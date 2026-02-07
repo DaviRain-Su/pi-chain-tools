@@ -1,10 +1,10 @@
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
-	DANGEROUS_RPC_METHODS,
 	TOOL_PREFIX,
 	callSolanaRpc,
 	getRpcEndpoint,
+	isDangerousRpcMethod,
 	parseNetwork,
 	solanaNetworkSchema,
 } from "../runtime.js";
@@ -25,10 +25,7 @@ export function createSolanaRpcTools() {
 			async execute(_toolCallId, params) {
 				const method = params.method.trim();
 				if (!method) throw new Error("method is required");
-				if (
-					DANGEROUS_RPC_METHODS.has(method) &&
-					params.allowDangerous !== true
-				) {
+				if (isDangerousRpcMethod(method) && params.allowDangerous !== true) {
 					throw new Error(
 						`RPC method "${method}" is blocked by default; set allowDangerous=true to override`,
 					);

@@ -4,6 +4,7 @@ import path from "node:path";
 import { Type } from "@sinclair/typebox";
 import {
 	Connection,
+	LAMPORTS_PER_SOL,
 	PublicKey,
 	Transaction,
 	VersionedTransaction,
@@ -25,6 +26,9 @@ export const DANGEROUS_RPC_METHODS = new Set([
 	"sendTransaction",
 	"requestAirdrop",
 ]);
+const DANGEROUS_RPC_METHODS_NORMALIZED = new Set(
+	[...DANGEROUS_RPC_METHODS].map((method) => method.toLowerCase()),
+);
 
 type TokenAmountInfo = {
 	amount: string;
@@ -78,6 +82,30 @@ export function parseCommitment(value?: string): CommitmentLevel {
 export function parseFinality(value?: string): FinalityLevel {
 	if (value === "finalized") return "finalized";
 	return "confirmed";
+}
+
+export function getExplorerCluster(network?: string): SolanaNetwork {
+	return parseNetwork(network);
+}
+
+export function getExplorerTransactionUrl(
+	signature: string,
+	network?: string,
+): string {
+	const cluster = getExplorerCluster(network);
+	return `https://explorer.solana.com/tx/${signature}?cluster=${cluster}`;
+}
+
+export function getExplorerAddressUrl(
+	address: string,
+	network?: string,
+): string {
+	const cluster = getExplorerCluster(network);
+	return `https://explorer.solana.com/address/${address}?cluster=${cluster}`;
+}
+
+export function isDangerousRpcMethod(method: string): boolean {
+	return DANGEROUS_RPC_METHODS_NORMALIZED.has(method.toLowerCase());
 }
 
 export function getRpcEndpoint(network?: string): string {
@@ -135,6 +163,19 @@ export function assertPositiveAmount(amountSol: number): void {
 	if (!Number.isFinite(amountSol) || amountSol <= 0) {
 		throw new Error("amountSol must be a positive number");
 	}
+}
+
+export function toLamports(amountSol: number): number {
+	assertPositiveAmount(amountSol);
+	const lamports = amountSol * LAMPORTS_PER_SOL;
+	const rounded = Math.round(lamports);
+	if (!Number.isSafeInteger(rounded)) {
+		throw new Error("amountSol is too large");
+	}
+	if (Math.abs(lamports - rounded) > 1e-6) {
+		throw new Error("amountSol supports up to 9 decimal places");
+	}
+	return rounded;
 }
 
 export function stringifyUnknown(value: unknown): string {
@@ -200,6 +241,11 @@ export function parseTransactionFromBase64(
 	}
 }
 
+function truncateText(value: string): string {
+	if (value.length <= 500) return value;
+	return `${value.slice(0, 500)}...`;
+}
+
 export async function callSolanaRpc(
 	method: string,
 	params: unknown[],
@@ -216,21 +262,46 @@ export async function callSolanaRpc(
 			params,
 		}),
 	});
-	const payload = (await response.json()) as {
+	const bodyText = await response.text();
+	let payload: {
 		result?: unknown;
 		error?: { code?: number; message?: string; data?: unknown };
-	};
+	} = {};
+	if (bodyText.trim().length > 0) {
+		try {
+			payload = JSON.parse(bodyText) as {
+				result?: unknown;
+				error?: { code?: number; message?: string; data?: unknown };
+			};
+		} catch {
+			const detail = truncateText(bodyText);
+			if (!response.ok) {
+				throw new Error(
+					`RPC request failed with HTTP ${response.status}: ${detail}`,
+				);
+			}
+			throw new Error(`RPC ${method} returned non-JSON response: ${detail}`);
+		}
+	}
 
 	if (!response.ok) {
+		const hasPayloadFields = Object.keys(payload).length > 0;
+		const detail =
+			payload.error ??
+			(hasPayloadFields ? payload : truncateText(bodyText) || "empty response");
 		throw new Error(
-			`RPC request failed with HTTP ${response.status}: ${stringifyUnknown(payload.error ?? payload)}`,
+			`RPC request failed with HTTP ${response.status}: ${stringifyUnknown(detail)}`,
 		);
 	}
 
 	if (payload.error) {
 		const code = payload.error.code ?? -1;
 		const message = payload.error.message ?? "Unknown RPC error";
-		throw new Error(`RPC ${method} failed (${code}): ${message}`);
+		const errorData =
+			payload.error.data == null
+				? ""
+				: ` data=${stringifyUnknown(payload.error.data)}`;
+		throw new Error(`RPC ${method} failed (${code}): ${message}${errorData}`);
 	}
 
 	return payload.result ?? null;

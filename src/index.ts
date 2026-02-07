@@ -14,7 +14,11 @@ export {
 	callSolanaRpc,
 	commitmentSchema,
 	getConnection,
+	getExplorerAddressUrl,
+	getExplorerCluster,
+	getExplorerTransactionUrl,
 	getRpcEndpoint,
+	isDangerousRpcMethod,
 	normalizeAtPath,
 	parseCommitment,
 	parseFinality,
@@ -24,6 +28,7 @@ export {
 	resolveSecretKey,
 	solanaNetworkSchema,
 	stringifyUnknown,
+	toLamports,
 } from "./chains/solana/runtime.js";
 
 export type {

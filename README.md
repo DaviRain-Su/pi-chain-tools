@@ -16,9 +16,9 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 
 ## Solana Tool Groups
 
-- `read`: balance, account info, blockhash, transaction, signatures, token accounts, token balance
-- `compose`: unsigned transfer transaction builders
-- `execute`: simulate, send, confirm, airdrop, transfer
+- `read`: balance, account info, multiple accounts, blockhash, rent exemption minimum, transaction, signatures, token accounts, token balance
+- `compose`: unsigned transfer transaction builders (legacy + v0)
+- `execute`: simulate, send, sign+send, confirm, airdrop, transfer
 - `rpc`: raw Solana JSON-RPC with safety guard for dangerous methods
 
 ## EVM Skeleton

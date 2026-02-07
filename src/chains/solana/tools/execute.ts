@@ -1,7 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import {
 	Keypair,
-	LAMPORTS_PER_SOL,
 	PublicKey,
 	SystemProgram,
 	Transaction,
@@ -11,9 +10,10 @@ import {
 import { defineTool } from "../../../core/types.js";
 import {
 	TOOL_PREFIX,
-	assertPositiveAmount,
 	commitmentSchema,
 	getConnection,
+	getExplorerAddressUrl,
+	getExplorerTransactionUrl,
 	normalizeAtPath,
 	parseFinality,
 	parseNetwork,
@@ -21,6 +21,7 @@ import {
 	resolveSecretKey,
 	solanaNetworkSchema,
 	stringifyUnknown,
+	toLamports,
 } from "../runtime.js";
 
 export function createSolanaExecuteTools() {
@@ -113,7 +114,132 @@ export function createSolanaExecuteTools() {
 						signature,
 						confirmed: params.confirm !== false,
 						network: cluster,
-						explorer: `https://explorer.solana.com/tx/${signature}?cluster=${cluster}`,
+						explorer: getExplorerTransactionUrl(signature, params.network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}signAndSendTransaction`,
+			label: "Solana Sign And Send Transaction",
+			description:
+				"Sign a serialized transaction (base64) with local/private key and send it. Supports both legacy and v0 transactions.",
+			parameters: Type.Object({
+				txBase64: Type.String({
+					description: "Serialized transaction (legacy or v0) as base64",
+				}),
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				network: solanaNetworkSchema(),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, only sign and simulate (no broadcast)",
+					}),
+				),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error("Mainnet signing/send requires confirmMainnet=true");
+				}
+
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const tx = parseTransactionFromBase64(params.txBase64);
+				const commitment = parseFinality(params.commitment);
+
+				let version: "legacy" | "v0" = "legacy";
+				if (tx instanceof VersionedTransaction) {
+					tx.sign([signer]);
+					version = "v0";
+				} else {
+					tx.partialSign(signer);
+				}
+
+				if (params.simulate === true) {
+					const simulation =
+						tx instanceof VersionedTransaction
+							? await connection.simulateTransaction(tx, {
+									sigVerify: true,
+									replaceRecentBlockhash: false,
+									commitment,
+								})
+							: await connection.simulateTransaction(tx);
+					const ok = simulation.value.err == null;
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Signed simulation ${ok ? "succeeded" : "failed"}`,
+							},
+						],
+						details: {
+							simulated: true,
+							ok,
+							version,
+							signer: signer.publicKey.toBase58(),
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+							network,
+							signerExplorer: getExplorerAddressUrl(
+								signer.publicKey.toBase58(),
+								network,
+							),
+						},
+					};
+				}
+
+				const signature = await connection.sendRawTransaction(tx.serialize(), {
+					skipPreflight: params.skipPreflight === true,
+					maxRetries: params.maxRetries,
+				});
+
+				let confirmationErr: unknown = null;
+				if (params.confirm !== false) {
+					const confirmation = await connection.confirmTransaction(
+						signature,
+						commitment,
+					);
+					confirmationErr = confirmation.value.err;
+				}
+				if (confirmationErr) {
+					throw new Error(
+						`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+					);
+				}
+
+				return {
+					content: [{ type: "text", text: `Signed and sent: ${signature}` }],
+					details: {
+						simulated: false,
+						signature,
+						version,
+						signer: signer.publicKey.toBase58(),
+						confirmed: params.confirm !== false,
+						network,
+						explorer: getExplorerTransactionUrl(signature, network),
+						signerExplorer: getExplorerAddressUrl(
+							signer.publicKey.toBase58(),
+							network,
+						),
 					},
 				};
 			},
@@ -163,14 +289,13 @@ export function createSolanaExecuteTools() {
 				),
 			}),
 			async execute(_toolCallId, params) {
-				assertPositiveAmount(params.amountSol);
+				const lamports = toLamports(params.amountSol);
 				const network = parseNetwork(params.network);
 				if (network === "mainnet-beta") {
 					throw new Error("Airdrop is only supported on devnet/testnet");
 				}
 				const connection = getConnection(network);
 				const to = new PublicKey(normalizeAtPath(params.address));
-				const lamports = Math.round(params.amountSol * LAMPORTS_PER_SOL);
 				const latestBlockhash = await connection.getLatestBlockhash();
 				const signature = await connection.requestAirdrop(to, lamports);
 				await connection.confirmTransaction(
@@ -188,7 +313,8 @@ export function createSolanaExecuteTools() {
 						address: to.toBase58(),
 						lamports,
 						network,
-						explorer: `https://explorer.solana.com/tx/${signature}?cluster=${network}`,
+						explorer: getExplorerTransactionUrl(signature, network),
+						addressExplorer: getExplorerAddressUrl(to.toBase58(), network),
 					},
 				};
 			},
@@ -212,7 +338,7 @@ export function createSolanaExecuteTools() {
 				confirmMainnet: Type.Optional(Type.Boolean()),
 			}),
 			async execute(_toolCallId, params) {
-				assertPositiveAmount(params.amountSol);
+				const lamports = toLamports(params.amountSol);
 				const network = parseNetwork(params.network);
 				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
 					throw new Error("Mainnet transfer requires confirmMainnet=true");
@@ -223,7 +349,6 @@ export function createSolanaExecuteTools() {
 					resolveSecretKey(params.fromSecretKey),
 				);
 				const to = new PublicKey(normalizeAtPath(params.toAddress));
-				const lamports = Math.round(params.amountSol * LAMPORTS_PER_SOL);
 
 				const tx = new Transaction().add(
 					SystemProgram.transfer({
@@ -279,8 +404,6 @@ export function createSolanaExecuteTools() {
 					[from],
 					{ commitment: "confirmed" },
 				);
-				const explorerCluster =
-					network === "mainnet-beta" ? "mainnet-beta" : network;
 				return {
 					content: [{ type: "text", text: `Transfer sent: ${signature}` }],
 					details: {
@@ -294,7 +417,12 @@ export function createSolanaExecuteTools() {
 						balanceLamports,
 						requiredLamports,
 						network,
-						explorer: `https://explorer.solana.com/tx/${signature}?cluster=${explorerCluster}`,
+						explorer: getExplorerTransactionUrl(signature, network),
+						fromExplorer: getExplorerAddressUrl(
+							from.publicKey.toBase58(),
+							network,
+						),
+						toExplorer: getExplorerAddressUrl(to.toBase58(), network),
 					},
 				};
 			},

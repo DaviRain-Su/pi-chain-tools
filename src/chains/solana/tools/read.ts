@@ -6,7 +6,10 @@ import {
 	TOOL_PREFIX,
 	commitmentSchema,
 	getConnection,
+	getExplorerAddressUrl,
+	getExplorerTransactionUrl,
 	normalizeAtPath,
+	parseCommitment,
 	parseFinality,
 	parseNetwork,
 	parseTokenAccountInfo,
@@ -82,6 +85,68 @@ export function createSolanaReadTools() {
 						dataLength: info.data.length,
 						lamports: info.lamports,
 						network: parseNetwork(params.network),
+						explorer: getExplorerAddressUrl(
+							publicKey.toBase58(),
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getMultipleAccounts`,
+			label: "Solana Get Multiple Accounts",
+			description: "Fetch multiple account metadata entries in one RPC call",
+			parameters: Type.Object({
+				addresses: Type.Array(
+					Type.String({ description: "Solana account address" }),
+					{ minItems: 1, maxItems: 100 },
+				),
+				network: solanaNetworkSchema(),
+				commitment: commitmentSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const connection = getConnection(params.network);
+				const addresses = params.addresses.map(normalizeAtPath);
+				const publicKeys = addresses.map((value) => new PublicKey(value));
+				const commitment = parseCommitment(params.commitment);
+				const infos = await connection.getMultipleAccountsInfo(
+					publicKeys,
+					commitment,
+				);
+				const accounts = infos.map((info, index) => {
+					const address = publicKeys[index]?.toBase58() ?? addresses[index];
+					if (!info) {
+						return {
+							address,
+							found: false,
+							explorer: getExplorerAddressUrl(address, params.network),
+						};
+					}
+					return {
+						address,
+						found: true,
+						owner: info.owner.toBase58(),
+						executable: info.executable,
+						rentEpoch: info.rentEpoch,
+						dataLength: info.data.length,
+						lamports: info.lamports,
+						explorer: getExplorerAddressUrl(address, params.network),
+					};
+				});
+				const foundCount = accounts.filter((item) => item.found).length;
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Fetched ${accounts.length} account(s), found ${foundCount}`,
+						},
+					],
+					details: {
+						count: accounts.length,
+						foundCount,
+						accounts,
+						network: parseNetwork(params.network),
 					},
 				};
 			},
@@ -104,6 +169,44 @@ export function createSolanaReadTools() {
 						},
 					],
 					details: { ...blockhash, network: parseNetwork(params.network) },
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getRentExemptionMinimum`,
+			label: "Solana Get Rent Exemption Minimum",
+			description:
+				"Get minimum lamports/SOL needed for rent exemption by account data size",
+			parameters: Type.Object({
+				dataLength: Type.Integer({
+					description: "Account data length in bytes",
+					minimum: 0,
+				}),
+				network: solanaNetworkSchema(),
+				commitment: commitmentSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const connection = getConnection(params.network);
+				const commitment = parseCommitment(params.commitment);
+				const lamports = await connection.getMinimumBalanceForRentExemption(
+					params.dataLength,
+					commitment,
+				);
+				const sol = lamports / LAMPORTS_PER_SOL;
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Rent exemption minimum: ${sol} SOL (${lamports} lamports)`,
+						},
+					],
+					details: {
+						dataLength: params.dataLength,
+						lamports,
+						sol,
+						commitment,
+						network: parseNetwork(params.network),
+					},
 				};
 			},
 		}),
@@ -152,7 +255,10 @@ export function createSolanaReadTools() {
 						err: transaction.meta?.err ?? null,
 						logs: transaction.meta?.logMessages ?? [],
 						network: explorerCluster,
-						explorer: `https://explorer.solana.com/tx/${params.signature}?cluster=${explorerCluster}`,
+						explorer: getExplorerTransactionUrl(
+							params.signature,
+							params.network,
+						),
 					},
 				};
 			},
@@ -193,8 +299,16 @@ export function createSolanaReadTools() {
 							blockTime: entry.blockTime ?? null,
 							err: entry.err ?? null,
 							confirmationStatus: entry.confirmationStatus ?? null,
+							explorer: getExplorerTransactionUrl(
+								entry.signature,
+								params.network,
+							),
 						})),
 						network: parseNetwork(params.network),
+						addressExplorer: getExplorerAddressUrl(
+							publicKey.toBase58(),
+							params.network,
+						),
 					},
 				};
 			},
@@ -257,6 +371,10 @@ export function createSolanaReadTools() {
 						count: accounts.length,
 						accounts,
 						network: parseNetwork(params.network),
+						addressExplorer: getExplorerAddressUrl(
+							owner.toBase58(),
+							params.network,
+						),
 					},
 				};
 			},
@@ -304,6 +422,10 @@ export function createSolanaReadTools() {
 						decimals,
 						tokenAccountCount: response.value.length,
 						network: parseNetwork(params.network),
+						addressExplorer: getExplorerAddressUrl(
+							owner.toBase58(),
+							params.network,
+						),
 					},
 				};
 			},
