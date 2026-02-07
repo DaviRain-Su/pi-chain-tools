@@ -18,13 +18,32 @@ import {
 import { defineTool } from "../../../core/types.js";
 import {
 	TOOL_PREFIX,
+	assertJupiterNetworkSupported,
+	assertRaydiumNetworkSupported,
+	buildJupiterSwapInstructions,
+	buildJupiterSwapTransaction,
+	buildRaydiumSwapTransactions,
 	getConnection,
 	getExplorerAddressUrl,
+	getJupiterApiBaseUrl,
+	getJupiterQuote,
+	getRaydiumApiBaseUrl,
+	getRaydiumPriorityFee,
+	getRaydiumPriorityFeeMicroLamports,
+	getRaydiumQuote,
 	getSplTokenProgramId,
+	jupiterPriorityLevelSchema,
+	jupiterSwapModeSchema,
 	normalizeAtPath,
+	parseJupiterPriorityLevel,
+	parseJupiterSwapMode,
 	parseNetwork,
 	parsePositiveBigInt,
+	parseRaydiumSwapType,
+	parseRaydiumTxVersion,
 	parseSplTokenProgram,
+	raydiumSwapTypeSchema,
+	raydiumTxVersionSchema,
 	solanaNetworkSchema,
 	splTokenProgramSchema,
 	toLamports,
@@ -153,6 +172,33 @@ async function buildSplTransferInstructions(
 		),
 	);
 	return { instructions, destinationAtaCreateIncluded };
+}
+
+function extractRaydiumTransactions(response: unknown): string[] {
+	if (!response || typeof response !== "object") return [];
+	const payload = response as Record<string, unknown>;
+	const data = payload.data;
+	if (Array.isArray(data)) {
+		return data
+			.map((entry) => {
+				if (!entry || typeof entry !== "object") return null;
+				const record = entry as Record<string, unknown>;
+				return typeof record.transaction === "string"
+					? record.transaction
+					: null;
+			})
+			.filter((entry): entry is string => entry !== null);
+	}
+	if (data && typeof data === "object") {
+		const record = data as Record<string, unknown>;
+		if (typeof record.transaction === "string") {
+			return [record.transaction];
+		}
+	}
+	if (typeof payload.transaction === "string") {
+		return [payload.transaction];
+	}
+	return [];
 }
 
 export function createSolanaComposeTools() {
@@ -533,6 +579,429 @@ export function createSolanaComposeTools() {
 						),
 						destinationTokenAccountExplorer: getExplorerAddressUrl(
 							destinationTokenAccount.toBase58(),
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildJupiterSwapTransaction`,
+			label: "Solana Build Jupiter Swap Transaction",
+			description:
+				"Build an unsigned Jupiter swap transaction (base64) using best available route across Solana DEXes",
+			parameters: Type.Object({
+				userPublicKey: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Swap amount in raw integer base units",
+				}),
+				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+				swapMode: jupiterSwapModeSchema(),
+				restrictIntermediateTokens: Type.Optional(Type.Boolean()),
+				onlyDirectRoutes: Type.Optional(Type.Boolean()),
+				maxAccounts: Type.Optional(Type.Integer({ minimum: 8, maximum: 256 })),
+				dexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to include" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				excludeDexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				asLegacyTransaction: Type.Optional(Type.Boolean()),
+				wrapAndUnwrapSol: Type.Optional(Type.Boolean()),
+				useSharedAccounts: Type.Optional(Type.Boolean()),
+				dynamicComputeUnitLimit: Type.Optional(Type.Boolean()),
+				skipUserAccountsRpcCalls: Type.Optional(Type.Boolean()),
+				destinationTokenAccount: Type.Optional(Type.String()),
+				trackingAccount: Type.Optional(Type.String()),
+				feeAccount: Type.Optional(Type.String()),
+				priorityLevel: jupiterPriorityLevelSchema(),
+				priorityMaxLamports: Type.Optional(
+					Type.Integer({ minimum: 1, maximum: 20_000_000 }),
+				),
+				priorityGlobal: Type.Optional(Type.Boolean()),
+				jitoTipLamports: Type.Optional(
+					Type.Integer({ minimum: 1, maximum: 20_000_000 }),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				assertJupiterNetworkSupported(params.network);
+				const userPublicKey = new PublicKey(
+					normalizeAtPath(params.userPublicKey),
+				).toBase58();
+				const inputMint = new PublicKey(
+					normalizeAtPath(params.inputMint),
+				).toBase58();
+				const outputMint = new PublicKey(
+					normalizeAtPath(params.outputMint),
+				).toBase58();
+				const amountRaw = parsePositiveBigInt(
+					params.amountRaw,
+					"amountRaw",
+				).toString();
+				const swapMode = parseJupiterSwapMode(params.swapMode);
+
+				const quote = await getJupiterQuote({
+					inputMint,
+					outputMint,
+					amount: amountRaw,
+					slippageBps: params.slippageBps,
+					swapMode,
+					restrictIntermediateTokens: params.restrictIntermediateTokens,
+					onlyDirectRoutes: params.onlyDirectRoutes,
+					asLegacyTransaction: params.asLegacyTransaction,
+					maxAccounts: params.maxAccounts,
+					dexes: params.dexes,
+					excludeDexes: params.excludeDexes,
+				});
+
+				const priorityLevel = parseJupiterPriorityLevel(params.priorityLevel);
+				const swapResponse = await buildJupiterSwapTransaction({
+					userPublicKey,
+					quoteResponse: quote,
+					wrapAndUnwrapSol: params.wrapAndUnwrapSol,
+					useSharedAccounts: params.useSharedAccounts,
+					dynamicComputeUnitLimit: params.dynamicComputeUnitLimit ?? true,
+					skipUserAccountsRpcCalls: params.skipUserAccountsRpcCalls,
+					destinationTokenAccount: params.destinationTokenAccount,
+					trackingAccount: params.trackingAccount,
+					feeAccount: params.feeAccount,
+					asLegacyTransaction: params.asLegacyTransaction,
+					jitoTipLamports: params.jitoTipLamports,
+					priorityFee:
+						params.jitoTipLamports === undefined
+							? {
+									priorityLevel,
+									maxLamports: params.priorityMaxLamports,
+									global: params.priorityGlobal,
+								}
+							: undefined,
+				});
+
+				const payload =
+					swapResponse && typeof swapResponse === "object"
+						? (swapResponse as Record<string, unknown>)
+						: {};
+				const txBase64 =
+					typeof payload.swapTransaction === "string"
+						? payload.swapTransaction
+						: "";
+				if (!txBase64) {
+					throw new Error("Jupiter swap response missing swapTransaction");
+				}
+
+				const quotePayload =
+					quote && typeof quote === "object"
+						? (quote as Record<string, unknown>)
+						: {};
+				const outAmount =
+					typeof quotePayload.outAmount === "string"
+						? quotePayload.outAmount
+						: null;
+				const routePlan = Array.isArray(quotePayload.routePlan)
+					? quotePayload.routePlan
+					: [];
+
+				return {
+					content: [
+						{ type: "text", text: "Unsigned Jupiter swap transaction built" },
+					],
+					details: {
+						txBase64,
+						userPublicKey,
+						inputMint,
+						outputMint,
+						amountRaw,
+						outAmount,
+						routeCount: routePlan.length,
+						swapMode,
+						quote,
+						swapResponse: payload,
+						network: parseNetwork(params.network),
+						jupiterBaseUrl: getJupiterApiBaseUrl(),
+						userExplorer: getExplorerAddressUrl(userPublicKey, params.network),
+						inputMintExplorer: getExplorerAddressUrl(inputMint, params.network),
+						outputMintExplorer: getExplorerAddressUrl(
+							outputMint,
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildJupiterSwapInstructions`,
+			label: "Solana Build Jupiter Swap Instructions",
+			description:
+				"Build Jupiter swap instructions payload for composing with custom transactions",
+			parameters: Type.Object({
+				userPublicKey: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Swap amount in raw integer base units",
+				}),
+				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+				swapMode: jupiterSwapModeSchema(),
+				restrictIntermediateTokens: Type.Optional(Type.Boolean()),
+				onlyDirectRoutes: Type.Optional(Type.Boolean()),
+				maxAccounts: Type.Optional(Type.Integer({ minimum: 8, maximum: 256 })),
+				dexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to include" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				excludeDexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				asLegacyTransaction: Type.Optional(Type.Boolean()),
+				wrapAndUnwrapSol: Type.Optional(Type.Boolean()),
+				useSharedAccounts: Type.Optional(Type.Boolean()),
+				dynamicComputeUnitLimit: Type.Optional(Type.Boolean()),
+				skipUserAccountsRpcCalls: Type.Optional(Type.Boolean()),
+				destinationTokenAccount: Type.Optional(Type.String()),
+				trackingAccount: Type.Optional(Type.String()),
+				feeAccount: Type.Optional(Type.String()),
+				priorityLevel: jupiterPriorityLevelSchema(),
+				priorityMaxLamports: Type.Optional(
+					Type.Integer({ minimum: 1, maximum: 20_000_000 }),
+				),
+				priorityGlobal: Type.Optional(Type.Boolean()),
+				jitoTipLamports: Type.Optional(
+					Type.Integer({ minimum: 1, maximum: 20_000_000 }),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				assertJupiterNetworkSupported(params.network);
+				const userPublicKey = new PublicKey(
+					normalizeAtPath(params.userPublicKey),
+				).toBase58();
+				const inputMint = new PublicKey(
+					normalizeAtPath(params.inputMint),
+				).toBase58();
+				const outputMint = new PublicKey(
+					normalizeAtPath(params.outputMint),
+				).toBase58();
+				const amountRaw = parsePositiveBigInt(
+					params.amountRaw,
+					"amountRaw",
+				).toString();
+				const swapMode = parseJupiterSwapMode(params.swapMode);
+
+				const quote = await getJupiterQuote({
+					inputMint,
+					outputMint,
+					amount: amountRaw,
+					slippageBps: params.slippageBps,
+					swapMode,
+					restrictIntermediateTokens: params.restrictIntermediateTokens,
+					onlyDirectRoutes: params.onlyDirectRoutes,
+					asLegacyTransaction: params.asLegacyTransaction,
+					maxAccounts: params.maxAccounts,
+					dexes: params.dexes,
+					excludeDexes: params.excludeDexes,
+				});
+
+				const priorityLevel = parseJupiterPriorityLevel(params.priorityLevel);
+				const instructions = await buildJupiterSwapInstructions({
+					userPublicKey,
+					quoteResponse: quote,
+					wrapAndUnwrapSol: params.wrapAndUnwrapSol,
+					useSharedAccounts: params.useSharedAccounts,
+					dynamicComputeUnitLimit: params.dynamicComputeUnitLimit ?? true,
+					skipUserAccountsRpcCalls: params.skipUserAccountsRpcCalls,
+					destinationTokenAccount: params.destinationTokenAccount,
+					trackingAccount: params.trackingAccount,
+					feeAccount: params.feeAccount,
+					asLegacyTransaction: params.asLegacyTransaction,
+					jitoTipLamports: params.jitoTipLamports,
+					priorityFee:
+						params.jitoTipLamports === undefined
+							? {
+									priorityLevel,
+									maxLamports: params.priorityMaxLamports,
+									global: params.priorityGlobal,
+								}
+							: undefined,
+				});
+				const payload =
+					instructions && typeof instructions === "object"
+						? (instructions as Record<string, unknown>)
+						: {};
+				const quotePayload =
+					quote && typeof quote === "object"
+						? (quote as Record<string, unknown>)
+						: {};
+				const routePlan = Array.isArray(quotePayload.routePlan)
+					? quotePayload.routePlan
+					: [];
+
+				return {
+					content: [{ type: "text", text: "Jupiter swap instructions built" }],
+					details: {
+						userPublicKey,
+						inputMint,
+						outputMint,
+						amountRaw,
+						routeCount: routePlan.length,
+						swapMode,
+						quote,
+						instructions: payload,
+						network: parseNetwork(params.network),
+						jupiterBaseUrl: getJupiterApiBaseUrl(),
+						userExplorer: getExplorerAddressUrl(userPublicKey, params.network),
+						inputMintExplorer: getExplorerAddressUrl(inputMint, params.network),
+						outputMintExplorer: getExplorerAddressUrl(
+							outputMint,
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildRaydiumSwapTransaction`,
+			label: "Solana Build Raydium Swap Transaction",
+			description:
+				"Build unsigned Raydium swap transaction(s) from official Trade API quote",
+			parameters: Type.Object({
+				userPublicKey: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Swap amount in raw integer base units",
+				}),
+				slippageBps: Type.Integer({ minimum: 1, maximum: 5000 }),
+				txVersion: raydiumTxVersionSchema(),
+				swapType: raydiumSwapTypeSchema(),
+				computeUnitPriceMicroLamports: Type.Optional(
+					Type.String({
+						description:
+							"Priority fee as micro-lamports per CU. If omitted, auto-fee endpoint will be used.",
+					}),
+				),
+				wrapSol: Type.Optional(Type.Boolean()),
+				unwrapSol: Type.Optional(Type.Boolean()),
+				inputAccount: Type.Optional(Type.String()),
+				outputAccount: Type.Optional(Type.String()),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				assertRaydiumNetworkSupported(params.network);
+				const userPublicKey = new PublicKey(
+					normalizeAtPath(params.userPublicKey),
+				).toBase58();
+				const inputMint = new PublicKey(
+					normalizeAtPath(params.inputMint),
+				).toBase58();
+				const outputMint = new PublicKey(
+					normalizeAtPath(params.outputMint),
+				).toBase58();
+				const amountRaw = parsePositiveBigInt(
+					params.amountRaw,
+					"amountRaw",
+				).toString();
+				const txVersion = parseRaydiumTxVersion(params.txVersion);
+				const swapType = parseRaydiumSwapType(params.swapType);
+				const inputAccount = params.inputAccount
+					? new PublicKey(normalizeAtPath(params.inputAccount)).toBase58()
+					: undefined;
+				const outputAccount = params.outputAccount
+					? new PublicKey(normalizeAtPath(params.outputAccount)).toBase58()
+					: undefined;
+
+				const quote = await getRaydiumQuote({
+					inputMint,
+					outputMint,
+					amount: amountRaw,
+					slippageBps: params.slippageBps,
+					txVersion,
+					swapType,
+				});
+
+				let autoFeePayload: unknown = null;
+				let computeUnitPriceMicroLamports =
+					params.computeUnitPriceMicroLamports;
+				if (!computeUnitPriceMicroLamports) {
+					autoFeePayload = await getRaydiumPriorityFee();
+					computeUnitPriceMicroLamports =
+						getRaydiumPriorityFeeMicroLamports(autoFeePayload) ?? undefined;
+				}
+				if (!computeUnitPriceMicroLamports) {
+					throw new Error(
+						"Unable to resolve Raydium computeUnitPriceMicroLamports from auto-fee endpoint. Provide computeUnitPriceMicroLamports explicitly.",
+					);
+				}
+
+				const swapResponse = await buildRaydiumSwapTransactions({
+					wallet: userPublicKey,
+					txVersion,
+					swapType,
+					quoteResponse: quote,
+					computeUnitPriceMicroLamports,
+					wrapSol: params.wrapSol,
+					unwrapSol: params.unwrapSol,
+					inputAccount,
+					outputAccount,
+				});
+
+				const transactions = extractRaydiumTransactions(swapResponse);
+				if (transactions.length === 0) {
+					throw new Error(
+						"Raydium swap response missing serialized transaction",
+					);
+				}
+				const txBase64 = transactions[0] ?? "";
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Raydium swap transaction built (${transactions.length} tx)`,
+						},
+					],
+					details: {
+						txBase64,
+						transactions,
+						txCount: transactions.length,
+						userPublicKey,
+						inputMint,
+						outputMint,
+						amountRaw,
+						slippageBps: params.slippageBps,
+						txVersion,
+						swapType,
+						computeUnitPriceMicroLamports,
+						inputAccount: inputAccount ?? null,
+						outputAccount: outputAccount ?? null,
+						quote,
+						swapResponse,
+						autoFeePayload,
+						network: parseNetwork(params.network),
+						raydiumApiBaseUrl: getRaydiumApiBaseUrl(),
+						userExplorer: getExplorerAddressUrl(userPublicKey, params.network),
+						inputMintExplorer: getExplorerAddressUrl(inputMint, params.network),
+						outputMintExplorer: getExplorerAddressUrl(
+							outputMint,
 							params.network,
 						),
 					},

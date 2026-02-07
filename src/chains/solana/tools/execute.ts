@@ -18,17 +18,35 @@ import {
 import { defineTool } from "../../../core/types.js";
 import {
 	TOOL_PREFIX,
+	assertJupiterNetworkSupported,
+	assertRaydiumNetworkSupported,
+	buildJupiterSwapTransaction,
+	buildRaydiumSwapTransactions,
 	commitmentSchema,
 	getConnection,
 	getExplorerAddressUrl,
 	getExplorerTransactionUrl,
+	getJupiterApiBaseUrl,
+	getJupiterQuote,
+	getRaydiumApiBaseUrl,
+	getRaydiumPriorityFee,
+	getRaydiumPriorityFeeMicroLamports,
+	getRaydiumQuote,
 	getSplTokenProgramId,
+	jupiterPriorityLevelSchema,
+	jupiterSwapModeSchema,
 	normalizeAtPath,
 	parseFinality,
+	parseJupiterPriorityLevel,
+	parseJupiterSwapMode,
 	parseNetwork,
 	parsePositiveBigInt,
+	parseRaydiumSwapType,
+	parseRaydiumTxVersion,
 	parseSplTokenProgram,
 	parseTransactionFromBase64,
+	raydiumSwapTypeSchema,
+	raydiumTxVersionSchema,
 	resolveSecretKey,
 	solanaNetworkSchema,
 	splTokenProgramSchema,
@@ -94,6 +112,33 @@ async function buildSplTransferInstructions(
 		),
 	);
 	return { instructions, destinationAtaCreateIncluded };
+}
+
+function extractRaydiumTransactions(response: unknown): string[] {
+	if (!response || typeof response !== "object") return [];
+	const payload = response as Record<string, unknown>;
+	const data = payload.data;
+	if (Array.isArray(data)) {
+		return data
+			.map((entry) => {
+				if (!entry || typeof entry !== "object") return null;
+				const record = entry as Record<string, unknown>;
+				return typeof record.transaction === "string"
+					? record.transaction
+					: null;
+			})
+			.filter((entry): entry is string => entry !== null);
+	}
+	if (data && typeof data === "object") {
+		const record = data as Record<string, unknown>;
+		if (typeof record.transaction === "string") {
+			return [record.transaction];
+		}
+	}
+	if (typeof payload.transaction === "string") {
+		return [payload.transaction];
+	}
+	return [];
 }
 
 export function createSolanaExecuteTools() {
@@ -312,6 +357,543 @@ export function createSolanaExecuteTools() {
 							signer.publicKey.toBase58(),
 							network,
 						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}jupiterSwap`,
+			label: "Solana Jupiter Swap",
+			description:
+				"End-to-end Jupiter swap: quote, build transaction, sign, simulate/send, and confirm",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				userPublicKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional signer pubkey assertion. If set, must match derived key from fromSecretKey.",
+					}),
+				),
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Swap amount in raw integer base units",
+				}),
+				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+				swapMode: jupiterSwapModeSchema(),
+				restrictIntermediateTokens: Type.Optional(Type.Boolean()),
+				onlyDirectRoutes: Type.Optional(Type.Boolean()),
+				maxAccounts: Type.Optional(Type.Integer({ minimum: 8, maximum: 256 })),
+				dexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to include" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				excludeDexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				asLegacyTransaction: Type.Optional(Type.Boolean()),
+				wrapAndUnwrapSol: Type.Optional(Type.Boolean()),
+				useSharedAccounts: Type.Optional(Type.Boolean()),
+				dynamicComputeUnitLimit: Type.Optional(Type.Boolean()),
+				skipUserAccountsRpcCalls: Type.Optional(Type.Boolean()),
+				destinationTokenAccount: Type.Optional(Type.String()),
+				trackingAccount: Type.Optional(Type.String()),
+				feeAccount: Type.Optional(Type.String()),
+				priorityLevel: jupiterPriorityLevelSchema(),
+				priorityMaxLamports: Type.Optional(
+					Type.Integer({ minimum: 1, maximum: 20_000_000 }),
+				),
+				priorityGlobal: Type.Optional(Type.Boolean()),
+				jitoTipLamports: Type.Optional(
+					Type.Integer({ minimum: 1, maximum: 20_000_000 }),
+				),
+				network: solanaNetworkSchema(),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, build/sign and simulate only (no broadcast)",
+					}),
+				),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				assertJupiterNetworkSupported(network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error("Mainnet Jupiter swap requires confirmMainnet=true");
+				}
+
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const signerPublicKey = signer.publicKey.toBase58();
+				if (params.userPublicKey) {
+					const asserted = new PublicKey(
+						normalizeAtPath(params.userPublicKey),
+					).toBase58();
+					if (asserted !== signerPublicKey) {
+						throw new Error(
+							`userPublicKey mismatch: expected ${signerPublicKey}, got ${asserted}`,
+						);
+					}
+				}
+
+				const inputMint = new PublicKey(
+					normalizeAtPath(params.inputMint),
+				).toBase58();
+				const outputMint = new PublicKey(
+					normalizeAtPath(params.outputMint),
+				).toBase58();
+				const amountRaw = parsePositiveBigInt(
+					params.amountRaw,
+					"amountRaw",
+				).toString();
+				const swapMode = parseJupiterSwapMode(params.swapMode);
+
+				const quote = await getJupiterQuote({
+					inputMint,
+					outputMint,
+					amount: amountRaw,
+					slippageBps: params.slippageBps,
+					swapMode,
+					restrictIntermediateTokens: params.restrictIntermediateTokens,
+					onlyDirectRoutes: params.onlyDirectRoutes,
+					asLegacyTransaction: params.asLegacyTransaction,
+					maxAccounts: params.maxAccounts,
+					dexes: params.dexes,
+					excludeDexes: params.excludeDexes,
+				});
+
+				const priorityLevel = parseJupiterPriorityLevel(params.priorityLevel);
+				const swapResponse = await buildJupiterSwapTransaction({
+					userPublicKey: signerPublicKey,
+					quoteResponse: quote,
+					wrapAndUnwrapSol: params.wrapAndUnwrapSol,
+					useSharedAccounts: params.useSharedAccounts,
+					dynamicComputeUnitLimit: params.dynamicComputeUnitLimit ?? true,
+					skipUserAccountsRpcCalls: params.skipUserAccountsRpcCalls,
+					destinationTokenAccount: params.destinationTokenAccount,
+					trackingAccount: params.trackingAccount,
+					feeAccount: params.feeAccount,
+					asLegacyTransaction: params.asLegacyTransaction,
+					jitoTipLamports: params.jitoTipLamports,
+					priorityFee:
+						params.jitoTipLamports === undefined
+							? {
+									priorityLevel,
+									maxLamports: params.priorityMaxLamports,
+									global: params.priorityGlobal,
+								}
+							: undefined,
+				});
+
+				const swapPayload =
+					swapResponse && typeof swapResponse === "object"
+						? (swapResponse as Record<string, unknown>)
+						: {};
+				const txBase64 =
+					typeof swapPayload.swapTransaction === "string"
+						? swapPayload.swapTransaction
+						: "";
+				if (!txBase64) {
+					throw new Error("Jupiter swap response missing swapTransaction");
+				}
+
+				const tx = parseTransactionFromBase64(txBase64);
+				let version: "legacy" | "v0" = "legacy";
+				if (tx instanceof VersionedTransaction) {
+					tx.sign([signer]);
+					version = "v0";
+				} else {
+					tx.partialSign(signer);
+				}
+
+				const commitment = parseFinality(params.commitment);
+				if (params.simulate === true) {
+					const simulation =
+						tx instanceof VersionedTransaction
+							? await connection.simulateTransaction(tx, {
+									sigVerify: true,
+									replaceRecentBlockhash: false,
+									commitment,
+								})
+							: await connection.simulateTransaction(tx);
+					const quotePayload =
+						quote && typeof quote === "object"
+							? (quote as Record<string, unknown>)
+							: {};
+					const routePlan = Array.isArray(quotePayload.routePlan)
+						? quotePayload.routePlan
+						: [];
+					const outAmount =
+						typeof quotePayload.outAmount === "string"
+							? quotePayload.outAmount
+							: null;
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Jupiter simulation ${simulation.value.err ? "failed" : "succeeded"}`,
+							},
+						],
+						details: {
+							simulated: true,
+							version,
+							inputMint,
+							outputMint,
+							amountRaw,
+							outAmount,
+							routeCount: routePlan.length,
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+							signer: signerPublicKey,
+							swapMode,
+							quote,
+							swapResponse: swapPayload,
+							network,
+							jupiterBaseUrl: getJupiterApiBaseUrl(),
+							explorerSigner: getExplorerAddressUrl(signerPublicKey, network),
+						},
+					};
+				}
+
+				const signature = await connection.sendRawTransaction(tx.serialize(), {
+					skipPreflight: params.skipPreflight === true,
+					maxRetries: params.maxRetries,
+				});
+				let confirmationErr: unknown = null;
+				if (params.confirm !== false) {
+					const confirmation = await connection.confirmTransaction(
+						signature,
+						commitment,
+					);
+					confirmationErr = confirmation.value.err;
+				}
+				if (confirmationErr) {
+					throw new Error(
+						`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+					);
+				}
+
+				const quotePayload =
+					quote && typeof quote === "object"
+						? (quote as Record<string, unknown>)
+						: {};
+				const routePlan = Array.isArray(quotePayload.routePlan)
+					? quotePayload.routePlan
+					: [];
+				const outAmount =
+					typeof quotePayload.outAmount === "string"
+						? quotePayload.outAmount
+						: null;
+				const priceImpactPct =
+					typeof quotePayload.priceImpactPct === "string"
+						? quotePayload.priceImpactPct
+						: null;
+				return {
+					content: [{ type: "text", text: `Jupiter swap sent: ${signature}` }],
+					details: {
+						simulated: false,
+						signature,
+						version,
+						signer: signerPublicKey,
+						inputMint,
+						outputMint,
+						amountRaw,
+						outAmount,
+						priceImpactPct,
+						routeCount: routePlan.length,
+						swapMode,
+						quote,
+						swapResponse: swapPayload,
+						confirmed: params.confirm !== false,
+						network,
+						jupiterBaseUrl: getJupiterApiBaseUrl(),
+						explorer: getExplorerTransactionUrl(signature, network),
+						explorerSigner: getExplorerAddressUrl(signerPublicKey, network),
+						explorerInputMint: getExplorerAddressUrl(inputMint, network),
+						explorerOutputMint: getExplorerAddressUrl(outputMint, network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}raydiumSwap`,
+			label: "Solana Raydium Swap",
+			description:
+				"End-to-end Raydium swap: quote, build transaction(s), sign, simulate/send, and confirm",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				userPublicKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional signer pubkey assertion. If set, must match derived key from fromSecretKey.",
+					}),
+				),
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Swap amount in raw integer base units",
+				}),
+				slippageBps: Type.Integer({ minimum: 1, maximum: 5000 }),
+				txVersion: raydiumTxVersionSchema(),
+				swapType: raydiumSwapTypeSchema(),
+				computeUnitPriceMicroLamports: Type.Optional(
+					Type.String({
+						description:
+							"Priority fee as micro-lamports per CU. If omitted, auto-fee endpoint will be used.",
+					}),
+				),
+				wrapSol: Type.Optional(Type.Boolean()),
+				unwrapSol: Type.Optional(Type.Boolean()),
+				inputAccount: Type.Optional(Type.String()),
+				outputAccount: Type.Optional(Type.String()),
+				network: solanaNetworkSchema(),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, build/sign and simulate only (no broadcast)",
+					}),
+				),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				assertRaydiumNetworkSupported(network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error("Mainnet Raydium swap requires confirmMainnet=true");
+				}
+
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const signerPublicKey = signer.publicKey.toBase58();
+				if (params.userPublicKey) {
+					const asserted = new PublicKey(
+						normalizeAtPath(params.userPublicKey),
+					).toBase58();
+					if (asserted !== signerPublicKey) {
+						throw new Error(
+							`userPublicKey mismatch: expected ${signerPublicKey}, got ${asserted}`,
+						);
+					}
+				}
+
+				const inputMint = new PublicKey(
+					normalizeAtPath(params.inputMint),
+				).toBase58();
+				const outputMint = new PublicKey(
+					normalizeAtPath(params.outputMint),
+				).toBase58();
+				const amountRaw = parsePositiveBigInt(
+					params.amountRaw,
+					"amountRaw",
+				).toString();
+				const txVersion = parseRaydiumTxVersion(params.txVersion);
+				const swapType = parseRaydiumSwapType(params.swapType);
+				const inputAccount = params.inputAccount
+					? new PublicKey(normalizeAtPath(params.inputAccount)).toBase58()
+					: undefined;
+				const outputAccount = params.outputAccount
+					? new PublicKey(normalizeAtPath(params.outputAccount)).toBase58()
+					: undefined;
+
+				const quote = await getRaydiumQuote({
+					inputMint,
+					outputMint,
+					amount: amountRaw,
+					slippageBps: params.slippageBps,
+					txVersion,
+					swapType,
+				});
+				let autoFeePayload: unknown = null;
+				let computeUnitPriceMicroLamports =
+					params.computeUnitPriceMicroLamports;
+				if (!computeUnitPriceMicroLamports) {
+					autoFeePayload = await getRaydiumPriorityFee();
+					computeUnitPriceMicroLamports =
+						getRaydiumPriorityFeeMicroLamports(autoFeePayload) ?? undefined;
+				}
+				if (!computeUnitPriceMicroLamports) {
+					throw new Error(
+						"Unable to resolve Raydium computeUnitPriceMicroLamports from auto-fee endpoint. Provide computeUnitPriceMicroLamports explicitly.",
+					);
+				}
+
+				const swapResponse = await buildRaydiumSwapTransactions({
+					wallet: signerPublicKey,
+					txVersion,
+					swapType,
+					quoteResponse: quote,
+					computeUnitPriceMicroLamports,
+					wrapSol: params.wrapSol,
+					unwrapSol: params.unwrapSol,
+					inputAccount,
+					outputAccount,
+				});
+				const txBase64List = extractRaydiumTransactions(swapResponse);
+				if (txBase64List.length === 0) {
+					throw new Error(
+						"Raydium swap response missing serialized transaction",
+					);
+				}
+
+				const signed = txBase64List.map((txBase64) => {
+					const tx = parseTransactionFromBase64(txBase64);
+					let version: "legacy" | "v0" = "legacy";
+					if (tx instanceof VersionedTransaction) {
+						tx.sign([signer]);
+						version = "v0";
+					} else {
+						tx.partialSign(signer);
+					}
+					return { tx, version };
+				});
+
+				const commitment = parseFinality(params.commitment);
+				if (params.simulate === true) {
+					const simulations = [];
+					for (const [index, entry] of signed.entries()) {
+						const simulation =
+							entry.tx instanceof VersionedTransaction
+								? await connection.simulateTransaction(entry.tx, {
+										sigVerify: true,
+										replaceRecentBlockhash: false,
+										commitment,
+									})
+								: await connection.simulateTransaction(entry.tx);
+						simulations.push({
+							index,
+							version: entry.version,
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+						});
+					}
+					const ok = simulations.every((item) => item.err == null);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Raydium simulation ${ok ? "succeeded" : "failed"} (${simulations.length} tx)`,
+							},
+						],
+						details: {
+							simulated: true,
+							ok,
+							signer: signerPublicKey,
+							txCount: signed.length,
+							txVersions: signed.map((item) => item.version),
+							inputMint,
+							outputMint,
+							amountRaw,
+							slippageBps: params.slippageBps,
+							txVersion,
+							swapType,
+							computeUnitPriceMicroLamports,
+							simulations,
+							quote,
+							swapResponse,
+							autoFeePayload,
+							network,
+							raydiumApiBaseUrl: getRaydiumApiBaseUrl(),
+							explorerSigner: getExplorerAddressUrl(signerPublicKey, network),
+						},
+					};
+				}
+
+				const signatures: string[] = [];
+				for (const entry of signed) {
+					const signature = await connection.sendRawTransaction(
+						entry.tx.serialize(),
+						{
+							skipPreflight: params.skipPreflight === true,
+							maxRetries: params.maxRetries,
+						},
+					);
+					signatures.push(signature);
+					if (params.confirm !== false) {
+						const confirmation = await connection.confirmTransaction(
+							signature,
+							commitment,
+						);
+						if (confirmation.value.err) {
+							throw new Error(
+								`Transaction confirmed with error: ${stringifyUnknown(confirmation.value.err)}`,
+							);
+						}
+					}
+				}
+				const signature = signatures[signatures.length - 1] ?? null;
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Raydium swap sent: ${signature ?? "unknown"} (${signatures.length} tx)`,
+						},
+					],
+					details: {
+						simulated: false,
+						signature,
+						signatures,
+						confirmed: params.confirm !== false,
+						signer: signerPublicKey,
+						txCount: signed.length,
+						txVersions: signed.map((item) => item.version),
+						inputMint,
+						outputMint,
+						amountRaw,
+						slippageBps: params.slippageBps,
+						txVersion,
+						swapType,
+						computeUnitPriceMicroLamports,
+						quote,
+						swapResponse,
+						autoFeePayload,
+						network,
+						raydiumApiBaseUrl: getRaydiumApiBaseUrl(),
+						explorer: signature
+							? getExplorerTransactionUrl(signature, network)
+							: null,
+						explorerSigner: getExplorerAddressUrl(signerPublicKey, network),
+						explorerInputMint: getExplorerAddressUrl(inputMint, network),
+						explorerOutputMint: getExplorerAddressUrl(outputMint, network),
 					},
 				};
 			},

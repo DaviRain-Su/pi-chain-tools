@@ -16,10 +16,18 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 
 ## Solana Tool Groups
 
-- `read`: balance, account info, multiple accounts, blockhash, rent exemption minimum, transaction, signatures, token accounts, token balance
-- `compose`: unsigned transfer transaction builders (SOL/SPL, legacy + v0)
-- `execute`: simulate, send, sign+send, confirm, airdrop, SOL transfer, SPL transfer
+- `read`: balance, account info, multiple accounts, blockhash, rent exemption minimum, transaction, signatures, token accounts, token balance, Jupiter/Raydium quote + meta APIs
+- `compose`: unsigned transfer transaction builders (SOL/SPL, legacy + v0), Jupiter & Raydium swap builders
+- `execute`: simulate, send, sign+send, confirm, airdrop, SOL transfer, SPL transfer, one-shot Jupiter & Raydium swap
 - `rpc`: raw Solana JSON-RPC with safety guard for dangerous methods
+
+## Solana DeFi Coverage (Current)
+
+- Jupiter routing/quote/swap API integration
+- DEX/AMM route discovery via Jupiter program-id labels
+- Priority fee / Jito tip / dynamic CU options in Jupiter swap compose & execute
+- Raydium Trade API quote/serialize integration (swap-base-in/out)
+- Raydium auto-priority-fee integration and multi-transaction swap execution
 
 ## EVM Skeleton
 

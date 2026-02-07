@@ -4,15 +4,33 @@ import { defineTool } from "../../../core/types.js";
 import {
 	TOKEN_PROGRAM_ID,
 	TOOL_PREFIX,
+	assertJupiterNetworkSupported,
+	assertRaydiumNetworkSupported,
+	callJupiterApi,
+	callRaydiumApi,
 	commitmentSchema,
 	getConnection,
 	getExplorerAddressUrl,
 	getExplorerTransactionUrl,
+	getJupiterApiBaseUrl,
+	getJupiterDexLabels,
+	getJupiterQuote,
+	getRaydiumApiBaseUrl,
+	getRaydiumPriorityFee,
+	getRaydiumPriorityFeeApiBaseUrl,
+	getRaydiumQuote,
+	jupiterSwapModeSchema,
 	normalizeAtPath,
 	parseCommitment,
 	parseFinality,
+	parseJupiterSwapMode,
 	parseNetwork,
+	parsePositiveBigInt,
+	parseRaydiumSwapType,
+	parseRaydiumTxVersion,
 	parseTokenAccountInfo,
+	raydiumSwapTypeSchema,
+	raydiumTxVersionSchema,
 	solanaNetworkSchema,
 } from "../runtime.js";
 
@@ -426,6 +444,293 @@ export function createSolanaReadTools() {
 							owner.toBase58(),
 							params.network,
 						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getJupiterDexLabels`,
+			label: "Solana Jupiter Get Dex Labels",
+			description:
+				"Fetch DEX/AMM program labels supported by Jupiter routing engine",
+			parameters: Type.Object({
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				assertJupiterNetworkSupported(params.network);
+				const labels = await getJupiterDexLabels();
+				const entries = Object.entries(labels).map(([programId, label]) => ({
+					programId,
+					label,
+				}));
+				return {
+					content: [
+						{ type: "text", text: `Jupiter DEX labels: ${entries.length}` },
+					],
+					details: {
+						count: entries.length,
+						labels: entries,
+						network: parseNetwork(params.network),
+						jupiterBaseUrl: getJupiterApiBaseUrl(),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getJupiterQuote`,
+			label: "Solana Jupiter Get Quote",
+			description:
+				"Fetch Jupiter swap quote (best route across Solana DEX/AMM venues)",
+			parameters: Type.Object({
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Amount in raw integer base units",
+				}),
+				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+				swapMode: jupiterSwapModeSchema(),
+				restrictIntermediateTokens: Type.Optional(Type.Boolean()),
+				onlyDirectRoutes: Type.Optional(Type.Boolean()),
+				asLegacyTransaction: Type.Optional(Type.Boolean()),
+				maxAccounts: Type.Optional(Type.Integer({ minimum: 8, maximum: 256 })),
+				dexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to include" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				excludeDexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				assertJupiterNetworkSupported(params.network);
+				const inputMint = new PublicKey(
+					normalizeAtPath(params.inputMint),
+				).toBase58();
+				const outputMint = new PublicKey(
+					normalizeAtPath(params.outputMint),
+				).toBase58();
+				const amountRaw = parsePositiveBigInt(
+					params.amountRaw,
+					"amountRaw",
+				).toString();
+				const swapMode = parseJupiterSwapMode(params.swapMode);
+
+				const quote = await getJupiterQuote({
+					inputMint,
+					outputMint,
+					amount: amountRaw,
+					slippageBps: params.slippageBps,
+					swapMode,
+					restrictIntermediateTokens: params.restrictIntermediateTokens,
+					onlyDirectRoutes: params.onlyDirectRoutes,
+					asLegacyTransaction: params.asLegacyTransaction,
+					maxAccounts: params.maxAccounts,
+					dexes: params.dexes,
+					excludeDexes: params.excludeDexes,
+				});
+
+				const payload =
+					quote && typeof quote === "object"
+						? (quote as Record<string, unknown>)
+						: {};
+				const routePlan = Array.isArray(payload.routePlan)
+					? payload.routePlan
+					: [];
+				const outAmount =
+					typeof payload.outAmount === "string" ? payload.outAmount : null;
+				const priceImpactPct =
+					typeof payload.priceImpactPct === "string"
+						? payload.priceImpactPct
+						: null;
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Jupiter quote ready: outAmount=${outAmount ?? "unknown"} routeCount=${routePlan.length}`,
+						},
+					],
+					details: {
+						inputMint,
+						outputMint,
+						amountRaw,
+						swapMode,
+						outAmount,
+						priceImpactPct,
+						routeCount: routePlan.length,
+						quote,
+						network: parseNetwork(params.network),
+						jupiterBaseUrl: getJupiterApiBaseUrl(),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getRaydiumPriorityFee`,
+			label: "Solana Raydium Priority Fee",
+			description:
+				"Fetch Raydium recommended priority fee presets for swap transactions",
+			parameters: Type.Object({
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				assertRaydiumNetworkSupported(params.network);
+				const feePayload = await getRaydiumPriorityFee();
+				return {
+					content: [{ type: "text", text: "Raydium priority fee fetched" }],
+					details: {
+						feePayload,
+						network: parseNetwork(params.network),
+						raydiumPriorityFeeApiBaseUrl: getRaydiumPriorityFeeApiBaseUrl(),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getRaydiumQuote`,
+			label: "Solana Raydium Get Quote",
+			description: "Fetch Raydium swap quote from official Trade API",
+			parameters: Type.Object({
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Amount in raw integer base units",
+				}),
+				slippageBps: Type.Integer({ minimum: 1, maximum: 5000 }),
+				txVersion: raydiumTxVersionSchema(),
+				swapType: raydiumSwapTypeSchema(),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				assertRaydiumNetworkSupported(params.network);
+				const inputMint = new PublicKey(
+					normalizeAtPath(params.inputMint),
+				).toBase58();
+				const outputMint = new PublicKey(
+					normalizeAtPath(params.outputMint),
+				).toBase58();
+				const amountRaw = parsePositiveBigInt(
+					params.amountRaw,
+					"amountRaw",
+				).toString();
+				const txVersion = parseRaydiumTxVersion(params.txVersion);
+				const swapType = parseRaydiumSwapType(params.swapType);
+
+				const quote = await getRaydiumQuote({
+					inputMint,
+					outputMint,
+					amount: amountRaw,
+					slippageBps: params.slippageBps,
+					txVersion,
+					swapType,
+				});
+				const payload =
+					quote && typeof quote === "object"
+						? (quote as Record<string, unknown>)
+						: {};
+				const success = payload.success === true;
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Raydium quote ${success ? "ready" : "returned"} (txVersion=${txVersion}, swapType=${swapType})`,
+						},
+					],
+					details: {
+						inputMint,
+						outputMint,
+						amountRaw,
+						slippageBps: params.slippageBps,
+						txVersion,
+						swapType,
+						quote,
+						success,
+						network: parseNetwork(params.network),
+						raydiumApiBaseUrl: getRaydiumApiBaseUrl(),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}raydiumRawApi`,
+			label: "Solana Raydium Raw API",
+			description:
+				"Call Raydium Trade API directly for advanced DeFi integrations",
+			parameters: Type.Object({
+				path: Type.String({
+					description:
+						"Raydium API path, e.g. /compute/swap-base-in or /transaction/swap-base-in",
+				}),
+				method: Type.Optional(
+					Type.Union([Type.Literal("GET"), Type.Literal("POST")]),
+				),
+				query: Type.Optional(Type.Record(Type.String(), Type.String())),
+				body: Type.Optional(Type.Unknown()),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				assertRaydiumNetworkSupported(params.network);
+				const response = await callRaydiumApi(params.path, {
+					method: params.method ?? "GET",
+					query: params.query,
+					body: params.body,
+				});
+				return {
+					content: [
+						{ type: "text", text: `Raydium API ${params.path} executed` },
+					],
+					details: {
+						path: params.path,
+						method: params.method ?? "GET",
+						query: params.query ?? {},
+						response,
+						network: parseNetwork(params.network),
+						raydiumApiBaseUrl: getRaydiumApiBaseUrl(),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}jupiterRawApi`,
+			label: "Solana Jupiter Raw API",
+			description:
+				"Call Jupiter REST endpoint directly for advanced DeFi integrations",
+			parameters: Type.Object({
+				path: Type.String({
+					description:
+						"Jupiter API path, e.g. /swap/v1/quote or /swap/v1/program-id-to-label",
+				}),
+				method: Type.Optional(
+					Type.Union([Type.Literal("GET"), Type.Literal("POST")]),
+				),
+				query: Type.Optional(Type.Record(Type.String(), Type.String())),
+				body: Type.Optional(Type.Unknown()),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				assertJupiterNetworkSupported(params.network);
+				const response = await callJupiterApi(params.path, {
+					method: params.method ?? "GET",
+					query: params.query,
+					body: params.body,
+				});
+				return {
+					content: [
+						{ type: "text", text: `Jupiter API ${params.path} executed` },
+					],
+					details: {
+						path: params.path,
+						method: params.method ?? "GET",
+						query: params.query ?? {},
+						response,
+						network: parseNetwork(params.network),
+						jupiterBaseUrl: getJupiterApiBaseUrl(),
 					},
 				};
 			},

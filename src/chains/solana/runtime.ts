@@ -16,6 +16,10 @@ export type SolanaNetwork = "mainnet-beta" | "devnet" | "testnet";
 export type CommitmentLevel = "processed" | "confirmed" | "finalized";
 export type FinalityLevel = "confirmed" | "finalized";
 export type SplTokenProgram = "token" | "token2022";
+export type JupiterSwapMode = "ExactIn" | "ExactOut";
+export type JupiterPriorityLevel = "medium" | "high" | "veryHigh" | "unsafeMax";
+export type RaydiumTxVersion = "V0" | "LEGACY";
+export type RaydiumSwapType = "BaseIn" | "BaseOut";
 
 export const TOOL_PREFIX = "solana_";
 const DEFAULT_COMMITMENT: CommitmentLevel = "confirmed";
@@ -72,6 +76,35 @@ export function splTokenProgramSchema() {
 	);
 }
 
+export function jupiterSwapModeSchema() {
+	return Type.Optional(
+		Type.Union([Type.Literal("ExactIn"), Type.Literal("ExactOut")]),
+	);
+}
+
+export function jupiterPriorityLevelSchema() {
+	return Type.Optional(
+		Type.Union([
+			Type.Literal("medium"),
+			Type.Literal("high"),
+			Type.Literal("veryHigh"),
+			Type.Literal("unsafeMax"),
+		]),
+	);
+}
+
+export function raydiumTxVersionSchema() {
+	return Type.Optional(
+		Type.Union([Type.Literal("V0"), Type.Literal("LEGACY")]),
+	);
+}
+
+export function raydiumSwapTypeSchema() {
+	return Type.Optional(
+		Type.Union([Type.Literal("BaseIn"), Type.Literal("BaseOut")]),
+	);
+}
+
 export function normalizeAtPath(value: string): string {
 	return value.startsWith("@") ? value.slice(1) : value;
 }
@@ -97,6 +130,30 @@ export function parseFinality(value?: string): FinalityLevel {
 export function parseSplTokenProgram(value?: string): SplTokenProgram {
 	if (value === "token2022") return "token2022";
 	return "token";
+}
+
+export function parseJupiterSwapMode(value?: string): JupiterSwapMode {
+	if (value === "ExactOut") return "ExactOut";
+	return "ExactIn";
+}
+
+export function parseJupiterPriorityLevel(
+	value?: string,
+): JupiterPriorityLevel {
+	if (value === "medium") return "medium";
+	if (value === "high") return "high";
+	if (value === "unsafeMax") return "unsafeMax";
+	return "veryHigh";
+}
+
+export function parseRaydiumTxVersion(value?: string): RaydiumTxVersion {
+	if (value === "LEGACY") return "LEGACY";
+	return "V0";
+}
+
+export function parseRaydiumSwapType(value?: string): RaydiumSwapType {
+	if (value === "BaseOut") return "BaseOut";
+	return "BaseIn";
 }
 
 export function getSplTokenProgramId(program?: string): PublicKey {
@@ -138,6 +195,55 @@ export function getConnection(network?: string): Connection {
 	const endpoint = getRpcEndpoint(network);
 	const commitment = parseCommitment(process.env.SOLANA_COMMITMENT);
 	return new Connection(endpoint, { commitment });
+}
+
+export function getJupiterApiKey(): string | null {
+	const apiKey = process.env.JUPITER_API_KEY?.trim();
+	return apiKey && apiKey.length > 0 ? apiKey : null;
+}
+
+export function getJupiterApiBaseUrl(): string {
+	const configured = process.env.JUPITER_API_BASE_URL?.trim();
+	if (configured && configured.length > 0) {
+		return configured.replace(/\/+$/, "");
+	}
+
+	// Without API key, default to lite endpoint for easier local usage.
+	return getJupiterApiKey() ? "https://api.jup.ag" : "https://lite-api.jup.ag";
+}
+
+export function assertJupiterNetworkSupported(network?: string): void {
+	const selected = parseNetwork(network);
+	if (selected !== "mainnet-beta") {
+		throw new Error(
+			"Jupiter API tools currently support mainnet-beta only. For preprod environments, set JUPITER_API_BASE_URL explicitly.",
+		);
+	}
+}
+
+export function assertRaydiumNetworkSupported(network?: string): void {
+	const selected = parseNetwork(network);
+	if (selected !== "mainnet-beta") {
+		throw new Error(
+			"Raydium API tools currently support mainnet-beta only. For custom environments, set RAYDIUM_API_BASE_URL and RAYDIUM_PRIORITY_FEE_API_BASE_URL explicitly.",
+		);
+	}
+}
+
+export function getRaydiumApiBaseUrl(): string {
+	const configured = process.env.RAYDIUM_API_BASE_URL?.trim();
+	if (configured && configured.length > 0) {
+		return configured.replace(/\/+$/, "");
+	}
+	return "https://transaction-v1.raydium.io";
+}
+
+export function getRaydiumPriorityFeeApiBaseUrl(): string {
+	const configured = process.env.RAYDIUM_PRIORITY_FEE_API_BASE_URL?.trim();
+	if (configured && configured.length > 0) {
+		return configured.replace(/\/+$/, "");
+	}
+	return "https://api-v3.raydium.io";
 }
 
 function parseSecretKey(secretKey: string): Uint8Array {
@@ -280,6 +386,400 @@ export function parseTransactionFromBase64(
 function truncateText(value: string): string {
 	if (value.length <= 500) return value;
 	return `${value.slice(0, 500)}...`;
+}
+
+type HttpMethod = "GET" | "POST";
+
+type JupiterRequestOptions = {
+	method?: HttpMethod;
+	query?: Record<string, string | number | boolean | undefined>;
+	body?: unknown;
+	timeoutMs?: number;
+};
+
+export type JupiterQuoteRequest = {
+	inputMint: string;
+	outputMint: string;
+	amount: string;
+	slippageBps?: number;
+	swapMode?: JupiterSwapMode;
+	restrictIntermediateTokens?: boolean;
+	onlyDirectRoutes?: boolean;
+	asLegacyTransaction?: boolean;
+	maxAccounts?: number;
+	dexes?: string[];
+	excludeDexes?: string[];
+};
+
+export type JupiterPriorityFeeConfig = {
+	maxLamports?: number;
+	global?: boolean;
+	priorityLevel?: JupiterPriorityLevel;
+};
+
+export type JupiterSwapRequest = {
+	userPublicKey: string;
+	quoteResponse: unknown;
+	wrapAndUnwrapSol?: boolean;
+	useSharedAccounts?: boolean;
+	dynamicComputeUnitLimit?: boolean;
+	skipUserAccountsRpcCalls?: boolean;
+	destinationTokenAccount?: string;
+	trackingAccount?: string;
+	feeAccount?: string;
+	asLegacyTransaction?: boolean;
+	jitoTipLamports?: number;
+	priorityFee?: JupiterPriorityFeeConfig;
+};
+
+export type RaydiumQuoteRequest = {
+	inputMint: string;
+	outputMint: string;
+	amount: string;
+	slippageBps: number;
+	txVersion?: RaydiumTxVersion;
+	swapType?: RaydiumSwapType;
+};
+
+export type RaydiumSwapRequest = {
+	wallet: string;
+	txVersion?: RaydiumTxVersion;
+	swapType?: RaydiumSwapType;
+	quoteResponse: unknown;
+	computeUnitPriceMicroLamports: string;
+	wrapSol?: boolean;
+	unwrapSol?: boolean;
+	inputAccount?: string;
+	outputAccount?: string;
+};
+
+function omitUndefined<T extends Record<string, unknown>>(
+	value: T,
+): Partial<T> {
+	const entries = Object.entries(value).filter(
+		([, entry]) => entry !== undefined,
+	);
+	return Object.fromEntries(entries) as Partial<T>;
+}
+
+function buildQueryString(
+	query?: Record<string, string | number | boolean | undefined>,
+): string {
+	if (!query) return "";
+	const entries = Object.entries(query).filter(
+		([, value]) => value !== undefined,
+	);
+	if (entries.length === 0) return "";
+	const params = new URLSearchParams();
+	for (const [key, value] of entries) {
+		params.set(key, String(value));
+	}
+	return `?${params.toString()}`;
+}
+
+async function callJsonApi(
+	url: string,
+	method: HttpMethod,
+	headers: Record<string, string>,
+	body?: unknown,
+	timeoutMs = 20_000,
+): Promise<unknown> {
+	const abort = new AbortController();
+	const timer = setTimeout(() => abort.abort(), timeoutMs);
+	try {
+		const response = await fetch(url, {
+			method,
+			headers,
+			body: method === "POST" ? JSON.stringify(body ?? {}) : undefined,
+			signal: abort.signal,
+		});
+
+		const responseText = await response.text();
+		let payload: unknown = null;
+		if (responseText.trim().length > 0) {
+			try {
+				payload = JSON.parse(responseText);
+			} catch {
+				if (!response.ok) {
+					throw new Error(
+						`HTTP ${response.status} ${response.statusText}: ${truncateText(responseText)}`,
+					);
+				}
+				throw new Error(
+					`Unexpected non-JSON response: ${truncateText(responseText)}`,
+				);
+			}
+		}
+
+		if (!response.ok) {
+			throw new Error(
+				`HTTP ${response.status} ${response.statusText}: ${stringifyUnknown(payload ?? responseText)}`,
+			);
+		}
+		return payload;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+export async function callJupiterApi(
+	path: string,
+	options: JupiterRequestOptions = {},
+): Promise<unknown> {
+	const method = options.method ?? "GET";
+	const baseUrl = getJupiterApiBaseUrl();
+	const query = buildQueryString(options.query);
+	const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+	const url = `${baseUrl}${normalizedPath}${query}`;
+	const apiKey = getJupiterApiKey();
+
+	const headers: Record<string, string> = {
+		"content-type": "application/json",
+	};
+	if (apiKey) {
+		headers["x-api-key"] = apiKey;
+	}
+
+	try {
+		return await callJsonApi(
+			url,
+			method,
+			headers,
+			options.body,
+			options.timeoutMs,
+		);
+	} catch (error) {
+		const fallbackToLite =
+			!apiKey &&
+			baseUrl === "https://api.jup.ag" &&
+			error instanceof Error &&
+			error.message.includes("401");
+		if (!fallbackToLite) throw error;
+
+		const fallbackUrl = `https://lite-api.jup.ag${normalizedPath}${query}`;
+		return callJsonApi(
+			fallbackUrl,
+			method,
+			{ "content-type": "application/json" },
+			options.body,
+			options.timeoutMs,
+		);
+	}
+}
+
+function buildJupiterQuoteQuery(
+	request: JupiterQuoteRequest,
+): Record<string, string | number | boolean | undefined> {
+	return {
+		inputMint: request.inputMint,
+		outputMint: request.outputMint,
+		amount: request.amount,
+		slippageBps: request.slippageBps,
+		swapMode: request.swapMode,
+		restrictIntermediateTokens: request.restrictIntermediateTokens,
+		onlyDirectRoutes: request.onlyDirectRoutes,
+		asLegacyTransaction: request.asLegacyTransaction,
+		maxAccounts: request.maxAccounts,
+		dexes:
+			request.dexes && request.dexes.length > 0
+				? request.dexes.join(",")
+				: undefined,
+		excludeDexes:
+			request.excludeDexes && request.excludeDexes.length > 0
+				? request.excludeDexes.join(",")
+				: undefined,
+	};
+}
+
+export async function getJupiterDexLabels(): Promise<Record<string, string>> {
+	const payload = await callJupiterApi("/swap/v1/program-id-to-label");
+	if (!payload || typeof payload !== "object") return {};
+	const entries = Object.entries(payload as Record<string, unknown>).filter(
+		([, value]) => typeof value === "string",
+	) as [string, string][];
+	return Object.fromEntries(entries);
+}
+
+export async function getJupiterQuote(
+	request: JupiterQuoteRequest,
+): Promise<unknown> {
+	return callJupiterApi("/swap/v1/quote", {
+		method: "GET",
+		query: buildJupiterQuoteQuery(request),
+	});
+}
+
+function buildJupiterSwapBody(
+	request: JupiterSwapRequest,
+): Record<string, unknown> {
+	const priorityLevel = request.priorityFee?.priorityLevel;
+	const priorityBody =
+		request.jitoTipLamports !== undefined
+			? { jitoTipLamports: request.jitoTipLamports }
+			: priorityLevel
+				? {
+						priorityLevelWithMaxLamports: {
+							maxLamports: request.priorityFee?.maxLamports ?? 5_000_000,
+							global: request.priorityFee?.global ?? false,
+							priorityLevel,
+						},
+					}
+				: undefined;
+
+	return omitUndefined({
+		userPublicKey: request.userPublicKey,
+		quoteResponse: request.quoteResponse,
+		wrapAndUnwrapSol: request.wrapAndUnwrapSol,
+		useSharedAccounts: request.useSharedAccounts,
+		dynamicComputeUnitLimit: request.dynamicComputeUnitLimit,
+		skipUserAccountsRpcCalls: request.skipUserAccountsRpcCalls,
+		destinationTokenAccount: request.destinationTokenAccount,
+		trackingAccount: request.trackingAccount,
+		feeAccount: request.feeAccount,
+		asLegacyTransaction: request.asLegacyTransaction,
+		prioritizationFeeLamports: priorityBody,
+	});
+}
+
+export async function buildJupiterSwapTransaction(
+	request: JupiterSwapRequest,
+): Promise<unknown> {
+	return callJupiterApi("/swap/v1/swap", {
+		method: "POST",
+		body: buildJupiterSwapBody(request),
+	});
+}
+
+export async function buildJupiterSwapInstructions(
+	request: JupiterSwapRequest,
+): Promise<unknown> {
+	return callJupiterApi("/swap/v1/swap-instructions", {
+		method: "POST",
+		body: buildJupiterSwapBody(request),
+	});
+}
+
+export async function callRaydiumApi(
+	path: string,
+	options: {
+		method?: HttpMethod;
+		query?: Record<string, string | number | boolean | undefined>;
+		body?: unknown;
+		timeoutMs?: number;
+	} = {},
+): Promise<unknown> {
+	const method = options.method ?? "GET";
+	const baseUrl = getRaydiumApiBaseUrl();
+	const query = buildQueryString(options.query);
+	const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+	const url = `${baseUrl}${normalizedPath}${query}`;
+	return callJsonApi(
+		url,
+		method,
+		{ "content-type": "application/json" },
+		options.body,
+		options.timeoutMs,
+	);
+}
+
+export async function getRaydiumPriorityFee(): Promise<unknown> {
+	const baseUrl = getRaydiumPriorityFeeApiBaseUrl();
+	return callJsonApi(
+		`${baseUrl}/main/auto-fee`,
+		"GET",
+		{ "content-type": "application/json" },
+		undefined,
+		20_000,
+	);
+}
+
+function findNumericString(value: unknown, depth = 0): string | null {
+	if (depth > 4) return null;
+	if (typeof value === "string" && /^\d+$/.test(value)) return value;
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return Math.round(value).toString();
+	}
+	if (!value || typeof value !== "object") return null;
+	if (Array.isArray(value)) {
+		for (const entry of value) {
+			const found = findNumericString(entry, depth + 1);
+			if (found) return found;
+		}
+		return null;
+	}
+	const record = value as Record<string, unknown>;
+	const preferredOrder = ["vh", "h", "m", "default", "data"];
+	for (const key of preferredOrder) {
+		if (!(key in record)) continue;
+		const found = findNumericString(record[key], depth + 1);
+		if (found) return found;
+	}
+	for (const entry of Object.values(record)) {
+		const found = findNumericString(entry, depth + 1);
+		if (found) return found;
+	}
+	return null;
+}
+
+export function getRaydiumPriorityFeeMicroLamports(
+	feePayload: unknown,
+): string | null {
+	return findNumericString(feePayload);
+}
+
+function buildRaydiumQuotePath(swapType: RaydiumSwapType): string {
+	return swapType === "BaseOut"
+		? "/compute/swap-base-out"
+		: "/compute/swap-base-in";
+}
+
+export async function getRaydiumQuote(
+	request: RaydiumQuoteRequest,
+): Promise<unknown> {
+	const txVersion = parseRaydiumTxVersion(request.txVersion);
+	const swapType = parseRaydiumSwapType(request.swapType);
+	return callRaydiumApi(buildRaydiumQuotePath(swapType), {
+		method: "GET",
+		query: {
+			inputMint: request.inputMint,
+			outputMint: request.outputMint,
+			amount: request.amount,
+			slippageBps: request.slippageBps,
+			txVersion,
+		},
+	});
+}
+
+function buildRaydiumSwapBody(
+	request: RaydiumSwapRequest,
+): Record<string, unknown> {
+	const txVersion = parseRaydiumTxVersion(request.txVersion);
+	return omitUndefined({
+		txVersion,
+		wallet: request.wallet,
+		computeUnitPriceMicroLamports: request.computeUnitPriceMicroLamports,
+		swapResponse: request.quoteResponse,
+		wrapSol: request.wrapSol,
+		unwrapSol: request.unwrapSol,
+		inputAccount: request.inputAccount,
+		outputAccount: request.outputAccount,
+	});
+}
+
+function buildRaydiumSwapPath(swapType: RaydiumSwapType): string {
+	return swapType === "BaseOut"
+		? "/transaction/swap-base-out"
+		: "/transaction/swap-base-in";
+}
+
+export async function buildRaydiumSwapTransactions(
+	request: RaydiumSwapRequest,
+): Promise<unknown> {
+	const swapType = parseRaydiumSwapType(request.swapType);
+	return callRaydiumApi(buildRaydiumSwapPath(swapType), {
+		method: "POST",
+		body: buildRaydiumSwapBody(request),
+	});
 }
 
 export async function callSolanaRpc(
