@@ -15,12 +15,16 @@ import bs58 from "bs58";
 export type SolanaNetwork = "mainnet-beta" | "devnet" | "testnet";
 export type CommitmentLevel = "processed" | "confirmed" | "finalized";
 export type FinalityLevel = "confirmed" | "finalized";
+export type SplTokenProgram = "token" | "token2022";
 
 export const TOOL_PREFIX = "solana_";
 const DEFAULT_COMMITMENT: CommitmentLevel = "confirmed";
 
 export const TOKEN_PROGRAM_ID = new PublicKey(
 	"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+);
+export const TOKEN_2022_PROGRAM_ID = new PublicKey(
+	"TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
 );
 export const DANGEROUS_RPC_METHODS = new Set([
 	"sendTransaction",
@@ -62,6 +66,12 @@ export function commitmentSchema() {
 	);
 }
 
+export function splTokenProgramSchema() {
+	return Type.Optional(
+		Type.Union([Type.Literal("token"), Type.Literal("token2022")]),
+	);
+}
+
 export function normalizeAtPath(value: string): string {
 	return value.startsWith("@") ? value.slice(1) : value;
 }
@@ -82,6 +92,17 @@ export function parseCommitment(value?: string): CommitmentLevel {
 export function parseFinality(value?: string): FinalityLevel {
 	if (value === "finalized") return "finalized";
 	return "confirmed";
+}
+
+export function parseSplTokenProgram(value?: string): SplTokenProgram {
+	if (value === "token2022") return "token2022";
+	return "token";
+}
+
+export function getSplTokenProgramId(program?: string): PublicKey {
+	return parseSplTokenProgram(program) === "token2022"
+		? TOKEN_2022_PROGRAM_ID
+		: TOKEN_PROGRAM_ID;
 }
 
 export function getExplorerCluster(network?: string): SolanaNetwork {
@@ -176,6 +197,21 @@ export function toLamports(amountSol: number): number {
 		throw new Error("amountSol supports up to 9 decimal places");
 	}
 	return rounded;
+}
+
+export function parsePositiveBigInt(
+	value: string,
+	fieldName = "amount",
+): bigint {
+	const normalized = value.trim();
+	if (!/^\d+$/.test(normalized)) {
+		throw new Error(`${fieldName} must be an integer string`);
+	}
+	const amount = BigInt(normalized);
+	if (amount <= 0n) {
+		throw new Error(`${fieldName} must be greater than 0`);
+	}
+	return amount;
 }
 
 export function stringifyUnknown(value: unknown): string {

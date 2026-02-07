@@ -13,16 +13,19 @@
 		"extensions": ["./src/pi/solana-extension.ts"]
 	},
 	"scripts": {
-		"check": "biome check --error-on-warnings . && tsc --noEmit"
+		"check": "biome check --error-on-warnings . && tsc --noEmit",
+		"test": "vitest run"
 	},
 	"dependencies": {
 		"@sinclair/typebox": "^0.34.41",
+		"@solana/spl-token": "^0.4.11",
 		"@solana/web3.js": "^1.98.4",
 		"bs58": "^6.0.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
 		"@types/node": "^20.17.24",
-		"typescript": "^5.8.3"
+		"typescript": "^5.8.3",
+		"vitest": "^3.2.4"
 	}
 }

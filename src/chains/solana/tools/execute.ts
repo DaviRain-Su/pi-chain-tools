@@ -1,9 +1,17 @@
 import { Type } from "@sinclair/typebox";
 import {
+	ASSOCIATED_TOKEN_PROGRAM_ID,
+	createAssociatedTokenAccountInstruction,
+	createTransferInstruction,
+	getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
+import {
+	type Connection,
 	Keypair,
 	PublicKey,
 	SystemProgram,
 	Transaction,
+	type TransactionInstruction,
 	VersionedTransaction,
 	sendAndConfirmTransaction,
 } from "@solana/web3.js";
@@ -14,15 +22,79 @@ import {
 	getConnection,
 	getExplorerAddressUrl,
 	getExplorerTransactionUrl,
+	getSplTokenProgramId,
 	normalizeAtPath,
 	parseFinality,
 	parseNetwork,
+	parsePositiveBigInt,
+	parseSplTokenProgram,
 	parseTransactionFromBase64,
 	resolveSecretKey,
 	solanaNetworkSchema,
+	splTokenProgramSchema,
 	stringifyUnknown,
 	toLamports,
 } from "../runtime.js";
+
+async function buildSplTransferInstructions(
+	connection: Connection,
+	fromOwner: PublicKey,
+	toOwner: PublicKey,
+	mint: PublicKey,
+	sourceTokenAccount: PublicKey,
+	destinationTokenAccount: PublicKey,
+	amountRaw: bigint,
+	tokenProgramId: PublicKey,
+	createDestinationAtaIfMissing: boolean,
+): Promise<{
+	instructions: TransactionInstruction[];
+	destinationAtaCreateIncluded: boolean;
+}> {
+	const sourceInfo = await connection.getAccountInfo(sourceTokenAccount);
+	if (!sourceInfo) {
+		throw new Error(
+			`Source token account not found: ${sourceTokenAccount.toBase58()}`,
+		);
+	}
+
+	const instructions: TransactionInstruction[] = [];
+	const destinationInfo = await connection.getAccountInfo(
+		destinationTokenAccount,
+	);
+	let destinationAtaCreateIncluded = false;
+
+	if (!destinationInfo && createDestinationAtaIfMissing) {
+		instructions.push(
+			createAssociatedTokenAccountInstruction(
+				fromOwner,
+				destinationTokenAccount,
+				toOwner,
+				mint,
+				tokenProgramId,
+				ASSOCIATED_TOKEN_PROGRAM_ID,
+			),
+		);
+		destinationAtaCreateIncluded = true;
+	}
+
+	if (!destinationInfo && !destinationAtaCreateIncluded) {
+		throw new Error(
+			`Destination token account not found: ${destinationTokenAccount.toBase58()}. Set createDestinationAtaIfMissing=true or provide an existing destinationTokenAccount.`,
+		);
+	}
+
+	instructions.push(
+		createTransferInstruction(
+			sourceTokenAccount,
+			destinationTokenAccount,
+			fromOwner,
+			amountRaw,
+			[],
+			tokenProgramId,
+		),
+	);
+	return { instructions, destinationAtaCreateIncluded };
+}
 
 export function createSolanaExecuteTools() {
 	return [
@@ -315,6 +387,180 @@ export function createSolanaExecuteTools() {
 						network,
 						explorer: getExplorerTransactionUrl(signature, network),
 						addressExplorer: getExplorerAddressUrl(to.toBase58(), network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}transferSplToken`,
+			label: "Solana Transfer SPL Token",
+			description:
+				"Transfer SPL token using local/private key signer. Supports destination ATA auto-create.",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Sender private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				toAddress: Type.String({ description: "Destination wallet address" }),
+				tokenMint: Type.String({ description: "Token mint address" }),
+				amountRaw: Type.String({
+					description: "Transfer amount in raw integer units (base units)",
+				}),
+				sourceTokenAccount: Type.Optional(
+					Type.String({
+						description:
+							"Optional source token account. Defaults to sender ATA for the mint.",
+					}),
+				),
+				destinationTokenAccount: Type.Optional(
+					Type.String({
+						description:
+							"Optional destination token account. Defaults to receiver ATA for the mint.",
+					}),
+				),
+				createDestinationAtaIfMissing: Type.Optional(
+					Type.Boolean({
+						description:
+							"Create receiver ATA when destination ATA is missing (default true).",
+					}),
+				),
+				tokenProgram: splTokenProgramSchema(),
+				network: solanaNetworkSchema(),
+				simulate: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error("Mainnet SPL transfer requires confirmMainnet=true");
+				}
+
+				const connection = getConnection(network);
+				const from = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const toOwner = new PublicKey(normalizeAtPath(params.toAddress));
+				const mint = new PublicKey(normalizeAtPath(params.tokenMint));
+				const tokenProgram = parseSplTokenProgram(params.tokenProgram);
+				const tokenProgramId = getSplTokenProgramId(tokenProgram);
+				const amountRaw = parsePositiveBigInt(params.amountRaw, "amountRaw");
+
+				const sourceTokenAccount = params.sourceTokenAccount
+					? new PublicKey(normalizeAtPath(params.sourceTokenAccount))
+					: getAssociatedTokenAddressSync(
+							mint,
+							from.publicKey,
+							false,
+							tokenProgramId,
+							ASSOCIATED_TOKEN_PROGRAM_ID,
+						);
+				const destinationTokenAccount = params.destinationTokenAccount
+					? new PublicKey(normalizeAtPath(params.destinationTokenAccount))
+					: getAssociatedTokenAddressSync(
+							mint,
+							toOwner,
+							false,
+							tokenProgramId,
+							ASSOCIATED_TOKEN_PROGRAM_ID,
+						);
+
+				const { instructions, destinationAtaCreateIncluded } =
+					await buildSplTransferInstructions(
+						connection,
+						from.publicKey,
+						toOwner,
+						mint,
+						sourceTokenAccount,
+						destinationTokenAccount,
+						amountRaw,
+						tokenProgramId,
+						params.createDestinationAtaIfMissing !== false,
+					);
+
+				const tx = new Transaction().add(...instructions);
+				tx.feePayer = from.publicKey;
+				const latestBlockhash = await connection.getLatestBlockhash();
+				tx.recentBlockhash = latestBlockhash.blockhash;
+
+				if (params.simulate === true) {
+					tx.sign(from);
+					const sim = await connection.simulateTransaction(tx);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Simulation ${sim.value.err ? "failed" : "succeeded"}`,
+							},
+						],
+						details: {
+							simulated: true,
+							err: sim.value.err,
+							logs: sim.value.logs ?? [],
+							from: from.publicKey.toBase58(),
+							to: toOwner.toBase58(),
+							tokenMint: mint.toBase58(),
+							amountRaw: amountRaw.toString(),
+							sourceTokenAccount: sourceTokenAccount.toBase58(),
+							destinationTokenAccount: destinationTokenAccount.toBase58(),
+							destinationAtaCreateIncluded,
+							tokenProgram,
+							tokenProgramId: tokenProgramId.toBase58(),
+							network,
+						},
+					};
+				}
+
+				const feeResult = await connection.getFeeForMessage(
+					tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const balanceLamports = await connection.getBalance(from.publicKey);
+				if (balanceLamports < feeLamports) {
+					throw new Error(
+						`Insufficient SOL for fee: balance ${balanceLamports} lamports, required ${feeLamports} lamports (short ${feeLamports - balanceLamports})`,
+					);
+				}
+
+				const signature = await sendAndConfirmTransaction(
+					connection,
+					tx,
+					[from],
+					{ commitment: "confirmed" },
+				);
+				return {
+					content: [{ type: "text", text: `SPL transfer sent: ${signature}` }],
+					details: {
+						simulated: false,
+						signature,
+						from: from.publicKey.toBase58(),
+						to: toOwner.toBase58(),
+						tokenMint: mint.toBase58(),
+						amountRaw: amountRaw.toString(),
+						sourceTokenAccount: sourceTokenAccount.toBase58(),
+						destinationTokenAccount: destinationTokenAccount.toBase58(),
+						destinationAtaCreateIncluded,
+						tokenProgram,
+						tokenProgramId: tokenProgramId.toBase58(),
+						feeLamports,
+						balanceLamports,
+						network,
+						explorer: getExplorerTransactionUrl(signature, network),
+						fromExplorer: getExplorerAddressUrl(
+							from.publicKey.toBase58(),
+							network,
+						),
+						toExplorer: getExplorerAddressUrl(toOwner.toBase58(), network),
+						tokenMintExplorer: getExplorerAddressUrl(mint.toBase58(), network),
+						sourceTokenAccountExplorer: getExplorerAddressUrl(
+							sourceTokenAccount.toBase58(),
+							network,
+						),
+						destinationTokenAccountExplorer: getExplorerAddressUrl(
+							destinationTokenAccount.toBase58(),
+							network,
+						),
 					},
 				};
 			},

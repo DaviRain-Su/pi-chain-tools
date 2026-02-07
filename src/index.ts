@@ -9,6 +9,7 @@ export type {
 export {
 	DANGEROUS_RPC_METHODS,
 	TOOL_PREFIX,
+	TOKEN_2022_PROGRAM_ID,
 	TOKEN_PROGRAM_ID,
 	assertPositiveAmount,
 	callSolanaRpc,
@@ -18,15 +19,19 @@ export {
 	getExplorerCluster,
 	getExplorerTransactionUrl,
 	getRpcEndpoint,
+	getSplTokenProgramId,
 	isDangerousRpcMethod,
 	normalizeAtPath,
+	parsePositiveBigInt,
 	parseCommitment,
 	parseFinality,
 	parseNetwork,
+	parseSplTokenProgram,
 	parseTokenAccountInfo,
 	parseTransactionFromBase64,
 	resolveSecretKey,
 	solanaNetworkSchema,
+	splTokenProgramSchema,
 	stringifyUnknown,
 	toLamports,
 } from "./chains/solana/runtime.js";
@@ -36,6 +41,7 @@ export type {
 	FinalityLevel,
 	ParsedTokenAccountInfo,
 	SolanaNetwork,
+	SplTokenProgram,
 } from "./chains/solana/runtime.js";
 
 export { createSolanaReadTools } from "./chains/solana/tools/read.js";
