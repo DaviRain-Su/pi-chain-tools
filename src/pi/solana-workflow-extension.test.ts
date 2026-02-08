@@ -13,6 +13,7 @@ describe("solanaWorkflowExtension", () => {
 		solanaWorkflowExtension(registrar);
 		expect(names.sort()).toEqual([
 			"solana_confirmTransaction",
+			"solana_getBalance",
 			"w3rt_run_workflow_v0",
 		]);
 	});
