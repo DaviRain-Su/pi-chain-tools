@@ -12,6 +12,7 @@ import { defineTool } from "../../../core/types.js";
 import {
 	assertJupiterNetworkSupported,
 	buildJupiterSwapTransaction,
+	callJupiterApi,
 	commitmentSchema,
 	getConnection,
 	getExplorerAddressUrl,
@@ -93,6 +94,11 @@ type KnownToken = {
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+const RAY_MINT = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R";
+const ORCA_MINT = "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE";
+const MSOL_MINT = "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So";
+const BSOL_MINT = "bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1";
+const BONK_MINT = "6dhTynDkYsVM7cbF7TKfC9DWB636TcEM935fq7JzL2ES";
 const KNOWN_TOKENS: KnownToken[] = [
 	{
 		mint: SOL_MINT,
@@ -109,6 +115,31 @@ const KNOWN_TOKENS: KnownToken[] = [
 		decimals: 6,
 		aliases: ["USDT"],
 	},
+	{
+		mint: RAY_MINT,
+		decimals: 6,
+		aliases: ["RAY"],
+	},
+	{
+		mint: ORCA_MINT,
+		decimals: 6,
+		aliases: ["ORCA"],
+	},
+	{
+		mint: MSOL_MINT,
+		decimals: 9,
+		aliases: ["MSOL", "mSOL"],
+	},
+	{
+		mint: BSOL_MINT,
+		decimals: 9,
+		aliases: ["BSOL", "bSOL"],
+	},
+	{
+		mint: BONK_MINT,
+		decimals: 9,
+		aliases: ["BONK"],
+	},
 ];
 const TOKEN_ALIAS_MAP = new Map(
 	KNOWN_TOKENS.flatMap((token) =>
@@ -119,9 +150,11 @@ const TOKEN_BY_MINT_MAP = new Map(
 	KNOWN_TOKENS.map((token) => [token.mint, token] as const),
 );
 const TOKEN_DECIMALS_CACHE = new Map<string, number>();
+const TOKEN_SYMBOL_MINT_CACHE = new Map<string, string | null>();
 
 const BASE58_PUBLIC_KEY_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const BASE58_PUBLIC_KEY_REGEX = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
+const TOKEN_SYMBOL_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{1,15}$/;
 const SWAP_KEYWORD_REGEX = /(swap|兑换|换成|换到|互换|兑成|兑为)/i;
 const TRANSFER_KEYWORD_REGEX = /(transfer|send|转账|转到|发送|打款)/i;
 
@@ -180,6 +213,195 @@ function parsePositiveNumber(value: string): number | null {
 		return null;
 	}
 	return parsed;
+}
+
+function sanitizeTokenCandidate(value: string): string {
+	return value.trim().replace(/^[`"' ]+|[`"'., ]+$/g, "");
+}
+
+function isTokenSymbol(value: string): boolean {
+	return TOKEN_SYMBOL_PATTERN.test(value);
+}
+
+function parseMintFromCandidate(value: string): string | undefined {
+	const candidate = normalizeAtPath(value);
+	if (!BASE58_PUBLIC_KEY_PATTERN.test(candidate)) {
+		return undefined;
+	}
+	try {
+		return new PublicKey(candidate).toBase58();
+	} catch {
+		return undefined;
+	}
+}
+
+function parseMintOrSymbolCandidate(value: string): string | undefined {
+	const sanitized = sanitizeTokenCandidate(value);
+	if (!sanitized) {
+		return undefined;
+	}
+	const symbolToken = TOKEN_ALIAS_MAP.get(sanitized.toUpperCase());
+	if (symbolToken) {
+		return symbolToken.mint;
+	}
+	const mint = parseMintFromCandidate(sanitized);
+	if (mint) {
+		return mint;
+	}
+	if (isTokenSymbol(sanitized)) {
+		return sanitized;
+	}
+	return undefined;
+}
+
+function registerResolvedTokenSymbol(
+	symbol: string,
+	mint: string,
+	decimals: number,
+): void {
+	const upper = symbol.toUpperCase();
+	const token: KnownToken = {
+		mint,
+		decimals,
+		aliases: [upper],
+	};
+	TOKEN_ALIAS_MAP.set(upper, token);
+	TOKEN_BY_MINT_MAP.set(mint, token);
+	TOKEN_DECIMALS_CACHE.set(mint, decimals);
+	TOKEN_SYMBOL_MINT_CACHE.set(upper, mint);
+}
+
+function parseRemoteDecimals(value: unknown): number | undefined {
+	if (typeof value === "number" && Number.isInteger(value)) {
+		return value;
+	}
+	if (typeof value === "string" && /^\d+$/.test(value)) {
+		return Number.parseInt(value, 10);
+	}
+	return undefined;
+}
+
+function parseRemoteTokenEntry(value: unknown): {
+	symbol: string;
+	mint: string;
+	decimals: number;
+	priority: number;
+} | null {
+	if (!value || typeof value !== "object") {
+		return null;
+	}
+	const entry = value as Record<string, unknown>;
+	const symbolRaw =
+		typeof entry.symbol === "string"
+			? entry.symbol
+			: typeof entry.ticker === "string"
+				? entry.ticker
+				: null;
+	const mintRaw =
+		typeof entry.address === "string"
+			? entry.address
+			: typeof entry.mint === "string"
+				? entry.mint
+				: null;
+	const decimalsRaw = parseRemoteDecimals(entry.decimals);
+	if (!symbolRaw || !mintRaw || decimalsRaw === undefined) {
+		return null;
+	}
+	if (decimalsRaw < 0 || decimalsRaw > 18) {
+		return null;
+	}
+	const mint = parseMintFromCandidate(mintRaw);
+	if (!mint) {
+		return null;
+	}
+	const chainId =
+		typeof entry.chainId === "number" && Number.isInteger(entry.chainId)
+			? entry.chainId
+			: undefined;
+	const priority = chainId === 101 ? 1 : 0;
+	return {
+		symbol: symbolRaw,
+		mint,
+		decimals: decimalsRaw,
+		priority,
+	};
+}
+
+function findTokenEntries(payload: unknown): unknown[] {
+	if (Array.isArray(payload)) {
+		return payload;
+	}
+	if (payload && typeof payload === "object") {
+		const object = payload as Record<string, unknown>;
+		if (Array.isArray(object.data)) {
+			return object.data;
+		}
+		if (Array.isArray(object.tokens)) {
+			return object.tokens;
+		}
+		return [object];
+	}
+	return [];
+}
+
+async function resolveTokenSymbolViaJupiter(
+	symbol: string,
+): Promise<string | undefined> {
+	const upper = symbol.toUpperCase();
+	const cachedMint = TOKEN_SYMBOL_MINT_CACHE.get(upper);
+	if (cachedMint !== undefined) {
+		return cachedMint ?? undefined;
+	}
+
+	const local = TOKEN_ALIAS_MAP.get(upper);
+	if (local) {
+		TOKEN_SYMBOL_MINT_CACHE.set(upper, local.mint);
+		return local.mint;
+	}
+
+	const queries: Array<Record<string, string | number>> = [
+		{ query: upper, limit: 25 },
+		{ q: upper, limit: 25 },
+		{ symbol: upper, limit: 25 },
+	];
+
+	for (const query of queries) {
+		try {
+			const payload = await callJupiterApi("/tokens/v1/search", {
+				method: "GET",
+				query,
+				timeoutMs: 5_000,
+			});
+			const entries = findTokenEntries(payload);
+			let best: {
+				symbol: string;
+				mint: string;
+				decimals: number;
+				priority: number;
+			} | null = null;
+			for (const entry of entries) {
+				const candidate = parseRemoteTokenEntry(entry);
+				if (!candidate) {
+					continue;
+				}
+				if (candidate.symbol.toUpperCase() !== upper) {
+					continue;
+				}
+				if (!best || candidate.priority > best.priority) {
+					best = candidate;
+				}
+			}
+			if (best) {
+				registerResolvedTokenSymbol(upper, best.mint, best.decimals);
+				return best.mint;
+			}
+		} catch {
+			// Ignore unavailable token index endpoints and fallback to local aliases.
+		}
+	}
+
+	TOKEN_SYMBOL_MINT_CACHE.set(upper, null);
+	return undefined;
 }
 
 function getKnownTokenByMint(mint: string): KnownToken | undefined {
@@ -249,20 +471,15 @@ async function fetchTokenDecimals(
 }
 
 function normalizeMintCandidate(value: string): string | undefined {
-	const sanitized = value.trim().replace(/^[`"' ]+|[`"'., ]+$/g, "");
+	const sanitized = sanitizeTokenCandidate(value);
 	if (!sanitized) {
 		return undefined;
 	}
 	const symbolToken = TOKEN_ALIAS_MAP.get(sanitized.toUpperCase());
-	const candidate = symbolToken?.mint ?? normalizeAtPath(sanitized);
-	if (!BASE58_PUBLIC_KEY_PATTERN.test(candidate)) {
-		return undefined;
+	if (symbolToken) {
+		return symbolToken.mint;
 	}
-	try {
-		return new PublicKey(candidate).toBase58();
-	} catch {
-		return undefined;
-	}
+	return parseMintFromCandidate(sanitized);
 }
 
 function decimalUiAmountToRaw(
@@ -296,7 +513,7 @@ function decimalUiAmountToRaw(
 function parseUiAmountWithToken(intentText: string): ParsedIntentTextFields {
 	const parsed: ParsedIntentTextFields = {};
 	const matches = intentText.matchAll(
-		/([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9]{1,15}|[1-9A-HJ-NP-Za-km-z]{32,44})\b/gi,
+		/([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9._-]{1,15}|[1-9A-HJ-NP-Za-km-z]{32,44})\b/gi,
 	);
 	for (const match of matches) {
 		const amountUi = match[1];
@@ -304,13 +521,17 @@ function parseUiAmountWithToken(intentText: string): ParsedIntentTextFields {
 		if (!amountUi || !tokenCandidate) {
 			continue;
 		}
-		const inputMint = normalizeMintCandidate(tokenCandidate);
-		if (!inputMint) {
+		const candidate = parseMintOrSymbolCandidate(tokenCandidate);
+		if (!candidate) {
 			continue;
 		}
 		parsed.amountUi = amountUi;
-		parsed.inputMint = inputMint;
-		if (inputMint === SOL_MINT) {
+		parsed.inputMint = candidate;
+		if (
+			candidate === SOL_MINT ||
+			sanitizeTokenCandidate(tokenCandidate).toUpperCase() === "SOL" ||
+			sanitizeTokenCandidate(tokenCandidate).toUpperCase() === "WSOL"
+		) {
 			const amountSol = parsePositiveNumber(amountUi);
 			if (amountSol != null) {
 				parsed.amountSol = amountSol;
@@ -354,16 +575,16 @@ function parseSwapIntentText(intentText: string): ParsedIntentTextFields {
 		intentType: "solana.swap.jupiter",
 	};
 	const inputMatch = intentText.match(
-		/\binputMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9]{1,15})\b/i,
+		/\binputMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
 	);
 	const outputMatch = intentText.match(
-		/\boutputMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9]{1,15})\b/i,
+		/\boutputMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
 	);
 	const inputMint = inputMatch?.[1]
-		? normalizeMintCandidate(inputMatch[1])
+		? parseMintOrSymbolCandidate(inputMatch[1])
 		: undefined;
 	const outputMint = outputMatch?.[1]
-		? normalizeMintCandidate(outputMatch[1])
+		? parseMintOrSymbolCandidate(outputMatch[1])
 		: undefined;
 	if (inputMint) {
 		parsed.inputMint = inputMint;
@@ -373,14 +594,14 @@ function parseSwapIntentText(intentText: string): ParsedIntentTextFields {
 	}
 	if (!parsed.inputMint || !parsed.outputMint) {
 		const pairPattern =
-			/([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z]{2,12})\s*(?:->|to|for|换成|换到|兑成|兑为)\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z]{2,12})/gi;
+			/([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\s*(?:->|to|for|换成|换到|兑成|兑为)\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})/gi;
 		let pairMatch: RegExpExecArray | null = null;
 		for (const match of intentText.matchAll(pairPattern)) {
 			pairMatch = match;
 		}
 		if (pairMatch) {
-			const pairInputMint = normalizeMintCandidate(pairMatch[1]);
-			const pairOutputMint = normalizeMintCandidate(pairMatch[2]);
+			const pairInputMint = parseMintOrSymbolCandidate(pairMatch[1]);
+			const pairOutputMint = parseMintOrSymbolCandidate(pairMatch[2]);
 			if (!parsed.inputMint && pairInputMint) {
 				parsed.inputMint = pairInputMint;
 			}
@@ -539,12 +760,20 @@ function resolveIntentType(
 	);
 }
 
-function ensureMint(value: unknown, field: string): string {
-	const normalized = normalizeMintCandidate(ensureString(value, field));
-	if (!normalized) {
-		throw new Error(`${field} is invalid`);
+async function ensureMint(value: unknown, field: string): Promise<string> {
+	const raw = ensureString(value, field);
+	const normalized = normalizeMintCandidate(raw);
+	if (normalized) {
+		return normalized;
 	}
-	return normalized;
+	const candidate = sanitizeTokenCandidate(raw);
+	if (isTokenSymbol(candidate)) {
+		const resolved = await resolveTokenSymbolViaJupiter(candidate);
+		if (resolved) {
+			return resolved;
+		}
+	}
+	throw new Error(`${field} is invalid`);
 }
 
 async function normalizeIntent(
@@ -569,8 +798,11 @@ async function normalizeIntent(
 		};
 	}
 
-	const inputMint = ensureMint(normalizedParams.inputMint, "inputMint");
-	const outputMint = ensureMint(normalizedParams.outputMint, "outputMint");
+	const inputMint = await ensureMint(normalizedParams.inputMint, "inputMint");
+	const outputMint = await ensureMint(
+		normalizedParams.outputMint,
+		"outputMint",
+	);
 	let amountRawValue = normalizedParams.amountRaw;
 	if (
 		(typeof amountRawValue !== "string" ||

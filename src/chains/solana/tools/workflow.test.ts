@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const runtimeMocks = vi.hoisted(() => ({
 	assertJupiterNetworkSupported: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
+	callJupiterApi: vi.fn(),
 	commitmentSchema: vi.fn(),
 	getConnection: vi.fn(),
 	getExplorerAddressUrl: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock("../runtime.js", async () => {
 		...actual,
 		assertJupiterNetworkSupported: runtimeMocks.assertJupiterNetworkSupported,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
+		callJupiterApi: runtimeMocks.callJupiterApi,
 		commitmentSchema: runtimeMocks.commitmentSchema,
 		getConnection: runtimeMocks.getConnection,
 		getExplorerAddressUrl: runtimeMocks.getExplorerAddressUrl,
@@ -57,6 +59,7 @@ import { createSolanaWorkflowTools } from "./workflow.js";
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+const RAY_MINT = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R";
 
 function getWorkflowTool() {
 	const tool = createSolanaWorkflowTools().find(
@@ -69,6 +72,7 @@ function getWorkflowTool() {
 describe("w3rt_run_workflow_v0", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		runtimeMocks.callJupiterApi.mockRejectedValue(new Error("unmocked"));
 		runtimeMocks.parseNetwork.mockReturnValue("devnet");
 		runtimeMocks.parseFinality.mockReturnValue("confirmed");
 		runtimeMocks.getExplorerAddressUrl.mockReturnValue(
@@ -246,6 +250,75 @@ describe("w3rt_run_workflow_v0", () => {
 						inputMint: USDT_MINT,
 						outputMint: USDC_MINT,
 						amountRaw: "2500000",
+					},
+				},
+			},
+		});
+	});
+
+	it("supports structured amountUi with expanded local token aliases", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-amount-ui-ray", {
+			runId: "run-amount-ui-ray",
+			runMode: "analysis",
+			intentType: "solana.swap.jupiter",
+			inputMint: "RAY",
+			outputMint: "USDC",
+			amountUi: "1.2",
+		});
+
+		expect(runtimeMocks.callJupiterApi).not.toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			runId: "run-amount-ui-ray",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.swap.jupiter",
+						inputMint: RAY_MINT,
+						outputMint: USDC_MINT,
+						amountRaw: "1200000",
+					},
+				},
+			},
+		});
+	});
+
+	it("resolves unknown symbols through Jupiter token search", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const remoteMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.callJupiterApi.mockResolvedValue([
+			{
+				symbol: "JITOSOL",
+				address: remoteMint,
+				decimals: 9,
+				chainId: 101,
+			},
+		]);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-remote-symbol", {
+			runId: "run-intent-remote-symbol",
+			runMode: "analysis",
+			intentText: "swap 1 JITOSOL to USDC",
+		});
+
+		expect(runtimeMocks.callJupiterApi).toHaveBeenCalledTimes(1);
+		expect(runtimeMocks.getConnection).not.toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			runId: "run-intent-remote-symbol",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.swap.jupiter",
+						inputMint: remoteMint,
+						outputMint: USDC_MINT,
+						amountRaw: "1000000000",
 					},
 				},
 			},
