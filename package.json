@@ -17,6 +17,8 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
+		"@jup-ag/api": "^6.0.48",
+		"@raydium-io/raydium-sdk-v2": "^0.2.32-alpha",
 		"@sinclair/typebox": "^0.34.41",
 		"@solana/spl-token": "^0.4.11",
 		"@solana/web3.js": "^1.98.4",
