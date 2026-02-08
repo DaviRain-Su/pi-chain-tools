@@ -54,6 +54,9 @@ vi.mock("../runtime.js", async () => {
 
 import { createSolanaWorkflowTools } from "./workflow.js";
 
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
 function getWorkflowTool() {
 	const tool = createSolanaWorkflowTools().find(
 		(entry) => entry.name === "w3rt_run_workflow_v0",
@@ -101,6 +104,93 @@ describe("w3rt_run_workflow_v0", () => {
 				}
 			).artifacts?.analysis?.intent?.type,
 		).toBe("solana.transfer.sol");
+	});
+
+	it("parses transfer intentText and infers intentType", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const destination = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-transfer", {
+			runId: "run-intent-transfer",
+			runMode: "analysis",
+			intentText: `请把 0.000001 SOL 转到 ${destination}`,
+		});
+
+		expect(runtimeMocks.toLamports).toHaveBeenCalledWith(0.000001);
+		expect(result.details).toMatchObject({
+			runId: "run-intent-transfer",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.transfer.sol",
+						toAddress: destination,
+						amountSol: 0.000001,
+					},
+				},
+			},
+		});
+	});
+
+	it("uses explicit fields over parsed intentText fields", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const parsedDestination = Keypair.generate().publicKey.toBase58();
+		const explicitDestination = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-override", {
+			runId: "run-intent-override",
+			runMode: "analysis",
+			intentText: `transfer 1 SOL to ${parsedDestination}`,
+			intentType: "solana.transfer.sol",
+			toAddress: explicitDestination,
+			amountSol: 0.25,
+		});
+
+		expect(runtimeMocks.toLamports).toHaveBeenCalledWith(0.25);
+		expect(result.details).toMatchObject({
+			runId: "run-intent-override",
+			artifacts: {
+				analysis: {
+					intent: {
+						toAddress: explicitDestination,
+						amountSol: 0.25,
+					},
+				},
+			},
+		});
+	});
+
+	it("parses swap intentText and derives amountRaw from SOL amount", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-swap", {
+			runId: "run-intent-swap",
+			runMode: "analysis",
+			intentText: "swap 0.1 SOL to USDC slippageBps=50",
+		});
+
+		expect(runtimeMocks.toLamports).toHaveBeenCalledWith(0.1);
+		expect(result.details).toMatchObject({
+			runId: "run-intent-swap",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.swap.jupiter",
+						inputMint: SOL_MINT,
+						outputMint: USDC_MINT,
+						amountRaw: "100000000",
+						slippageBps: 50,
+					},
+				},
+			},
+		});
 	});
 
 	it("enforces mainnet confirm token before execute", async () => {

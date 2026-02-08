@@ -33,6 +33,16 @@ import {
 
 type WorkflowRunMode = "analysis" | "simulate" | "execute";
 type WorkflowIntentType = "solana.transfer.sol" | "solana.swap.jupiter";
+type ParsedIntentTextFields = Partial<{
+	intentType: WorkflowIntentType;
+	toAddress: string;
+	amountSol: number;
+	inputMint: string;
+	outputMint: string;
+	amountRaw: string;
+	slippageBps: number;
+	swapMode: "ExactIn" | "ExactOut";
+}>;
 
 type TransferSolIntent = {
 	type: "solana.transfer.sol";
@@ -71,6 +81,18 @@ type PreparedTransaction = {
 	};
 	context: Record<string, unknown>;
 };
+
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const TOKEN_SYMBOL_MINTS: Record<string, string> = {
+	SOL: SOL_MINT,
+	WSOL: SOL_MINT,
+	USDC: USDC_MINT,
+};
+const BASE58_PUBLIC_KEY_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const BASE58_PUBLIC_KEY_REGEX = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
+const SWAP_KEYWORD_REGEX = /(swap|兑换|换成|换到|互换|兑成|兑为)/i;
+const TRANSFER_KEYWORD_REGEX = /(transfer|send|转账|转到|发送|打款)/i;
 
 function parseRunMode(value?: string): WorkflowRunMode {
 	if (value === "analysis" || value === "simulate" || value === "execute") {
@@ -121,16 +143,232 @@ function createWorkflowPlan(intentType: WorkflowIntentType): string[] {
 	];
 }
 
+function parsePositiveNumber(value: string): number | null {
+	const parsed = Number.parseFloat(value);
+	if (!Number.isFinite(parsed) || parsed <= 0) {
+		return null;
+	}
+	return parsed;
+}
+
+function normalizeMintCandidate(value: string): string | undefined {
+	const sanitized = value.trim().replace(/^[`"' ]+|[`"'., ]+$/g, "");
+	if (!sanitized) {
+		return undefined;
+	}
+	const symbolMint = TOKEN_SYMBOL_MINTS[sanitized.toUpperCase()];
+	const candidate = symbolMint ?? normalizeAtPath(sanitized);
+	if (!BASE58_PUBLIC_KEY_PATTERN.test(candidate)) {
+		return undefined;
+	}
+	try {
+		return new PublicKey(candidate).toBase58();
+	} catch {
+		return undefined;
+	}
+}
+
+function parseTransferIntentText(intentText: string): ParsedIntentTextFields {
+	const parsed: ParsedIntentTextFields = {
+		intentType: "solana.transfer.sol",
+	};
+	const toMatch = intentText.match(
+		/(?:\bto\b|->|=>|到|给)\s*([1-9A-HJ-NP-Za-km-z]{32,44})/i,
+	);
+	if (toMatch?.[1]) {
+		parsed.toAddress = toMatch[1];
+	}
+	if (!parsed.toAddress) {
+		const addresses = intentText.match(BASE58_PUBLIC_KEY_REGEX);
+		if (addresses && addresses.length > 0) {
+			parsed.toAddress = addresses[addresses.length - 1];
+		}
+	}
+	const amountMatch =
+		intentText.match(/\bamountSol\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\b/i) ??
+		intentText.match(/([0-9]+(?:\.[0-9]+)?)\s*sol\b/i);
+	if (amountMatch?.[1]) {
+		const amountSol = parsePositiveNumber(amountMatch[1]);
+		if (amountSol != null) {
+			parsed.amountSol = amountSol;
+		}
+	}
+	return parsed;
+}
+
+function parseSwapIntentText(intentText: string): ParsedIntentTextFields {
+	const parsed: ParsedIntentTextFields = {
+		intentType: "solana.swap.jupiter",
+	};
+	const inputMatch = intentText.match(
+		/\binputMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9]{1,15})\b/i,
+	);
+	const outputMatch = intentText.match(
+		/\boutputMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9]{1,15})\b/i,
+	);
+	const inputMint = inputMatch?.[1]
+		? normalizeMintCandidate(inputMatch[1])
+		: undefined;
+	const outputMint = outputMatch?.[1]
+		? normalizeMintCandidate(outputMatch[1])
+		: undefined;
+	if (inputMint) {
+		parsed.inputMint = inputMint;
+	}
+	if (outputMint) {
+		parsed.outputMint = outputMint;
+	}
+	if (!parsed.inputMint || !parsed.outputMint) {
+		const pairPattern =
+			/([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z]{2,12})\s*(?:->|to|for|换成|换到|兑成|兑为)\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z]{2,12})/gi;
+		let pairMatch: RegExpExecArray | null = null;
+		for (const match of intentText.matchAll(pairPattern)) {
+			pairMatch = match;
+		}
+		if (pairMatch) {
+			const pairInputMint = normalizeMintCandidate(pairMatch[1]);
+			const pairOutputMint = normalizeMintCandidate(pairMatch[2]);
+			if (!parsed.inputMint && pairInputMint) {
+				parsed.inputMint = pairInputMint;
+			}
+			if (!parsed.outputMint && pairOutputMint) {
+				parsed.outputMint = pairOutputMint;
+			}
+		}
+	}
+	const amountRawMatch =
+		intentText.match(/\bamountRaw\s*[=:]\s*([0-9]+)\b/i) ??
+		intentText.match(/\b([0-9]+)\s*(?:raw|lamports?)\b/i);
+	if (amountRawMatch?.[1]) {
+		parsed.amountRaw = amountRawMatch[1];
+	}
+	const amountSolMatch =
+		intentText.match(/\bamountSol\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\b/i) ??
+		intentText.match(/([0-9]+(?:\.[0-9]+)?)\s*sol\b/i);
+	if (amountSolMatch?.[1]) {
+		const amountSol = parsePositiveNumber(amountSolMatch[1]);
+		if (amountSol != null) {
+			parsed.amountSol = amountSol;
+		}
+	}
+	const slippageMatch =
+		intentText.match(/\bslippageBps\s*[=:]\s*([0-9]+)\b/i) ??
+		intentText.match(/\b([0-9]+)\s*bps\b/i);
+	if (slippageMatch?.[1]) {
+		const slippageBps = Number.parseInt(slippageMatch[1], 10);
+		if (Number.isInteger(slippageBps) && slippageBps > 0) {
+			parsed.slippageBps = slippageBps;
+		}
+	}
+	if (/\bexact\s*out\b|\bexactout\b/i.test(intentText)) {
+		parsed.swapMode = "ExactOut";
+	} else if (/\bexact\s*in\b|\bexactin\b/i.test(intentText)) {
+		parsed.swapMode = "ExactIn";
+	}
+	return parsed;
+}
+
+function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
+	if (typeof intentText !== "string" || intentText.trim().length === 0) {
+		return {};
+	}
+	const trimmed = intentText.trim();
+	const lower = trimmed.toLowerCase();
+	if (lower.includes("solana.transfer.sol")) {
+		return parseTransferIntentText(trimmed);
+	}
+	if (lower.includes("solana.swap.jupiter")) {
+		return parseSwapIntentText(trimmed);
+	}
+	const hasSwapKeywords = SWAP_KEYWORD_REGEX.test(trimmed);
+	const hasTransferKeywords = TRANSFER_KEYWORD_REGEX.test(trimmed);
+	if (hasSwapKeywords && !hasTransferKeywords) {
+		return parseSwapIntentText(trimmed);
+	}
+	if (hasTransferKeywords && !hasSwapKeywords) {
+		return parseTransferIntentText(trimmed);
+	}
+	const swapFields = parseSwapIntentText(trimmed);
+	if (
+		swapFields.inputMint ||
+		swapFields.outputMint ||
+		swapFields.amountRaw ||
+		swapFields.swapMode
+	) {
+		return swapFields;
+	}
+	const transferFields = parseTransferIntentText(trimmed);
+	if (transferFields.toAddress || transferFields.amountSol) {
+		return transferFields;
+	}
+	return {};
+}
+
+function mergeIntentParams(
+	params: Record<string, unknown>,
+): Record<string, unknown> {
+	const parsedFromText = parseIntentTextFields(params.intentText);
+	if (Object.keys(parsedFromText).length === 0) {
+		return params;
+	}
+	const merged: Record<string, unknown> = {
+		...parsedFromText,
+	};
+	for (const [key, value] of Object.entries(params)) {
+		if (value !== undefined) {
+			merged[key] = value;
+		}
+	}
+	return merged;
+}
+
+function resolveIntentType(
+	params: Record<string, unknown>,
+): WorkflowIntentType {
+	if (
+		params.intentType === "solana.transfer.sol" ||
+		params.intentType === "solana.swap.jupiter"
+	) {
+		return params.intentType;
+	}
+	if (
+		typeof params.inputMint === "string" ||
+		typeof params.outputMint === "string" ||
+		typeof params.amountRaw === "string" ||
+		typeof params.slippageBps === "number"
+	) {
+		return "solana.swap.jupiter";
+	}
+	if (
+		typeof params.toAddress === "string" ||
+		typeof params.amountSol === "number"
+	) {
+		return "solana.transfer.sol";
+	}
+	throw new Error(
+		"intentType is required. Provide intentType or parsable intentText.",
+	);
+}
+
+function ensureMint(value: unknown, field: string): string {
+	const normalized = normalizeMintCandidate(ensureString(value, field));
+	if (!normalized) {
+		throw new Error(`${field} is invalid`);
+	}
+	return normalized;
+}
+
 function normalizeIntent(
 	params: Record<string, unknown>,
 	signerPublicKey: string,
 ): WorkflowIntent {
-	const intentType = params.intentType as WorkflowIntentType;
+	const normalizedParams = mergeIntentParams(params);
+	const intentType = resolveIntentType(normalizedParams);
 	if (intentType === "solana.transfer.sol") {
 		const toAddress = new PublicKey(
-			normalizeAtPath(ensureString(params.toAddress, "toAddress")),
+			normalizeAtPath(ensureString(normalizedParams.toAddress, "toAddress")),
 		).toBase58();
-		const amountSol = ensureNumber(params.amountSol, "amountSol");
+		const amountSol = ensureNumber(normalizedParams.amountSol, "amountSol");
 		const lamports = toLamports(amountSol);
 		return {
 			type: intentType,
@@ -141,14 +379,20 @@ function normalizeIntent(
 		};
 	}
 
-	const inputMint = new PublicKey(
-		normalizeAtPath(ensureString(params.inputMint, "inputMint")),
-	).toBase58();
-	const outputMint = new PublicKey(
-		normalizeAtPath(ensureString(params.outputMint, "outputMint")),
-	).toBase58();
+	const inputMint = ensureMint(normalizedParams.inputMint, "inputMint");
+	const outputMint = ensureMint(normalizedParams.outputMint, "outputMint");
+	let amountRawValue = normalizedParams.amountRaw;
+	if (
+		(typeof amountRawValue !== "string" ||
+			amountRawValue.trim().length === 0) &&
+		inputMint === SOL_MINT &&
+		typeof normalizedParams.amountSol === "number"
+	) {
+		const amountSol = ensureNumber(normalizedParams.amountSol, "amountSol");
+		amountRawValue = toLamports(amountSol).toString();
+	}
 	const amountRaw = parsePositiveBigInt(
-		ensureString(params.amountRaw, "amountRaw"),
+		ensureString(amountRawValue, "amountRaw"),
 		"amountRaw",
 	).toString();
 	return {
@@ -158,33 +402,39 @@ function normalizeIntent(
 		outputMint,
 		amountRaw,
 		slippageBps:
-			typeof params.slippageBps === "number" ? params.slippageBps : undefined,
+			typeof normalizedParams.slippageBps === "number"
+				? normalizedParams.slippageBps
+				: undefined,
 		swapMode: parseJupiterSwapMode(
-			typeof params.swapMode === "string" ? params.swapMode : undefined,
+			typeof normalizedParams.swapMode === "string"
+				? normalizedParams.swapMode
+				: undefined,
 		),
 		restrictIntermediateTokens:
-			typeof params.restrictIntermediateTokens === "boolean"
-				? params.restrictIntermediateTokens
+			typeof normalizedParams.restrictIntermediateTokens === "boolean"
+				? normalizedParams.restrictIntermediateTokens
 				: undefined,
 		onlyDirectRoutes:
-			typeof params.onlyDirectRoutes === "boolean"
-				? params.onlyDirectRoutes
+			typeof normalizedParams.onlyDirectRoutes === "boolean"
+				? normalizedParams.onlyDirectRoutes
 				: undefined,
 		maxAccounts:
-			typeof params.maxAccounts === "number" ? params.maxAccounts : undefined,
-		dexes: Array.isArray(params.dexes)
-			? params.dexes.filter(
+			typeof normalizedParams.maxAccounts === "number"
+				? normalizedParams.maxAccounts
+				: undefined,
+		dexes: Array.isArray(normalizedParams.dexes)
+			? normalizedParams.dexes.filter(
 					(entry): entry is string => typeof entry === "string",
 				)
 			: undefined,
-		excludeDexes: Array.isArray(params.excludeDexes)
-			? params.excludeDexes.filter(
+		excludeDexes: Array.isArray(normalizedParams.excludeDexes)
+			? normalizedParams.excludeDexes.filter(
 					(entry): entry is string => typeof entry === "string",
 				)
 			: undefined,
 		asLegacyTransaction:
-			typeof params.asLegacyTransaction === "boolean"
-				? params.asLegacyTransaction
+			typeof normalizedParams.asLegacyTransaction === "boolean"
+				? normalizedParams.asLegacyTransaction
 				: undefined,
 	};
 }
@@ -423,10 +673,18 @@ export function createSolanaWorkflowTools() {
 							"Optional workflow run id. Provide the same id when replaying simulate->execute on mainnet.",
 					}),
 				),
-				intentType: Type.Union([
-					Type.Literal("solana.transfer.sol"),
-					Type.Literal("solana.swap.jupiter"),
-				]),
+				intentType: Type.Optional(
+					Type.Union([
+						Type.Literal("solana.transfer.sol"),
+						Type.Literal("solana.swap.jupiter"),
+					]),
+				),
+				intentText: Type.Optional(
+					Type.String({
+						description:
+							"Optional natural-language intent. Structured fields override parsed values.",
+					}),
+				),
 				runMode: Type.Optional(
 					Type.Union([
 						Type.Literal("analysis"),
