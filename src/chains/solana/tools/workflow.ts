@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import {
 	Keypair,
+	type ParsedAccountData,
 	PublicKey,
 	SystemProgram,
 	Transaction,
@@ -117,6 +118,7 @@ const TOKEN_ALIAS_MAP = new Map(
 const TOKEN_BY_MINT_MAP = new Map(
 	KNOWN_TOKENS.map((token) => [token.mint, token] as const),
 );
+const TOKEN_DECIMALS_CACHE = new Map<string, number>();
 
 const BASE58_PUBLIC_KEY_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const BASE58_PUBLIC_KEY_REGEX = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
@@ -185,7 +187,65 @@ function getKnownTokenByMint(mint: string): KnownToken | undefined {
 }
 
 function getTokenDecimalsByMint(mint: string): number | undefined {
-	return getKnownTokenByMint(mint)?.decimals;
+	return getKnownTokenByMint(mint)?.decimals ?? TOKEN_DECIMALS_CACHE.get(mint);
+}
+
+function parseMintDecimals(accountData: ParsedAccountData): number | null {
+	const parsed = accountData.parsed;
+	if (!parsed || typeof parsed !== "object") {
+		return null;
+	}
+	const info = (parsed as Record<string, unknown>).info;
+	if (!info || typeof info !== "object") {
+		return null;
+	}
+	const decimals = (info as Record<string, unknown>).decimals;
+	if (
+		typeof decimals !== "number" ||
+		!Number.isInteger(decimals) ||
+		decimals < 0 ||
+		decimals > 18
+	) {
+		return null;
+	}
+	return decimals;
+}
+
+async function fetchTokenDecimals(
+	network: string,
+	mintAddress: string,
+): Promise<number> {
+	const cached = getTokenDecimalsByMint(mintAddress);
+	if (cached !== undefined) {
+		return cached;
+	}
+	const connection = getConnection(network);
+	const mint = new PublicKey(mintAddress);
+	const accountInfo = await connection.getParsedAccountInfo(mint);
+	if (!accountInfo.value) {
+		throw new Error(
+			`Cannot infer amountRaw: mint account not found for inputMint=${mintAddress}.`,
+		);
+	}
+	if (typeof accountInfo.value.data !== "object") {
+		throw new Error(
+			`Cannot infer amountRaw: mint account is not parsed for inputMint=${mintAddress}.`,
+		);
+	}
+	const parsedData = accountInfo.value.data;
+	if (!("parsed" in parsedData)) {
+		throw new Error(
+			`Cannot infer amountRaw: mint account is not parsed for inputMint=${mintAddress}.`,
+		);
+	}
+	const decimals = parseMintDecimals(parsedData as ParsedAccountData);
+	if (decimals == null) {
+		throw new Error(
+			`Cannot infer amountRaw: mint decimals unavailable for inputMint=${mintAddress}.`,
+		);
+	}
+	TOKEN_DECIMALS_CACHE.set(mintAddress, decimals);
+	return decimals;
 }
 
 function normalizeMintCandidate(value: string): string | undefined {
@@ -487,10 +547,11 @@ function ensureMint(value: unknown, field: string): string {
 	return normalized;
 }
 
-function normalizeIntent(
+async function normalizeIntent(
 	params: Record<string, unknown>,
 	signerPublicKey: string,
-): WorkflowIntent {
+	network: string,
+): Promise<WorkflowIntent> {
 	const normalizedParams = mergeIntentParams(params);
 	const intentType = resolveIntentType(normalizedParams);
 	if (intentType === "solana.transfer.sol") {
@@ -525,12 +586,7 @@ function normalizeIntent(
 			amountRawValue.trim().length === 0) &&
 		typeof normalizedParams.amountUi === "string"
 	) {
-		const decimals = getTokenDecimalsByMint(inputMint);
-		if (decimals === undefined) {
-			throw new Error(
-				`Cannot infer amountRaw from amountUi for inputMint=${inputMint}; provide amountRaw explicitly.`,
-			);
-		}
+		const decimals = await fetchTokenDecimals(network, inputMint);
 		amountRawValue = decimalUiAmountToRaw(
 			normalizedParams.amountUi,
 			decimals,
@@ -940,9 +996,10 @@ export function createSolanaWorkflowTools() {
 					typeof params.runId === "string" && params.runId.trim().length > 0
 						? params.runId.trim()
 						: createRunId();
-				const intent = normalizeIntent(
+				const intent = await normalizeIntent(
 					params as Record<string, unknown>,
 					signerPublicKey,
+					network,
 				);
 				const confirmToken = createConfirmToken(runId, network, intent);
 				const approvalRequired = network === "mainnet-beta";

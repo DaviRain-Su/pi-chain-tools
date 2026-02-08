@@ -252,22 +252,71 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
-	it("throws explicit error when amountUi token decimals are unknown", async () => {
+	it("derives amountRaw from on-chain mint decimals for unknown token mints", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
 		const unknownMint = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getParsedAccountInfo: vi.fn().mockResolvedValue({
+				value: {
+					data: {
+						parsed: {
+							info: {
+								decimals: 8,
+							},
+						},
+					},
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-amount-ui-unknown", {
+			runId: "run-amount-ui-unknown",
+			runMode: "analysis",
+			intentType: "solana.swap.jupiter",
+			inputMint: unknownMint,
+			outputMint: "USDC",
+			amountUi: "1.25",
+		});
+
+		expect(connection.getParsedAccountInfo).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			runId: "run-amount-ui-unknown",
+			artifacts: {
+				analysis: {
+					intent: {
+						inputMint: unknownMint,
+						amountRaw: "125000000",
+					},
+				},
+			},
+		});
+	});
+
+	it("fails clearly when mint decimals cannot be resolved", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const unknownMint = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getParsedAccountInfo: vi.fn().mockResolvedValue({
+				value: null,
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
 		const tool = getWorkflowTool();
 
 		await expect(
-			tool.execute("wf-amount-ui-unknown", {
-				runId: "run-amount-ui-unknown",
+			tool.execute("wf-amount-ui-missing-mint", {
+				runId: "run-amount-ui-missing-mint",
 				runMode: "analysis",
 				intentType: "solana.swap.jupiter",
 				inputMint: unknownMint,
 				outputMint: "USDC",
 				amountUi: "1",
 			}),
-		).rejects.toThrow("Cannot infer amountRaw from amountUi");
+		).rejects.toThrow("mint account not found");
 	});
 
 	it("enforces mainnet confirm token before execute", async () => {
