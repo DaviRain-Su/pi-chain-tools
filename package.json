@@ -7,10 +7,11 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./pi/solana-extension": "./src/pi/solana-extension.ts",
+		"./pi/solana-workflow-extension": "./src/pi/solana-workflow-extension.ts",
 		"./pi/evm-extension": "./src/pi/evm-extension.ts"
 	},
 	"pi": {
-		"extensions": ["./src/pi/solana-extension.ts"]
+		"extensions": ["./src/pi/solana-workflow-extension.ts"]
 	},
 	"scripts": {
 		"check": "biome check --error-on-warnings . && tsc --noEmit",
