@@ -37,6 +37,7 @@ type ParsedIntentTextFields = Partial<{
 	intentType: WorkflowIntentType;
 	toAddress: string;
 	amountSol: number;
+	amountUi: string;
 	inputMint: string;
 	outputMint: string;
 	amountRaw: string;
@@ -82,13 +83,41 @@ type PreparedTransaction = {
 	context: Record<string, unknown>;
 };
 
+type KnownToken = {
+	mint: string;
+	decimals: number;
+	aliases: string[];
+};
+
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-const TOKEN_SYMBOL_MINTS: Record<string, string> = {
-	SOL: SOL_MINT,
-	WSOL: SOL_MINT,
-	USDC: USDC_MINT,
-};
+const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+const KNOWN_TOKENS: KnownToken[] = [
+	{
+		mint: SOL_MINT,
+		decimals: 9,
+		aliases: ["SOL", "WSOL"],
+	},
+	{
+		mint: USDC_MINT,
+		decimals: 6,
+		aliases: ["USDC"],
+	},
+	{
+		mint: USDT_MINT,
+		decimals: 6,
+		aliases: ["USDT"],
+	},
+];
+const TOKEN_ALIAS_MAP = new Map(
+	KNOWN_TOKENS.flatMap((token) =>
+		token.aliases.map((alias) => [alias.toUpperCase(), token] as const),
+	),
+);
+const TOKEN_BY_MINT_MAP = new Map(
+	KNOWN_TOKENS.map((token) => [token.mint, token] as const),
+);
+
 const BASE58_PUBLIC_KEY_PATTERN = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const BASE58_PUBLIC_KEY_REGEX = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
 const SWAP_KEYWORD_REGEX = /(swap|兑换|换成|换到|互换|兑成|兑为)/i;
@@ -151,13 +180,21 @@ function parsePositiveNumber(value: string): number | null {
 	return parsed;
 }
 
+function getKnownTokenByMint(mint: string): KnownToken | undefined {
+	return TOKEN_BY_MINT_MAP.get(mint);
+}
+
+function getTokenDecimalsByMint(mint: string): number | undefined {
+	return getKnownTokenByMint(mint)?.decimals;
+}
+
 function normalizeMintCandidate(value: string): string | undefined {
 	const sanitized = value.trim().replace(/^[`"' ]+|[`"'., ]+$/g, "");
 	if (!sanitized) {
 		return undefined;
 	}
-	const symbolMint = TOKEN_SYMBOL_MINTS[sanitized.toUpperCase()];
-	const candidate = symbolMint ?? normalizeAtPath(sanitized);
+	const symbolToken = TOKEN_ALIAS_MAP.get(sanitized.toUpperCase());
+	const candidate = symbolToken?.mint ?? normalizeAtPath(sanitized);
 	if (!BASE58_PUBLIC_KEY_PATTERN.test(candidate)) {
 		return undefined;
 	}
@@ -166,6 +203,62 @@ function normalizeMintCandidate(value: string): string | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+function decimalUiAmountToRaw(
+	amountUi: string,
+	decimals: number,
+	field: string,
+): string {
+	const trimmed = amountUi.trim();
+	const match = trimmed.match(/^([0-9]+)(?:\.([0-9]+))?$/);
+	if (!match) {
+		throw new Error(`${field} must be a positive decimal string`);
+	}
+	const whole = match[1] ?? "0";
+	const fraction = match[2] ?? "";
+	if (fraction.length > decimals) {
+		throw new Error(
+			`${field} has too many decimal places for token decimals=${decimals}`,
+		);
+	}
+	const base = 10n ** BigInt(decimals);
+	const wholeRaw = BigInt(whole) * base;
+	const paddedFraction = fraction.padEnd(decimals, "0");
+	const fractionRaw = paddedFraction.length > 0 ? BigInt(paddedFraction) : 0n;
+	const raw = wholeRaw + fractionRaw;
+	if (raw <= 0n) {
+		throw new Error(`${field} must be positive`);
+	}
+	return raw.toString();
+}
+
+function parseUiAmountWithToken(intentText: string): ParsedIntentTextFields {
+	const parsed: ParsedIntentTextFields = {};
+	const matches = intentText.matchAll(
+		/([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9]{1,15}|[1-9A-HJ-NP-Za-km-z]{32,44})\b/gi,
+	);
+	for (const match of matches) {
+		const amountUi = match[1];
+		const tokenCandidate = match[2];
+		if (!amountUi || !tokenCandidate) {
+			continue;
+		}
+		const inputMint = normalizeMintCandidate(tokenCandidate);
+		if (!inputMint) {
+			continue;
+		}
+		parsed.amountUi = amountUi;
+		parsed.inputMint = inputMint;
+		if (inputMint === SOL_MINT) {
+			const amountSol = parsePositiveNumber(amountUi);
+			if (amountSol != null) {
+				parsed.amountSol = amountSol;
+			}
+		}
+		break;
+	}
+	return parsed;
 }
 
 function parseTransferIntentText(intentText: string): ParsedIntentTextFields {
@@ -236,11 +329,34 @@ function parseSwapIntentText(intentText: string): ParsedIntentTextFields {
 			}
 		}
 	}
+	const uiAmountWithToken = parseUiAmountWithToken(intentText);
+	if (uiAmountWithToken.inputMint) {
+		const sameInputMint =
+			!parsed.inputMint || parsed.inputMint === uiAmountWithToken.inputMint;
+		if (sameInputMint) {
+			parsed.inputMint = parsed.inputMint ?? uiAmountWithToken.inputMint;
+			if (uiAmountWithToken.amountUi) {
+				parsed.amountUi = uiAmountWithToken.amountUi;
+			}
+			if (
+				parsed.amountSol === undefined &&
+				typeof uiAmountWithToken.amountSol === "number"
+			) {
+				parsed.amountSol = uiAmountWithToken.amountSol;
+			}
+		}
+	}
 	const amountRawMatch =
 		intentText.match(/\bamountRaw\s*[=:]\s*([0-9]+)\b/i) ??
 		intentText.match(/\b([0-9]+)\s*(?:raw|lamports?)\b/i);
 	if (amountRawMatch?.[1]) {
 		parsed.amountRaw = amountRawMatch[1];
+	}
+	const amountUiMatch = intentText.match(
+		/\b(?:amount|amountIn|amountUi)\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+	);
+	if (amountUiMatch?.[1]) {
+		parsed.amountUi = amountUiMatch[1];
 	}
 	const amountSolMatch =
 		intentText.match(/\bamountSol\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\b/i) ??
@@ -258,6 +374,17 @@ function parseSwapIntentText(intentText: string): ParsedIntentTextFields {
 		const slippageBps = Number.parseInt(slippageMatch[1], 10);
 		if (Number.isInteger(slippageBps) && slippageBps > 0) {
 			parsed.slippageBps = slippageBps;
+		}
+	}
+	if (parsed.slippageBps === undefined) {
+		const slippagePercentMatch =
+			intentText.match(/\bslippage\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i) ??
+			intentText.match(/滑点\s*([0-9]+(?:\.[0-9]+)?)\s*%/i);
+		if (slippagePercentMatch?.[1]) {
+			const slippagePercent = parsePositiveNumber(slippagePercentMatch[1]);
+			if (slippagePercent != null) {
+				parsed.slippageBps = Math.round(slippagePercent * 100);
+			}
 		}
 	}
 	if (/\bexact\s*out\b|\bexactout\b/i.test(intentText)) {
@@ -293,6 +420,7 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 		swapFields.inputMint ||
 		swapFields.outputMint ||
 		swapFields.amountRaw ||
+		swapFields.amountUi ||
 		swapFields.swapMode
 	) {
 		return swapFields;
@@ -335,6 +463,7 @@ function resolveIntentType(
 		typeof params.inputMint === "string" ||
 		typeof params.outputMint === "string" ||
 		typeof params.amountRaw === "string" ||
+		typeof params.amountUi === "string" ||
 		typeof params.slippageBps === "number"
 	) {
 		return "solana.swap.jupiter";
@@ -390,6 +519,23 @@ function normalizeIntent(
 	) {
 		const amountSol = ensureNumber(normalizedParams.amountSol, "amountSol");
 		amountRawValue = toLamports(amountSol).toString();
+	}
+	if (
+		(typeof amountRawValue !== "string" ||
+			amountRawValue.trim().length === 0) &&
+		typeof normalizedParams.amountUi === "string"
+	) {
+		const decimals = getTokenDecimalsByMint(inputMint);
+		if (decimals === undefined) {
+			throw new Error(
+				`Cannot infer amountRaw from amountUi for inputMint=${inputMint}; provide amountRaw explicitly.`,
+			);
+		}
+		amountRawValue = decimalUiAmountToRaw(
+			normalizedParams.amountUi,
+			decimals,
+			"amountUi",
+		);
 	}
 	const amountRaw = parsePositiveBigInt(
 		ensureString(amountRawValue, "amountRaw"),
@@ -741,6 +887,12 @@ export function createSolanaWorkflowTools() {
 					Type.String({
 						description:
 							"Raw integer amount for intentType=solana.swap.jupiter",
+					}),
+				),
+				amountUi: Type.Optional(
+					Type.String({
+						description:
+							"Optional human-readable token amount for swaps (for known mints like SOL/USDC/USDT).",
 					}),
 				),
 				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),

@@ -56,6 +56,7 @@ import { createSolanaWorkflowTools } from "./workflow.js";
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 
 function getWorkflowTool() {
 	const tool = createSolanaWorkflowTools().find(
@@ -191,6 +192,82 @@ describe("w3rt_run_workflow_v0", () => {
 				},
 			},
 		});
+	});
+
+	it("parses USDC ui amount and slippage percent from intentText", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-swap-usdc", {
+			runId: "run-intent-swap-usdc",
+			runMode: "analysis",
+			intentText: "swap 1.25 USDC to SOL slippage 0.5%",
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-intent-swap-usdc",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.swap.jupiter",
+						inputMint: USDC_MINT,
+						outputMint: SOL_MINT,
+						amountRaw: "1250000",
+						slippageBps: 50,
+					},
+				},
+			},
+		});
+	});
+
+	it("supports structured amountUi for known-token swaps", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-amount-ui", {
+			runId: "run-amount-ui",
+			runMode: "analysis",
+			intentType: "solana.swap.jupiter",
+			inputMint: "USDT",
+			outputMint: "USDC",
+			amountUi: "2.5",
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-amount-ui",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.swap.jupiter",
+						inputMint: USDT_MINT,
+						outputMint: USDC_MINT,
+						amountRaw: "2500000",
+					},
+				},
+			},
+		});
+	});
+
+	it("throws explicit error when amountUi token decimals are unknown", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const unknownMint = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-amount-ui-unknown", {
+				runId: "run-amount-ui-unknown",
+				runMode: "analysis",
+				intentType: "solana.swap.jupiter",
+				inputMint: unknownMint,
+				outputMint: "USDC",
+				amountUi: "1",
+			}),
+		).rejects.toThrow("Cannot infer amountRaw from amountUi");
 	});
 
 	it("enforces mainnet confirm token before execute", async () => {
