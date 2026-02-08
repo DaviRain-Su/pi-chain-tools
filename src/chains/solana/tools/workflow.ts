@@ -556,11 +556,19 @@ export function createSolanaWorkflowTools() {
 				};
 
 				if (runMode === "analysis") {
+					const tokenText =
+						approvalRequired && approvalArtifact.confirmToken
+							? approvalArtifact.confirmToken
+							: "N/A";
 					return {
 						content: [
 							{
 								type: "text",
 								text: `Workflow analyzed: ${intent.type}`,
+							},
+							{
+								type: "text",
+								text: `runId=${runId} approvalRequired=${approvalRequired} confirmToken=${tokenText}`,
 							},
 						],
 						details: {
@@ -594,11 +602,19 @@ export function createSolanaWorkflowTools() {
 				};
 
 				if (runMode === "simulate") {
+					const tokenText =
+						approvalRequired && approvalArtifact.confirmToken
+							? approvalArtifact.confirmToken
+							: "N/A";
 					return {
 						content: [
 							{
 								type: "text",
 								text: `Workflow simulation ${prepared.simulation.ok ? "succeeded" : "failed"}`,
+							},
+							{
+								type: "text",
+								text: `runId=${runId} approvalRequired=${approvalRequired} confirmToken=${tokenText}`,
 							},
 						],
 						details: {
@@ -656,6 +672,10 @@ export function createSolanaWorkflowTools() {
 						{
 							type: "text",
 							text: `Workflow executed: ${execution.signature}`,
+						},
+						{
+							type: "text",
+							text: `runId=${runId}`,
 						},
 					],
 					details: {
