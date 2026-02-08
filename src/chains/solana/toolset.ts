@@ -3,6 +3,7 @@ import { createSolanaComposeTools } from "./tools/compose.js";
 import { createSolanaExecuteTools } from "./tools/execute.js";
 import { createSolanaReadTools } from "./tools/read.js";
 import { createSolanaRpcTools } from "./tools/rpc.js";
+import { createSolanaWorkflowTools } from "./tools/workflow.js";
 
 export function createSolanaToolset(): ChainToolset {
 	return {
@@ -10,7 +11,10 @@ export function createSolanaToolset(): ChainToolset {
 		groups: [
 			{ name: "read", tools: createSolanaReadTools() },
 			{ name: "compose", tools: createSolanaComposeTools() },
-			{ name: "execute", tools: createSolanaExecuteTools() },
+			{
+				name: "execute",
+				tools: [...createSolanaExecuteTools(), ...createSolanaWorkflowTools()],
+			},
 			{ name: "rpc", tools: createSolanaRpcTools() },
 		],
 	};

@@ -81,6 +81,7 @@ export { createSolanaReadTools } from "./chains/solana/tools/read.js";
 export { createSolanaComposeTools } from "./chains/solana/tools/compose.js";
 export { createSolanaExecuteTools } from "./chains/solana/tools/execute.js";
 export { createSolanaRpcTools } from "./chains/solana/tools/rpc.js";
+export { createSolanaWorkflowTools } from "./chains/solana/tools/workflow.js";
 export { createSolanaToolset } from "./chains/solana/toolset.js";
 
 export {
