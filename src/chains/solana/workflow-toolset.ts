@@ -28,11 +28,18 @@ function getTokenBalanceTool() {
 	);
 }
 
+function getPortfolioTool() {
+	return createSolanaReadTools().find(
+		(tool) => tool.name === `${TOOL_PREFIX}getPortfolio`,
+	);
+}
+
 export function createSolanaWorkflowToolset(): ChainToolset {
 	const confirmTool = getConfirmTool();
 	const balanceTool = getBalanceTool();
 	const tokenAccountsTool = getTokenAccountsTool();
 	const tokenBalanceTool = getTokenBalanceTool();
+	const portfolioTool = getPortfolioTool();
 	return {
 		chain: "solana",
 		groups: [
@@ -42,6 +49,7 @@ export function createSolanaWorkflowToolset(): ChainToolset {
 					...(balanceTool ? [balanceTool] : []),
 					...(tokenAccountsTool ? [tokenAccountsTool] : []),
 					...(tokenBalanceTool ? [tokenBalanceTool] : []),
+					...(portfolioTool ? [portfolioTool] : []),
 				],
 			},
 			{

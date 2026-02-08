@@ -2,6 +2,7 @@ import { Type } from "@sinclair/typebox";
 import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { defineTool } from "../../../core/types.js";
 import {
+	TOKEN_2022_PROGRAM_ID,
 	TOKEN_PROGRAM_ID,
 	TOOL_PREFIX,
 	assertJupiterNetworkSupported,
@@ -33,6 +34,34 @@ import {
 	raydiumTxVersionSchema,
 	solanaNetworkSchema,
 } from "../runtime.js";
+
+const KNOWN_MINT_SYMBOLS: Record<string, string> = {
+	So11111111111111111111111111111111111111112: "SOL",
+	EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v: "USDC",
+	Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB: "USDT",
+	"4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R": "RAY",
+	orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE: "ORCA",
+	mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So: "mSOL",
+	bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1: "bSOL",
+	"6dhTynDkYsVM7cbF7TKfC9DWB636TcEM935fq7JzL2ES": "BONK",
+};
+
+function formatTokenUiAmount(amountRaw: bigint, decimals: number): string {
+	if (decimals <= 0) {
+		return amountRaw.toString();
+	}
+	const base = 10n ** BigInt(decimals);
+	const whole = amountRaw / base;
+	const fractionRaw = amountRaw % base;
+	if (fractionRaw === 0n) {
+		return whole.toString();
+	}
+	const fraction = fractionRaw
+		.toString()
+		.padStart(decimals, "0")
+		.replace(/0+$/, "");
+	return `${whole.toString()}.${fraction}`;
+}
 
 export function createSolanaReadTools() {
 	return [
@@ -444,6 +473,124 @@ export function createSolanaReadTools() {
 							owner.toBase58(),
 							params.network,
 						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getPortfolio`,
+			label: "Solana Get Portfolio",
+			description:
+				"Get aggregated wallet portfolio including SOL and SPL token balances",
+			parameters: Type.Object({
+				address: Type.String({ description: "Wallet address" }),
+				includeZero: Type.Optional(
+					Type.Boolean({
+						description: "Include zero-balance token positions",
+					}),
+				),
+				includeToken2022: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include Token-2022 accounts in addition to legacy SPL Token accounts",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const connection = getConnection(params.network);
+				const owner = new PublicKey(normalizeAtPath(params.address));
+				const includeToken2022 = params.includeToken2022 !== false;
+				const [lamports, tokenProgramResponse, token2022Response] =
+					await Promise.all([
+						connection.getBalance(owner),
+						connection.getParsedTokenAccountsByOwner(owner, {
+							programId: TOKEN_PROGRAM_ID,
+						}),
+						includeToken2022
+							? connection.getParsedTokenAccountsByOwner(owner, {
+									programId: TOKEN_2022_PROGRAM_ID,
+								})
+							: Promise.resolve(null),
+					]);
+
+				const tokenAccounts = [
+					...tokenProgramResponse.value,
+					...(token2022Response?.value ?? []),
+				];
+				const positions = new Map<
+					string,
+					{
+						amountRaw: bigint;
+						decimals: number;
+						tokenAccountCount: number;
+					}
+				>();
+
+				for (const entry of tokenAccounts) {
+					const tokenInfo = parseTokenAccountInfo(entry.account.data);
+					if (!tokenInfo) continue;
+					const amountRaw = BigInt(tokenInfo.tokenAmount.amount);
+					const existing = positions.get(tokenInfo.mint);
+					if (!existing) {
+						positions.set(tokenInfo.mint, {
+							amountRaw,
+							decimals: tokenInfo.tokenAmount.decimals,
+							tokenAccountCount: 1,
+						});
+						continue;
+					}
+					existing.amountRaw += amountRaw;
+					existing.tokenAccountCount += 1;
+				}
+
+				const tokens = [...positions.entries()]
+					.map(([mint, position]) => ({
+						mint,
+						symbol: KNOWN_MINT_SYMBOLS[mint] ?? null,
+						amount: position.amountRaw.toString(),
+						uiAmount: formatTokenUiAmount(
+							position.amountRaw,
+							position.decimals,
+						),
+						decimals: position.decimals,
+						tokenAccountCount: position.tokenAccountCount,
+						explorer: getExplorerAddressUrl(mint, params.network),
+					}))
+					.filter((position) =>
+						params.includeZero === true ? true : BigInt(position.amount) > 0n,
+					)
+					.sort((a, b) => {
+						if (a.symbol && b.symbol) return a.symbol.localeCompare(b.symbol);
+						if (a.symbol) return -1;
+						if (b.symbol) return 1;
+						return a.mint.localeCompare(b.mint);
+					});
+
+				const sol = lamports / LAMPORTS_PER_SOL;
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Portfolio: ${sol} SOL + ${tokens.length} token position(s)`,
+						},
+					],
+					details: {
+						address: owner.toBase58(),
+						network: parseNetwork(params.network),
+						addressExplorer: getExplorerAddressUrl(
+							owner.toBase58(),
+							params.network,
+						),
+						sol: {
+							lamports,
+							uiAmount: sol,
+						},
+						tokenCount: tokens.length,
+						tokenAccountCount: tokenAccounts.length,
+						tokenProgramAccountCount: tokenProgramResponse.value.length,
+						token2022AccountCount: token2022Response?.value.length ?? 0,
+						tokens,
 					},
 				};
 			},

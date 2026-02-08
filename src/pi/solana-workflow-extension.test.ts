@@ -15,6 +15,7 @@ describe("solanaWorkflowExtension", () => {
 		expect(names.sort()).toEqual([
 			"solana_confirmTransaction",
 			"solana_getBalance",
+			"solana_getPortfolio",
 			"solana_getTokenAccounts",
 			"solana_getTokenBalance",
 			"w3rt_run_workflow_v0",
