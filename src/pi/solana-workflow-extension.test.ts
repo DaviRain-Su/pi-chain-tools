@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import solanaWorkflowExtension from "./solana-workflow-extension.js";
 
 describe("solanaWorkflowExtension", () => {
-	it("registers workflow-first tool surface", () => {
+	it("registers workflow-first tool surface once", () => {
 		const names: string[] = [];
 		const registrar = {
 			registerTool(tool: { name: string }) {
@@ -10,6 +10,7 @@ describe("solanaWorkflowExtension", () => {
 			},
 		};
 
+		solanaWorkflowExtension(registrar);
 		solanaWorkflowExtension(registrar);
 		expect(names.sort()).toEqual([
 			"solana_confirmTransaction",
