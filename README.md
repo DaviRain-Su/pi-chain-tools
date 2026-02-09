@@ -29,6 +29,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 - Orca/Meteora scoped swap workflow support (via Jupiter dex filters)
 - Orca/Meteora scoped compose/execute tools (`build*SwapTransaction` / `*Swap`)
 - Orca LP lifecycle compose/execute/workflow support (open/close/increase/decrease)
+- Orca LP decrease supports ratio-based input (`liquidityBps`, intentText like `decrease 50%`)
 - Meteora DLMM LP lifecycle compose/execute/workflow support (add/remove)
 - Native stake operation tools: create+delegate/delegate/authorize/deactivate/withdraw
 - Workflow/read support for `solana.read.defiPositions` + `solana_getDefiPositions`

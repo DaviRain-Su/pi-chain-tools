@@ -3246,6 +3246,151 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Orca decrease intentText with percentage shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-decrease-intent", {
+			runId: "run-orca-decrease-intent",
+			runMode: "analysis",
+			intentText: `orca decrease liquidity ${positionMint} 50%`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-orca-decrease-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.decrease",
+						positionMint,
+						liquidityBps: 5000,
+					},
+				},
+			},
+		});
+	});
+
+	it("resolves Orca decrease liquidityBps into liquidityAmountRaw", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			bundleCount: 0,
+			poolCount: 1,
+			whirlpoolAddresses: [Keypair.generate().publicKey.toBase58()],
+			positions: [
+				{
+					positionMint,
+					liquidity: "2000",
+				},
+			],
+			queryErrors: [],
+		});
+		runtimeMocks.buildOrcaDecreaseLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			positionMint,
+			quoteParamKind: "liquidity",
+			quoteParamAmountRaw: "500",
+			slippageBps: 75,
+			instructionCount: 1,
+			quote: { tokenMinA: "1", tokenMinB: "1" },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([12]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 78,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 223,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-lp-sim-bps", {
+			runId: "run-orca-lp-sim-bps",
+			intentType: "solana.lp.orca.decrease",
+			runMode: "simulate",
+			positionMint,
+			liquidityBps: 2500,
+		});
+
+		expect(runtimeMocks.getOrcaWhirlpoolPositions).toHaveBeenCalledWith({
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+		});
+		expect(
+			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				positionMint,
+				liquidityAmountRaw: "500",
+				tokenAAmountRaw: undefined,
+				tokenBAmountRaw: undefined,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-orca-lp-sim-bps",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.decrease",
+						positionMint,
+						liquidityBps: 2500,
+					},
+				},
+				simulate: {
+					ok: true,
+					context: {
+						resolvedLiquidityAmountRaw: "500",
+						requestedLiquidityBps: 2500,
+					},
+				},
+			},
+		});
+	});
+
+	it("rejects Orca decrease when liquidityBps is combined with raw amount fields", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-orca-decrease-conflict", {
+				runId: "run-orca-decrease-conflict",
+				intentType: "solana.lp.orca.decrease",
+				runMode: "analysis",
+				positionMint,
+				liquidityAmountRaw: "10",
+				liquidityBps: 5000,
+			}),
+		).rejects.toThrow(
+			"Provide either liquidityBps or one of liquidityAmountRaw, tokenAAmountRaw, tokenBAmountRaw",
+		);
+	});
+
 	it("parses Orca open intentText with shorthand LP fields", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
