@@ -522,6 +522,85 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses swap intentText with exclude-orca hint without forcing orca intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-swap-exclude-orca", {
+			runId: "run-intent-swap-exclude-orca",
+			runMode: "analysis",
+			intentText: "swap 0.1 SOL to USDC exclude orca",
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-intent-swap-exclude-orca",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.swap.jupiter",
+						excludeDexes: ["Orca V2", "Orca Whirlpool"],
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates Jupiter swap with exclude-orca hint and passes excludeDexes", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		runtimeMocks.getJupiterQuote.mockResolvedValue({
+			outAmount: "42",
+			routePlan: [{ route: "mock" }],
+		});
+		runtimeMocks.buildJupiterSwapTransaction.mockResolvedValue({
+			swapTransaction: Buffer.from("swap-tx").toString("base64"),
+		});
+		runtimeMocks.parseTransactionFromBase64.mockReturnValue({
+			partialSign: vi.fn(),
+			serialize: vi.fn(() => Buffer.from("signed")),
+		});
+		const connection = {
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 88,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-swap-exclude-orca-sim", {
+			runId: "run-intent-swap-exclude-orca-sim",
+			runMode: "simulate",
+			intentText: "swap 0.1 SOL to USDC exclude orca",
+		});
+
+		expect(runtimeMocks.getJupiterQuote).toHaveBeenCalledWith(
+			expect.objectContaining({
+				excludeDexes: ["Orca V2", "Orca Whirlpool"],
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-intent-swap-exclude-orca-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.swap.jupiter",
+						excludeDexes: ["Orca V2", "Orca Whirlpool"],
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
+		});
+	});
+
 	it("simulates Meteora swap intent using Jupiter with dex filter", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);

@@ -81,6 +81,8 @@ type ParsedIntentTextFields = Partial<{
 	amountRaw: string;
 	slippageBps: number;
 	swapMode: "ExactIn" | "ExactOut";
+	dexes: string[];
+	excludeDexes: string[];
 }>;
 
 type TransferSolIntent = {
@@ -255,6 +257,63 @@ const PORTFOLIO_KEYWORD_REGEX =
 	/(portfolio|资产|持仓|all\s+balances?|全部余额|token\s+positions?)/i;
 const ORCA_DEFAULT_DEXES = ["Orca V2", "Orca Whirlpool"] as const;
 const METEORA_DEFAULT_DEXES = ["Meteora DLMM"] as const;
+const RAYDIUM_DEFAULT_DEXES = ["Raydium CLMM", "Raydium CPMM"] as const;
+
+function uniqueStrings(values: string[]): string[] {
+	const seen = new Set<string>();
+	const result: string[] = [];
+	for (const value of values) {
+		const normalized = value.trim();
+		if (!normalized || seen.has(normalized)) {
+			continue;
+		}
+		seen.add(normalized);
+		result.push(normalized);
+	}
+	return result;
+}
+
+function splitDexLabels(value: string): string[] {
+	return uniqueStrings(
+		value
+			.split(/[,，|]/)
+			.map((entry) => entry.trim())
+			.filter((entry) => entry.length > 0),
+	);
+}
+
+function getDexesForProtocolKeyword(keyword: string): string[] | undefined {
+	const lower = keyword.toLowerCase();
+	if (lower === "orca") {
+		return [...ORCA_DEFAULT_DEXES];
+	}
+	if (lower === "meteora" || lower === "dlmm") {
+		return [...METEORA_DEFAULT_DEXES];
+	}
+	if (lower === "raydium") {
+		return [...RAYDIUM_DEFAULT_DEXES];
+	}
+	return undefined;
+}
+
+function getIntentTypeForProtocolKeyword(
+	keyword: string,
+): WorkflowIntentType | undefined {
+	const lower = keyword.toLowerCase();
+	if (lower === "orca") {
+		return "solana.swap.orca";
+	}
+	if (lower === "meteora" || lower === "dlmm") {
+		return "solana.swap.meteora";
+	}
+	if (lower === "raydium") {
+		return "solana.swap.raydium";
+	}
+	if (lower === "jupiter") {
+		return "solana.swap.jupiter";
+	}
+	return undefined;
+}
 
 function parseRunMode(value?: string): WorkflowRunMode {
 	if (value === "analysis" || value === "simulate" || value === "execute") {
@@ -825,15 +884,30 @@ function parseReadIntentText(intentText: string): ParsedIntentTextFields {
 	return parsed;
 }
 
-function parseSwapIntentText(intentText: string): ParsedIntentTextFields {
+function detectSwapIntentTypeFromText(intentText: string): WorkflowIntentType {
 	const lower = intentText.toLowerCase();
-	const intentType: WorkflowIntentType = lower.includes("raydium")
-		? "solana.swap.raydium"
-		: lower.includes("meteora") || lower.includes("dlmm")
-			? "solana.swap.meteora"
-			: lower.includes("orca")
-				? "solana.swap.orca"
-				: "solana.swap.jupiter";
+	if (lower.includes("solana.swap.raydium")) return "solana.swap.raydium";
+	if (lower.includes("solana.swap.orca")) return "solana.swap.orca";
+	if (lower.includes("solana.swap.meteora")) return "solana.swap.meteora";
+	if (lower.includes("solana.swap.jupiter")) return "solana.swap.jupiter";
+
+	const protocolPatterns = [
+		/\b(?:only|just)\s*(?:on|via)?\s*(orca|meteora|dlmm|raydium|jupiter)\b/i,
+		/\b(?:on|via)\s*(orca|meteora|dlmm|raydium|jupiter)\b/i,
+		/(?:只走|仅走|只用|仅用|在|通过|走)\s*(orca|meteora|dlmm|raydium|jupiter)/i,
+	];
+	for (const pattern of protocolPatterns) {
+		const match = intentText.match(pattern);
+		const keyword = match?.[1];
+		if (!keyword) continue;
+		const intentType = getIntentTypeForProtocolKeyword(keyword);
+		if (intentType) return intentType;
+	}
+	return "solana.swap.jupiter";
+}
+
+function parseSwapIntentText(intentText: string): ParsedIntentTextFields {
+	const intentType = detectSwapIntentTypeFromText(intentText);
 	const parsed: ParsedIntentTextFields = {
 		intentType,
 	};
@@ -935,6 +1009,40 @@ function parseSwapIntentText(intentText: string): ParsedIntentTextFields {
 		parsed.swapMode = "ExactOut";
 	} else if (/\bexact\s*in\b|\bexactin\b/i.test(intentText)) {
 		parsed.swapMode = "ExactIn";
+	}
+	const dexesMatch = intentText.match(
+		/\bdexes?\s*[=:]\s*([A-Za-z0-9._\- /,|]+)/i,
+	);
+	if (dexesMatch?.[1]) {
+		parsed.dexes = splitDexLabels(dexesMatch[1]);
+	}
+	const excludeDexesMatch = intentText.match(
+		/\bexcludeDexes?\s*[=:]\s*([A-Za-z0-9._\- /,|]+)/i,
+	);
+	if (excludeDexesMatch?.[1]) {
+		parsed.excludeDexes = splitDexLabels(excludeDexesMatch[1]);
+	}
+	const excludedProtocolDexes: string[] = [];
+	for (const match of intentText.matchAll(
+		/(?:exclude|without|排除|不要|不走)\s*(orca|meteora|dlmm|raydium)\b/gi,
+	)) {
+		const keyword = match[1];
+		if (!keyword) continue;
+		const dexes = getDexesForProtocolKeyword(keyword);
+		if (!dexes) continue;
+		excludedProtocolDexes.push(...dexes);
+	}
+	if (excludedProtocolDexes.length > 0) {
+		parsed.excludeDexes = uniqueStrings([
+			...(parsed.excludeDexes ?? []),
+			...excludedProtocolDexes,
+		]);
+	}
+	if (!parsed.dexes) {
+		const defaultDexes = getDefaultDexesForIntentType(intentType);
+		if (defaultDexes) {
+			parsed.dexes = defaultDexes;
+		}
 	}
 	return parsed;
 }
