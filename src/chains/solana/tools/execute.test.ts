@@ -530,6 +530,105 @@ describe("protocol-scoped Jupiter swap tools", () => {
 		});
 	});
 
+	it("falls back to Jupiter routing for Orca and preserves swap options", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const destinationTokenAccount = Keypair.generate().publicKey.toBase58();
+		const trackingAccount = Keypair.generate().publicKey.toBase58();
+		const feeAccount = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getJupiterQuote
+			.mockResolvedValueOnce({
+				outAmount: "0",
+				routePlan: [],
+			})
+			.mockResolvedValueOnce({
+				outAmount: "99",
+				routePlan: [{ route: "jupiter" }],
+			});
+		runtimeMocks.buildJupiterSwapTransaction.mockResolvedValue({
+			swapTransaction: Buffer.from("swap-tx").toString("base64"),
+		});
+		const legacy = createLegacyTx("orca-fallback-signed");
+		runtimeMocks.parseTransactionFromBase64.mockReturnValue(legacy.tx);
+		const simulateTransaction = vi.fn().mockResolvedValue({
+			value: {
+				err: null,
+				logs: [],
+				unitsConsumed: 90,
+			},
+		});
+		runtimeMocks.getConnection.mockReturnValue({
+			simulateTransaction,
+			sendRawTransaction: vi.fn(),
+		});
+
+		const tool = getTool("solana_orcaSwap");
+		const result = await tool.execute("orca-sim-fallback", {
+			fromSecretKey: "mock",
+			inputMint: Keypair.generate().publicKey.toBase58(),
+			outputMint: Keypair.generate().publicKey.toBase58(),
+			amountRaw: "1000",
+			restrictIntermediateTokens: true,
+			onlyDirectRoutes: true,
+			maxAccounts: 32,
+			wrapAndUnwrapSol: false,
+			useSharedAccounts: false,
+			dynamicComputeUnitLimit: false,
+			skipUserAccountsRpcCalls: true,
+			destinationTokenAccount,
+			trackingAccount,
+			feeAccount,
+			priorityLevel: "high",
+			priorityMaxLamports: 5000,
+			priorityGlobal: true,
+			fallbackToJupiterOnNoRoute: true,
+			network: "mainnet-beta",
+			simulate: true,
+			confirmMainnet: true,
+		});
+
+		expect(runtimeMocks.getJupiterQuote).toHaveBeenCalledTimes(2);
+		expect(runtimeMocks.getJupiterQuote.mock.calls[0]?.[0]).toMatchObject({
+			dexes: ["Orca V2", "Orca Whirlpool"],
+			restrictIntermediateTokens: true,
+			onlyDirectRoutes: true,
+			maxAccounts: 32,
+		});
+		expect(runtimeMocks.getJupiterQuote.mock.calls[1]?.[0]).toMatchObject({
+			dexes: undefined,
+			restrictIntermediateTokens: true,
+			onlyDirectRoutes: true,
+			maxAccounts: 32,
+		});
+		expect(runtimeMocks.parseJupiterPriorityLevel).toHaveBeenCalledWith("high");
+		expect(runtimeMocks.buildJupiterSwapTransaction).toHaveBeenCalledWith(
+			expect.objectContaining({
+				wrapAndUnwrapSol: false,
+				useSharedAccounts: false,
+				dynamicComputeUnitLimit: false,
+				skipUserAccountsRpcCalls: true,
+				destinationTokenAccount,
+				trackingAccount,
+				feeAccount,
+				priorityFee: {
+					priorityLevel: "veryHigh",
+					maxLamports: 5000,
+					global: true,
+				},
+			}),
+		);
+		expect(result.details).toMatchObject({
+			protocol: "orca",
+			dexes: ["Orca V2", "Orca Whirlpool"],
+			fallbackApplied: true,
+			routeSource: "jupiter-fallback",
+			outAmount: "99",
+			routeCount: 1,
+			simulated: true,
+		});
+	});
+
 	it("fails clearly when Orca route is unavailable", async () => {
 		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
 		const signer = Keypair.generate();

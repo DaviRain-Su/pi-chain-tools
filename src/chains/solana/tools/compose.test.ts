@@ -333,6 +333,51 @@ describe("compose tools", () => {
 		});
 	});
 
+	it("falls back to Jupiter routing when Orca route is unavailable and fallback is enabled", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const userPublicKey = Keypair.generate().publicKey.toBase58();
+		const inputMint = Keypair.generate().publicKey.toBase58();
+		const outputMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getJupiterQuote
+			.mockResolvedValueOnce({
+				outAmount: "0",
+				routePlan: [],
+			})
+			.mockResolvedValueOnce({
+				outAmount: "789",
+				routePlan: [{ route: "jupiter" }],
+			});
+		runtimeMocks.buildJupiterSwapTransaction.mockResolvedValue({
+			swapTransaction: Buffer.from("fallback-swap").toString("base64"),
+		});
+
+		const tool = getTool("solana_buildOrcaSwapTransaction");
+		const result = await tool.execute("compose-orca-fallback", {
+			userPublicKey,
+			inputMint,
+			outputMint,
+			amountRaw: "1000000",
+			fallbackToJupiterOnNoRoute: true,
+			network: "mainnet-beta",
+		});
+
+		expect(runtimeMocks.getJupiterQuote).toHaveBeenCalledTimes(2);
+		expect(runtimeMocks.getJupiterQuote.mock.calls[0]?.[0]).toMatchObject({
+			dexes: ["Orca V2", "Orca Whirlpool"],
+		});
+		expect(runtimeMocks.getJupiterQuote.mock.calls[1]?.[0]).toMatchObject({
+			dexes: undefined,
+		});
+		expect(result.details).toMatchObject({
+			protocol: "orca",
+			dexes: ["Orca V2", "Orca Whirlpool"],
+			fallbackApplied: true,
+			routeSource: "jupiter-fallback",
+			outAmount: "789",
+			routeCount: 1,
+		});
+	});
+
 	it("fails clearly when Orca route is unavailable", async () => {
 		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
 		runtimeMocks.getJupiterQuote.mockResolvedValue({

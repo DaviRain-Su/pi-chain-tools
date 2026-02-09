@@ -658,6 +658,77 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("falls back to Jupiter routing when Orca route is unavailable and fallback is enabled", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		runtimeMocks.getJupiterQuote
+			.mockResolvedValueOnce({
+				outAmount: "0",
+				routePlan: [],
+			})
+			.mockResolvedValueOnce({
+				outAmount: "77",
+				routePlan: [{ route: "jupiter" }],
+			});
+		runtimeMocks.buildJupiterSwapTransaction.mockResolvedValue({
+			swapTransaction: Buffer.from("swap-tx").toString("base64"),
+		});
+		runtimeMocks.parseTransactionFromBase64.mockReturnValue({
+			partialSign: vi.fn(),
+			serialize: vi.fn(() => Buffer.from("signed")),
+		});
+		const connection = {
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 101,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-swap-orca-fallback", {
+			runId: "run-intent-swap-orca-fallback",
+			runMode: "simulate",
+			intentType: "solana.swap.orca",
+			inputMint: SOL_MINT,
+			outputMint: USDC_MINT,
+			amountRaw: "1000000",
+			fallbackToJupiterOnNoRoute: true,
+		});
+
+		expect(runtimeMocks.getJupiterQuote).toHaveBeenCalledTimes(2);
+		expect(runtimeMocks.getJupiterQuote.mock.calls[0]?.[0]).toMatchObject({
+			dexes: ["Orca V2", "Orca Whirlpool"],
+		});
+		expect(runtimeMocks.getJupiterQuote.mock.calls[1]?.[0]).toMatchObject({
+			dexes: undefined,
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-intent-swap-orca-fallback",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.swap.orca",
+						fallbackToJupiterOnNoRoute: true,
+					},
+				},
+				simulate: {
+					ok: true,
+					context: {
+						fallbackApplied: true,
+						routeSource: "jupiter-fallback",
+						outAmount: "77",
+						routeCount: 1,
+					},
+				},
+			},
+		});
+	});
+
 	it("fails clearly when Orca-scoped route is unavailable", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);

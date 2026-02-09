@@ -64,23 +64,54 @@ function resolveScopedDexes(
 	return dexes && dexes.length > 0 ? dexes : [...defaultDexes];
 }
 
+function hasPositiveOutAmount(outAmount: string | null): boolean {
+	return (
+		typeof outAmount === "string" &&
+		/^\d+$/.test(outAmount) &&
+		BigInt(outAmount) > 0n
+	);
+}
+
+function hasScopedRoute(
+	routePlan: unknown[],
+	outAmount: string | null,
+): boolean {
+	return routePlan.length > 0 || hasPositiveOutAmount(outAmount);
+}
+
+function parseQuoteRouteContext(quote: unknown): {
+	outAmount: string | null;
+	routePlan: unknown[];
+	hasRoute: boolean;
+} {
+	const quotePayload =
+		quote && typeof quote === "object"
+			? (quote as Record<string, unknown>)
+			: {};
+	const routePlan = Array.isArray(quotePayload.routePlan)
+		? quotePayload.routePlan
+		: [];
+	const outAmount =
+		typeof quotePayload.outAmount === "string" ? quotePayload.outAmount : null;
+	return {
+		outAmount,
+		routePlan,
+		hasRoute: hasScopedRoute(routePlan, outAmount),
+	};
+}
+
 function assertScopedRouteAvailability(
 	protocol: "orca" | "meteora",
 	dexes: string[],
 	routePlan: unknown[],
 	outAmount: string | null,
 ): void {
-	const hasRoute = routePlan.length > 0;
-	const hasPositiveOutAmount =
-		typeof outAmount === "string" &&
-		/^\d+$/.test(outAmount) &&
-		BigInt(outAmount) > 0n;
-	if (hasRoute || hasPositiveOutAmount) {
+	if (hasScopedRoute(routePlan, outAmount)) {
 		return;
 	}
 	const label = protocol === "orca" ? "Orca" : "Meteora";
 	throw new Error(
-		`No ${label} route found under dex constraints [${dexes.join(", ")}]. Try solana_jupiterSwap or adjust dexes.`,
+		`No ${label} route found under dex constraints [${dexes.join(", ")}]. Set fallbackToJupiterOnNoRoute=true, try solana_jupiterSwap, or adjust dexes.`,
 	);
 }
 
@@ -179,9 +210,24 @@ type ScopedJupiterExecuteParams = {
 	amountRaw: string;
 	slippageBps?: number;
 	swapMode?: string;
+	restrictIntermediateTokens?: boolean;
+	onlyDirectRoutes?: boolean;
+	maxAccounts?: number;
 	asLegacyTransaction?: boolean;
 	dexes?: string[];
 	excludeDexes?: string[];
+	wrapAndUnwrapSol?: boolean;
+	useSharedAccounts?: boolean;
+	dynamicComputeUnitLimit?: boolean;
+	skipUserAccountsRpcCalls?: boolean;
+	destinationTokenAccount?: string;
+	trackingAccount?: string;
+	feeAccount?: string;
+	priorityLevel?: string;
+	priorityMaxLamports?: number;
+	priorityGlobal?: boolean;
+	jitoTipLamports?: number;
+	fallbackToJupiterOnNoRoute?: boolean;
 	network?: string;
 	skipPreflight?: boolean;
 	maxRetries?: number;
@@ -229,31 +275,69 @@ async function executeScopedJupiterSwap(
 	).toString();
 	const swapMode = parseJupiterSwapMode(params.swapMode);
 	const dexes = resolveScopedDexes(params.dexes, defaultDexes);
-
-	const quote = await getJupiterQuote({
+	const quoteRequest = {
 		inputMint,
 		outputMint,
 		amount: amountRaw,
 		slippageBps: params.slippageBps,
 		swapMode,
+		restrictIntermediateTokens: params.restrictIntermediateTokens,
+		onlyDirectRoutes: params.onlyDirectRoutes,
 		asLegacyTransaction: params.asLegacyTransaction,
+		maxAccounts: params.maxAccounts,
 		dexes,
 		excludeDexes: params.excludeDexes,
-	});
-	const quotePayload =
-		quote && typeof quote === "object"
-			? (quote as Record<string, unknown>)
-			: {};
-	const routePlan = Array.isArray(quotePayload.routePlan)
-		? quotePayload.routePlan
-		: [];
-	const outAmount =
-		typeof quotePayload.outAmount === "string" ? quotePayload.outAmount : null;
-	assertScopedRouteAvailability(protocol, dexes, routePlan, outAmount);
+	};
+	const scopedQuote = await getJupiterQuote(quoteRequest);
+	const fallbackRequested = params.fallbackToJupiterOnNoRoute === true;
+	let fallbackApplied = false;
+	let quote = scopedQuote;
+	let quoteRoute = parseQuoteRouteContext(scopedQuote);
+	if (!quoteRoute.hasRoute) {
+		if (fallbackRequested) {
+			const fallbackQuote = await getJupiterQuote({
+				...quoteRequest,
+				dexes: undefined,
+			});
+			const fallbackRoute = parseQuoteRouteContext(fallbackQuote);
+			if (!fallbackRoute.hasRoute) {
+				throw new Error(
+					`No ${protocolLabel} route found under dex constraints [${dexes.join(", ")}], and Jupiter fallback also returned no route.`,
+				);
+			}
+			quote = fallbackQuote;
+			quoteRoute = fallbackRoute;
+			fallbackApplied = true;
+		} else {
+			assertScopedRouteAvailability(
+				protocol,
+				dexes,
+				quoteRoute.routePlan,
+				quoteRoute.outAmount,
+			);
+		}
+	}
+	const priorityLevel = parseJupiterPriorityLevel(params.priorityLevel);
 	const swapResponse = await buildJupiterSwapTransaction({
 		userPublicKey: signerPublicKey,
 		quoteResponse: quote,
+		wrapAndUnwrapSol: params.wrapAndUnwrapSol,
+		useSharedAccounts: params.useSharedAccounts,
+		dynamicComputeUnitLimit: params.dynamicComputeUnitLimit ?? true,
+		skipUserAccountsRpcCalls: params.skipUserAccountsRpcCalls,
+		destinationTokenAccount: params.destinationTokenAccount,
+		trackingAccount: params.trackingAccount,
+		feeAccount: params.feeAccount,
 		asLegacyTransaction: params.asLegacyTransaction,
+		jitoTipLamports: params.jitoTipLamports,
+		priorityFee:
+			params.jitoTipLamports === undefined
+				? {
+						priorityLevel,
+						maxLamports: params.priorityMaxLamports,
+						global: params.priorityGlobal,
+					}
+				: undefined,
 	});
 
 	const swapPayload =
@@ -302,14 +386,19 @@ async function executeScopedJupiterSwap(
 				inputMint,
 				outputMint,
 				amountRaw,
-				outAmount,
-				routeCount: routePlan.length,
+				outAmount: quoteRoute.outAmount,
+				routeCount: quoteRoute.routePlan.length,
 				err: simulation.value.err ?? null,
 				logs: simulation.value.logs ?? [],
 				unitsConsumed: simulation.value.unitsConsumed ?? null,
 				signer: signerPublicKey,
 				swapMode,
+				effectiveDexes: fallbackApplied ? null : dexes,
+				fallbackToJupiterOnNoRoute: fallbackRequested,
+				fallbackApplied,
+				routeSource: fallbackApplied ? "jupiter-fallback" : "scoped",
 				quote,
+				scopedQuote: fallbackApplied ? scopedQuote : undefined,
 				swapResponse: swapPayload,
 				network,
 				jupiterBaseUrl: getJupiterApiBaseUrl(),
@@ -350,10 +439,15 @@ async function executeScopedJupiterSwap(
 			inputMint,
 			outputMint,
 			amountRaw,
-			outAmount,
-			routeCount: routePlan.length,
+			outAmount: quoteRoute.outAmount,
+			routeCount: quoteRoute.routePlan.length,
 			swapMode,
 			quote,
+			scopedQuote: fallbackApplied ? scopedQuote : undefined,
+			effectiveDexes: fallbackApplied ? null : dexes,
+			fallbackToJupiterOnNoRoute: fallbackRequested,
+			fallbackApplied,
+			routeSource: fallbackApplied ? "jupiter-fallback" : "scoped",
 			swapResponse: swapPayload,
 			confirmed: params.confirm !== false,
 			network,
@@ -624,6 +718,12 @@ export function createSolanaExecuteTools() {
 					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
 						minItems: 1,
 						maxItems: 20,
+					}),
+				),
+				fallbackToJupiterOnNoRoute: Type.Optional(
+					Type.Boolean({
+						description:
+							"Fallback to unconstrained Jupiter routing if no Orca route is available",
 					}),
 				),
 				asLegacyTransaction: Type.Optional(Type.Boolean()),
@@ -904,6 +1004,12 @@ export function createSolanaExecuteTools() {
 					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
 						minItems: 1,
 						maxItems: 20,
+					}),
+				),
+				fallbackToJupiterOnNoRoute: Type.Optional(
+					Type.Boolean({
+						description:
+							"Fallback to unconstrained Jupiter routing if no Meteora route is available",
 					}),
 				),
 				asLegacyTransaction: Type.Optional(Type.Boolean()),

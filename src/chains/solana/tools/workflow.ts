@@ -119,6 +119,7 @@ type JupiterSwapIntent = {
 	dexes?: string[];
 	excludeDexes?: string[];
 	asLegacyTransaction?: boolean;
+	fallbackToJupiterOnNoRoute?: boolean;
 };
 
 type RaydiumSwapIntent = {
@@ -374,24 +375,60 @@ function getDefaultDexesForIntentType(
 	return undefined;
 }
 
+function isScopedJupiterIntentType(
+	intentType: WorkflowIntentType,
+): intentType is "solana.swap.orca" | "solana.swap.meteora" {
+	return (
+		intentType === "solana.swap.orca" || intentType === "solana.swap.meteora"
+	);
+}
+
+function hasPositiveOutAmount(outAmount: string | null): boolean {
+	return (
+		typeof outAmount === "string" &&
+		/^\d+$/.test(outAmount) &&
+		BigInt(outAmount) > 0n
+	);
+}
+
+function hasProtocolRouteAvailability(
+	routePlan: unknown[],
+	outAmount: string | null,
+): boolean {
+	return routePlan.length > 0 || hasPositiveOutAmount(outAmount);
+}
+
+function parseQuoteRouteContext(quote: unknown): {
+	outAmount: string | null;
+	routePlan: unknown[];
+	hasRoute: boolean;
+} {
+	const quotePayload =
+		quote && typeof quote === "object"
+			? (quote as Record<string, unknown>)
+			: {};
+	const routePlan = Array.isArray(quotePayload.routePlan)
+		? quotePayload.routePlan
+		: [];
+	const outAmount =
+		typeof quotePayload.outAmount === "string" ? quotePayload.outAmount : null;
+	return {
+		outAmount,
+		routePlan,
+		hasRoute: hasProtocolRouteAvailability(routePlan, outAmount),
+	};
+}
+
 function assertProtocolRouteAvailability(
 	intentType: WorkflowIntentType,
 	dexes: string[] | undefined,
 	routePlan: unknown[],
 	outAmount: string | null,
 ): void {
-	if (
-		intentType !== "solana.swap.orca" &&
-		intentType !== "solana.swap.meteora"
-	) {
+	if (!isScopedJupiterIntentType(intentType)) {
 		return;
 	}
-	const hasRoute = routePlan.length > 0;
-	const hasPositiveOutAmount =
-		typeof outAmount === "string" &&
-		/^\d+$/.test(outAmount) &&
-		BigInt(outAmount) > 0n;
-	if (hasRoute || hasPositiveOutAmount) {
+	if (hasProtocolRouteAvailability(routePlan, outAmount)) {
 		return;
 	}
 	const protocol = intentType === "solana.swap.orca" ? "Orca" : "Meteora";
@@ -400,7 +437,7 @@ function assertProtocolRouteAvailability(
 			? dexes
 			: (getDefaultDexesForIntentType(intentType) ?? []);
 	throw new Error(
-		`No ${protocol} route found under dex constraints [${resolvedDexes.join(", ")}]. Try intentType=solana.swap.jupiter or relax dex constraints.`,
+		`No ${protocol} route found under dex constraints [${resolvedDexes.join(", ")}]. Set fallbackToJupiterOnNoRoute=true, try intentType=solana.swap.jupiter, or relax dex constraints.`,
 	);
 }
 
@@ -1542,6 +1579,10 @@ async function normalizeIntent(
 			typeof normalizedParams.asLegacyTransaction === "boolean"
 				? normalizedParams.asLegacyTransaction
 				: undefined,
+		fallbackToJupiterOnNoRoute:
+			typeof normalizedParams.fallbackToJupiterOnNoRoute === "boolean"
+				? normalizedParams.fallbackToJupiterOnNoRoute
+				: undefined,
 	};
 }
 
@@ -1901,7 +1942,7 @@ async function prepareJupiterSwapSimulation(
 	params: Record<string, unknown>,
 ): Promise<PreparedTransaction> {
 	assertJupiterNetworkSupported(network);
-	const quote = await getJupiterQuote({
+	const quoteRequest = {
 		inputMint: intent.inputMint,
 		outputMint: intent.outputMint,
 		amount: intent.amountRaw,
@@ -1913,22 +1954,39 @@ async function prepareJupiterSwapSimulation(
 		maxAccounts: intent.maxAccounts,
 		dexes: intent.dexes,
 		excludeDexes: intent.excludeDexes,
-	});
-	const quotePayload =
-		quote && typeof quote === "object"
-			? (quote as Record<string, unknown>)
-			: {};
-	const routePlan = Array.isArray(quotePayload.routePlan)
-		? quotePayload.routePlan
-		: [];
-	const outAmount =
-		typeof quotePayload.outAmount === "string" ? quotePayload.outAmount : null;
-	assertProtocolRouteAvailability(
-		intent.type,
-		intent.dexes,
-		routePlan,
-		outAmount,
-	);
+	};
+	const scopedQuote = await getJupiterQuote(quoteRequest);
+	const scopedIntent = isScopedJupiterIntentType(intent.type);
+	const fallbackRequested = intent.fallbackToJupiterOnNoRoute === true;
+	let fallbackApplied = false;
+	let quote = scopedQuote;
+	let quoteRoute = parseQuoteRouteContext(scopedQuote);
+	if (scopedIntent && !quoteRoute.hasRoute) {
+		if (fallbackRequested) {
+			const fallbackQuote = await getJupiterQuote({
+				...quoteRequest,
+				dexes: undefined,
+			});
+			const fallbackRoute = parseQuoteRouteContext(fallbackQuote);
+			if (!fallbackRoute.hasRoute) {
+				const protocolLabel =
+					intent.type === "solana.swap.orca" ? "Orca" : "Meteora";
+				throw new Error(
+					`No ${protocolLabel} route found under dex constraints [${(intent.dexes ?? []).join(", ")}], and Jupiter fallback also returned no route.`,
+				);
+			}
+			quote = fallbackQuote;
+			quoteRoute = fallbackRoute;
+			fallbackApplied = true;
+		} else {
+			assertProtocolRouteAvailability(
+				intent.type,
+				intent.dexes,
+				quoteRoute.routePlan,
+				quoteRoute.outAmount,
+			);
+		}
+	}
 	const priorityLevel = parseJupiterPriorityLevel(
 		typeof params.priorityLevel === "string" ? params.priorityLevel : undefined,
 	);
@@ -2023,9 +2081,19 @@ async function prepareJupiterSwapSimulation(
 		},
 		context: {
 			quote,
+			scopedQuote: fallbackApplied ? scopedQuote : undefined,
 			swapResponse: swapPayload,
-			outAmount,
-			routeCount: routePlan.length,
+			outAmount: quoteRoute.outAmount,
+			routeCount: quoteRoute.routePlan.length,
+			dexes: intent.dexes,
+			effectiveDexes: fallbackApplied ? null : intent.dexes,
+			fallbackToJupiterOnNoRoute: fallbackRequested,
+			fallbackApplied,
+			routeSource: fallbackApplied
+				? "jupiter-fallback"
+				: scopedIntent
+					? "scoped"
+					: "jupiter",
 			jupiterBaseUrl: getJupiterApiBaseUrl(),
 		},
 	};
@@ -2359,6 +2427,12 @@ export function createSolanaWorkflowTools() {
 					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
 						minItems: 1,
 						maxItems: 20,
+					}),
+				),
+				fallbackToJupiterOnNoRoute: Type.Optional(
+					Type.Boolean({
+						description:
+							"When intentType=solana.swap.orca|solana.swap.meteora, fallback to unconstrained Jupiter routing if scoped dexes have no route",
 					}),
 				),
 				priorityLevel: jupiterPriorityLevelSchema(),

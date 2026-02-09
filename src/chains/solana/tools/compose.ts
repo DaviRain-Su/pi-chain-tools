@@ -59,23 +59,54 @@ function resolveScopedDexes(
 	return dexes && dexes.length > 0 ? dexes : [...defaultDexes];
 }
 
+function hasPositiveOutAmount(outAmount: string | null): boolean {
+	return (
+		typeof outAmount === "string" &&
+		/^\d+$/.test(outAmount) &&
+		BigInt(outAmount) > 0n
+	);
+}
+
+function hasScopedRoute(
+	routePlan: unknown[],
+	outAmount: string | null,
+): boolean {
+	return routePlan.length > 0 || hasPositiveOutAmount(outAmount);
+}
+
+function parseQuoteRouteContext(quote: unknown): {
+	outAmount: string | null;
+	routePlan: unknown[];
+	hasRoute: boolean;
+} {
+	const quotePayload =
+		quote && typeof quote === "object"
+			? (quote as Record<string, unknown>)
+			: {};
+	const outAmount =
+		typeof quotePayload.outAmount === "string" ? quotePayload.outAmount : null;
+	const routePlan = Array.isArray(quotePayload.routePlan)
+		? quotePayload.routePlan
+		: [];
+	return {
+		outAmount,
+		routePlan,
+		hasRoute: hasScopedRoute(routePlan, outAmount),
+	};
+}
+
 function assertScopedRouteAvailability(
 	protocol: "orca" | "meteora",
 	dexes: string[],
 	routePlan: unknown[],
 	outAmount: string | null,
 ): void {
-	const hasRoute = routePlan.length > 0;
-	const hasPositiveOutAmount =
-		typeof outAmount === "string" &&
-		/^\d+$/.test(outAmount) &&
-		BigInt(outAmount) > 0n;
-	if (hasRoute || hasPositiveOutAmount) {
+	if (hasScopedRoute(routePlan, outAmount)) {
 		return;
 	}
 	const label = protocol === "orca" ? "Orca" : "Meteora";
 	throw new Error(
-		`No ${label} route found under dex constraints [${dexes.join(", ")}]. Try solana_buildJupiterSwapTransaction or adjust dexes.`,
+		`No ${label} route found under dex constraints [${dexes.join(", ")}]. Set fallbackToJupiterOnNoRoute=true, try solana_buildJupiterSwapTransaction, or adjust dexes.`,
 	);
 }
 
@@ -241,6 +272,7 @@ type ScopedJupiterComposeParams = {
 	asLegacyTransaction?: boolean;
 	dexes?: string[];
 	excludeDexes?: string[];
+	fallbackToJupiterOnNoRoute?: boolean;
 	network?: string;
 };
 
@@ -263,8 +295,7 @@ async function buildScopedJupiterSwapTransaction(
 	).toString();
 	const swapMode = parseJupiterSwapMode(params.swapMode);
 	const dexes = resolveScopedDexes(params.dexes, defaultDexes);
-
-	const quote = await getJupiterQuote({
+	const quoteRequest = {
 		inputMint,
 		outputMint,
 		amount: amountRaw,
@@ -273,7 +304,37 @@ async function buildScopedJupiterSwapTransaction(
 		asLegacyTransaction: params.asLegacyTransaction,
 		dexes,
 		excludeDexes: params.excludeDexes,
-	});
+	};
+	const scopedQuote = await getJupiterQuote(quoteRequest);
+	const fallbackRequested = params.fallbackToJupiterOnNoRoute === true;
+	let fallbackApplied = false;
+	let quote = scopedQuote;
+	let quoteRoute = parseQuoteRouteContext(scopedQuote);
+	if (!quoteRoute.hasRoute) {
+		if (fallbackRequested) {
+			const fallbackQuote = await getJupiterQuote({
+				...quoteRequest,
+				dexes: undefined,
+			});
+			const fallbackRoute = parseQuoteRouteContext(fallbackQuote);
+			if (!fallbackRoute.hasRoute) {
+				const protocolLabel = protocol === "orca" ? "Orca" : "Meteora";
+				throw new Error(
+					`No ${protocolLabel} route found under dex constraints [${dexes.join(", ")}], and Jupiter fallback also returned no route.`,
+				);
+			}
+			quote = fallbackQuote;
+			quoteRoute = fallbackRoute;
+			fallbackApplied = true;
+		} else {
+			assertScopedRouteAvailability(
+				protocol,
+				dexes,
+				quoteRoute.routePlan,
+				quoteRoute.outAmount,
+			);
+		}
+	}
 	const swapResponse = await buildJupiterSwapTransaction({
 		userPublicKey,
 		quoteResponse: quote,
@@ -288,17 +349,6 @@ async function buildScopedJupiterSwapTransaction(
 	if (!txBase64) {
 		throw new Error("Jupiter swap response missing swapTransaction");
 	}
-
-	const quotePayload =
-		quote && typeof quote === "object"
-			? (quote as Record<string, unknown>)
-			: {};
-	const outAmount =
-		typeof quotePayload.outAmount === "string" ? quotePayload.outAmount : null;
-	const routePlan = Array.isArray(quotePayload.routePlan)
-		? quotePayload.routePlan
-		: [];
-	assertScopedRouteAvailability(protocol, dexes, routePlan, outAmount);
 	const protocolLabel = protocol === "orca" ? "Orca" : "Meteora";
 	return {
 		content: [
@@ -310,15 +360,20 @@ async function buildScopedJupiterSwapTransaction(
 		details: {
 			protocol,
 			dexes,
+			effectiveDexes: fallbackApplied ? null : dexes,
+			fallbackToJupiterOnNoRoute: fallbackRequested,
+			fallbackApplied,
+			routeSource: fallbackApplied ? "jupiter-fallback" : "scoped",
 			txBase64,
 			userPublicKey,
 			inputMint,
 			outputMint,
 			amountRaw,
-			outAmount,
-			routeCount: routePlan.length,
+			outAmount: quoteRoute.outAmount,
+			routeCount: quoteRoute.routePlan.length,
 			swapMode,
 			quote,
+			scopedQuote: fallbackApplied ? scopedQuote : undefined,
 			swapResponse: payload,
 			network: parseNetwork(params.network),
 			jupiterBaseUrl: getJupiterApiBaseUrl(),
@@ -899,6 +954,12 @@ export function createSolanaComposeTools() {
 						maxItems: 20,
 					}),
 				),
+				fallbackToJupiterOnNoRoute: Type.Optional(
+					Type.Boolean({
+						description:
+							"Fallback to unconstrained Jupiter routing if no Orca route is available",
+					}),
+				),
 				network: solanaNetworkSchema(),
 			}),
 			async execute(toolCallId, params) {
@@ -940,6 +1001,12 @@ export function createSolanaComposeTools() {
 					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
 						minItems: 1,
 						maxItems: 20,
+					}),
+				),
+				fallbackToJupiterOnNoRoute: Type.Optional(
+					Type.Boolean({
+						description:
+							"Fallback to unconstrained Jupiter routing if no Meteora route is available",
 					}),
 				),
 				network: solanaNetworkSchema(),
