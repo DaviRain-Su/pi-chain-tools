@@ -2204,13 +2204,20 @@ function parseMeteoraLiquidityIntentText(
 			parsed.tokenMint = tokenMint;
 		}
 	}
+	const genericAmountRawMatch =
+		intentText.match(/\bamountRaw\s*[=:]?\s*([0-9]+)\b/i) ??
+		intentText.match(/\b([0-9]+)\s*raw\b/i);
+	if (genericAmountRawMatch?.[1]) {
+		parsed.amountRaw = parsed.amountRaw ?? genericAmountRawMatch[1];
+	}
 	const hasMeteoraSideAmountInput =
 		parsed.totalXAmountRaw !== undefined ||
 		parsed.totalYAmountRaw !== undefined ||
 		parsed.totalXAmountUi !== undefined ||
 		parsed.totalYAmountUi !== undefined;
 	if (
-		parsed.intentType === "solana.lp.meteora.add" &&
+		(parsed.intentType === "solana.lp.meteora.add" ||
+			parsed.intentType === "solana.lp.meteora.remove") &&
 		!hasMeteoraSideAmountInput
 	) {
 		const genericAmountWithTokenMatch = intentText.match(
@@ -4060,6 +4067,113 @@ async function resolveMeteoraPositionForIntent(args: {
 	return resolved;
 }
 
+function normalizeOptionalNonNegativeRawAmount(value: unknown): string {
+	if (typeof value === "bigint") {
+		return value >= 0n ? value.toString() : "0";
+	}
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return Number.isInteger(value) && value >= 0 ? value.toString() : "0";
+	}
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		if (/^[0-9]+$/.test(trimmed)) {
+			return BigInt(trimmed).toString();
+		}
+	}
+	return "0";
+}
+
+async function resolveMeteoraPositionDetailsForRemove(args: {
+	network: string;
+	ownerAddress: string;
+	poolAddress: string;
+	positionAddress: string;
+}): Promise<{
+	tokenXMint: string;
+	tokenYMint: string;
+	totalXAmountRaw: string;
+	totalYAmountRaw: string;
+}> {
+	const positions = await getMeteoraDlmmPositions({
+		address: args.ownerAddress,
+		network: args.network,
+	});
+	const pool = positions.pools.find(
+		(entry) => entry.poolAddress === args.poolAddress,
+	);
+	if (!pool) {
+		throw new Error(
+			`Meteora pool not found for ownerAddress=${args.ownerAddress} poolAddress=${args.poolAddress}`,
+		);
+	}
+	const position = pool.positions.find(
+		(entry) => entry.positionAddress === args.positionAddress,
+	);
+	if (!position) {
+		throw new Error(
+			`Meteora position not found for ownerAddress=${args.ownerAddress} poolAddress=${args.poolAddress} positionAddress=${args.positionAddress}`,
+		);
+	}
+	const tokenXMintRaw =
+		typeof pool.tokenXMint === "string" && pool.tokenXMint.trim().length > 0
+			? pool.tokenXMint
+			: null;
+	const tokenYMintRaw =
+		typeof pool.tokenYMint === "string" && pool.tokenYMint.trim().length > 0
+			? pool.tokenYMint
+			: null;
+	if (!tokenXMintRaw || !tokenYMintRaw) {
+		throw new Error(
+			`Meteora pool token mints unavailable for poolAddress=${args.poolAddress}`,
+		);
+	}
+	return {
+		tokenXMint: new PublicKey(normalizeAtPath(tokenXMintRaw)).toBase58(),
+		tokenYMint: new PublicKey(normalizeAtPath(tokenYMintRaw)).toBase58(),
+		totalXAmountRaw: normalizeOptionalNonNegativeRawAmount(
+			position.totalXAmountRaw,
+		),
+		totalYAmountRaw: normalizeOptionalNonNegativeRawAmount(
+			position.totalYAmountRaw,
+		),
+	};
+}
+
+function deriveMeteoraRemoveBpsFromRawAmount(args: {
+	requestedAmountRaw: string;
+	positionAmountRaw: string;
+	field: "amountRaw" | "amountUi";
+	tokenMint: string;
+	poolAddress: string;
+	positionAddress: string;
+}): number {
+	const requestedRaw = BigInt(args.requestedAmountRaw);
+	if (requestedRaw <= 0n) {
+		throw new Error(
+			`${args.field} must be > 0 for intentType=solana.lp.meteora.remove`,
+		);
+	}
+	const positionRaw = BigInt(args.positionAmountRaw);
+	if (positionRaw <= 0n) {
+		throw new Error(
+			`Cannot derive bps for tokenMint=${args.tokenMint}: position ${args.positionAddress} in pool ${args.poolAddress} has zero balance on that side`,
+		);
+	}
+	if (requestedRaw > positionRaw) {
+		throw new Error(
+			`${args.field} exceeds position token amount for tokenMint=${args.tokenMint}: requested=${requestedRaw.toString()} available=${positionRaw.toString()}`,
+		);
+	}
+	let bps = (requestedRaw * 10_000n + positionRaw / 2n) / positionRaw;
+	if (bps < 1n) {
+		bps = 1n;
+	}
+	if (bps > 10_000n) {
+		bps = 10_000n;
+	}
+	return Number(bps);
+}
+
 async function normalizeIntent(
 	params: Record<string, unknown>,
 	signerPublicKey: string,
@@ -5141,7 +5255,70 @@ async function normalizeIntent(
 		) {
 			throw new Error("fromBinId must be <= toBinId");
 		}
-		const bps = parseOptionalMeteoraBps(normalizedParams.bps);
+		const genericAmountRawInput =
+			typeof normalizedParams.amountRaw === "string" &&
+			normalizedParams.amountRaw.trim().length > 0
+				? parseNonNegativeRawAmount(normalizedParams.amountRaw, "amountRaw")
+				: undefined;
+		const genericAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.amountUi,
+			"amountUi",
+		);
+		if (genericAmountRawInput !== undefined && genericAmountUi !== undefined) {
+			throw new Error("Provide either amountRaw or amountUi, not both");
+		}
+		const hasGenericAmountInput =
+			genericAmountRawInput !== undefined || genericAmountUi !== undefined;
+		const genericTokenMint =
+			hasGenericAmountInput &&
+			typeof normalizedParams.tokenMint === "string" &&
+			normalizedParams.tokenMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenMint, "tokenMint")
+				: undefined;
+		if (hasGenericAmountInput && !genericTokenMint) {
+			throw new Error(
+				"tokenMint is required when amountUi or amountRaw is provided for intentType=solana.lp.meteora.remove",
+			);
+		}
+		let bps = parseOptionalMeteoraBps(normalizedParams.bps);
+		if (bps !== undefined && hasGenericAmountInput) {
+			throw new Error(
+				"Provide either bps or amountUi/tokenMint (or amountRaw/tokenMint), not both",
+			);
+		}
+		if (hasGenericAmountInput && genericTokenMint) {
+			const positionDetails = await resolveMeteoraPositionDetailsForRemove({
+				network,
+				ownerAddress,
+				poolAddress,
+				positionAddress,
+			});
+			const requestedAmountRaw =
+				genericAmountRawInput ??
+				decimalUiAmountToRaw(
+					ensureString(genericAmountUi, "amountUi"),
+					await fetchTokenDecimals(network, genericTokenMint),
+					"amountUi",
+				);
+			let positionAmountRaw: string;
+			if (genericTokenMint === positionDetails.tokenXMint) {
+				positionAmountRaw = positionDetails.totalXAmountRaw;
+			} else if (genericTokenMint === positionDetails.tokenYMint) {
+				positionAmountRaw = positionDetails.totalYAmountRaw;
+			} else {
+				throw new Error(
+					`tokenMint mismatch for poolAddress=${poolAddress}: expected ${positionDetails.tokenXMint} or ${positionDetails.tokenYMint}, got ${genericTokenMint}`,
+				);
+			}
+			bps = deriveMeteoraRemoveBpsFromRawAmount({
+				requestedAmountRaw,
+				positionAmountRaw,
+				field: genericAmountRawInput !== undefined ? "amountRaw" : "amountUi",
+				tokenMint: genericTokenMint,
+				poolAddress,
+				positionAddress,
+			});
+		}
 		return {
 			type: intentType,
 			ownerAddress,
@@ -8032,7 +8209,7 @@ export function createSolanaWorkflowTools() {
 				tokenMint: Type.Optional(
 					Type.String({
 						description:
-							"Token mint for intentType=solana.transfer.spl, and optional side selector for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease / solana.lp.meteora.add when using amountUi.",
+							"Token mint for intentType=solana.transfer.spl, and optional side selector for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease / solana.lp.meteora.add / solana.lp.meteora.remove when using amountUi or amountRaw.",
 					}),
 				),
 				tokenAMint: Type.Optional(
@@ -8134,7 +8311,7 @@ export function createSolanaWorkflowTools() {
 				amountRaw: Type.Optional(
 					Type.String({
 						description:
-							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl / solana.lend.kamino.borrow / solana.lend.kamino.deposit / solana.lend.kamino.repay / solana.lend.kamino.withdraw. Also supports side-selected LP input with tokenMint for intentType=solana.lp.orca.open and solana.lp.meteora.add.",
+							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl / solana.lend.kamino.borrow / solana.lend.kamino.deposit / solana.lend.kamino.repay / solana.lend.kamino.withdraw. Also supports side-selected LP input with tokenMint for intentType=solana.lp.orca.open / solana.lp.meteora.add / solana.lp.meteora.remove.",
 					}),
 				),
 				liquidityAmountRaw: Type.Optional(
@@ -8308,7 +8485,7 @@ export function createSolanaWorkflowTools() {
 				amountUi: Type.Optional(
 					Type.String({
 						description:
-							"Optional human-readable token amount for swaps, SPL transfers, Kamino lending actions, and Orca/Meteora LP side-selected inputs via tokenMint (for known mints like SOL/USDC/USDT). For Orca open/increase/decrease and Meteora add, pair with tokenMint.",
+							"Optional human-readable token amount for swaps, SPL transfers, Kamino lending actions, and Orca/Meteora LP side-selected inputs via tokenMint (for known mints like SOL/USDC/USDT). For Orca open/increase/decrease and Meteora add/remove, pair with tokenMint.",
 					}),
 				),
 				depositAmountUi: Type.Optional(

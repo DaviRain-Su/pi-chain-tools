@@ -5091,6 +5091,242 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Meteora remove intentText with generic amount token shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -5,
+							upperBinId: 7,
+							totalXAmountRaw: "4000000",
+							totalYAmountRaw: "10000000",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-remove-generic-intent", {
+			runId: "run-meteora-remove-generic-intent",
+			runMode: "analysis",
+			intentText: "meteora remove liquidity amount 1.5 USDC",
+		});
+
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-remove-generic-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.remove",
+						poolAddress,
+						positionAddress,
+						bps: 3750,
+					},
+				},
+			},
+		});
+	});
+
+	it("derives Meteora remove bps from generic amountUi/tokenMint fields", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -5,
+							upperBinId: 7,
+							totalXAmountRaw: "4000000",
+							totalYAmountRaw: "10000000",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-remove-generic-ui", {
+			runId: "run-meteora-remove-generic-ui",
+			intentType: "solana.lp.meteora.remove",
+			runMode: "analysis",
+			poolAddress,
+			positionAddress,
+			amountUi: "0.005",
+			tokenMint: "SOL",
+		});
+
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-remove-generic-ui",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.remove",
+						poolAddress,
+						positionAddress,
+						bps: 5000,
+					},
+				},
+			},
+		});
+	});
+
+	it("rejects Meteora remove generic amountUi when tokenMint is missing", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-meteora-remove-generic-missing-mint", {
+				runId: "run-meteora-remove-generic-missing-mint",
+				intentType: "solana.lp.meteora.remove",
+				runMode: "analysis",
+				poolAddress,
+				positionAddress,
+				amountUi: "1",
+			}),
+		).rejects.toThrow(
+			"tokenMint is required when amountUi or amountRaw is provided for intentType=solana.lp.meteora.remove",
+		);
+	});
+
+	it("rejects Meteora remove when bps and generic amount are both provided", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-meteora-remove-generic-conflict", {
+				runId: "run-meteora-remove-generic-conflict",
+				intentType: "solana.lp.meteora.remove",
+				runMode: "analysis",
+				poolAddress,
+				positionAddress,
+				bps: 5000,
+				amountUi: "0.5",
+				tokenMint: "USDC",
+			}),
+		).rejects.toThrow(
+			"Provide either bps or amountUi/tokenMint (or amountRaw/tokenMint), not both",
+		);
+	});
+
+	it("rejects Meteora remove generic amount when it exceeds position-side balance", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -5,
+							upperBinId: 7,
+							totalXAmountRaw: "1000",
+							totalYAmountRaw: "0",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-meteora-remove-generic-too-large", {
+				runId: "run-meteora-remove-generic-too-large",
+				intentType: "solana.lp.meteora.remove",
+				runMode: "analysis",
+				poolAddress,
+				positionAddress,
+				amountRaw: "2000",
+				tokenMint: "USDC",
+			}),
+		).rejects.toThrow("amountRaw exceeds position token amount");
+	});
+
 	it("simulates Meteora remove-liquidity workflow intent", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
