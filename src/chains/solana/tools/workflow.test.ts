@@ -3602,6 +3602,39 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Meteora add intentText with UI token amounts", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-add-ui-intent", {
+			runId: "run-meteora-add-ui-intent",
+			runMode: "analysis",
+			intentText: `meteora add liquidity ${poolAddress} ${positionAddress} x 1.25 USDC y 0.01 SOL strategy curve bins -10 to 20`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-add-ui-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.add",
+						poolAddress,
+						positionAddress,
+						totalXAmountRaw: "1250000",
+						totalYAmountRaw: "10000000",
+						minBinId: -10,
+						maxBinId: 20,
+						strategyType: "Curve",
+					},
+				},
+			},
+		});
+	});
+
 	it("simulates Meteora add-liquidity workflow intent", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -3691,6 +3724,151 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("resolves Meteora add UI amounts via pool token mints", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -10,
+							upperBinId: 20,
+							totalXAmountRaw: "0",
+							totalYAmountRaw: "0",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		runtimeMocks.buildMeteoraAddLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			poolAddress,
+			positionAddress,
+			totalXAmountRaw: "1500000",
+			totalYAmountRaw: "0",
+			minBinId: -10,
+			maxBinId: 20,
+			strategyType: "Spot",
+			singleSidedX: false,
+			slippageBps: 100,
+			activeBinId: 0,
+			instructionCount: 1,
+			transactionCount: 1,
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([13]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 92,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 337,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-add-ui-sim", {
+			runId: "run-meteora-add-ui-sim",
+			intentType: "solana.lp.meteora.add",
+			runMode: "simulate",
+			poolAddress,
+			positionAddress,
+			totalXAmountUi: "1.5",
+		});
+
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+		});
+		expect(
+			runtimeMocks.buildMeteoraAddLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				poolAddress,
+				positionAddress,
+				totalXAmountRaw: "1500000",
+				totalYAmountRaw: "0",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-add-ui-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.add",
+						poolAddress,
+						positionAddress,
+						totalXAmountRaw: "1500000",
+						totalYAmountRaw: "0",
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
+		});
+	});
+
+	it("rejects Meteora add when raw and UI amount are both provided for the same side", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-meteora-add-conflict", {
+				runId: "run-meteora-add-conflict",
+				intentType: "solana.lp.meteora.add",
+				runMode: "analysis",
+				poolAddress,
+				positionAddress,
+				totalXAmountRaw: "1000",
+				totalXAmountUi: "1.0",
+				totalYAmountRaw: "0",
+			}),
+		).rejects.toThrow(
+			"Provide either totalXAmountRaw or totalXAmountUi, not both",
+		);
+	});
+
 	it("parses Meteora remove intentText with shorthand LP fields", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -3718,6 +3896,35 @@ describe("w3rt_run_workflow_v0", () => {
 						bps: 7500,
 						shouldClaimAndClose: true,
 						skipUnwrapSol: true,
+					},
+				},
+			},
+		});
+	});
+
+	it("parses Meteora remove intentText with half-position shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-remove-half-intent", {
+			runId: "run-meteora-remove-half-intent",
+			runMode: "analysis",
+			intentText: `meteora remove liquidity ${poolAddress} ${positionAddress} half`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-remove-half-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.remove",
+						poolAddress,
+						positionAddress,
+						bps: 5000,
 					},
 				},
 			},
