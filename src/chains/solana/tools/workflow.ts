@@ -27,7 +27,9 @@ import {
 	assertJupiterNetworkSupported,
 	assertRaydiumNetworkSupported,
 	buildJupiterSwapTransaction,
+	buildKaminoBorrowInstructions,
 	buildKaminoDepositInstructions,
+	buildKaminoRepayInstructions,
 	buildKaminoWithdrawInstructions,
 	buildRaydiumSwapTransactions,
 	callJupiterApi,
@@ -70,7 +72,9 @@ type WorkflowRunMode = "analysis" | "simulate" | "execute";
 type WorkflowIntentType =
 	| "solana.transfer.sol"
 	| "solana.transfer.spl"
+	| "solana.lend.kamino.borrow"
 	| "solana.lend.kamino.deposit"
+	| "solana.lend.kamino.repay"
 	| "solana.lend.kamino.withdraw"
 	| "solana.stake.createAndDelegate"
 	| "solana.stake.delegate"
@@ -101,6 +105,7 @@ type ParsedIntentTextFields = Partial<{
 	amountRaw: string;
 	marketAddress: string;
 	ownerAddress: string;
+	currentSlot: string;
 	useV2Ixs: boolean;
 	includeAtaIxs: boolean;
 	extraComputeUnits: number;
@@ -202,6 +207,19 @@ type KaminoDepositIntent = {
 	requestElevationGroup: boolean;
 };
 
+type KaminoBorrowIntent = {
+	type: "solana.lend.kamino.borrow";
+	ownerAddress: string;
+	marketAddress: string;
+	programId?: string;
+	reserveMint: string;
+	amountRaw: string;
+	useV2Ixs: boolean;
+	includeAtaIxs: boolean;
+	extraComputeUnits?: number;
+	requestElevationGroup: boolean;
+};
+
 type KaminoWithdrawIntent = {
 	type: "solana.lend.kamino.withdraw";
 	ownerAddress: string;
@@ -213,6 +231,20 @@ type KaminoWithdrawIntent = {
 	includeAtaIxs: boolean;
 	extraComputeUnits?: number;
 	requestElevationGroup: boolean;
+};
+
+type KaminoRepayIntent = {
+	type: "solana.lend.kamino.repay";
+	ownerAddress: string;
+	marketAddress: string;
+	programId?: string;
+	reserveMint: string;
+	amountRaw: string;
+	useV2Ixs: boolean;
+	includeAtaIxs: boolean;
+	extraComputeUnits?: number;
+	requestElevationGroup: boolean;
+	currentSlot?: string;
 };
 
 type JupiterSwapIntent = {
@@ -256,7 +288,9 @@ type WorkflowIntent =
 	| StakeAuthorizeIntent
 	| StakeDeactivateIntent
 	| StakeWithdrawIntent
+	| KaminoBorrowIntent
 	| KaminoDepositIntent
+	| KaminoRepayIntent
 	| KaminoWithdrawIntent
 	| JupiterSwapIntent
 	| RaydiumSwapIntent
@@ -403,8 +437,12 @@ const DEFI_POSITIONS_KEYWORD_REGEX =
 	/(defi|de-fi|protocol\s+positions?|协议仓位|staking|stake|质押|farm|yield|收益)/i;
 const KAMINO_DEPOSIT_KEYWORD_REGEX =
 	/(kamino.*(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出)|(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出).*kamino)/i;
+const KAMINO_BORROW_KEYWORD_REGEX =
+	/(kamino.*(\bborrow\b|\bborrowed\b|\bloan\b|借入|借款)|(\bborrow\b|\bborrowed\b|\bloan\b|借入|借款).*kamino)/i;
 const KAMINO_WITHDRAW_KEYWORD_REGEX =
 	/(kamino.*(\bwithdraw\b|\bredeem\b|取回|赎回|提取)|(\bwithdraw\b|\bredeem\b|取回|赎回|提取).*kamino)/i;
+const KAMINO_REPAY_KEYWORD_REGEX =
+	/(kamino.*(\brepay\b|还款|偿还|归还)|(\brepay\b|还款|偿还|归还).*kamino)/i;
 const ORCA_DEFAULT_DEXES = ["Orca V2", "Orca Whirlpool"] as const;
 const METEORA_DEFAULT_DEXES = ["Meteora DLMM"] as const;
 const RAYDIUM_DEFAULT_DEXES = ["Raydium CLMM", "Raydium CPMM"] as const;
@@ -1168,11 +1206,16 @@ function parseTransferIntentText(intentText: string): ParsedIntentTextFields {
 	return parsed;
 }
 
-function parseKaminoDepositIntentText(
+function parseKaminoIntentText(
 	intentText: string,
+	intentType:
+		| "solana.lend.kamino.borrow"
+		| "solana.lend.kamino.deposit"
+		| "solana.lend.kamino.repay"
+		| "solana.lend.kamino.withdraw",
 ): ParsedIntentTextFields {
 	const parsed: ParsedIntentTextFields = {
-		intentType: "solana.lend.kamino.deposit",
+		intentType,
 		protocol: "kamino",
 	};
 	const ownerAddressMatch = intentText.match(
@@ -1248,90 +1291,37 @@ function parseKaminoDepositIntentText(
 	if (/\brequestElevationGroup\s*[=:]\s*true\b/i.test(intentText)) {
 		parsed.requestElevationGroup = true;
 	}
+	const currentSlotMatch = intentText.match(
+		/\bcurrentSlot\s*[=:]\s*([0-9]+)\b/i,
+	);
+	if (currentSlotMatch?.[1]) {
+		parsed.currentSlot = currentSlotMatch[1];
+	}
 	return parsed;
+}
+
+function parseKaminoBorrowIntentText(
+	intentText: string,
+): ParsedIntentTextFields {
+	return parseKaminoIntentText(intentText, "solana.lend.kamino.borrow");
+}
+
+function parseKaminoDepositIntentText(
+	intentText: string,
+): ParsedIntentTextFields {
+	return parseKaminoIntentText(intentText, "solana.lend.kamino.deposit");
+}
+
+function parseKaminoRepayIntentText(
+	intentText: string,
+): ParsedIntentTextFields {
+	return parseKaminoIntentText(intentText, "solana.lend.kamino.repay");
 }
 
 function parseKaminoWithdrawIntentText(
 	intentText: string,
 ): ParsedIntentTextFields {
-	const parsed: ParsedIntentTextFields = {
-		intentType: "solana.lend.kamino.withdraw",
-		protocol: "kamino",
-	};
-	const ownerAddressMatch = intentText.match(
-		/\bownerAddress\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
-	);
-	if (ownerAddressMatch?.[1]) {
-		parsed.ownerAddress = ownerAddressMatch[1];
-	}
-	const marketAddressMatch = intentText.match(
-		/\bmarketAddress\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
-	);
-	if (marketAddressMatch?.[1]) {
-		parsed.marketAddress = marketAddressMatch[1];
-	}
-	const reserveMintMatch = intentText.match(
-		/\b(?:reserveMint|tokenMint|mint)\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
-	);
-	if (reserveMintMatch?.[1]) {
-		const reserveMint = parseMintOrSymbolCandidate(reserveMintMatch[1]);
-		if (reserveMint) {
-			parsed.reserveMint = reserveMint;
-		}
-	}
-	const amountRawMatch =
-		intentText.match(/\bamountRaw\s*[=:]\s*([0-9]+)\b/i) ??
-		intentText.match(/\b([0-9]+)\s*raw\b/i);
-	if (amountRawMatch?.[1]) {
-		parsed.amountRaw = amountRawMatch[1];
-	}
-	const amountUiMatch = intentText.match(
-		/\b(?:amount|amountUi)\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\b/i,
-	);
-	if (amountUiMatch?.[1]) {
-		parsed.amountUi = amountUiMatch[1];
-	}
-	const amountSolMatch =
-		intentText.match(/\bamountSol\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\b/i) ??
-		intentText.match(/([0-9]+(?:\.[0-9]+)?)\s*sol\b/i);
-	if (amountSolMatch?.[1]) {
-		const amountSol = parsePositiveNumber(amountSolMatch[1]);
-		if (amountSol != null) {
-			parsed.amountSol = amountSol;
-		}
-	}
-	const uiAmountWithToken = parseUiAmountWithToken(intentText);
-	if (uiAmountWithToken.inputMint) {
-		parsed.reserveMint = parsed.reserveMint ?? uiAmountWithToken.inputMint;
-		if (uiAmountWithToken.amountUi) {
-			parsed.amountUi = parsed.amountUi ?? uiAmountWithToken.amountUi;
-		}
-		if (
-			parsed.amountSol === undefined &&
-			typeof uiAmountWithToken.amountSol === "number"
-		) {
-			parsed.amountSol = uiAmountWithToken.amountSol;
-		}
-	}
-	if (/\buseV2Ixs\s*[=:]\s*false\b/i.test(intentText)) {
-		parsed.useV2Ixs = false;
-	}
-	if (/\bincludeAtaIxs\s*[=:]\s*false\b/i.test(intentText)) {
-		parsed.includeAtaIxs = false;
-	}
-	const extraComputeUnitsMatch = intentText.match(
-		/\bextraComputeUnits\s*[=:]\s*([0-9]+)\b/i,
-	);
-	if (extraComputeUnitsMatch?.[1]) {
-		const extraComputeUnits = Number.parseInt(extraComputeUnitsMatch[1], 10);
-		if (Number.isInteger(extraComputeUnits) && extraComputeUnits >= 0) {
-			parsed.extraComputeUnits = extraComputeUnits;
-		}
-	}
-	if (/\brequestElevationGroup\s*[=:]\s*true\b/i.test(intentText)) {
-		parsed.requestElevationGroup = true;
-	}
-	return parsed;
+	return parseKaminoIntentText(intentText, "solana.lend.kamino.withdraw");
 }
 
 function detectStakeIntentTypeFromText(
@@ -1834,10 +1824,22 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 			intentType: "solana.transfer.spl",
 		};
 	}
+	if (lower.includes("solana.lend.kamino.borrow")) {
+		return {
+			...parseKaminoBorrowIntentText(trimmed),
+			intentType: "solana.lend.kamino.borrow",
+		};
+	}
 	if (lower.includes("solana.lend.kamino.deposit")) {
 		return {
 			...parseKaminoDepositIntentText(trimmed),
 			intentType: "solana.lend.kamino.deposit",
+		};
+	}
+	if (lower.includes("solana.lend.kamino.repay")) {
+		return {
+			...parseKaminoRepayIntentText(trimmed),
+			intentType: "solana.lend.kamino.repay",
 		};
 	}
 	if (lower.includes("solana.lend.kamino.withdraw")) {
@@ -1910,8 +1912,14 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	if (hasSwapKeywords && !hasTransferKeywords) {
 		return parseSwapIntentText(trimmed);
 	}
+	if (KAMINO_REPAY_KEYWORD_REGEX.test(trimmed)) {
+		return parseKaminoRepayIntentText(trimmed);
+	}
 	if (KAMINO_WITHDRAW_KEYWORD_REGEX.test(trimmed)) {
 		return parseKaminoWithdrawIntentText(trimmed);
+	}
+	if (KAMINO_BORROW_KEYWORD_REGEX.test(trimmed)) {
+		return parseKaminoBorrowIntentText(trimmed);
 	}
 	if (KAMINO_DEPOSIT_KEYWORD_REGEX.test(trimmed)) {
 		return parseKaminoDepositIntentText(trimmed);
@@ -1981,7 +1989,9 @@ function resolveIntentType(
 	if (
 		params.intentType === "solana.transfer.sol" ||
 		params.intentType === "solana.transfer.spl" ||
+		params.intentType === "solana.lend.kamino.borrow" ||
 		params.intentType === "solana.lend.kamino.deposit" ||
+		params.intentType === "solana.lend.kamino.repay" ||
 		params.intentType === "solana.lend.kamino.withdraw" ||
 		params.intentType === "solana.stake.createAndDelegate" ||
 		params.intentType === "solana.stake.delegate" ||
@@ -2034,9 +2044,21 @@ function resolveIntentType(
 	}
 	if (
 		typeof params.intentText === "string" &&
+		KAMINO_REPAY_KEYWORD_REGEX.test(params.intentText)
+	) {
+		return "solana.lend.kamino.repay";
+	}
+	if (
+		typeof params.intentText === "string" &&
 		KAMINO_WITHDRAW_KEYWORD_REGEX.test(params.intentText)
 	) {
 		return "solana.lend.kamino.withdraw";
+	}
+	if (
+		typeof params.intentText === "string" &&
+		KAMINO_BORROW_KEYWORD_REGEX.test(params.intentText)
+	) {
+		return "solana.lend.kamino.borrow";
 	}
 	if (
 		typeof params.intentText === "string" &&
@@ -2358,7 +2380,9 @@ async function normalizeIntent(
 		};
 	}
 	if (
+		intentType === "solana.lend.kamino.borrow" ||
 		intentType === "solana.lend.kamino.deposit" ||
+		intentType === "solana.lend.kamino.repay" ||
 		intentType === "solana.lend.kamino.withdraw"
 	) {
 		const ownerAddress = new PublicKey(
@@ -2436,6 +2460,26 @@ async function normalizeIntent(
 				"extraComputeUnits must be an integer between 0 and 2000000",
 			);
 		}
+		let currentSlot: string | undefined;
+		if (normalizedParams.currentSlot !== undefined) {
+			if (typeof normalizedParams.currentSlot === "string") {
+				const parsedSlot = normalizedParams.currentSlot.trim();
+				if (!/^\d+$/.test(parsedSlot)) {
+					throw new Error("currentSlot must be a non-negative integer");
+				}
+				currentSlot = parsedSlot;
+			} else if (typeof normalizedParams.currentSlot === "number") {
+				if (
+					!Number.isInteger(normalizedParams.currentSlot) ||
+					normalizedParams.currentSlot < 0
+				) {
+					throw new Error("currentSlot must be a non-negative integer");
+				}
+				currentSlot = Math.floor(normalizedParams.currentSlot).toString();
+			} else {
+				throw new Error("currentSlot must be a non-negative integer");
+			}
+		}
 		return {
 			type: intentType,
 			ownerAddress,
@@ -2447,6 +2491,7 @@ async function normalizeIntent(
 			includeAtaIxs: normalizedParams.includeAtaIxs !== false,
 			extraComputeUnits,
 			requestElevationGroup: normalizedParams.requestElevationGroup === true,
+			...(intentType === "solana.lend.kamino.repay" ? { currentSlot } : {}),
 		};
 	}
 	if (intentType === "solana.transfer.sol") {
@@ -3448,6 +3493,66 @@ async function prepareKaminoDepositSimulation(
 	};
 }
 
+async function prepareKaminoBorrowSimulation(
+	network: string,
+	signer: Keypair,
+	intent: KaminoBorrowIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.ownerAddress !== signerAddress) {
+		throw new Error(
+			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const build = await buildKaminoBorrowInstructions({
+		ownerAddress: intent.ownerAddress,
+		reserveMint: intent.reserveMint,
+		amountRaw: intent.amountRaw,
+		marketAddress: intent.marketAddress,
+		programId: intent.programId,
+		useV2Ixs: intent.useV2Ixs,
+		includeAtaIxs: intent.includeAtaIxs,
+		extraComputeUnits: intent.extraComputeUnits,
+		requestElevationGroup: intent.requestElevationGroup,
+		network,
+	});
+	const tx = new Transaction().add(...build.instructions);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			latestBlockhash,
+			ownerAddress: build.ownerAddress,
+			marketAddress: build.marketAddress,
+			programId: build.programId,
+			reserveMint: build.reserveMint,
+			reserveAddress: build.reserveAddress,
+			reserveSymbol: build.reserveSymbol,
+			amountRaw: build.amountRaw,
+			obligationAddress: build.obligationAddress,
+			instructionCount: build.instructionCount,
+			setupInstructionCount: build.setupInstructionCount,
+			lendingInstructionCount: build.lendingInstructionCount,
+			cleanupInstructionCount: build.cleanupInstructionCount,
+			setupInstructionLabels: build.setupInstructionLabels,
+			lendingInstructionLabels: build.lendingInstructionLabels,
+			cleanupInstructionLabels: build.cleanupInstructionLabels,
+		},
+	};
+}
+
 async function prepareKaminoWithdrawSimulation(
 	network: string,
 	signer: Keypair,
@@ -3496,6 +3601,68 @@ async function prepareKaminoWithdrawSimulation(
 			reserveAddress: build.reserveAddress,
 			reserveSymbol: build.reserveSymbol,
 			amountRaw: build.amountRaw,
+			obligationAddress: build.obligationAddress,
+			instructionCount: build.instructionCount,
+			setupInstructionCount: build.setupInstructionCount,
+			lendingInstructionCount: build.lendingInstructionCount,
+			cleanupInstructionCount: build.cleanupInstructionCount,
+			setupInstructionLabels: build.setupInstructionLabels,
+			lendingInstructionLabels: build.lendingInstructionLabels,
+			cleanupInstructionLabels: build.cleanupInstructionLabels,
+		},
+	};
+}
+
+async function prepareKaminoRepaySimulation(
+	network: string,
+	signer: Keypair,
+	intent: KaminoRepayIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.ownerAddress !== signerAddress) {
+		throw new Error(
+			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const build = await buildKaminoRepayInstructions({
+		ownerAddress: intent.ownerAddress,
+		reserveMint: intent.reserveMint,
+		amountRaw: intent.amountRaw,
+		marketAddress: intent.marketAddress,
+		programId: intent.programId,
+		useV2Ixs: intent.useV2Ixs,
+		includeAtaIxs: intent.includeAtaIxs,
+		extraComputeUnits: intent.extraComputeUnits,
+		requestElevationGroup: intent.requestElevationGroup,
+		currentSlot: intent.currentSlot,
+		network,
+	});
+	const tx = new Transaction().add(...build.instructions);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			latestBlockhash,
+			ownerAddress: build.ownerAddress,
+			marketAddress: build.marketAddress,
+			programId: build.programId,
+			reserveMint: build.reserveMint,
+			reserveAddress: build.reserveAddress,
+			reserveSymbol: build.reserveSymbol,
+			amountRaw: build.amountRaw,
+			currentSlot: build.currentSlot,
 			obligationAddress: build.obligationAddress,
 			instructionCount: build.instructionCount,
 			setupInstructionCount: build.setupInstructionCount,
@@ -4046,8 +4213,14 @@ async function prepareSimulation(
 	if (intent.type === "solana.transfer.spl") {
 		return prepareTransferSplSimulation(network, signer, intent);
 	}
+	if (intent.type === "solana.lend.kamino.borrow") {
+		return prepareKaminoBorrowSimulation(network, signer, intent);
+	}
 	if (intent.type === "solana.lend.kamino.deposit") {
 		return prepareKaminoDepositSimulation(network, signer, intent);
+	}
+	if (intent.type === "solana.lend.kamino.repay") {
+		return prepareKaminoRepaySimulation(network, signer, intent);
 	}
 	if (intent.type === "solana.lend.kamino.withdraw") {
 		return prepareKaminoWithdrawSimulation(network, signer, intent);
@@ -4146,7 +4319,9 @@ export function createSolanaWorkflowTools() {
 					Type.Union([
 						Type.Literal("solana.transfer.sol"),
 						Type.Literal("solana.transfer.spl"),
+						Type.Literal("solana.lend.kamino.borrow"),
 						Type.Literal("solana.lend.kamino.deposit"),
+						Type.Literal("solana.lend.kamino.repay"),
 						Type.Literal("solana.lend.kamino.withdraw"),
 						Type.Literal("solana.stake.createAndDelegate"),
 						Type.Literal("solana.stake.delegate"),
@@ -4218,7 +4393,7 @@ export function createSolanaWorkflowTools() {
 				amountSol: Type.Optional(
 					Type.Number({
 						description:
-							"Amount in SOL for intentType=solana.transfer.sol / solana.stake.createAndDelegate / solana.stake.withdraw, or for solana.lend.kamino.deposit|solana.lend.kamino.withdraw when reserveMint is SOL",
+							"Amount in SOL for intentType=solana.transfer.sol / solana.stake.createAndDelegate / solana.stake.withdraw, or for solana.lend.kamino.borrow|solana.lend.kamino.deposit|solana.lend.kamino.repay|solana.lend.kamino.withdraw when reserveMint is SOL",
 					}),
 				),
 				stakeAccountAddress: Type.Optional(
@@ -4271,19 +4446,19 @@ export function createSolanaWorkflowTools() {
 				ownerAddress: Type.Optional(
 					Type.String({
 						description:
-							"Optional owner assertion for intentType=solana.lend.kamino.deposit|solana.lend.kamino.withdraw. Must match signer address.",
+							"Optional owner assertion for intentType=solana.lend.kamino.borrow|solana.lend.kamino.deposit|solana.lend.kamino.repay|solana.lend.kamino.withdraw. Must match signer address.",
 					}),
 				),
 				reserveMint: Type.Optional(
 					Type.String({
 						description:
-							"Reserve mint for intentType=solana.lend.kamino.deposit|solana.lend.kamino.withdraw (supports known symbols like SOL/USDC/USDT)",
+							"Reserve mint for intentType=solana.lend.kamino.borrow|solana.lend.kamino.deposit|solana.lend.kamino.repay|solana.lend.kamino.withdraw (supports known symbols like SOL/USDC/USDT)",
 					}),
 				),
 				marketAddress: Type.Optional(
 					Type.String({
 						description:
-							"Optional Kamino market address for intentType=solana.lend.kamino.deposit|solana.lend.kamino.withdraw. Defaults to main market on mainnet-beta.",
+							"Optional Kamino market address for intentType=solana.lend.kamino.borrow|solana.lend.kamino.deposit|solana.lend.kamino.repay|solana.lend.kamino.withdraw. Defaults to main market on mainnet-beta.",
 					}),
 				),
 				inputMint: Type.Optional(
@@ -4301,25 +4476,31 @@ export function createSolanaWorkflowTools() {
 				amountRaw: Type.Optional(
 					Type.String({
 						description:
-							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl / solana.lend.kamino.deposit / solana.lend.kamino.withdraw",
+							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl / solana.lend.kamino.borrow / solana.lend.kamino.deposit / solana.lend.kamino.repay / solana.lend.kamino.withdraw",
 					}),
 				),
 				amountUi: Type.Optional(
 					Type.String({
 						description:
-							"Optional human-readable token amount for swaps, SPL transfers, and Kamino deposits (for known mints like SOL/USDC/USDT).",
+							"Optional human-readable token amount for swaps, SPL transfers, and Kamino lending actions (for known mints like SOL/USDC/USDT).",
+					}),
+				),
+				currentSlot: Type.Optional(
+					Type.String({
+						description:
+							"Optional slot override for intentType=solana.lend.kamino.repay. Defaults to current RPC slot.",
 					}),
 				),
 				useV2Ixs: Type.Optional(
 					Type.Boolean({
 						description:
-							"Use Kamino V2 instructions for intentType=solana.lend.kamino.deposit|solana.lend.kamino.withdraw (default true)",
+							"Use Kamino V2 instructions for intentType=solana.lend.kamino.borrow|solana.lend.kamino.deposit|solana.lend.kamino.repay|solana.lend.kamino.withdraw (default true)",
 					}),
 				),
 				includeAtaIxs: Type.Optional(
 					Type.Boolean({
 						description:
-							"Include ATA setup instructions for intentType=solana.lend.kamino.deposit|solana.lend.kamino.withdraw (default true)",
+							"Include ATA setup instructions for intentType=solana.lend.kamino.borrow|solana.lend.kamino.deposit|solana.lend.kamino.repay|solana.lend.kamino.withdraw (default true)",
 					}),
 				),
 				extraComputeUnits: Type.Optional(
@@ -4327,13 +4508,13 @@ export function createSolanaWorkflowTools() {
 						minimum: 0,
 						maximum: 2_000_000,
 						description:
-							"Optional compute unit limit for intentType=solana.lend.kamino.deposit|solana.lend.kamino.withdraw",
+							"Optional compute unit limit for intentType=solana.lend.kamino.borrow|solana.lend.kamino.deposit|solana.lend.kamino.repay|solana.lend.kamino.withdraw",
 					}),
 				),
 				requestElevationGroup: Type.Optional(
 					Type.Boolean({
 						description:
-							"Request Kamino elevation group for intentType=solana.lend.kamino.deposit|solana.lend.kamino.withdraw (default false)",
+							"Request Kamino elevation group for intentType=solana.lend.kamino.borrow|solana.lend.kamino.deposit|solana.lend.kamino.repay|solana.lend.kamino.withdraw (default false)",
 					}),
 				),
 				includeZero: Type.Optional(
@@ -4363,7 +4544,7 @@ export function createSolanaWorkflowTools() {
 				programId: Type.Optional(
 					Type.String({
 						description:
-							"Optional Kamino lending program id. For read intents it is a filter; for solana.lend.kamino.deposit|solana.lend.kamino.withdraw it overrides the default program id.",
+							"Optional Kamino lending program id. For read intents it is a filter; for solana.lend.kamino.borrow|solana.lend.kamino.deposit|solana.lend.kamino.repay|solana.lend.kamino.withdraw it overrides the default program id.",
 					}),
 				),
 				limitMarkets: Type.Optional(

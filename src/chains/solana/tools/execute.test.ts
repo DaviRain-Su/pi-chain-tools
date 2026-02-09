@@ -11,7 +11,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const runtimeMocks = vi.hoisted(() => ({
 	assertJupiterNetworkSupported: vi.fn(),
 	assertRaydiumNetworkSupported: vi.fn(),
+	buildKaminoBorrowInstructions: vi.fn(),
 	buildKaminoDepositInstructions: vi.fn(),
+	buildKaminoRepayInstructions: vi.fn(),
 	buildKaminoWithdrawInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
 	buildRaydiumSwapTransactions: vi.fn(),
@@ -54,7 +56,9 @@ vi.mock("../runtime.js", async () => {
 		...actual,
 		assertJupiterNetworkSupported: runtimeMocks.assertJupiterNetworkSupported,
 		assertRaydiumNetworkSupported: runtimeMocks.assertRaydiumNetworkSupported,
+		buildKaminoBorrowInstructions: runtimeMocks.buildKaminoBorrowInstructions,
 		buildKaminoDepositInstructions: runtimeMocks.buildKaminoDepositInstructions,
+		buildKaminoRepayInstructions: runtimeMocks.buildKaminoRepayInstructions,
 		buildKaminoWithdrawInstructions:
 			runtimeMocks.buildKaminoWithdrawInstructions,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
@@ -654,6 +658,326 @@ describe("solana_kaminoWithdraw", () => {
 			simulated: false,
 			signature: "kamino-withdraw-sig",
 			confirmed: true,
+		});
+	});
+});
+
+describe("solana_kaminoBorrow", () => {
+	it("blocks mainnet Kamino borrow unless confirmMainnet=true", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const tool = getTool("solana_kaminoBorrow");
+
+		await expect(
+			tool.execute("kamino-borrow-mainnet-block", {
+				reserveMint: Keypair.generate().publicKey.toBase58(),
+				amountRaw: "1000",
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+		expect(runtimeMocks.buildKaminoBorrowInstructions).not.toHaveBeenCalled();
+	});
+
+	it("simulates Kamino borrow without broadcasting", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("devnet");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const reserveMint = Keypair.generate().publicKey.toBase58();
+		const marketAddress = Keypair.generate().publicKey.toBase58();
+		const programId = Keypair.generate().publicKey.toBase58();
+		const reserveAddress = Keypair.generate().publicKey.toBase58();
+		const obligationAddress = Keypair.generate().publicKey.toBase58();
+		const instruction = new TransactionInstruction({
+			programId: Keypair.generate().publicKey,
+			keys: [],
+			data: Buffer.from([21]),
+		});
+		runtimeMocks.buildKaminoBorrowInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			marketAddress,
+			programId,
+			reserveMint,
+			reserveAddress,
+			reserveSymbol: "USDC",
+			amountRaw: "1000",
+			useV2Ixs: true,
+			includeAtaIxs: true,
+			extraComputeUnits: 1_000_000,
+			requestElevationGroup: false,
+			obligationAddress,
+			instructionCount: 1,
+			setupInstructionCount: 0,
+			lendingInstructionCount: 1,
+			cleanupInstructionCount: 0,
+			setupInstructionLabels: [],
+			lendingInstructionLabels: ["borrow"],
+			cleanupInstructionLabels: [],
+			instructions: [instruction],
+		});
+		const sendRawTransaction = vi.fn();
+		const simulateTransaction = vi.fn().mockResolvedValue({
+			value: {
+				err: null,
+				logs: ["ok"],
+				unitsConsumed: 125,
+			},
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 9,
+			}),
+			sendRawTransaction,
+			simulateTransaction,
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_kaminoBorrow");
+		const result = await tool.execute("kamino-borrow-sim", {
+			fromSecretKey: "mock",
+			reserveMint,
+			amountRaw: "1000",
+			network: "devnet",
+			simulate: true,
+		});
+
+		expect(sendRawTransaction).not.toHaveBeenCalled();
+		expect(simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			simulated: true,
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			reserveMint,
+			obligationAddress,
+		});
+	});
+
+	it("sends Kamino borrow transaction and confirms by default", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("devnet");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const reserveMint = Keypair.generate().publicKey.toBase58();
+		const instruction = new TransactionInstruction({
+			programId: Keypair.generate().publicKey,
+			keys: [],
+			data: Buffer.from([22]),
+		});
+		runtimeMocks.buildKaminoBorrowInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			marketAddress: Keypair.generate().publicKey.toBase58(),
+			programId: Keypair.generate().publicKey.toBase58(),
+			reserveMint,
+			reserveAddress: Keypair.generate().publicKey.toBase58(),
+			reserveSymbol: "USDC",
+			amountRaw: "1000",
+			useV2Ixs: true,
+			includeAtaIxs: true,
+			extraComputeUnits: 1_000_000,
+			requestElevationGroup: false,
+			obligationAddress: Keypair.generate().publicKey.toBase58(),
+			instructionCount: 1,
+			setupInstructionCount: 0,
+			lendingInstructionCount: 1,
+			cleanupInstructionCount: 0,
+			setupInstructionLabels: [],
+			lendingInstructionLabels: ["borrow"],
+			cleanupInstructionLabels: [],
+			instructions: [instruction],
+		});
+		const sendRawTransaction = vi.fn().mockResolvedValue("kamino-borrow-sig");
+		const confirmTransaction = vi.fn().mockResolvedValue({
+			value: {
+				err: null,
+			},
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 10,
+			}),
+			sendRawTransaction,
+			confirmTransaction,
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_kaminoBorrow");
+		const result = await tool.execute("kamino-borrow-exec", {
+			fromSecretKey: "mock",
+			reserveMint,
+			amountRaw: "1000",
+			network: "devnet",
+		});
+
+		expect(sendRawTransaction).toHaveBeenCalledTimes(1);
+		expect(confirmTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			simulated: false,
+			signature: "kamino-borrow-sig",
+			confirmed: true,
+		});
+	});
+});
+
+describe("solana_kaminoRepay", () => {
+	it("blocks mainnet Kamino repay unless confirmMainnet=true", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const tool = getTool("solana_kaminoRepay");
+
+		await expect(
+			tool.execute("kamino-repay-mainnet-block", {
+				reserveMint: Keypair.generate().publicKey.toBase58(),
+				amountRaw: "1000",
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+		expect(runtimeMocks.buildKaminoRepayInstructions).not.toHaveBeenCalled();
+	});
+
+	it("simulates Kamino repay without broadcasting", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("devnet");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const reserveMint = Keypair.generate().publicKey.toBase58();
+		const marketAddress = Keypair.generate().publicKey.toBase58();
+		const programId = Keypair.generate().publicKey.toBase58();
+		const reserveAddress = Keypair.generate().publicKey.toBase58();
+		const obligationAddress = Keypair.generate().publicKey.toBase58();
+		const instruction = new TransactionInstruction({
+			programId: Keypair.generate().publicKey,
+			keys: [],
+			data: Buffer.from([23]),
+		});
+		runtimeMocks.buildKaminoRepayInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			marketAddress,
+			programId,
+			reserveMint,
+			reserveAddress,
+			reserveSymbol: "USDC",
+			amountRaw: "1000",
+			useV2Ixs: true,
+			includeAtaIxs: true,
+			extraComputeUnits: 1_000_000,
+			requestElevationGroup: false,
+			currentSlot: "555",
+			obligationAddress,
+			instructionCount: 1,
+			setupInstructionCount: 0,
+			lendingInstructionCount: 1,
+			cleanupInstructionCount: 0,
+			setupInstructionLabels: [],
+			lendingInstructionLabels: ["repay"],
+			cleanupInstructionLabels: [],
+			instructions: [instruction],
+		});
+		const sendRawTransaction = vi.fn();
+		const simulateTransaction = vi.fn().mockResolvedValue({
+			value: {
+				err: null,
+				logs: ["ok"],
+				unitsConsumed: 126,
+			},
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 9,
+			}),
+			sendRawTransaction,
+			simulateTransaction,
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_kaminoRepay");
+		const result = await tool.execute("kamino-repay-sim", {
+			fromSecretKey: "mock",
+			reserveMint,
+			amountRaw: "1000",
+			currentSlot: "555",
+			network: "devnet",
+			simulate: true,
+		});
+
+		expect(sendRawTransaction).not.toHaveBeenCalled();
+		expect(simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			simulated: true,
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			reserveMint,
+			currentSlot: "555",
+			obligationAddress,
+		});
+	});
+
+	it("sends Kamino repay transaction and confirms by default", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("devnet");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const reserveMint = Keypair.generate().publicKey.toBase58();
+		const instruction = new TransactionInstruction({
+			programId: Keypair.generate().publicKey,
+			keys: [],
+			data: Buffer.from([24]),
+		});
+		runtimeMocks.buildKaminoRepayInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			marketAddress: Keypair.generate().publicKey.toBase58(),
+			programId: Keypair.generate().publicKey.toBase58(),
+			reserveMint,
+			reserveAddress: Keypair.generate().publicKey.toBase58(),
+			reserveSymbol: "USDC",
+			amountRaw: "1000",
+			useV2Ixs: true,
+			includeAtaIxs: true,
+			extraComputeUnits: 1_000_000,
+			requestElevationGroup: false,
+			currentSlot: "777",
+			obligationAddress: Keypair.generate().publicKey.toBase58(),
+			instructionCount: 1,
+			setupInstructionCount: 0,
+			lendingInstructionCount: 1,
+			cleanupInstructionCount: 0,
+			setupInstructionLabels: [],
+			lendingInstructionLabels: ["repay"],
+			cleanupInstructionLabels: [],
+			instructions: [instruction],
+		});
+		const sendRawTransaction = vi.fn().mockResolvedValue("kamino-repay-sig");
+		const confirmTransaction = vi.fn().mockResolvedValue({
+			value: {
+				err: null,
+			},
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 10,
+			}),
+			sendRawTransaction,
+			confirmTransaction,
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_kaminoRepay");
+		const result = await tool.execute("kamino-repay-exec", {
+			fromSecretKey: "mock",
+			reserveMint,
+			amountRaw: "1000",
+			currentSlot: "777",
+			network: "devnet",
+		});
+
+		expect(sendRawTransaction).toHaveBeenCalledTimes(1);
+		expect(confirmTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			simulated: false,
+			signature: "kamino-repay-sig",
+			confirmed: true,
+			currentSlot: "777",
 		});
 	});
 });

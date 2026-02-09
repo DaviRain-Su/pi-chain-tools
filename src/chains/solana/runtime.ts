@@ -519,6 +519,35 @@ function parseKaminoExtraComputeUnits(value: number | undefined): number {
 	return value;
 }
 
+type KaminoRepayCurrentSlot = Parameters<typeof KaminoAction.buildRepayTxns>[7];
+
+async function resolveKaminoRepayCurrentSlot(
+	network: SolanaNetwork,
+	value: string | number | bigint | undefined,
+): Promise<KaminoRepayCurrentSlot> {
+	if (value === undefined) {
+		const slot = await getConnection(network).getSlot();
+		return BigInt(slot) as KaminoRepayCurrentSlot;
+	}
+	if (typeof value === "bigint") {
+		if (value < 0n) {
+			throw new Error("currentSlot must be a non-negative integer");
+		}
+		return value as KaminoRepayCurrentSlot;
+	}
+	if (typeof value === "number") {
+		if (!Number.isInteger(value) || value < 0) {
+			throw new Error("currentSlot must be a non-negative integer");
+		}
+		return BigInt(value) as KaminoRepayCurrentSlot;
+	}
+	const normalized = value.trim();
+	if (!/^\d+$/.test(normalized)) {
+		throw new Error("currentSlot must be a non-negative integer");
+	}
+	return BigInt(normalized) as KaminoRepayCurrentSlot;
+}
+
 export async function buildKaminoDepositInstructions(
 	request: KaminoDepositInstructionsRequest,
 ): Promise<KaminoDepositInstructionsResult> {
@@ -573,6 +602,100 @@ export async function buildKaminoDepositInstructions(
 		);
 	}
 	const action = await KaminoAction.buildDepositTxns(
+		kaminoMarket,
+		amountRaw,
+		reserve.getLiquidityMint(),
+		createNoopSigner(address(ownerAddress)),
+		new VanillaObligation(address(programId)),
+		useV2Ixs,
+		undefined,
+		extraComputeUnits,
+		includeAtaIxs,
+		requestElevationGroup,
+	);
+	const instructions = KaminoAction.actionToIxs(action).map(
+		convertKitInstructionToLegacy,
+	);
+	const obligationAddress = await action.getObligationPda();
+	return {
+		network,
+		ownerAddress,
+		marketAddress,
+		programId,
+		reserveMint,
+		reserveAddress: reserve.address,
+		reserveSymbol: reserve.symbol ?? null,
+		amountRaw,
+		useV2Ixs,
+		includeAtaIxs,
+		extraComputeUnits,
+		requestElevationGroup,
+		obligationAddress,
+		instructionCount: instructions.length,
+		setupInstructionCount: action.setupIxs.length,
+		lendingInstructionCount: action.lendingIxs.length,
+		cleanupInstructionCount: action.cleanupIxs.length,
+		setupInstructionLabels: [...action.setupIxsLabels],
+		lendingInstructionLabels: [...action.lendingIxsLabels],
+		cleanupInstructionLabels: [...action.cleanupIxsLabels],
+		instructions,
+	};
+}
+
+export async function buildKaminoBorrowInstructions(
+	request: KaminoBorrowInstructionsRequest,
+): Promise<KaminoBorrowInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const reserveMint = new PublicKey(
+		normalizeAtPath(request.reserveMint),
+	).toBase58();
+	const marketInput =
+		typeof request.marketAddress === "string" &&
+		request.marketAddress.trim().length > 0
+			? request.marketAddress
+			: network === "mainnet-beta"
+				? KAMINO_MAINNET_MARKET_ADDRESS
+				: null;
+	if (!marketInput) {
+		throw new Error(
+			"marketAddress is required when network is not mainnet-beta",
+		);
+	}
+	const marketAddress = new PublicKey(normalizeAtPath(marketInput)).toBase58();
+	const programId = new PublicKey(
+		normalizeAtPath(request.programId ?? KAMINO_PROGRAM_ID),
+	).toBase58();
+	const amountRaw = parsePositiveBigInt(
+		request.amountRaw,
+		"amountRaw",
+	).toString();
+	const useV2Ixs = request.useV2Ixs !== false;
+	const includeAtaIxs = request.includeAtaIxs !== false;
+	const extraComputeUnits = parseKaminoExtraComputeUnits(
+		request.extraComputeUnits,
+	);
+	const requestElevationGroup = request.requestElevationGroup === true;
+
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+	const kaminoMarket = await KaminoMarket.load(
+		rpc,
+		address(marketAddress),
+		DEFAULT_RECENT_SLOT_DURATION_MS,
+		address(programId),
+	);
+	if (!kaminoMarket) {
+		throw new Error(`Kamino market not found: ${marketAddress}`);
+	}
+	const reserve = kaminoMarket.getReserveByMint(address(reserveMint));
+	if (!reserve) {
+		throw new Error(
+			`Kamino reserve not found in market: reserveMint=${reserveMint} marketAddress=${marketAddress}`,
+		);
+	}
+	const action = await KaminoAction.buildBorrowTxns(
 		kaminoMarket,
 		amountRaw,
 		reserve.getLiquidityMint(),
@@ -707,6 +830,107 @@ export async function buildKaminoWithdrawInstructions(
 	};
 }
 
+export async function buildKaminoRepayInstructions(
+	request: KaminoRepayInstructionsRequest,
+): Promise<KaminoRepayInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const reserveMint = new PublicKey(
+		normalizeAtPath(request.reserveMint),
+	).toBase58();
+	const marketInput =
+		typeof request.marketAddress === "string" &&
+		request.marketAddress.trim().length > 0
+			? request.marketAddress
+			: network === "mainnet-beta"
+				? KAMINO_MAINNET_MARKET_ADDRESS
+				: null;
+	if (!marketInput) {
+		throw new Error(
+			"marketAddress is required when network is not mainnet-beta",
+		);
+	}
+	const marketAddress = new PublicKey(normalizeAtPath(marketInput)).toBase58();
+	const programId = new PublicKey(
+		normalizeAtPath(request.programId ?? KAMINO_PROGRAM_ID),
+	).toBase58();
+	const amountRaw = parsePositiveBigInt(
+		request.amountRaw,
+		"amountRaw",
+	).toString();
+	const useV2Ixs = request.useV2Ixs !== false;
+	const includeAtaIxs = request.includeAtaIxs !== false;
+	const extraComputeUnits = parseKaminoExtraComputeUnits(
+		request.extraComputeUnits,
+	);
+	const requestElevationGroup = request.requestElevationGroup === true;
+	const currentSlot = await resolveKaminoRepayCurrentSlot(
+		network,
+		request.currentSlot,
+	);
+
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+	const kaminoMarket = await KaminoMarket.load(
+		rpc,
+		address(marketAddress),
+		DEFAULT_RECENT_SLOT_DURATION_MS,
+		address(programId),
+	);
+	if (!kaminoMarket) {
+		throw new Error(`Kamino market not found: ${marketAddress}`);
+	}
+	const reserve = kaminoMarket.getReserveByMint(address(reserveMint));
+	if (!reserve) {
+		throw new Error(
+			`Kamino reserve not found in market: reserveMint=${reserveMint} marketAddress=${marketAddress}`,
+		);
+	}
+	const action = await KaminoAction.buildRepayTxns(
+		kaminoMarket,
+		amountRaw,
+		reserve.getLiquidityMint(),
+		createNoopSigner(address(ownerAddress)),
+		new VanillaObligation(address(programId)),
+		useV2Ixs,
+		undefined,
+		currentSlot,
+		undefined,
+		extraComputeUnits,
+		includeAtaIxs,
+		requestElevationGroup,
+	);
+	const instructions = KaminoAction.actionToIxs(action).map(
+		convertKitInstructionToLegacy,
+	);
+	const obligationAddress = await action.getObligationPda();
+	return {
+		network,
+		ownerAddress,
+		marketAddress,
+		programId,
+		reserveMint,
+		reserveAddress: reserve.address,
+		reserveSymbol: reserve.symbol ?? null,
+		amountRaw,
+		useV2Ixs,
+		includeAtaIxs,
+		extraComputeUnits,
+		requestElevationGroup,
+		currentSlot: currentSlot.toString(),
+		obligationAddress,
+		instructionCount: instructions.length,
+		setupInstructionCount: action.setupIxs.length,
+		lendingInstructionCount: action.lendingIxs.length,
+		cleanupInstructionCount: action.cleanupIxs.length,
+		setupInstructionLabels: [...action.setupIxsLabels],
+		lendingInstructionLabels: [...action.lendingIxsLabels],
+		cleanupInstructionLabels: [...action.cleanupIxsLabels],
+		instructions,
+	};
+}
+
 function truncateText(value: string): string {
 	if (value.length <= 500) return value;
 	return `${value.slice(0, 500)}...`;
@@ -817,6 +1041,15 @@ export type KaminoDepositInstructionsResult = {
 export type KaminoWithdrawInstructionsRequest =
 	KaminoDepositInstructionsRequest;
 export type KaminoWithdrawInstructionsResult = KaminoDepositInstructionsResult;
+export type KaminoBorrowInstructionsRequest = KaminoDepositInstructionsRequest;
+export type KaminoBorrowInstructionsResult = KaminoDepositInstructionsResult;
+export type KaminoRepayInstructionsRequest =
+	KaminoDepositInstructionsRequest & {
+		currentSlot?: string | number | bigint;
+	};
+export type KaminoRepayInstructionsResult = KaminoDepositInstructionsResult & {
+	currentSlot: string;
+};
 
 export type KaminoLendingProtocol = "kamino";
 export type KaminoLendingPositionSide = "deposit" | "borrow";
