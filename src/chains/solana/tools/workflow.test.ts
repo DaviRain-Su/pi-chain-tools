@@ -10,8 +10,10 @@ const runtimeMocks = vi.hoisted(() => ({
 	assertRaydiumNetworkSupported: vi.fn(),
 	assertJupiterNetworkSupported: vi.fn(),
 	buildKaminoBorrowInstructions: vi.fn(),
+	buildKaminoDepositAndBorrowInstructions: vi.fn(),
 	buildKaminoDepositInstructions: vi.fn(),
 	buildKaminoRepayInstructions: vi.fn(),
+	buildKaminoRepayAndWithdrawInstructions: vi.fn(),
 	buildKaminoWithdrawInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
 	buildRaydiumSwapTransactions: vi.fn(),
@@ -58,8 +60,12 @@ vi.mock("../runtime.js", async () => {
 		assertRaydiumNetworkSupported: runtimeMocks.assertRaydiumNetworkSupported,
 		assertJupiterNetworkSupported: runtimeMocks.assertJupiterNetworkSupported,
 		buildKaminoBorrowInstructions: runtimeMocks.buildKaminoBorrowInstructions,
+		buildKaminoDepositAndBorrowInstructions:
+			runtimeMocks.buildKaminoDepositAndBorrowInstructions,
 		buildKaminoDepositInstructions: runtimeMocks.buildKaminoDepositInstructions,
 		buildKaminoRepayInstructions: runtimeMocks.buildKaminoRepayInstructions,
+		buildKaminoRepayAndWithdrawInstructions:
+			runtimeMocks.buildKaminoRepayAndWithdrawInstructions,
 		buildKaminoWithdrawInstructions:
 			runtimeMocks.buildKaminoWithdrawInstructions,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
@@ -860,6 +866,166 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses kamino deposit+borrow intentText and derives per-leg amountRaw", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const marketAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-kamino-deposit-borrow-analysis", {
+			runId: "run-kamino-deposit-borrow-analysis",
+			runMode: "analysis",
+			intentText: "kamino deposit 1.25 USDC and borrow 0.01 SOL",
+			marketAddress,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-kamino-deposit-borrow-analysis",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lend.kamino.depositAndBorrow",
+						ownerAddress: signer.publicKey.toBase58(),
+						marketAddress,
+						depositReserveMint: USDC_MINT,
+						depositAmountRaw: "1250000",
+						borrowReserveMint: SOL_MINT,
+						borrowAmountRaw: "10000000",
+					},
+				},
+			},
+		});
+	});
+
+	it("enforces mainnet confirm token for kamino deposit+borrow execute", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const marketAddress = Keypair.generate().publicKey.toBase58();
+		const depositReserveAddress = Keypair.generate().publicKey.toBase58();
+		const borrowReserveAddress = Keypair.generate().publicKey.toBase58();
+		const obligationAddress = Keypair.generate().publicKey.toBase58();
+		const instruction = new TransactionInstruction({
+			programId: Keypair.generate().publicKey,
+			keys: [],
+			data: Buffer.from([25]),
+		});
+		runtimeMocks.buildKaminoDepositAndBorrowInstructions.mockResolvedValue({
+			network: "mainnet-beta",
+			ownerAddress: signer.publicKey.toBase58(),
+			marketAddress,
+			programId: Keypair.generate().publicKey.toBase58(),
+			depositReserveMint: USDC_MINT,
+			depositReserveAddress,
+			depositReserveSymbol: "USDC",
+			depositAmountRaw: "1000",
+			borrowReserveMint: SOL_MINT,
+			borrowReserveAddress,
+			borrowReserveSymbol: "SOL",
+			borrowAmountRaw: "10",
+			useV2Ixs: true,
+			includeAtaIxs: true,
+			extraComputeUnits: 1_000_000,
+			requestElevationGroup: false,
+			obligationAddress,
+			instructionCount: 1,
+			setupInstructionCount: 0,
+			lendingInstructionCount: 1,
+			cleanupInstructionCount: 0,
+			setupInstructionLabels: [],
+			lendingInstructionLabels: ["depositAndBorrow"],
+			cleanupInstructionLabels: [],
+			instructions: [instruction],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 1,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 99,
+				},
+			}),
+			sendRawTransaction: vi
+				.fn()
+				.mockResolvedValue("kamino-deposit-borrow-sig"),
+			confirmTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const simulated = await tool.execute("wf-kamino-deposit-borrow-sim", {
+			runId: "run-kamino-deposit-borrow",
+			intentType: "solana.lend.kamino.depositAndBorrow",
+			runMode: "simulate",
+			marketAddress,
+			depositReserveMint: USDC_MINT,
+			depositAmountRaw: "1000",
+			borrowReserveMint: SOL_MINT,
+			borrowAmountRaw: "10",
+			network: "mainnet-beta",
+		});
+		const confirmToken = (
+			simulated.details as {
+				artifacts?: { approval?: { confirmToken?: string | null } };
+			}
+		).artifacts?.approval?.confirmToken;
+		if (!confirmToken) throw new Error("confirmToken not returned");
+
+		await expect(
+			tool.execute("wf-kamino-deposit-borrow-exec-missing-confirm", {
+				runId: "run-kamino-deposit-borrow",
+				intentType: "solana.lend.kamino.depositAndBorrow",
+				runMode: "execute",
+				marketAddress,
+				depositReserveMint: USDC_MINT,
+				depositAmountRaw: "1000",
+				borrowReserveMint: SOL_MINT,
+				borrowAmountRaw: "10",
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+
+		const executed = await tool.execute("wf-kamino-deposit-borrow-exec", {
+			runId: "run-kamino-deposit-borrow",
+			intentType: "solana.lend.kamino.depositAndBorrow",
+			runMode: "execute",
+			marketAddress,
+			depositReserveMint: USDC_MINT,
+			depositAmountRaw: "1000",
+			borrowReserveMint: SOL_MINT,
+			borrowAmountRaw: "10",
+			network: "mainnet-beta",
+			confirmMainnet: true,
+			confirmToken,
+		});
+
+		expect(connection.sendRawTransaction).toHaveBeenCalledTimes(1);
+		expect(executed.details).toMatchObject({
+			runId: "run-kamino-deposit-borrow",
+			status: "executed",
+			artifacts: {
+				execute: {
+					signature: "kamino-deposit-borrow-sig",
+					guardChecks: {
+						approvalRequired: true,
+						confirmMainnetProvided: true,
+						confirmTokenMatched: true,
+						simulationOk: true,
+					},
+				},
+			},
+		});
+	});
+
 	it("parses kamino borrow intentText and derives amountRaw from amountUi", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -1173,6 +1339,172 @@ describe("w3rt_run_workflow_v0", () => {
 			artifacts: {
 				execute: {
 					signature: "kamino-repay-sig",
+					guardChecks: {
+						approvalRequired: true,
+						confirmMainnetProvided: true,
+						confirmTokenMatched: true,
+						simulationOk: true,
+					},
+				},
+			},
+		});
+	});
+
+	it("parses kamino repay+withdraw intentText and derives per-leg amountRaw", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const marketAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-kamino-repay-withdraw-analysis", {
+			runId: "run-kamino-repay-withdraw-analysis",
+			runMode: "analysis",
+			intentText:
+				"kamino repay 1.25 USDC and withdraw 0.01 SOL currentSlot=555",
+			marketAddress,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-kamino-repay-withdraw-analysis",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lend.kamino.repayAndWithdraw",
+						ownerAddress: signer.publicKey.toBase58(),
+						marketAddress,
+						repayReserveMint: USDC_MINT,
+						repayAmountRaw: "1250000",
+						withdrawReserveMint: SOL_MINT,
+						withdrawAmountRaw: "10000000",
+						currentSlot: "555",
+					},
+				},
+			},
+		});
+	});
+
+	it("enforces mainnet confirm token for kamino repay+withdraw execute", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const marketAddress = Keypair.generate().publicKey.toBase58();
+		const repayReserveAddress = Keypair.generate().publicKey.toBase58();
+		const withdrawReserveAddress = Keypair.generate().publicKey.toBase58();
+		const obligationAddress = Keypair.generate().publicKey.toBase58();
+		const instruction = new TransactionInstruction({
+			programId: Keypair.generate().publicKey,
+			keys: [],
+			data: Buffer.from([26]),
+		});
+		runtimeMocks.buildKaminoRepayAndWithdrawInstructions.mockResolvedValue({
+			network: "mainnet-beta",
+			ownerAddress: signer.publicKey.toBase58(),
+			marketAddress,
+			programId: Keypair.generate().publicKey.toBase58(),
+			repayReserveMint: USDC_MINT,
+			repayReserveAddress,
+			repayReserveSymbol: "USDC",
+			repayAmountRaw: "1000",
+			withdrawReserveMint: SOL_MINT,
+			withdrawReserveAddress,
+			withdrawReserveSymbol: "SOL",
+			withdrawAmountRaw: "10",
+			useV2Ixs: true,
+			includeAtaIxs: true,
+			extraComputeUnits: 1_000_000,
+			requestElevationGroup: false,
+			currentSlot: "999",
+			obligationAddress,
+			instructionCount: 1,
+			setupInstructionCount: 0,
+			lendingInstructionCount: 1,
+			cleanupInstructionCount: 0,
+			setupInstructionLabels: [],
+			lendingInstructionLabels: ["repayAndWithdraw"],
+			cleanupInstructionLabels: [],
+			instructions: [instruction],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 1,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 100,
+				},
+			}),
+			sendRawTransaction: vi
+				.fn()
+				.mockResolvedValue("kamino-repay-withdraw-sig"),
+			confirmTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const simulated = await tool.execute("wf-kamino-repay-withdraw-sim", {
+			runId: "run-kamino-repay-withdraw",
+			intentType: "solana.lend.kamino.repayAndWithdraw",
+			runMode: "simulate",
+			marketAddress,
+			repayReserveMint: USDC_MINT,
+			repayAmountRaw: "1000",
+			withdrawReserveMint: SOL_MINT,
+			withdrawAmountRaw: "10",
+			currentSlot: "999",
+			network: "mainnet-beta",
+		});
+		const confirmToken = (
+			simulated.details as {
+				artifacts?: { approval?: { confirmToken?: string | null } };
+			}
+		).artifacts?.approval?.confirmToken;
+		if (!confirmToken) throw new Error("confirmToken not returned");
+
+		await expect(
+			tool.execute("wf-kamino-repay-withdraw-exec-missing-confirm", {
+				runId: "run-kamino-repay-withdraw",
+				intentType: "solana.lend.kamino.repayAndWithdraw",
+				runMode: "execute",
+				marketAddress,
+				repayReserveMint: USDC_MINT,
+				repayAmountRaw: "1000",
+				withdrawReserveMint: SOL_MINT,
+				withdrawAmountRaw: "10",
+				currentSlot: "999",
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+
+		const executed = await tool.execute("wf-kamino-repay-withdraw-exec", {
+			runId: "run-kamino-repay-withdraw",
+			intentType: "solana.lend.kamino.repayAndWithdraw",
+			runMode: "execute",
+			marketAddress,
+			repayReserveMint: USDC_MINT,
+			repayAmountRaw: "1000",
+			withdrawReserveMint: SOL_MINT,
+			withdrawAmountRaw: "10",
+			currentSlot: "999",
+			network: "mainnet-beta",
+			confirmMainnet: true,
+			confirmToken,
+		});
+
+		expect(connection.sendRawTransaction).toHaveBeenCalledTimes(1);
+		expect(executed.details).toMatchObject({
+			runId: "run-kamino-repay-withdraw",
+			status: "executed",
+			artifacts: {
+				execute: {
+					signature: "kamino-repay-withdraw-sig",
 					guardChecks: {
 						approvalRequired: true,
 						confirmMainnetProvided: true,
