@@ -14,8 +14,12 @@
 		"extensions": ["./src/pi/solana-workflow-extension.ts"]
 	},
 	"scripts": {
-		"check": "biome check --error-on-warnings . && tsc --noEmit",
-		"test": "vitest run"
+		"lint": "biome check --error-on-warnings .",
+		"typecheck": "tsc --noEmit",
+		"build": "npm run typecheck",
+		"check": "npm run lint && npm run typecheck",
+		"test": "vitest run",
+		"ci": "npm run check && npm test"
 	},
 	"dependencies": {
 		"@jup-ag/api": "^6.0.48",

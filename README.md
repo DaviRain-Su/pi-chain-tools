@@ -50,10 +50,24 @@ export default solanaExtension;
 
 ## Development
 
+Local workflow (Bun):
+
 ```bash
-npm install
-npm run check
+bun install
+bun run check
+bun run test
 ```
+
+CI workflow (npm, via GitHub Actions):
+
+```bash
+npm ci
+npm run check
+npm test
+```
+
+- Local default package manager: Bun
+- CI package manager: npm (`npm ci` + lockfile)
 
 ## Future Chains
 
