@@ -64,6 +64,24 @@ function getMeteoraSwapTool() {
 	);
 }
 
+function getStakeDelegateTool() {
+	return createSolanaExecuteTools().find(
+		(tool) => tool.name === `${TOOL_PREFIX}stakeDelegate`,
+	);
+}
+
+function getStakeDeactivateTool() {
+	return createSolanaExecuteTools().find(
+		(tool) => tool.name === `${TOOL_PREFIX}stakeDeactivate`,
+	);
+}
+
+function getStakeWithdrawTool() {
+	return createSolanaExecuteTools().find(
+		(tool) => tool.name === `${TOOL_PREFIX}stakeWithdraw`,
+	);
+}
+
 export function createSolanaWorkflowToolset(): ChainToolset {
 	const confirmTool = getConfirmTool();
 	const balanceTool = getBalanceTool();
@@ -75,6 +93,9 @@ export function createSolanaWorkflowToolset(): ChainToolset {
 	const meteoraQuoteTool = getMeteoraQuoteTool();
 	const orcaSwapTool = getOrcaSwapTool();
 	const meteoraSwapTool = getMeteoraSwapTool();
+	const stakeDelegateTool = getStakeDelegateTool();
+	const stakeDeactivateTool = getStakeDeactivateTool();
+	const stakeWithdrawTool = getStakeWithdrawTool();
 	return {
 		chain: "solana",
 		groups: [
@@ -97,6 +118,9 @@ export function createSolanaWorkflowToolset(): ChainToolset {
 					...(confirmTool ? [confirmTool] : []),
 					...(orcaSwapTool ? [orcaSwapTool] : []),
 					...(meteoraSwapTool ? [meteoraSwapTool] : []),
+					...(stakeDelegateTool ? [stakeDelegateTool] : []),
+					...(stakeDeactivateTool ? [stakeDeactivateTool] : []),
+					...(stakeWithdrawTool ? [stakeWithdrawTool] : []),
 				],
 			},
 		],

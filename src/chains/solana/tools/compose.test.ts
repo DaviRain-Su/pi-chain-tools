@@ -195,6 +195,75 @@ describe("compose tools", () => {
 		});
 	});
 
+	it("builds native stake delegate transaction", async () => {
+		const stakeAuthorityAddress = Keypair.generate().publicKey.toBase58();
+		const stakeAccountAddress = Keypair.generate().publicKey.toBase58();
+		const voteAccountAddress = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 99,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 6000 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_buildStakeDelegateTransaction");
+		const result = await tool.execute("compose-stake-delegate", {
+			stakeAuthorityAddress,
+			stakeAccountAddress,
+			voteAccountAddress,
+			network: "devnet",
+		});
+
+		expect(result.details).toMatchObject({
+			version: "legacy",
+			action: "delegate",
+			stakeAuthority: stakeAuthorityAddress,
+			stakeAccount: stakeAccountAddress,
+			voteAccount: voteAccountAddress,
+			feeLamports: 6000,
+			network: "devnet",
+		});
+	});
+
+	it("builds native stake withdraw transaction and converts amountSol to lamports", async () => {
+		const withdrawAuthorityAddress = Keypair.generate().publicKey.toBase58();
+		const stakeAccountAddress = Keypair.generate().publicKey.toBase58();
+		const toAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.toLamports.mockReturnValue(123_000_000);
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 88,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 8000 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_buildStakeWithdrawTransaction");
+		const result = await tool.execute("compose-stake-withdraw", {
+			withdrawAuthorityAddress,
+			stakeAccountAddress,
+			toAddress,
+			amountSol: 0.123,
+			network: "devnet",
+		});
+
+		expect(runtimeMocks.toLamports).toHaveBeenCalledWith(0.123);
+		expect(result.details).toMatchObject({
+			version: "legacy",
+			action: "withdraw",
+			withdrawAuthority: withdrawAuthorityAddress,
+			stakeAccount: stakeAccountAddress,
+			toAddress,
+			amountSol: 0.123,
+			lamports: 123_000_000,
+			feeLamports: 8000,
+			network: "devnet",
+		});
+	});
+
 	it("builds Raydium swap transactions and resolves compute fee from auto-fee endpoint", async () => {
 		const userPublicKey = Keypair.generate().publicKey.toBase58();
 		const inputMint = Keypair.generate().publicKey.toBase58();

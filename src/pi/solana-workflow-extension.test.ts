@@ -23,6 +23,9 @@ describe("solanaWorkflowExtension", () => {
 			"solana_getTokenBalance",
 			"solana_meteoraSwap",
 			"solana_orcaSwap",
+			"solana_stakeDeactivate",
+			"solana_stakeDelegate",
+			"solana_stakeWithdraw",
 			"w3rt_run_workflow_v0",
 		]);
 	});

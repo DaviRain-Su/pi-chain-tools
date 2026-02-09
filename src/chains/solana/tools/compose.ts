@@ -9,6 +9,7 @@ import {
 	type BlockhashWithExpiryBlockHeight,
 	type Connection,
 	PublicKey,
+	StakeProgram,
 	SystemProgram,
 	Transaction,
 	type TransactionInstruction,
@@ -762,6 +763,263 @@ export function createSolanaComposeTools() {
 						),
 						destinationTokenAccountExplorer: getExplorerAddressUrl(
 							destinationTokenAccount.toBase58(),
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildStakeDelegateTransaction`,
+			label: "Solana Build Stake Delegate Transaction",
+			description:
+				"Build an unsigned native staking delegate transaction (legacy, base64) for an existing stake account",
+			parameters: Type.Object({
+				stakeAuthorityAddress: Type.String({
+					description: "Stake authority wallet address (also fee payer)",
+				}),
+				stakeAccountAddress: Type.String({
+					description: "Stake account public key",
+				}),
+				voteAccountAddress: Type.String({
+					description: "Validator vote account public key",
+				}),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const connection = getConnection(params.network);
+				const stakeAuthority = new PublicKey(
+					normalizeAtPath(params.stakeAuthorityAddress),
+				);
+				const stakeAccount = new PublicKey(
+					normalizeAtPath(params.stakeAccountAddress),
+				);
+				const voteAccount = new PublicKey(
+					normalizeAtPath(params.voteAccountAddress),
+				);
+				const delegateTx = StakeProgram.delegate({
+					stakePubkey: stakeAccount,
+					authorizedPubkey: stakeAuthority,
+					votePubkey: voteAccount,
+				});
+				const instruction =
+					delegateTx.instructions[delegateTx.instructions.length - 1];
+				if (!instruction) {
+					throw new Error("Failed to build stake delegate instruction");
+				}
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const tx = createLegacyTransaction(
+					stakeAuthority,
+					[instruction],
+					latestBlockhash,
+				);
+				const feeResult = await connection.getFeeForMessage(
+					tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 = tx
+					.serialize({
+						requireAllSignatures: false,
+						verifySignatures: false,
+					})
+					.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned stake delegate transaction built (legacy)",
+						},
+					],
+					details: {
+						txBase64,
+						version: "legacy",
+						action: "delegate",
+						stakeAuthority: stakeAuthority.toBase58(),
+						stakeAccount: stakeAccount.toBase58(),
+						voteAccount: voteAccount.toBase58(),
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						network: parseNetwork(params.network),
+						stakeAuthorityExplorer: getExplorerAddressUrl(
+							stakeAuthority.toBase58(),
+							params.network,
+						),
+						stakeAccountExplorer: getExplorerAddressUrl(
+							stakeAccount.toBase58(),
+							params.network,
+						),
+						voteAccountExplorer: getExplorerAddressUrl(
+							voteAccount.toBase58(),
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildStakeDeactivateTransaction`,
+			label: "Solana Build Stake Deactivate Transaction",
+			description:
+				"Build an unsigned native staking deactivate transaction (legacy, base64) for an existing stake account",
+			parameters: Type.Object({
+				stakeAuthorityAddress: Type.String({
+					description: "Stake authority wallet address (also fee payer)",
+				}),
+				stakeAccountAddress: Type.String({
+					description: "Stake account public key",
+				}),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const connection = getConnection(params.network);
+				const stakeAuthority = new PublicKey(
+					normalizeAtPath(params.stakeAuthorityAddress),
+				);
+				const stakeAccount = new PublicKey(
+					normalizeAtPath(params.stakeAccountAddress),
+				);
+				const deactivateTx = StakeProgram.deactivate({
+					stakePubkey: stakeAccount,
+					authorizedPubkey: stakeAuthority,
+				});
+				const instruction =
+					deactivateTx.instructions[deactivateTx.instructions.length - 1];
+				if (!instruction) {
+					throw new Error("Failed to build stake deactivate instruction");
+				}
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const tx = createLegacyTransaction(
+					stakeAuthority,
+					[instruction],
+					latestBlockhash,
+				);
+				const feeResult = await connection.getFeeForMessage(
+					tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 = tx
+					.serialize({
+						requireAllSignatures: false,
+						verifySignatures: false,
+					})
+					.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned stake deactivate transaction built (legacy)",
+						},
+					],
+					details: {
+						txBase64,
+						version: "legacy",
+						action: "deactivate",
+						stakeAuthority: stakeAuthority.toBase58(),
+						stakeAccount: stakeAccount.toBase58(),
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						network: parseNetwork(params.network),
+						stakeAuthorityExplorer: getExplorerAddressUrl(
+							stakeAuthority.toBase58(),
+							params.network,
+						),
+						stakeAccountExplorer: getExplorerAddressUrl(
+							stakeAccount.toBase58(),
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildStakeWithdrawTransaction`,
+			label: "Solana Build Stake Withdraw Transaction",
+			description:
+				"Build an unsigned native staking withdraw transaction (legacy, base64) for an existing stake account",
+			parameters: Type.Object({
+				withdrawAuthorityAddress: Type.String({
+					description: "Withdraw authority wallet address (also fee payer)",
+				}),
+				stakeAccountAddress: Type.String({
+					description: "Stake account public key",
+				}),
+				toAddress: Type.String({
+					description: "Destination wallet address for withdrawn SOL",
+				}),
+				amountSol: Type.Number({
+					description: "Withdraw amount in SOL",
+				}),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const connection = getConnection(params.network);
+				const withdrawAuthority = new PublicKey(
+					normalizeAtPath(params.withdrawAuthorityAddress),
+				);
+				const stakeAccount = new PublicKey(
+					normalizeAtPath(params.stakeAccountAddress),
+				);
+				const to = new PublicKey(normalizeAtPath(params.toAddress));
+				const lamports = toLamports(params.amountSol);
+				const withdrawTx = StakeProgram.withdraw({
+					stakePubkey: stakeAccount,
+					authorizedPubkey: withdrawAuthority,
+					toPubkey: to,
+					lamports,
+				});
+				const instruction =
+					withdrawTx.instructions[withdrawTx.instructions.length - 1];
+				if (!instruction) {
+					throw new Error("Failed to build stake withdraw instruction");
+				}
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const tx = createLegacyTransaction(
+					withdrawAuthority,
+					[instruction],
+					latestBlockhash,
+				);
+				const feeResult = await connection.getFeeForMessage(
+					tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 = tx
+					.serialize({
+						requireAllSignatures: false,
+						verifySignatures: false,
+					})
+					.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned stake withdraw transaction built (legacy)",
+						},
+					],
+					details: {
+						txBase64,
+						version: "legacy",
+						action: "withdraw",
+						withdrawAuthority: withdrawAuthority.toBase58(),
+						stakeAccount: stakeAccount.toBase58(),
+						toAddress: to.toBase58(),
+						amountSol: params.amountSol,
+						lamports,
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						network: parseNetwork(params.network),
+						withdrawAuthorityExplorer: getExplorerAddressUrl(
+							withdrawAuthority.toBase58(),
+							params.network,
+						),
+						stakeAccountExplorer: getExplorerAddressUrl(
+							stakeAccount.toBase58(),
+							params.network,
+						),
+						toAddressExplorer: getExplorerAddressUrl(
+							to.toBase58(),
 							params.network,
 						),
 					},

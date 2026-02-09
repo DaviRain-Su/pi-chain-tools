@@ -821,3 +821,107 @@ describe("solana_transferSplToken", () => {
 		});
 	});
 });
+
+describe("native stake execute tools", () => {
+	it("simulates stake delegation", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 123,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 91,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_stakeDelegate");
+		const stakeAccountAddress = Keypair.generate().publicKey.toBase58();
+		const voteAccountAddress = Keypair.generate().publicKey.toBase58();
+		const result = await tool.execute("stake-delegate-sim", {
+			fromSecretKey: "mock",
+			stakeAccountAddress,
+			voteAccountAddress,
+			network: "mainnet-beta",
+			simulate: true,
+			confirmMainnet: true,
+		});
+
+		expect(connection.simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			action: "delegate",
+			simulated: true,
+			stakeAccount: stakeAccountAddress,
+			voteAccount: voteAccountAddress,
+			network: "mainnet-beta",
+		});
+	});
+
+	it("blocks mainnet stake deactivation unless confirmMainnet=true", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const tool = getTool("solana_stakeDeactivate");
+
+		await expect(
+			tool.execute("stake-deactivate-mainnet", {
+				fromSecretKey: "mock",
+				stakeAccountAddress: Keypair.generate().publicKey.toBase58(),
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+		expect(runtimeMocks.getConnection).not.toHaveBeenCalled();
+	});
+
+	it("sends stake withdraw transaction", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("devnet");
+		runtimeMocks.toLamports.mockReturnValue(500_000_000);
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const sendRawTransaction = vi.fn().mockResolvedValue("stake-withdraw-sig");
+		const confirmTransaction = vi
+			.fn()
+			.mockResolvedValue({ value: { err: null } });
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 222,
+			}),
+			sendRawTransaction,
+			confirmTransaction,
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_stakeWithdraw");
+		const stakeAccountAddress = Keypair.generate().publicKey.toBase58();
+		const toAddress = Keypair.generate().publicKey.toBase58();
+		const result = await tool.execute("stake-withdraw-send", {
+			fromSecretKey: "mock",
+			stakeAccountAddress,
+			toAddress,
+			amountSol: 0.5,
+			network: "devnet",
+		});
+
+		expect(runtimeMocks.toLamports).toHaveBeenCalledWith(0.5);
+		expect(sendRawTransaction).toHaveBeenCalledTimes(1);
+		expect(confirmTransaction).toHaveBeenCalledWith(
+			"stake-withdraw-sig",
+			"confirmed",
+		);
+		expect(result.details).toMatchObject({
+			action: "withdraw",
+			simulated: false,
+			signature: "stake-withdraw-sig",
+			stakeAccount: stakeAccountAddress,
+			toAddress,
+			lamports: 500_000_000,
+			network: "devnet",
+		});
+	});
+});
