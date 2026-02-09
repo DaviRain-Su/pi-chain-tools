@@ -1,17 +1,27 @@
 import { createHash, randomBytes } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import {
+	ASSOCIATED_TOKEN_PROGRAM_ID,
+	createAssociatedTokenAccountInstruction,
+	createTransferInstruction,
+	getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
+import {
+	type Connection,
 	Keypair,
 	type ParsedAccountData,
 	PublicKey,
 	SystemProgram,
 	Transaction,
+	type TransactionInstruction,
 	VersionedTransaction,
 } from "@solana/web3.js";
 import { defineTool } from "../../../core/types.js";
 import {
 	assertJupiterNetworkSupported,
+	assertRaydiumNetworkSupported,
 	buildJupiterSwapTransaction,
+	buildRaydiumSwapTransactions,
 	callJupiterApi,
 	commitmentSchema,
 	getConnection,
@@ -19,6 +29,11 @@ import {
 	getExplorerTransactionUrl,
 	getJupiterApiBaseUrl,
 	getJupiterQuote,
+	getRaydiumApiBaseUrl,
+	getRaydiumPriorityFee,
+	getRaydiumPriorityFeeMicroLamports,
+	getRaydiumQuote,
+	getSplTokenProgramId,
 	jupiterPriorityLevelSchema,
 	jupiterSwapModeSchema,
 	normalizeAtPath,
@@ -27,14 +42,25 @@ import {
 	parseJupiterSwapMode,
 	parseNetwork,
 	parsePositiveBigInt,
+	parseRaydiumSwapType,
+	parseRaydiumTxVersion,
+	parseSplTokenProgram,
 	parseTransactionFromBase64,
+	raydiumSwapTypeSchema,
+	raydiumTxVersionSchema,
 	resolveSecretKey,
 	solanaNetworkSchema,
+	splTokenProgramSchema,
+	stringifyUnknown,
 	toLamports,
 } from "../runtime.js";
 
 type WorkflowRunMode = "analysis" | "simulate" | "execute";
-type WorkflowIntentType = "solana.transfer.sol" | "solana.swap.jupiter";
+type WorkflowIntentType =
+	| "solana.transfer.sol"
+	| "solana.transfer.spl"
+	| "solana.swap.jupiter"
+	| "solana.swap.raydium";
 type ParsedIntentTextFields = Partial<{
 	intentType: WorkflowIntentType;
 	toAddress: string;
@@ -55,6 +81,18 @@ type TransferSolIntent = {
 	lamports: number;
 };
 
+type TransferSplIntent = {
+	type: "solana.transfer.spl";
+	fromAddress: string;
+	toAddress: string;
+	tokenMint: string;
+	amountRaw: string;
+	tokenProgram: "token" | "token2022";
+	sourceTokenAccount?: string;
+	destinationTokenAccount?: string;
+	createDestinationAtaIfMissing: boolean;
+};
+
 type JupiterSwapIntent = {
 	type: "solana.swap.jupiter";
 	userPublicKey: string;
@@ -71,11 +109,35 @@ type JupiterSwapIntent = {
 	asLegacyTransaction?: boolean;
 };
 
-type WorkflowIntent = TransferSolIntent | JupiterSwapIntent;
+type RaydiumSwapIntent = {
+	type: "solana.swap.raydium";
+	userPublicKey: string;
+	inputMint: string;
+	outputMint: string;
+	amountRaw: string;
+	slippageBps: number;
+	txVersion: "V0" | "LEGACY";
+	swapType: "BaseIn" | "BaseOut";
+	computeUnitPriceMicroLamports?: string;
+	wrapSol?: boolean;
+	unwrapSol?: boolean;
+	inputAccount?: string;
+	outputAccount?: string;
+};
+
+type WorkflowIntent =
+	| TransferSolIntent
+	| TransferSplIntent
+	| JupiterSwapIntent
+	| RaydiumSwapIntent;
 
 type PreparedTransaction = {
 	tx: Transaction | VersionedTransaction;
 	version: "legacy" | "v0";
+	signedTransactions?: Array<{
+		tx: Transaction | VersionedTransaction;
+		version: "legacy" | "v0";
+	}>;
 	simulation: {
 		ok: boolean;
 		err: unknown;
@@ -571,8 +633,11 @@ function parseTransferIntentText(intentText: string): ParsedIntentTextFields {
 }
 
 function parseSwapIntentText(intentText: string): ParsedIntentTextFields {
+	const lower = intentText.toLowerCase();
 	const parsed: ParsedIntentTextFields = {
-		intentType: "solana.swap.jupiter",
+		intentType: lower.includes("raydium")
+			? "solana.swap.raydium"
+			: "solana.swap.jupiter",
 	};
 	const inputMatch = intentText.match(
 		/\binputMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
@@ -685,8 +750,20 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	if (lower.includes("solana.transfer.sol")) {
 		return parseTransferIntentText(trimmed);
 	}
+	if (lower.includes("solana.transfer.spl")) {
+		return {
+			...parseTransferIntentText(trimmed),
+			intentType: "solana.transfer.spl",
+		};
+	}
 	if (lower.includes("solana.swap.jupiter")) {
 		return parseSwapIntentText(trimmed);
+	}
+	if (lower.includes("solana.swap.raydium")) {
+		return {
+			...parseSwapIntentText(trimmed),
+			intentType: "solana.swap.raydium",
+		};
 	}
 	const hasSwapKeywords = SWAP_KEYWORD_REGEX.test(trimmed);
 	const hasTransferKeywords = TRANSFER_KEYWORD_REGEX.test(trimmed);
@@ -736,9 +813,28 @@ function resolveIntentType(
 ): WorkflowIntentType {
 	if (
 		params.intentType === "solana.transfer.sol" ||
-		params.intentType === "solana.swap.jupiter"
+		params.intentType === "solana.transfer.spl" ||
+		params.intentType === "solana.swap.jupiter" ||
+		params.intentType === "solana.swap.raydium"
 	) {
 		return params.intentType;
+	}
+	if (
+		typeof params.tokenMint === "string" &&
+		(typeof params.toAddress === "string" ||
+			typeof params.sourceTokenAccount === "string" ||
+			typeof params.destinationTokenAccount === "string")
+	) {
+		return "solana.transfer.spl";
+	}
+	if (
+		typeof params.txVersion === "string" ||
+		typeof params.swapType === "string" ||
+		typeof params.computeUnitPriceMicroLamports === "string" ||
+		(typeof params.intentText === "string" &&
+			params.intentText.toLowerCase().includes("raydium"))
+	) {
+		return "solana.swap.raydium";
 	}
 	if (
 		typeof params.inputMint === "string" ||
@@ -797,6 +893,45 @@ async function normalizeIntent(
 			lamports,
 		};
 	}
+	if (intentType === "solana.transfer.spl") {
+		const toAddress = new PublicKey(
+			normalizeAtPath(ensureString(normalizedParams.toAddress, "toAddress")),
+		).toBase58();
+		const tokenMint = await ensureMint(normalizedParams.tokenMint, "tokenMint");
+		const amountRaw = parsePositiveBigInt(
+			ensureString(normalizedParams.amountRaw, "amountRaw"),
+			"amountRaw",
+		).toString();
+		const tokenProgram = parseSplTokenProgram(
+			typeof normalizedParams.tokenProgram === "string"
+				? normalizedParams.tokenProgram
+				: undefined,
+		);
+		const sourceTokenAccount =
+			typeof normalizedParams.sourceTokenAccount === "string"
+				? new PublicKey(
+						normalizeAtPath(normalizedParams.sourceTokenAccount),
+					).toBase58()
+				: undefined;
+		const destinationTokenAccount =
+			typeof normalizedParams.destinationTokenAccount === "string"
+				? new PublicKey(
+						normalizeAtPath(normalizedParams.destinationTokenAccount),
+					).toBase58()
+				: undefined;
+		return {
+			type: intentType,
+			fromAddress: signerPublicKey,
+			toAddress,
+			tokenMint,
+			amountRaw,
+			tokenProgram,
+			sourceTokenAccount,
+			destinationTokenAccount,
+			createDestinationAtaIfMissing:
+				normalizedParams.createDestinationAtaIfMissing !== false,
+		};
+	}
 
 	const inputMint = await ensureMint(normalizedParams.inputMint, "inputMint");
 	const outputMint = await ensureMint(
@@ -829,6 +964,59 @@ async function normalizeIntent(
 		ensureString(amountRawValue, "amountRaw"),
 		"amountRaw",
 	).toString();
+	if (intentType === "solana.swap.raydium") {
+		const inputAccount =
+			typeof normalizedParams.inputAccount === "string"
+				? new PublicKey(
+						normalizeAtPath(normalizedParams.inputAccount),
+					).toBase58()
+				: undefined;
+		const outputAccount =
+			typeof normalizedParams.outputAccount === "string"
+				? new PublicKey(
+						normalizeAtPath(normalizedParams.outputAccount),
+					).toBase58()
+				: undefined;
+		const slippageBps =
+			typeof normalizedParams.slippageBps === "number"
+				? normalizedParams.slippageBps
+				: undefined;
+		if (!slippageBps) {
+			throw new Error("slippageBps is required");
+		}
+		return {
+			type: intentType,
+			userPublicKey: signerPublicKey,
+			inputMint,
+			outputMint,
+			amountRaw,
+			slippageBps,
+			txVersion: parseRaydiumTxVersion(
+				typeof normalizedParams.txVersion === "string"
+					? normalizedParams.txVersion
+					: undefined,
+			),
+			swapType: parseRaydiumSwapType(
+				typeof normalizedParams.swapType === "string"
+					? normalizedParams.swapType
+					: undefined,
+			),
+			computeUnitPriceMicroLamports:
+				typeof normalizedParams.computeUnitPriceMicroLamports === "string"
+					? normalizedParams.computeUnitPriceMicroLamports
+					: undefined,
+			wrapSol:
+				typeof normalizedParams.wrapSol === "boolean"
+					? normalizedParams.wrapSol
+					: undefined,
+			unwrapSol:
+				typeof normalizedParams.unwrapSol === "boolean"
+					? normalizedParams.unwrapSol
+					: undefined,
+			inputAccount,
+			outputAccount,
+		};
+	}
 	return {
 		type: intentType,
 		userPublicKey: signerPublicKey,
@@ -873,6 +1061,92 @@ async function normalizeIntent(
 	};
 }
 
+async function buildSplTransferInstructions(
+	connection: Connection,
+	fromOwner: PublicKey,
+	toOwner: PublicKey,
+	mint: PublicKey,
+	sourceTokenAccount: PublicKey,
+	destinationTokenAccount: PublicKey,
+	amountRaw: bigint,
+	tokenProgramId: PublicKey,
+	createDestinationAtaIfMissing: boolean,
+): Promise<{
+	instructions: TransactionInstruction[];
+	destinationAtaCreateIncluded: boolean;
+}> {
+	const sourceInfo = await connection.getAccountInfo(sourceTokenAccount);
+	if (!sourceInfo) {
+		throw new Error(
+			`Source token account not found: ${sourceTokenAccount.toBase58()}`,
+		);
+	}
+
+	const instructions: TransactionInstruction[] = [];
+	const destinationInfo = await connection.getAccountInfo(
+		destinationTokenAccount,
+	);
+	let destinationAtaCreateIncluded = false;
+
+	if (!destinationInfo && createDestinationAtaIfMissing) {
+		instructions.push(
+			createAssociatedTokenAccountInstruction(
+				fromOwner,
+				destinationTokenAccount,
+				toOwner,
+				mint,
+				tokenProgramId,
+				ASSOCIATED_TOKEN_PROGRAM_ID,
+			),
+		);
+		destinationAtaCreateIncluded = true;
+	}
+	if (!destinationInfo && !destinationAtaCreateIncluded) {
+		throw new Error(
+			`Destination token account not found: ${destinationTokenAccount.toBase58()}. Set createDestinationAtaIfMissing=true or provide an existing destinationTokenAccount.`,
+		);
+	}
+
+	instructions.push(
+		createTransferInstruction(
+			sourceTokenAccount,
+			destinationTokenAccount,
+			fromOwner,
+			amountRaw,
+			[],
+			tokenProgramId,
+		),
+	);
+	return { instructions, destinationAtaCreateIncluded };
+}
+
+function extractRaydiumTransactions(response: unknown): string[] {
+	if (!response || typeof response !== "object") return [];
+	const payload = response as Record<string, unknown>;
+	const data = payload.data;
+	if (Array.isArray(data)) {
+		return data
+			.map((entry) => {
+				if (!entry || typeof entry !== "object") return null;
+				const record = entry as Record<string, unknown>;
+				return typeof record.transaction === "string"
+					? record.transaction
+					: null;
+			})
+			.filter((entry): entry is string => entry !== null);
+	}
+	if (data && typeof data === "object") {
+		const record = data as Record<string, unknown>;
+		if (typeof record.transaction === "string") {
+			return [record.transaction];
+		}
+	}
+	if (typeof payload.transaction === "string") {
+		return [payload.transaction];
+	}
+	return [];
+}
+
 async function prepareTransferSolSimulation(
 	network: string,
 	signer: Keypair,
@@ -906,6 +1180,76 @@ async function prepareTransferSolSimulation(
 			fromAddress: intent.fromAddress,
 			toAddress: intent.toAddress,
 			amountSol: intent.amountSol,
+		},
+	};
+}
+
+async function prepareTransferSplSimulation(
+	network: string,
+	signer: Keypair,
+	intent: TransferSplIntent,
+): Promise<PreparedTransaction> {
+	const connection = getConnection(network);
+	const toOwner = new PublicKey(intent.toAddress);
+	const mint = new PublicKey(intent.tokenMint);
+	const tokenProgramId = getSplTokenProgramId(intent.tokenProgram);
+	const sourceTokenAccount = intent.sourceTokenAccount
+		? new PublicKey(intent.sourceTokenAccount)
+		: getAssociatedTokenAddressSync(
+				mint,
+				signer.publicKey,
+				false,
+				tokenProgramId,
+				ASSOCIATED_TOKEN_PROGRAM_ID,
+			);
+	const destinationTokenAccount = intent.destinationTokenAccount
+		? new PublicKey(intent.destinationTokenAccount)
+		: getAssociatedTokenAddressSync(
+				mint,
+				toOwner,
+				false,
+				tokenProgramId,
+				ASSOCIATED_TOKEN_PROGRAM_ID,
+			);
+
+	const { instructions, destinationAtaCreateIncluded } =
+		await buildSplTransferInstructions(
+			connection,
+			signer.publicKey,
+			toOwner,
+			mint,
+			sourceTokenAccount,
+			destinationTokenAccount,
+			parsePositiveBigInt(intent.amountRaw, "amountRaw"),
+			tokenProgramId,
+			intent.createDestinationAtaIfMissing,
+		);
+	const tx = new Transaction().add(...instructions);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			latestBlockhash,
+			fromAddress: intent.fromAddress,
+			toAddress: intent.toAddress,
+			tokenMint: intent.tokenMint,
+			amountRaw: intent.amountRaw,
+			tokenProgram: intent.tokenProgram,
+			tokenProgramId: tokenProgramId.toBase58(),
+			sourceTokenAccount: sourceTokenAccount.toBase58(),
+			destinationTokenAccount: destinationTokenAccount.toBase58(),
+			destinationAtaCreateIncluded,
 		},
 	};
 }
@@ -1042,6 +1386,123 @@ async function prepareJupiterSwapSimulation(
 	};
 }
 
+async function prepareRaydiumSwapSimulation(
+	network: string,
+	signer: Keypair,
+	intent: RaydiumSwapIntent,
+	params: Record<string, unknown>,
+): Promise<PreparedTransaction> {
+	assertRaydiumNetworkSupported(network);
+	const quote = await getRaydiumQuote({
+		inputMint: intent.inputMint,
+		outputMint: intent.outputMint,
+		amount: intent.amountRaw,
+		slippageBps: intent.slippageBps,
+		txVersion: intent.txVersion,
+		swapType: intent.swapType,
+	});
+	let autoFeePayload: unknown = null;
+	let computeUnitPriceMicroLamports = intent.computeUnitPriceMicroLamports;
+	if (!computeUnitPriceMicroLamports) {
+		autoFeePayload = await getRaydiumPriorityFee();
+		computeUnitPriceMicroLamports =
+			getRaydiumPriorityFeeMicroLamports(autoFeePayload) ?? undefined;
+	}
+	if (!computeUnitPriceMicroLamports) {
+		throw new Error(
+			"Unable to resolve Raydium computeUnitPriceMicroLamports from auto-fee endpoint. Provide computeUnitPriceMicroLamports explicitly.",
+		);
+	}
+	const swapResponse = await buildRaydiumSwapTransactions({
+		wallet: signer.publicKey.toBase58(),
+		txVersion: intent.txVersion,
+		swapType: intent.swapType,
+		quoteResponse: quote,
+		computeUnitPriceMicroLamports,
+		wrapSol: intent.wrapSol,
+		unwrapSol: intent.unwrapSol,
+		inputAccount: intent.inputAccount,
+		outputAccount: intent.outputAccount,
+	});
+	const txBase64List = extractRaydiumTransactions(swapResponse);
+	if (txBase64List.length === 0) {
+		throw new Error("Raydium swap response missing serialized transaction");
+	}
+	const signedTransactions = txBase64List.map((txBase64) => {
+		const tx = parseTransactionFromBase64(txBase64);
+		let version: "legacy" | "v0" = "legacy";
+		if (tx instanceof VersionedTransaction) {
+			tx.sign([signer]);
+			version = "v0";
+		} else {
+			tx.partialSign(signer);
+		}
+		return { tx, version };
+	});
+	const commitment = parseFinality(
+		typeof params.commitment === "string" ? params.commitment : undefined,
+	);
+	const connection = getConnection(network);
+	const simulations = [];
+	for (const [index, entry] of signedTransactions.entries()) {
+		const simulation =
+			entry.tx instanceof VersionedTransaction
+				? await connection.simulateTransaction(entry.tx, {
+						sigVerify: true,
+						replaceRecentBlockhash: false,
+						commitment,
+					})
+				: await connection.simulateTransaction(entry.tx);
+		simulations.push({
+			index,
+			version: entry.version,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		});
+	}
+	const simulationOk = simulations.every((item) => item.err == null);
+	const firstErr = simulations.find((item) => item.err != null)?.err ?? null;
+	const combinedLogs = simulations.flatMap((item) => item.logs);
+	const totalUnits = simulations.reduce<number | null>((total, item) => {
+		if (item.unitsConsumed == null) {
+			return total;
+		}
+		return (total ?? 0) + item.unitsConsumed;
+	}, null);
+	const primary = signedTransactions[0];
+	if (!primary) {
+		throw new Error("Raydium swap produced no signed transaction");
+	}
+	return {
+		tx: primary.tx,
+		version: primary.version,
+		signedTransactions,
+		simulation: {
+			ok: simulationOk,
+			err: firstErr,
+			logs: combinedLogs,
+			unitsConsumed: totalUnits,
+		},
+		context: {
+			txCount: signedTransactions.length,
+			txVersions: signedTransactions.map((entry) => entry.version),
+			simulations,
+			inputMint: intent.inputMint,
+			outputMint: intent.outputMint,
+			amountRaw: intent.amountRaw,
+			slippageBps: intent.slippageBps,
+			txVersion: intent.txVersion,
+			swapType: intent.swapType,
+			computeUnitPriceMicroLamports,
+			quote,
+			swapResponse,
+			autoFeePayload,
+			raydiumApiBaseUrl: getRaydiumApiBaseUrl(),
+		},
+	};
+}
+
 async function prepareSimulation(
 	network: string,
 	signer: Keypair,
@@ -1050,6 +1511,12 @@ async function prepareSimulation(
 ): Promise<PreparedTransaction> {
 	if (intent.type === "solana.transfer.sol") {
 		return prepareTransferSolSimulation(network, signer, intent);
+	}
+	if (intent.type === "solana.transfer.spl") {
+		return prepareTransferSplSimulation(network, signer, intent);
+	}
+	if (intent.type === "solana.swap.raydium") {
+		return prepareRaydiumSwapSimulation(network, signer, intent, params);
 	}
 	return prepareJupiterSwapSimulation(network, signer, intent, params);
 }
@@ -1060,35 +1527,48 @@ async function executePreparedTransaction(
 	params: Record<string, unknown>,
 ): Promise<{
 	signature: string;
+	signatures: string[];
 	confirmed: boolean;
 }> {
 	const connection = getConnection(network);
-	const signature = await connection.sendRawTransaction(
-		prepared.tx.serialize(),
-		{
-			skipPreflight: params.skipPreflight === true,
-			maxRetries:
-				typeof params.maxRetries === "number" ? params.maxRetries : undefined,
-		},
-	);
 	const commitment = parseFinality(
 		typeof params.commitment === "string" ? params.commitment : undefined,
 	);
-	let confirmationErr: unknown = null;
-	if (params.confirm !== false) {
-		const confirmation = await connection.confirmTransaction(
-			signature,
-			commitment,
+	const signedTransactions =
+		prepared.signedTransactions && prepared.signedTransactions.length > 0
+			? prepared.signedTransactions
+			: [{ tx: prepared.tx, version: prepared.version }];
+	const signatures: string[] = [];
+	for (const entry of signedTransactions) {
+		const signature = await connection.sendRawTransaction(
+			entry.tx.serialize(),
+			{
+				skipPreflight: params.skipPreflight === true,
+				maxRetries:
+					typeof params.maxRetries === "number" ? params.maxRetries : undefined,
+			},
 		);
-		confirmationErr = confirmation.value.err;
+		signatures.push(signature);
+		if (params.confirm !== false) {
+			const confirmation = await connection.confirmTransaction(
+				signature,
+				commitment,
+			);
+			const confirmationErr = confirmation.value.err;
+			if (confirmationErr) {
+				throw new Error(
+					`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+				);
+			}
+		}
 	}
-	if (confirmationErr) {
-		throw new Error(
-			`Transaction confirmed with error: ${JSON.stringify(confirmationErr)}`,
-		);
+	const signature = signatures[signatures.length - 1];
+	if (!signature) {
+		throw new Error("No signature returned");
 	}
 	return {
 		signature,
+		signatures,
 		confirmed: params.confirm !== false,
 	};
 }
@@ -1110,7 +1590,9 @@ export function createSolanaWorkflowTools() {
 				intentType: Type.Optional(
 					Type.Union([
 						Type.Literal("solana.transfer.sol"),
+						Type.Literal("solana.transfer.spl"),
 						Type.Literal("solana.swap.jupiter"),
+						Type.Literal("solana.swap.raydium"),
 					]),
 				),
 				intentText: Type.Optional(
@@ -1153,7 +1635,7 @@ export function createSolanaWorkflowTools() {
 				toAddress: Type.Optional(
 					Type.String({
 						description:
-							"Destination address for intentType=solana.transfer.sol",
+							"Destination address for intentType=solana.transfer.sol or solana.transfer.spl",
 					}),
 				),
 				amountSol: Type.Optional(
@@ -1161,20 +1643,27 @@ export function createSolanaWorkflowTools() {
 						description: "Amount in SOL for intentType=solana.transfer.sol",
 					}),
 				),
+				tokenMint: Type.Optional(
+					Type.String({
+						description: "Token mint for intentType=solana.transfer.spl",
+					}),
+				),
 				inputMint: Type.Optional(
 					Type.String({
-						description: "Input mint for intentType=solana.swap.jupiter",
+						description:
+							"Input mint for intentType=solana.swap.jupiter or solana.swap.raydium",
 					}),
 				),
 				outputMint: Type.Optional(
 					Type.String({
-						description: "Output mint for intentType=solana.swap.jupiter",
+						description:
+							"Output mint for intentType=solana.swap.jupiter or solana.swap.raydium",
 					}),
 				),
 				amountRaw: Type.Optional(
 					Type.String({
 						description:
-							"Raw integer amount for intentType=solana.swap.jupiter",
+							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl",
 					}),
 				),
 				amountUi: Type.Optional(
@@ -1185,6 +1674,9 @@ export function createSolanaWorkflowTools() {
 				),
 				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
 				swapMode: jupiterSwapModeSchema(),
+				txVersion: raydiumTxVersionSchema(),
+				swapType: raydiumSwapTypeSchema(),
+				computeUnitPriceMicroLamports: Type.Optional(Type.String()),
 				restrictIntermediateTokens: Type.Optional(Type.Boolean()),
 				onlyDirectRoutes: Type.Optional(Type.Boolean()),
 				asLegacyTransaction: Type.Optional(Type.Boolean()),
@@ -1213,7 +1705,14 @@ export function createSolanaWorkflowTools() {
 				useSharedAccounts: Type.Optional(Type.Boolean()),
 				dynamicComputeUnitLimit: Type.Optional(Type.Boolean()),
 				skipUserAccountsRpcCalls: Type.Optional(Type.Boolean()),
+				wrapSol: Type.Optional(Type.Boolean()),
+				unwrapSol: Type.Optional(Type.Boolean()),
 				destinationTokenAccount: Type.Optional(Type.String()),
+				sourceTokenAccount: Type.Optional(Type.String()),
+				inputAccount: Type.Optional(Type.String()),
+				outputAccount: Type.Optional(Type.String()),
+				createDestinationAtaIfMissing: Type.Optional(Type.Boolean()),
+				tokenProgram: splTokenProgramSchema(),
 				trackingAccount: Type.Optional(Type.String()),
 				feeAccount: Type.Optional(Type.String()),
 			}),
@@ -1356,6 +1855,7 @@ export function createSolanaWorkflowTools() {
 				const executeArtifact = {
 					stage: "execute",
 					signature: execution.signature,
+					signatures: execution.signatures,
 					confirmed: execution.confirmed,
 					version: prepared.version,
 				};

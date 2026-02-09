@@ -2,8 +2,10 @@ import { Keypair } from "@solana/web3.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtimeMocks = vi.hoisted(() => ({
+	assertRaydiumNetworkSupported: vi.fn(),
 	assertJupiterNetworkSupported: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
+	buildRaydiumSwapTransactions: vi.fn(),
 	callJupiterApi: vi.fn(),
 	commitmentSchema: vi.fn(),
 	getConnection: vi.fn(),
@@ -11,6 +13,11 @@ const runtimeMocks = vi.hoisted(() => ({
 	getExplorerTransactionUrl: vi.fn(),
 	getJupiterApiBaseUrl: vi.fn(() => "https://lite-api.jup.ag"),
 	getJupiterQuote: vi.fn(),
+	getRaydiumApiBaseUrl: vi.fn(() => "https://raydium.api"),
+	getRaydiumPriorityFee: vi.fn(),
+	getRaydiumPriorityFeeMicroLamports: vi.fn(() => "1000"),
+	getRaydiumQuote: vi.fn(),
+	getSplTokenProgramId: vi.fn(),
 	jupiterPriorityLevelSchema: vi.fn(),
 	jupiterSwapModeSchema: vi.fn(),
 	normalizeAtPath: vi.fn((value: string) => value),
@@ -19,9 +26,16 @@ const runtimeMocks = vi.hoisted(() => ({
 	parseJupiterSwapMode: vi.fn(() => "ExactIn"),
 	parseNetwork: vi.fn(() => "devnet"),
 	parsePositiveBigInt: vi.fn((value: string) => BigInt(value)),
+	parseRaydiumSwapType: vi.fn(() => "BaseIn"),
+	parseRaydiumTxVersion: vi.fn(() => "V0"),
+	parseSplTokenProgram: vi.fn(() => "token"),
 	parseTransactionFromBase64: vi.fn(),
+	raydiumSwapTypeSchema: vi.fn(),
+	raydiumTxVersionSchema: vi.fn(),
 	resolveSecretKey: vi.fn(),
 	solanaNetworkSchema: vi.fn(),
+	splTokenProgramSchema: vi.fn(),
+	stringifyUnknown: vi.fn((value: unknown) => String(value)),
 	toLamports: vi.fn((value: number) => Math.round(value * 1_000_000_000)),
 }));
 
@@ -30,8 +44,10 @@ vi.mock("../runtime.js", async () => {
 		await vi.importActual<typeof import("../runtime.js")>("../runtime.js");
 	return {
 		...actual,
+		assertRaydiumNetworkSupported: runtimeMocks.assertRaydiumNetworkSupported,
 		assertJupiterNetworkSupported: runtimeMocks.assertJupiterNetworkSupported,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
+		buildRaydiumSwapTransactions: runtimeMocks.buildRaydiumSwapTransactions,
 		callJupiterApi: runtimeMocks.callJupiterApi,
 		commitmentSchema: runtimeMocks.commitmentSchema,
 		getConnection: runtimeMocks.getConnection,
@@ -39,6 +55,12 @@ vi.mock("../runtime.js", async () => {
 		getExplorerTransactionUrl: runtimeMocks.getExplorerTransactionUrl,
 		getJupiterApiBaseUrl: runtimeMocks.getJupiterApiBaseUrl,
 		getJupiterQuote: runtimeMocks.getJupiterQuote,
+		getRaydiumApiBaseUrl: runtimeMocks.getRaydiumApiBaseUrl,
+		getRaydiumPriorityFee: runtimeMocks.getRaydiumPriorityFee,
+		getRaydiumPriorityFeeMicroLamports:
+			runtimeMocks.getRaydiumPriorityFeeMicroLamports,
+		getRaydiumQuote: runtimeMocks.getRaydiumQuote,
+		getSplTokenProgramId: runtimeMocks.getSplTokenProgramId,
 		jupiterPriorityLevelSchema: runtimeMocks.jupiterPriorityLevelSchema,
 		jupiterSwapModeSchema: runtimeMocks.jupiterSwapModeSchema,
 		normalizeAtPath: runtimeMocks.normalizeAtPath,
@@ -47,9 +69,16 @@ vi.mock("../runtime.js", async () => {
 		parseJupiterSwapMode: runtimeMocks.parseJupiterSwapMode,
 		parseNetwork: runtimeMocks.parseNetwork,
 		parsePositiveBigInt: runtimeMocks.parsePositiveBigInt,
+		parseRaydiumSwapType: runtimeMocks.parseRaydiumSwapType,
+		parseRaydiumTxVersion: runtimeMocks.parseRaydiumTxVersion,
+		parseSplTokenProgram: runtimeMocks.parseSplTokenProgram,
 		parseTransactionFromBase64: runtimeMocks.parseTransactionFromBase64,
+		raydiumSwapTypeSchema: runtimeMocks.raydiumSwapTypeSchema,
+		raydiumTxVersionSchema: runtimeMocks.raydiumTxVersionSchema,
 		resolveSecretKey: runtimeMocks.resolveSecretKey,
 		solanaNetworkSchema: runtimeMocks.solanaNetworkSchema,
+		splTokenProgramSchema: runtimeMocks.splTokenProgramSchema,
+		stringifyUnknown: runtimeMocks.stringifyUnknown,
 		toLamports: runtimeMocks.toLamports,
 	};
 });
@@ -75,6 +104,9 @@ describe("w3rt_run_workflow_v0", () => {
 		runtimeMocks.callJupiterApi.mockRejectedValue(new Error("unmocked"));
 		runtimeMocks.parseNetwork.mockReturnValue("devnet");
 		runtimeMocks.parseFinality.mockReturnValue("confirmed");
+		runtimeMocks.getSplTokenProgramId.mockReturnValue(
+			Keypair.generate().publicKey,
+		);
 		runtimeMocks.getExplorerAddressUrl.mockReturnValue(
 			"https://explorer/signer",
 		);
@@ -390,6 +422,154 @@ describe("w3rt_run_workflow_v0", () => {
 				amountUi: "1",
 			}),
 		).rejects.toThrow("mint account not found");
+	});
+
+	it("simulates SPL transfer workflow intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const destination = Keypair.generate().publicKey.toBase58();
+		const tokenMint = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getAccountInfo: vi.fn().mockResolvedValue({ owner: signer.publicKey }),
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 1,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 99,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-transfer-spl-simulate", {
+			runId: "run-transfer-spl",
+			intentType: "solana.transfer.spl",
+			runMode: "simulate",
+			toAddress: destination,
+			tokenMint,
+			amountRaw: "1000",
+		});
+
+		expect(connection.simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			runId: "run-transfer-spl",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.transfer.spl",
+						toAddress: destination,
+						tokenMint,
+						amountRaw: "1000",
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
+		});
+	});
+
+	it("enforces mainnet confirm token for Raydium workflow execute", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const inputMint = Keypair.generate().publicKey.toBase58();
+		const outputMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getRaydiumQuote.mockResolvedValue({
+			data: { outputAmount: "1" },
+		});
+		runtimeMocks.buildRaydiumSwapTransactions.mockResolvedValue({
+			data: [{ transaction: "tx-one" }, { transaction: "tx-two" }],
+		});
+		runtimeMocks.parseTransactionFromBase64.mockImplementation(() => ({
+			partialSign: vi.fn(),
+			serialize: vi.fn(() => Buffer.from("signed")),
+		}));
+		const connection = {
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 120,
+				},
+			}),
+			sendRawTransaction: vi
+				.fn()
+				.mockResolvedValueOnce("sig-one")
+				.mockResolvedValueOnce("sig-two"),
+			confirmTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const simulated = await tool.execute("wf-ray-sim", {
+			runId: "run-ray",
+			intentType: "solana.swap.raydium",
+			runMode: "simulate",
+			inputMint,
+			outputMint,
+			amountRaw: "1000",
+			slippageBps: 50,
+			computeUnitPriceMicroLamports: "5000",
+		});
+		const confirmToken = (
+			simulated.details as {
+				artifacts?: { approval?: { confirmToken?: string | null } };
+			}
+		).artifacts?.approval?.confirmToken;
+		if (!confirmToken) throw new Error("confirmToken not returned");
+
+		await expect(
+			tool.execute("wf-ray-exec-missing-confirm", {
+				runId: "run-ray",
+				intentType: "solana.swap.raydium",
+				runMode: "execute",
+				inputMint,
+				outputMint,
+				amountRaw: "1000",
+				slippageBps: 50,
+				computeUnitPriceMicroLamports: "5000",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+
+		const executed = await tool.execute("wf-ray-exec", {
+			runId: "run-ray",
+			intentType: "solana.swap.raydium",
+			runMode: "execute",
+			inputMint,
+			outputMint,
+			amountRaw: "1000",
+			slippageBps: 50,
+			computeUnitPriceMicroLamports: "5000",
+			confirmMainnet: true,
+			confirmToken,
+		});
+		expect(connection.sendRawTransaction).toHaveBeenCalledTimes(2);
+		expect(executed.details).toMatchObject({
+			runId: "run-ray",
+			status: "executed",
+		});
+		expect(
+			(
+				executed.details as {
+					artifacts?: {
+						execute?: {
+							signatures?: string[];
+						};
+					};
+				}
+			).artifacts?.execute?.signatures,
+		).toEqual(["sig-one", "sig-two"]);
 	});
 
 	it("enforces mainnet confirm token before execute", async () => {
