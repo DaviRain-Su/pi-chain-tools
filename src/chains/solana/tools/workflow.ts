@@ -66,6 +66,7 @@ type ParsedIntentTextFields = Partial<{
 	toAddress: string;
 	amountSol: number;
 	amountUi: string;
+	tokenMint: string;
 	inputMint: string;
 	outputMint: string;
 	amountRaw: string;
@@ -620,6 +621,40 @@ function parseTransferIntentText(intentText: string): ParsedIntentTextFields {
 			parsed.toAddress = addresses[addresses.length - 1];
 		}
 	}
+	const tokenMintMatch = intentText.match(
+		/\btokenMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
+	);
+	const tokenMint = tokenMintMatch?.[1]
+		? parseMintOrSymbolCandidate(tokenMintMatch[1])
+		: undefined;
+	if (tokenMint) {
+		parsed.tokenMint = tokenMint;
+	}
+	const amountRawMatch =
+		intentText.match(/\bamountRaw\s*[=:]\s*([0-9]+)\b/i) ??
+		intentText.match(/\b([0-9]+)\s*raw\b/i);
+	if (amountRawMatch?.[1]) {
+		parsed.amountRaw = amountRawMatch[1];
+	}
+	const amountUiMatch = intentText.match(
+		/\b(?:amount|amountUi)\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+	);
+	if (amountUiMatch?.[1]) {
+		parsed.amountUi = amountUiMatch[1];
+	}
+	const uiAmountWithToken = parseUiAmountWithToken(intentText);
+	if (uiAmountWithToken.inputMint) {
+		if (uiAmountWithToken.inputMint === SOL_MINT) {
+			if (typeof uiAmountWithToken.amountSol === "number") {
+				parsed.amountSol = parsed.amountSol ?? uiAmountWithToken.amountSol;
+			}
+		} else {
+			parsed.tokenMint = parsed.tokenMint ?? uiAmountWithToken.inputMint;
+			if (uiAmountWithToken.amountUi) {
+				parsed.amountUi = parsed.amountUi ?? uiAmountWithToken.amountUi;
+			}
+		}
+	}
 	const amountMatch =
 		intentText.match(/\bamountSol\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\b/i) ??
 		intentText.match(/([0-9]+(?:\.[0-9]+)?)\s*sol\b/i);
@@ -628,6 +663,18 @@ function parseTransferIntentText(intentText: string): ParsedIntentTextFields {
 		if (amountSol != null) {
 			parsed.amountSol = amountSol;
 		}
+	}
+	if (parsed.tokenMint === SOL_MINT) {
+		if (parsed.amountSol === undefined && parsed.amountUi) {
+			const amountSol = parsePositiveNumber(parsed.amountUi);
+			if (amountSol != null) {
+				parsed.amountSol = amountSol;
+			}
+		}
+		parsed.tokenMint = undefined;
+	}
+	if (parsed.tokenMint || /\bspl\b/i.test(intentText)) {
+		parsed.intentType = "solana.transfer.spl";
 	}
 	return parsed;
 }
@@ -898,8 +945,21 @@ async function normalizeIntent(
 			normalizeAtPath(ensureString(normalizedParams.toAddress, "toAddress")),
 		).toBase58();
 		const tokenMint = await ensureMint(normalizedParams.tokenMint, "tokenMint");
+		let amountRawValue = normalizedParams.amountRaw;
+		if (
+			(typeof amountRawValue !== "string" ||
+				amountRawValue.trim().length === 0) &&
+			typeof normalizedParams.amountUi === "string"
+		) {
+			const decimals = await fetchTokenDecimals(network, tokenMint);
+			amountRawValue = decimalUiAmountToRaw(
+				normalizedParams.amountUi,
+				decimals,
+				"amountUi",
+			);
+		}
 		const amountRaw = parsePositiveBigInt(
-			ensureString(normalizedParams.amountRaw, "amountRaw"),
+			ensureString(amountRawValue, "amountRaw"),
 			"amountRaw",
 		).toString();
 		const tokenProgram = parseSplTokenProgram(
@@ -1669,7 +1729,7 @@ export function createSolanaWorkflowTools() {
 				amountUi: Type.Optional(
 					Type.String({
 						description:
-							"Optional human-readable token amount for swaps (for known mints like SOL/USDC/USDT).",
+							"Optional human-readable token amount for swaps and SPL transfers (for known mints like SOL/USDC/USDT).",
 					}),
 				),
 				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),

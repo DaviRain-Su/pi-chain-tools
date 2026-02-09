@@ -201,6 +201,111 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses SPL transfer intentText and derives amountRaw from token ui amount", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const destination = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-transfer-spl", {
+			runId: "run-intent-transfer-spl",
+			runMode: "analysis",
+			intentText: `transfer 1.25 USDC to ${destination}`,
+		});
+
+		expect(runtimeMocks.getConnection).not.toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			runId: "run-intent-transfer-spl",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.transfer.spl",
+						toAddress: destination,
+						tokenMint: USDC_MINT,
+						amountRaw: "1250000",
+					},
+				},
+			},
+		});
+	});
+
+	it("supports structured SPL transfer amountUi for known token symbols", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const destination = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-amount-ui-transfer-spl", {
+			runId: "run-amount-ui-transfer-spl",
+			runMode: "analysis",
+			intentType: "solana.transfer.spl",
+			toAddress: destination,
+			tokenMint: "USDT",
+			amountUi: "2.5",
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-amount-ui-transfer-spl",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.transfer.spl",
+						toAddress: destination,
+						tokenMint: USDT_MINT,
+						amountRaw: "2500000",
+					},
+				},
+			},
+		});
+	});
+
+	it("derives SPL transfer amountRaw from on-chain mint decimals for unknown token mints", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const destination = Keypair.generate().publicKey.toBase58();
+		const unknownMint = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getParsedAccountInfo: vi.fn().mockResolvedValue({
+				value: {
+					data: {
+						parsed: {
+							info: {
+								decimals: 8,
+							},
+						},
+					},
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-amount-ui-transfer-unknown", {
+			runId: "run-amount-ui-transfer-unknown",
+			runMode: "analysis",
+			intentType: "solana.transfer.spl",
+			toAddress: destination,
+			tokenMint: unknownMint,
+			amountUi: "1.25",
+		});
+
+		expect(connection.getParsedAccountInfo).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			runId: "run-amount-ui-transfer-unknown",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.transfer.spl",
+						tokenMint: unknownMint,
+						amountRaw: "125000000",
+					},
+				},
+			},
+		});
+	});
+
 	it("parses swap intentText and derives amountRaw from SOL amount", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
