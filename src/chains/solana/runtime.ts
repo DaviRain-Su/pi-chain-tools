@@ -2361,6 +2361,24 @@ export type OrcaWhirlpoolPositionsResult = {
 	queryErrors: string[];
 };
 
+export type OrcaWhirlpoolPoolRequest = {
+	poolAddress: string;
+	network?: string;
+};
+
+export type OrcaWhirlpoolPoolResult = {
+	protocol: "orca-whirlpool";
+	poolAddress: string;
+	network: SolanaNetwork;
+	tokenMintA: string | null;
+	tokenMintB: string | null;
+	tickSpacing: number | null;
+	feeRate: number | null;
+	currentTickIndex: number | null;
+	rewardMints: Array<string | null>;
+	queryErrors: string[];
+};
+
 export type MeteoraDlmmOwnerPosition = {
 	positionAddress: string;
 	poolAddress: string;
@@ -3748,6 +3766,78 @@ export async function getOrcaWhirlpoolPositions(
 			.size,
 		whirlpoolAddresses,
 		positions,
+		queryErrors,
+	};
+}
+
+export async function getOrcaWhirlpoolPool(
+	request: OrcaWhirlpoolPoolRequest,
+): Promise<OrcaWhirlpoolPoolResult> {
+	const poolAddress = new PublicKey(
+		normalizeAtPath(request.poolAddress),
+	).toBase58();
+	const network = parseNetwork(request.network);
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+
+	const toNumber = (value: unknown): number | null => {
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return value;
+		}
+		if (typeof value === "bigint") {
+			return Number(value);
+		}
+		if (typeof value === "string" && /^-?\d+$/.test(value.trim())) {
+			const parsed = Number.parseInt(value.trim(), 10);
+			if (Number.isFinite(parsed)) return parsed;
+		}
+		return null;
+	};
+	const toAddress = (value: unknown): string | null =>
+		typeof value === "string" ? normalizePublicKey(value) : null;
+
+	const queryErrors: string[] = [];
+	let tokenMintA: string | null = null;
+	let tokenMintB: string | null = null;
+	let tickSpacing: number | null = null;
+	let feeRate: number | null = null;
+	let currentTickIndex: number | null = null;
+	let rewardMints: Array<string | null> = [];
+
+	const [maybeWhirlpool] = await fetchAllMaybeWhirlpool(rpc as never, [
+		address(poolAddress),
+	]);
+	const account = asObjectRecord(maybeWhirlpool);
+	if (!account || account.exists !== true) {
+		queryErrors.push(`${poolAddress}: whirlpool account not found`);
+	} else {
+		const data = asObjectRecord(account.data);
+		if (!data) {
+			queryErrors.push(`${poolAddress}: invalid whirlpool account data`);
+		} else {
+			tokenMintA = toAddress(data.tokenMintA);
+			tokenMintB = toAddress(data.tokenMintB);
+			tickSpacing = toNumber(data.tickSpacing);
+			feeRate = toNumber(data.feeRate);
+			currentTickIndex = toNumber(data.tickCurrentIndex);
+			rewardMints = (
+				Array.isArray(data.rewardInfos) ? data.rewardInfos : []
+			).map((rewardInfo) => {
+				const reward = asObjectRecord(rewardInfo);
+				return toAddress(reward?.mint);
+			});
+		}
+	}
+
+	return {
+		protocol: "orca-whirlpool",
+		poolAddress,
+		network,
+		tokenMintA,
+		tokenMintB,
+		tickSpacing,
+		feeRate,
+		currentTickIndex,
+		rewardMints,
 		queryErrors,
 	};
 }

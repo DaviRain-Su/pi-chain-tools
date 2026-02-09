@@ -34,6 +34,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	getKaminoLendingMarkets: vi.fn(),
 	getKaminoLendingPositions: vi.fn(),
 	getMeteoraDlmmPositions: vi.fn(),
+	getOrcaWhirlpoolPool: vi.fn(),
 	getOrcaWhirlpoolPositions: vi.fn(),
 	getRaydiumApiBaseUrl: vi.fn(() => "https://raydium.api"),
 	getRaydiumPriorityFee: vi.fn(),
@@ -103,6 +104,7 @@ vi.mock("../runtime.js", async () => {
 		getKaminoLendingMarkets: runtimeMocks.getKaminoLendingMarkets,
 		getKaminoLendingPositions: runtimeMocks.getKaminoLendingPositions,
 		getMeteoraDlmmPositions: runtimeMocks.getMeteoraDlmmPositions,
+		getOrcaWhirlpoolPool: runtimeMocks.getOrcaWhirlpoolPool,
 		getOrcaWhirlpoolPositions: runtimeMocks.getOrcaWhirlpoolPositions,
 		getRaydiumApiBaseUrl: runtimeMocks.getRaydiumApiBaseUrl,
 		getRaydiumPriorityFee: runtimeMocks.getRaydiumPriorityFee,
@@ -232,6 +234,18 @@ describe("w3rt_run_workflow_v0", () => {
 			poolCount: 0,
 			whirlpoolAddresses: [],
 			positions: [],
+			queryErrors: [],
+		});
+		runtimeMocks.getOrcaWhirlpoolPool.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			poolAddress: "",
+			network: "devnet",
+			tokenMintA: USDC_MINT,
+			tokenMintB: SOL_MINT,
+			tickSpacing: null,
+			feeRate: null,
+			currentTickIndex: null,
+			rewardMints: [],
 			queryErrors: [],
 		});
 		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
@@ -3452,6 +3466,50 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Orca open intentText with generic amount token shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPool.mockResolvedValueOnce({
+			protocol: "orca-whirlpool",
+			poolAddress,
+			network: "devnet",
+			tokenMintA: USDC_MINT,
+			tokenMintB: SOL_MINT,
+			tickSpacing: null,
+			feeRate: null,
+			currentTickIndex: null,
+			rewardMints: [],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-open-generic-intent", {
+			runId: "run-orca-open-generic-intent",
+			runMode: "analysis",
+			intentText: `open orca position pool ${poolAddress} amount 1.25 USDC full range`,
+		});
+
+		expect(runtimeMocks.getOrcaWhirlpoolPool).toHaveBeenCalledWith({
+			poolAddress,
+			network: "devnet",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-orca-open-generic-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.open",
+						poolAddress,
+						tokenAAmountRaw: "1250000",
+						fullRange: true,
+					},
+				},
+			},
+		});
+	});
+
 	it("rejects Orca open when raw and UI amount are both provided for tokenA", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -3470,6 +3528,48 @@ describe("w3rt_run_workflow_v0", () => {
 			}),
 		).rejects.toThrow(
 			"Provide either tokenAAmountRaw or tokenAAmountUi for Orca LP intents, not both",
+		);
+	});
+
+	it("rejects Orca open generic amountUi when tokenMint is missing", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-orca-open-generic-missing-mint", {
+				runId: "run-orca-open-generic-missing-mint",
+				intentType: "solana.lp.orca.open",
+				runMode: "analysis",
+				poolAddress,
+				amountUi: "1",
+				fullRange: true,
+			}),
+		).rejects.toThrow(
+			"tokenMint is required when amountUi or amountRaw is provided for intentType=solana.lp.orca.open",
+		);
+	});
+
+	it("rejects Orca open when generic and side-specific amount fields are mixed", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-orca-open-generic-conflict", {
+				runId: "run-orca-open-generic-conflict",
+				intentType: "solana.lp.orca.open",
+				runMode: "analysis",
+				poolAddress,
+				amountUi: "1",
+				tokenMint: "USDC",
+				tokenAAmountRaw: "1000",
+				fullRange: true,
+			}),
+		).rejects.toThrow(
+			"Provide either amountUi/tokenMint (or amountRaw/tokenMint) or side-specific Orca amount fields, not both",
 		);
 	});
 
@@ -3541,6 +3641,101 @@ describe("w3rt_run_workflow_v0", () => {
 					intent: {
 						type: "solana.lp.orca.open",
 						poolAddress,
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
+		});
+	});
+
+	it("resolves Orca open generic amountUi/tokenMint via pool token mints", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPool.mockResolvedValueOnce({
+			protocol: "orca-whirlpool",
+			poolAddress,
+			network: "devnet",
+			tokenMintA: USDC_MINT,
+			tokenMintB: SOL_MINT,
+			tickSpacing: null,
+			feeRate: null,
+			currentTickIndex: null,
+			rewardMints: [],
+			queryErrors: [],
+		});
+		runtimeMocks.buildOrcaOpenPositionInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			poolAddress,
+			positionMint,
+			quoteParamKind: "tokenB",
+			quoteParamAmountRaw: "10000000",
+			fullRange: true,
+			initializationCostLamports: "0",
+			slippageBps: 50,
+			instructionCount: 1,
+			quote: { liquidityAmount: "123" },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([18]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 89,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 334,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-open-generic-ui-sim", {
+			runId: "run-orca-open-generic-ui-sim",
+			intentType: "solana.lp.orca.open",
+			runMode: "simulate",
+			poolAddress,
+			amountUi: "0.01",
+			tokenMint: "SOL",
+			fullRange: true,
+			slippageBps: 50,
+		});
+
+		expect(runtimeMocks.getOrcaWhirlpoolPool).toHaveBeenCalledWith({
+			poolAddress,
+			network: "devnet",
+		});
+		expect(runtimeMocks.buildOrcaOpenPositionInstructions).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				poolAddress,
+				tokenBAmountRaw: "10000000",
+				fullRange: true,
+				slippageBps: 50,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-orca-open-generic-ui-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.open",
+						poolAddress,
+						tokenBAmountRaw: "10000000",
 					},
 				},
 				simulate: {

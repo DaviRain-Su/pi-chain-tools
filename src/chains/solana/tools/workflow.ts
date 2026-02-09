@@ -51,6 +51,7 @@ import {
 	getKaminoLendingMarkets,
 	getKaminoLendingPositions,
 	getMeteoraDlmmPositions,
+	getOrcaWhirlpoolPool,
 	getOrcaWhirlpoolPositions,
 	getRaydiumApiBaseUrl,
 	getRaydiumPriorityFee,
@@ -1961,8 +1962,10 @@ function parseOrcaLiquidityIntentText(
 		}
 	}
 	const supportsGenericTokenAmount =
+		parsed.intentType === "solana.lp.orca.open" ||
 		parsed.intentType === "solana.lp.orca.increase" ||
-		parsed.intentType === "solana.lp.orca.decrease";
+		parsed.intentType === "solana.lp.orca.decrease" ||
+		ORCA_POSITIONS_KEYWORD_REGEX.test(intentText);
 	const hasOrcaSideAmountInput =
 		parsed.liquidityAmountRaw !== undefined ||
 		parsed.tokenAAmountRaw !== undefined ||
@@ -1979,6 +1982,12 @@ function parseOrcaLiquidityIntentText(
 		if (genericAmountWithTokenMatch?.[1] && genericAmountWithTokenMint) {
 			parsed.amountUi = parsed.amountUi ?? genericAmountWithTokenMatch[1];
 			parsed.tokenMint = parsed.tokenMint ?? genericAmountWithTokenMint;
+		}
+		const genericAmountUiMatch = intentText.match(
+			/\b(?:amountUi|amount)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+		);
+		if (genericAmountUiMatch?.[1]) {
+			parsed.amountUi = parsed.amountUi ?? genericAmountUiMatch[1];
 		}
 	}
 	const liquidityBpsMatch = intentText.match(
@@ -3191,6 +3200,10 @@ function resolveIntentType(
 	const hasOrcaUiLiquidityAmountField =
 		typeof params.tokenAAmountUi === "string" ||
 		typeof params.tokenBAmountUi === "string";
+	const hasGenericAmountWithTokenMintField =
+		typeof params.tokenMint === "string" &&
+		(typeof params.amountUi === "string" ||
+			typeof params.amountRaw === "string");
 	const hasOrcaLiquidityBpsField = typeof params.liquidityBps === "number";
 	if (
 		typeof params.poolAddress === "string" &&
@@ -3218,7 +3231,9 @@ function resolveIntentType(
 	}
 	if (
 		typeof params.poolAddress === "string" &&
-		(hasOrcaRawLiquidityAmountField || hasOrcaUiLiquidityAmountField)
+		(hasOrcaRawLiquidityAmountField ||
+			hasOrcaUiLiquidityAmountField ||
+			hasGenericAmountWithTokenMintField)
 	) {
 		return "solana.lp.orca.open";
 	}
@@ -3947,6 +3962,38 @@ async function resolveOrcaPositionTokenMintsForIntent(args: {
 	};
 }
 
+async function resolveOrcaPoolTokenMintsForOpen(args: {
+	network: string;
+	poolAddress: string;
+}): Promise<{
+	tokenMintA: string;
+	tokenMintB: string;
+}> {
+	const pool = await getOrcaWhirlpoolPool({
+		poolAddress: args.poolAddress,
+		network: args.network,
+	});
+	const tokenMintA =
+		typeof pool.tokenMintA === "string" && pool.tokenMintA.length > 0
+			? pool.tokenMintA
+			: null;
+	const tokenMintB =
+		typeof pool.tokenMintB === "string" && pool.tokenMintB.length > 0
+			? pool.tokenMintB
+			: null;
+	if (!tokenMintA || !tokenMintB) {
+		const querySummary =
+			pool.queryErrors.length > 0 ? ` ${pool.queryErrors.join("; ")}` : "";
+		throw new Error(
+			`Unable to resolve Orca pool token mints for poolAddress=${args.poolAddress}.${querySummary}`,
+		);
+	}
+	return {
+		tokenMintA: new PublicKey(normalizeAtPath(tokenMintA)).toBase58(),
+		tokenMintB: new PublicKey(normalizeAtPath(tokenMintB)).toBase58(),
+	};
+}
+
 async function resolveMeteoraPositionForIntent(args: {
 	network: string;
 	ownerAddress: string;
@@ -4206,14 +4253,26 @@ async function normalizeIntent(
 				ensureString(normalizedParams.poolAddress, "poolAddress"),
 			),
 		).toBase58();
-		const tokenAAmountUi = parseOptionalPositiveUiAmountField(
+		let tokenAAmountUi = parseOptionalPositiveUiAmountField(
 			normalizedParams.tokenAAmountUi,
 			"tokenAAmountUi",
 		);
-		const tokenBAmountUi = parseOptionalPositiveUiAmountField(
+		let tokenBAmountUi = parseOptionalPositiveUiAmountField(
 			normalizedParams.tokenBAmountUi,
 			"tokenBAmountUi",
 		);
+		const genericAmountRawInput =
+			typeof normalizedParams.amountRaw === "string" &&
+			normalizedParams.amountRaw.trim().length > 0
+				? parseNonNegativeRawAmount(normalizedParams.amountRaw, "amountRaw")
+				: undefined;
+		const genericAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.amountUi,
+			"amountUi",
+		);
+		if (genericAmountRawInput !== undefined && genericAmountUi !== undefined) {
+			throw new Error("Provide either amountRaw or amountUi, not both");
+		}
 		if (
 			tokenAAmountUi &&
 			typeof normalizedParams.tokenAAmountRaw === "string" &&
@@ -4232,39 +4291,116 @@ async function normalizeIntent(
 				"Provide either tokenBAmountRaw or tokenBAmountUi for Orca LP intents, not both",
 			);
 		}
+		const hasSideAmountInput =
+			(typeof normalizedParams.liquidityAmountRaw === "string" &&
+				normalizedParams.liquidityAmountRaw.trim().length > 0) ||
+			(typeof normalizedParams.tokenAAmountRaw === "string" &&
+				normalizedParams.tokenAAmountRaw.trim().length > 0) ||
+			(typeof normalizedParams.tokenBAmountRaw === "string" &&
+				normalizedParams.tokenBAmountRaw.trim().length > 0) ||
+			tokenAAmountUi !== undefined ||
+			tokenBAmountUi !== undefined;
+		const hasGenericAmountInput =
+			genericAmountRawInput !== undefined || genericAmountUi !== undefined;
+		if (hasGenericAmountInput && hasSideAmountInput) {
+			throw new Error(
+				"Provide either amountUi/tokenMint (or amountRaw/tokenMint) or side-specific Orca amount fields, not both",
+			);
+		}
+		const genericTokenMint =
+			hasGenericAmountInput &&
+			typeof normalizedParams.tokenMint === "string" &&
+			normalizedParams.tokenMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenMint, "tokenMint")
+				: undefined;
+		if (hasGenericAmountInput && !genericTokenMint) {
+			throw new Error(
+				"tokenMint is required when amountUi or amountRaw is provided for intentType=solana.lp.orca.open",
+			);
+		}
+		const tokenAMint =
+			typeof normalizedParams.tokenAMint === "string" &&
+			normalizedParams.tokenAMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenAMint, "tokenAMint")
+				: undefined;
+		const tokenBMint =
+			typeof normalizedParams.tokenBMint === "string" &&
+			normalizedParams.tokenBMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenBMint, "tokenBMint")
+				: undefined;
+		const needsPoolTokenMints =
+			hasGenericAmountInput ||
+			(tokenAAmountUi !== undefined && !tokenAMint) ||
+			(tokenBAmountUi !== undefined && !tokenBMint);
+		const poolTokenMints = needsPoolTokenMints
+			? await resolveOrcaPoolTokenMintsForOpen({
+					network,
+					poolAddress,
+				})
+			: undefined;
+		if (hasGenericAmountInput) {
+			if (!poolTokenMints) {
+				throw new Error(
+					`Unable to resolve Orca pool token mints for poolAddress=${poolAddress}`,
+				);
+			}
+			if (genericTokenMint === poolTokenMints.tokenMintA) {
+				if (genericAmountUi !== undefined) {
+					tokenAAmountUi = genericAmountUi;
+				}
+			} else if (genericTokenMint === poolTokenMints.tokenMintB) {
+				if (genericAmountUi !== undefined) {
+					tokenBAmountUi = genericAmountUi;
+				}
+			} else {
+				throw new Error(
+					`tokenMint mismatch for poolAddress=${poolAddress}: expected ${poolTokenMints.tokenMintA} or ${poolTokenMints.tokenMintB}, got ${genericTokenMint}`,
+				);
+			}
+		}
+		let tokenAAmountRawFromGeneric: string | undefined;
+		let tokenBAmountRawFromGeneric: string | undefined;
+		if (genericAmountRawInput !== undefined) {
+			if (!poolTokenMints) {
+				throw new Error(
+					`Unable to resolve Orca pool token mints for poolAddress=${poolAddress}`,
+				);
+			}
+			if (genericTokenMint === poolTokenMints.tokenMintA) {
+				tokenAAmountRawFromGeneric = genericAmountRawInput;
+			} else if (genericTokenMint === poolTokenMints.tokenMintB) {
+				tokenBAmountRawFromGeneric = genericAmountRawInput;
+			} else {
+				throw new Error(
+					`tokenMint mismatch for poolAddress=${poolAddress}: expected ${poolTokenMints.tokenMintA} or ${poolTokenMints.tokenMintB}, got ${genericTokenMint}`,
+				);
+			}
+		}
 		let tokenAAmountRawFromUi: string | undefined;
 		if (tokenAAmountUi) {
-			const tokenAMint =
-				typeof normalizedParams.tokenAMint === "string" &&
-				normalizedParams.tokenAMint.trim().length > 0
-					? await ensureMint(normalizedParams.tokenAMint, "tokenAMint")
-					: undefined;
-			if (!tokenAMint) {
+			const tokenAMintForUi = tokenAMint ?? poolTokenMints?.tokenMintA;
+			if (!tokenAMintForUi) {
 				throw new Error(
 					"tokenAMint is required when tokenAAmountUi is provided for intentType=solana.lp.orca.open",
 				);
 			}
 			tokenAAmountRawFromUi = decimalUiAmountToRaw(
 				tokenAAmountUi,
-				await fetchTokenDecimals(network, tokenAMint),
+				await fetchTokenDecimals(network, tokenAMintForUi),
 				"tokenAAmountUi",
 			);
 		}
 		let tokenBAmountRawFromUi: string | undefined;
 		if (tokenBAmountUi) {
-			const tokenBMint =
-				typeof normalizedParams.tokenBMint === "string" &&
-				normalizedParams.tokenBMint.trim().length > 0
-					? await ensureMint(normalizedParams.tokenBMint, "tokenBMint")
-					: undefined;
-			if (!tokenBMint) {
+			const tokenBMintForUi = tokenBMint ?? poolTokenMints?.tokenMintB;
+			if (!tokenBMintForUi) {
 				throw new Error(
 					"tokenBMint is required when tokenBAmountUi is provided for intentType=solana.lp.orca.open",
 				);
 			}
 			tokenBAmountRawFromUi = decimalUiAmountToRaw(
 				tokenBAmountUi,
-				await fetchTokenDecimals(network, tokenBMint),
+				await fetchTokenDecimals(network, tokenBMintForUi),
 				"tokenBAmountUi",
 			);
 		}
@@ -4275,6 +4411,12 @@ async function normalizeIntent(
 				: {}),
 			...(tokenBAmountRawFromUi !== undefined
 				? { tokenBAmountRaw: tokenBAmountRawFromUi }
+				: {}),
+			...(tokenAAmountRawFromGeneric !== undefined
+				? { tokenAAmountRaw: tokenAAmountRawFromGeneric }
+				: {}),
+			...(tokenBAmountRawFromGeneric !== undefined
+				? { tokenBAmountRaw: tokenBAmountRawFromGeneric }
 				: {}),
 		});
 		const fullRange = normalizedParams.fullRange === true;
@@ -7880,7 +8022,7 @@ export function createSolanaWorkflowTools() {
 				tokenMint: Type.Optional(
 					Type.String({
 						description:
-							"Token mint for intentType=solana.transfer.spl, and optional side selector for intentType=solana.lp.orca.increase / solana.lp.orca.decrease / solana.lp.meteora.add when using amountUi.",
+							"Token mint for intentType=solana.transfer.spl, and optional side selector for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease / solana.lp.meteora.add when using amountUi.",
 					}),
 				),
 				tokenAMint: Type.Optional(
@@ -7982,7 +8124,7 @@ export function createSolanaWorkflowTools() {
 				amountRaw: Type.Optional(
 					Type.String({
 						description:
-							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl / solana.lend.kamino.borrow / solana.lend.kamino.deposit / solana.lend.kamino.repay / solana.lend.kamino.withdraw",
+							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl / solana.lend.kamino.borrow / solana.lend.kamino.deposit / solana.lend.kamino.repay / solana.lend.kamino.withdraw. Also supports side-selected LP input with tokenMint for intentType=solana.lp.orca.open and solana.lp.meteora.add.",
 					}),
 				),
 				liquidityAmountRaw: Type.Optional(
@@ -8156,7 +8298,7 @@ export function createSolanaWorkflowTools() {
 				amountUi: Type.Optional(
 					Type.String({
 						description:
-							"Optional human-readable token amount for swaps, SPL transfers, Kamino lending actions, and Orca/Meteora LP side-selected inputs via tokenMint (for known mints like SOL/USDC/USDT).",
+							"Optional human-readable token amount for swaps, SPL transfers, Kamino lending actions, and Orca/Meteora LP side-selected inputs via tokenMint (for known mints like SOL/USDC/USDT). For Orca open/increase/decrease and Meteora add, pair with tokenMint.",
 					}),
 				),
 				depositAmountUi: Type.Optional(
