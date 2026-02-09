@@ -54,6 +54,16 @@ import {
 	toLamports,
 } from "../runtime.js";
 
+const ORCA_DEFAULT_DEXES = ["Orca V2", "Orca Whirlpool"] as const;
+const METEORA_DEFAULT_DEXES = ["Meteora DLMM"] as const;
+
+function resolveScopedDexes(
+	dexes: string[] | undefined,
+	defaultDexes: readonly string[],
+): string[] {
+	return dexes && dexes.length > 0 ? dexes : [...defaultDexes];
+}
+
 async function buildSplTransferInstructions(
 	connection: Connection,
 	fromOwner: PublicKey,
@@ -139,6 +149,200 @@ function extractRaydiumTransactions(response: unknown): string[] {
 		return [payload.transaction];
 	}
 	return [];
+}
+
+type ScopedJupiterExecuteParams = {
+	fromSecretKey?: string;
+	userPublicKey?: string;
+	inputMint: string;
+	outputMint: string;
+	amountRaw: string;
+	slippageBps?: number;
+	swapMode?: string;
+	asLegacyTransaction?: boolean;
+	dexes?: string[];
+	excludeDexes?: string[];
+	network?: string;
+	skipPreflight?: boolean;
+	maxRetries?: number;
+	confirm?: boolean;
+	commitment?: string;
+	simulate?: boolean;
+	confirmMainnet?: boolean;
+};
+
+async function executeScopedJupiterSwap(
+	protocol: "orca" | "meteora",
+	defaultDexes: readonly string[],
+	params: ScopedJupiterExecuteParams,
+) {
+	const network = parseNetwork(params.network);
+	assertJupiterNetworkSupported(network);
+	const protocolLabel = protocol === "orca" ? "Orca" : "Meteora";
+	if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+		throw new Error(
+			`Mainnet ${protocolLabel} swap requires confirmMainnet=true`,
+		);
+	}
+
+	const connection = getConnection(network);
+	const signer = Keypair.fromSecretKey(resolveSecretKey(params.fromSecretKey));
+	const signerPublicKey = signer.publicKey.toBase58();
+	if (params.userPublicKey) {
+		const asserted = new PublicKey(
+			normalizeAtPath(params.userPublicKey),
+		).toBase58();
+		if (asserted !== signerPublicKey) {
+			throw new Error(
+				`userPublicKey mismatch: expected ${signerPublicKey}, got ${asserted}`,
+			);
+		}
+	}
+
+	const inputMint = new PublicKey(normalizeAtPath(params.inputMint)).toBase58();
+	const outputMint = new PublicKey(
+		normalizeAtPath(params.outputMint),
+	).toBase58();
+	const amountRaw = parsePositiveBigInt(
+		params.amountRaw,
+		"amountRaw",
+	).toString();
+	const swapMode = parseJupiterSwapMode(params.swapMode);
+	const dexes = resolveScopedDexes(params.dexes, defaultDexes);
+
+	const quote = await getJupiterQuote({
+		inputMint,
+		outputMint,
+		amount: amountRaw,
+		slippageBps: params.slippageBps,
+		swapMode,
+		asLegacyTransaction: params.asLegacyTransaction,
+		dexes,
+		excludeDexes: params.excludeDexes,
+	});
+	const swapResponse = await buildJupiterSwapTransaction({
+		userPublicKey: signerPublicKey,
+		quoteResponse: quote,
+		asLegacyTransaction: params.asLegacyTransaction,
+	});
+
+	const swapPayload =
+		swapResponse && typeof swapResponse === "object"
+			? (swapResponse as Record<string, unknown>)
+			: {};
+	const txBase64 =
+		typeof swapPayload.swapTransaction === "string"
+			? swapPayload.swapTransaction
+			: "";
+	if (!txBase64) {
+		throw new Error("Jupiter swap response missing swapTransaction");
+	}
+	const tx = parseTransactionFromBase64(txBase64);
+	let version: "legacy" | "v0" = "legacy";
+	if (tx instanceof VersionedTransaction) {
+		tx.sign([signer]);
+		version = "v0";
+	} else {
+		tx.partialSign(signer);
+	}
+
+	const commitment = parseFinality(params.commitment);
+	const quotePayload =
+		quote && typeof quote === "object"
+			? (quote as Record<string, unknown>)
+			: {};
+	const routePlan = Array.isArray(quotePayload.routePlan)
+		? quotePayload.routePlan
+		: [];
+	const outAmount =
+		typeof quotePayload.outAmount === "string" ? quotePayload.outAmount : null;
+
+	if (params.simulate === true) {
+		const simulation =
+			tx instanceof VersionedTransaction
+				? await connection.simulateTransaction(tx, {
+						sigVerify: true,
+						replaceRecentBlockhash: false,
+						commitment,
+					})
+				: await connection.simulateTransaction(tx);
+		return {
+			content: [
+				{
+					type: "text",
+					text: `${protocolLabel} simulation ${simulation.value.err ? "failed" : "succeeded"}`,
+				},
+			],
+			details: {
+				protocol,
+				dexes,
+				simulated: true,
+				version,
+				inputMint,
+				outputMint,
+				amountRaw,
+				outAmount,
+				routeCount: routePlan.length,
+				err: simulation.value.err ?? null,
+				logs: simulation.value.logs ?? [],
+				unitsConsumed: simulation.value.unitsConsumed ?? null,
+				signer: signerPublicKey,
+				swapMode,
+				quote,
+				swapResponse: swapPayload,
+				network,
+				jupiterBaseUrl: getJupiterApiBaseUrl(),
+				explorerSigner: getExplorerAddressUrl(signerPublicKey, network),
+			},
+		};
+	}
+
+	const signature = await connection.sendRawTransaction(tx.serialize(), {
+		skipPreflight: params.skipPreflight === true,
+		maxRetries: params.maxRetries,
+	});
+	let confirmationErr: unknown = null;
+	if (params.confirm !== false) {
+		const confirmation = await connection.confirmTransaction(
+			signature,
+			commitment,
+		);
+		confirmationErr = confirmation.value.err;
+	}
+	if (confirmationErr) {
+		throw new Error(
+			`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+		);
+	}
+
+	return {
+		content: [
+			{ type: "text", text: `${protocolLabel} swap sent: ${signature}` },
+		],
+		details: {
+			protocol,
+			dexes,
+			simulated: false,
+			signature,
+			version,
+			signer: signerPublicKey,
+			inputMint,
+			outputMint,
+			amountRaw,
+			outAmount,
+			routeCount: routePlan.length,
+			swapMode,
+			quote,
+			swapResponse: swapPayload,
+			confirmed: params.confirm !== false,
+			network,
+			jupiterBaseUrl: getJupiterApiBaseUrl(),
+			explorer: getExplorerTransactionUrl(signature, network),
+			explorerSigner: getExplorerAddressUrl(signerPublicKey, network),
+			explorerInputMint: getExplorerAddressUrl(inputMint, network),
+			explorerOutputMint: getExplorerAddressUrl(outputMint, network),
+		},
+	};
 }
 
 export function createSolanaExecuteTools() {
@@ -636,6 +840,174 @@ export function createSolanaExecuteTools() {
 						explorerOutputMint: getExplorerAddressUrl(outputMint, network),
 					},
 				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}orcaSwap`,
+			label: "Solana Orca Swap",
+			description:
+				"End-to-end Orca-scoped swap (via Jupiter with Orca dex filters)",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				userPublicKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional signer pubkey assertion. If set, must match derived key from fromSecretKey.",
+					}),
+				),
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Swap amount in raw integer base units",
+				}),
+				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+				swapMode: jupiterSwapModeSchema(),
+				restrictIntermediateTokens: Type.Optional(Type.Boolean()),
+				onlyDirectRoutes: Type.Optional(Type.Boolean()),
+				maxAccounts: Type.Optional(Type.Integer({ minimum: 8, maximum: 256 })),
+				dexes: Type.Optional(
+					Type.Array(
+						Type.String({ description: "Optional DEX labels override" }),
+						{
+							minItems: 1,
+							maxItems: 20,
+						},
+					),
+				),
+				excludeDexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				asLegacyTransaction: Type.Optional(Type.Boolean()),
+				wrapAndUnwrapSol: Type.Optional(Type.Boolean()),
+				useSharedAccounts: Type.Optional(Type.Boolean()),
+				dynamicComputeUnitLimit: Type.Optional(Type.Boolean()),
+				skipUserAccountsRpcCalls: Type.Optional(Type.Boolean()),
+				destinationTokenAccount: Type.Optional(Type.String()),
+				trackingAccount: Type.Optional(Type.String()),
+				feeAccount: Type.Optional(Type.String()),
+				priorityLevel: jupiterPriorityLevelSchema(),
+				priorityMaxLamports: Type.Optional(
+					Type.Integer({ minimum: 1, maximum: 20_000_000 }),
+				),
+				priorityGlobal: Type.Optional(Type.Boolean()),
+				jitoTipLamports: Type.Optional(
+					Type.Integer({ minimum: 1, maximum: 20_000_000 }),
+				),
+				network: solanaNetworkSchema(),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, build/sign and simulate only (no broadcast)",
+					}),
+				),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(toolCallId, params) {
+				void toolCallId;
+				return executeScopedJupiterSwap("orca", ORCA_DEFAULT_DEXES, params);
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}meteoraSwap`,
+			label: "Solana Meteora Swap",
+			description:
+				"End-to-end Meteora-scoped swap (via Jupiter with Meteora dex filters)",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				userPublicKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional signer pubkey assertion. If set, must match derived key from fromSecretKey.",
+					}),
+				),
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Swap amount in raw integer base units",
+				}),
+				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+				swapMode: jupiterSwapModeSchema(),
+				restrictIntermediateTokens: Type.Optional(Type.Boolean()),
+				onlyDirectRoutes: Type.Optional(Type.Boolean()),
+				maxAccounts: Type.Optional(Type.Integer({ minimum: 8, maximum: 256 })),
+				dexes: Type.Optional(
+					Type.Array(
+						Type.String({ description: "Optional DEX labels override" }),
+						{
+							minItems: 1,
+							maxItems: 20,
+						},
+					),
+				),
+				excludeDexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				asLegacyTransaction: Type.Optional(Type.Boolean()),
+				wrapAndUnwrapSol: Type.Optional(Type.Boolean()),
+				useSharedAccounts: Type.Optional(Type.Boolean()),
+				dynamicComputeUnitLimit: Type.Optional(Type.Boolean()),
+				skipUserAccountsRpcCalls: Type.Optional(Type.Boolean()),
+				destinationTokenAccount: Type.Optional(Type.String()),
+				trackingAccount: Type.Optional(Type.String()),
+				feeAccount: Type.Optional(Type.String()),
+				priorityLevel: jupiterPriorityLevelSchema(),
+				priorityMaxLamports: Type.Optional(
+					Type.Integer({ minimum: 1, maximum: 20_000_000 }),
+				),
+				priorityGlobal: Type.Optional(Type.Boolean()),
+				jitoTipLamports: Type.Optional(
+					Type.Integer({ minimum: 1, maximum: 20_000_000 }),
+				),
+				network: solanaNetworkSchema(),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, build/sign and simulate only (no broadcast)",
+					}),
+				),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(toolCallId, params) {
+				void toolCallId;
+				return executeScopedJupiterSwap(
+					"meteora",
+					METEORA_DEFAULT_DEXES,
+					params,
+				);
 			},
 		}),
 		defineTool({

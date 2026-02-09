@@ -27,6 +27,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 - DEX/AMM route discovery via Jupiter program-id labels
 - Priority fee / Jito tip / dynamic CU options in Jupiter swap compose & execute
 - Orca/Meteora scoped swap workflow support (via Jupiter dex filters)
+- Orca/Meteora scoped compose/execute tools (`build*SwapTransaction` / `*Swap`)
 - Raydium Trade API quote/serialize integration (swap-base-in/out)
 - Raydium auto-priority-fee integration and multi-transaction swap execution
 

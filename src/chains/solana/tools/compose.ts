@@ -49,6 +49,16 @@ import {
 	toLamports,
 } from "../runtime.js";
 
+const ORCA_DEFAULT_DEXES = ["Orca V2", "Orca Whirlpool"] as const;
+const METEORA_DEFAULT_DEXES = ["Meteora DLMM"] as const;
+
+function resolveScopedDexes(
+	dexes: string[] | undefined,
+	defaultDexes: readonly string[],
+): string[] {
+	return dexes && dexes.length > 0 ? dexes : [...defaultDexes];
+}
+
 function createTransferTransaction(
 	fromAddress: string,
 	toAddress: string,
@@ -199,6 +209,103 @@ function extractRaydiumTransactions(response: unknown): string[] {
 		return [payload.transaction];
 	}
 	return [];
+}
+
+type ScopedJupiterComposeParams = {
+	userPublicKey: string;
+	inputMint: string;
+	outputMint: string;
+	amountRaw: string;
+	slippageBps?: number;
+	swapMode?: string;
+	asLegacyTransaction?: boolean;
+	dexes?: string[];
+	excludeDexes?: string[];
+	network?: string;
+};
+
+async function buildScopedJupiterSwapTransaction(
+	protocol: "orca" | "meteora",
+	defaultDexes: readonly string[],
+	params: ScopedJupiterComposeParams,
+) {
+	assertJupiterNetworkSupported(params.network);
+	const userPublicKey = new PublicKey(
+		normalizeAtPath(params.userPublicKey),
+	).toBase58();
+	const inputMint = new PublicKey(normalizeAtPath(params.inputMint)).toBase58();
+	const outputMint = new PublicKey(
+		normalizeAtPath(params.outputMint),
+	).toBase58();
+	const amountRaw = parsePositiveBigInt(
+		params.amountRaw,
+		"amountRaw",
+	).toString();
+	const swapMode = parseJupiterSwapMode(params.swapMode);
+	const dexes = resolveScopedDexes(params.dexes, defaultDexes);
+
+	const quote = await getJupiterQuote({
+		inputMint,
+		outputMint,
+		amount: amountRaw,
+		slippageBps: params.slippageBps,
+		swapMode,
+		asLegacyTransaction: params.asLegacyTransaction,
+		dexes,
+		excludeDexes: params.excludeDexes,
+	});
+	const swapResponse = await buildJupiterSwapTransaction({
+		userPublicKey,
+		quoteResponse: quote,
+		asLegacyTransaction: params.asLegacyTransaction,
+	});
+	const payload =
+		swapResponse && typeof swapResponse === "object"
+			? (swapResponse as Record<string, unknown>)
+			: {};
+	const txBase64 =
+		typeof payload.swapTransaction === "string" ? payload.swapTransaction : "";
+	if (!txBase64) {
+		throw new Error("Jupiter swap response missing swapTransaction");
+	}
+
+	const quotePayload =
+		quote && typeof quote === "object"
+			? (quote as Record<string, unknown>)
+			: {};
+	const outAmount =
+		typeof quotePayload.outAmount === "string" ? quotePayload.outAmount : null;
+	const routePlan = Array.isArray(quotePayload.routePlan)
+		? quotePayload.routePlan
+		: [];
+	const protocolLabel = protocol === "orca" ? "Orca" : "Meteora";
+	return {
+		content: [
+			{
+				type: "text",
+				text: `Unsigned ${protocolLabel} swap transaction built`,
+			},
+		],
+		details: {
+			protocol,
+			dexes,
+			txBase64,
+			userPublicKey,
+			inputMint,
+			outputMint,
+			amountRaw,
+			outAmount,
+			routeCount: routePlan.length,
+			swapMode,
+			quote,
+			swapResponse: payload,
+			network: parseNetwork(params.network),
+			jupiterBaseUrl: getJupiterApiBaseUrl(),
+			userExplorer: getExplorerAddressUrl(userPublicKey, params.network),
+			inputMintExplorer: getExplorerAddressUrl(inputMint, params.network),
+			outputMintExplorer: getExplorerAddressUrl(outputMint, params.network),
+		},
+	};
 }
 
 export function createSolanaComposeTools() {
@@ -737,6 +844,92 @@ export function createSolanaComposeTools() {
 						),
 					},
 				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildOrcaSwapTransaction`,
+			label: "Solana Build Orca Swap Transaction",
+			description:
+				"Build an unsigned Orca-scoped swap transaction (via Jupiter with Orca dex filters)",
+			parameters: Type.Object({
+				userPublicKey: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Swap amount in raw integer base units",
+				}),
+				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+				swapMode: jupiterSwapModeSchema(),
+				asLegacyTransaction: Type.Optional(Type.Boolean()),
+				dexes: Type.Optional(
+					Type.Array(
+						Type.String({ description: "Optional DEX labels override" }),
+						{
+							minItems: 1,
+							maxItems: 20,
+						},
+					),
+				),
+				excludeDexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(toolCallId, params) {
+				void toolCallId;
+				return buildScopedJupiterSwapTransaction(
+					"orca",
+					ORCA_DEFAULT_DEXES,
+					params,
+				);
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildMeteoraSwapTransaction`,
+			label: "Solana Build Meteora Swap Transaction",
+			description:
+				"Build an unsigned Meteora-scoped swap transaction (via Jupiter with Meteora dex filters)",
+			parameters: Type.Object({
+				userPublicKey: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Swap amount in raw integer base units",
+				}),
+				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+				swapMode: jupiterSwapModeSchema(),
+				asLegacyTransaction: Type.Optional(Type.Boolean()),
+				dexes: Type.Optional(
+					Type.Array(
+						Type.String({ description: "Optional DEX labels override" }),
+						{
+							minItems: 1,
+							maxItems: 20,
+						},
+					),
+				),
+				excludeDexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(toolCallId, params) {
+				void toolCallId;
+				return buildScopedJupiterSwapTransaction(
+					"meteora",
+					METEORA_DEFAULT_DEXES,
+					params,
+				);
 			},
 		}),
 		defineTool({

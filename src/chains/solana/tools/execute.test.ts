@@ -431,6 +431,106 @@ describe("solana_jupiterSwap", () => {
 	});
 });
 
+describe("protocol-scoped Jupiter swap tools", () => {
+	it("simulates Orca swap with default dex filters", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		runtimeMocks.getJupiterQuote.mockResolvedValue({
+			outAmount: "42",
+			routePlan: [{ route: "orca" }],
+		});
+		runtimeMocks.buildJupiterSwapTransaction.mockResolvedValue({
+			swapTransaction: Buffer.from("swap-tx").toString("base64"),
+		});
+		const legacy = createLegacyTx("orca-signed");
+		runtimeMocks.parseTransactionFromBase64.mockReturnValue(legacy.tx);
+		const simulateTransaction = vi.fn().mockResolvedValue({
+			value: {
+				err: null,
+				logs: [],
+				unitsConsumed: 66,
+			},
+		});
+		runtimeMocks.getConnection.mockReturnValue({
+			simulateTransaction,
+			sendRawTransaction: vi.fn(),
+		});
+
+		const tool = getTool("solana_orcaSwap");
+		const result = await tool.execute("orca-sim", {
+			fromSecretKey: "mock",
+			inputMint: Keypair.generate().publicKey.toBase58(),
+			outputMint: Keypair.generate().publicKey.toBase58(),
+			amountRaw: "1000",
+			network: "mainnet-beta",
+			simulate: true,
+			confirmMainnet: true,
+		});
+
+		expect(runtimeMocks.getJupiterQuote).toHaveBeenCalledWith(
+			expect.objectContaining({
+				dexes: ["Orca V2", "Orca Whirlpool"],
+			}),
+		);
+		expect(result.details).toMatchObject({
+			protocol: "orca",
+			dexes: ["Orca V2", "Orca Whirlpool"],
+			simulated: true,
+		});
+	});
+
+	it("simulates Meteora swap with dex override", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const dexes = ["Meteora DLMM", "Meteora DAMM v2"];
+		runtimeMocks.getJupiterQuote.mockResolvedValue({
+			outAmount: "42",
+			routePlan: [{ route: "meteora" }],
+		});
+		runtimeMocks.buildJupiterSwapTransaction.mockResolvedValue({
+			swapTransaction: Buffer.from("swap-tx").toString("base64"),
+		});
+		const legacy = createLegacyTx("meteora-signed");
+		runtimeMocks.parseTransactionFromBase64.mockReturnValue(legacy.tx);
+		const simulateTransaction = vi.fn().mockResolvedValue({
+			value: {
+				err: null,
+				logs: [],
+				unitsConsumed: 77,
+			},
+		});
+		runtimeMocks.getConnection.mockReturnValue({
+			simulateTransaction,
+			sendRawTransaction: vi.fn(),
+		});
+
+		const tool = getTool("solana_meteoraSwap");
+		const result = await tool.execute("meteora-sim", {
+			fromSecretKey: "mock",
+			inputMint: Keypair.generate().publicKey.toBase58(),
+			outputMint: Keypair.generate().publicKey.toBase58(),
+			amountRaw: "1000",
+			dexes,
+			network: "mainnet-beta",
+			simulate: true,
+			confirmMainnet: true,
+		});
+
+		expect(runtimeMocks.getJupiterQuote).toHaveBeenCalledWith(
+			expect.objectContaining({
+				dexes,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			protocol: "meteora",
+			dexes,
+			simulated: true,
+		});
+	});
+});
+
 describe("solana_raydiumSwap", () => {
 	it("simulates multi-tx Raydium swap and reports partial failure", async () => {
 		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");

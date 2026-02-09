@@ -258,4 +258,78 @@ describe("compose tools", () => {
 			"Unable to resolve Raydium computeUnitPriceMicroLamports",
 		);
 	});
+
+	it("builds Orca-scoped swap transaction with default dex filters", async () => {
+		const userPublicKey = Keypair.generate().publicKey.toBase58();
+		const inputMint = Keypair.generate().publicKey.toBase58();
+		const outputMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		runtimeMocks.getJupiterQuote.mockResolvedValue({
+			outAmount: "123",
+			routePlan: [{ route: "orca" }],
+		});
+		runtimeMocks.buildJupiterSwapTransaction.mockResolvedValue({
+			swapTransaction: Buffer.from("orca-swap").toString("base64"),
+		});
+
+		const tool = getTool("solana_buildOrcaSwapTransaction");
+		const result = await tool.execute("compose-orca", {
+			userPublicKey,
+			inputMint,
+			outputMint,
+			amountRaw: "1000000",
+			network: "mainnet-beta",
+		});
+
+		expect(runtimeMocks.getJupiterQuote).toHaveBeenCalledWith(
+			expect.objectContaining({
+				dexes: ["Orca V2", "Orca Whirlpool"],
+			}),
+		);
+		expect(result.details).toMatchObject({
+			protocol: "orca",
+			dexes: ["Orca V2", "Orca Whirlpool"],
+			userPublicKey,
+			inputMint,
+			outputMint,
+		});
+	});
+
+	it("builds Meteora-scoped swap transaction with dex override", async () => {
+		const userPublicKey = Keypair.generate().publicKey.toBase58();
+		const inputMint = Keypair.generate().publicKey.toBase58();
+		const outputMint = Keypair.generate().publicKey.toBase58();
+		const dexes = ["Meteora DLMM", "Meteora DAMM v2"];
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		runtimeMocks.getJupiterQuote.mockResolvedValue({
+			outAmount: "456",
+			routePlan: [{ route: "meteora" }],
+		});
+		runtimeMocks.buildJupiterSwapTransaction.mockResolvedValue({
+			swapTransaction: Buffer.from("meteora-swap").toString("base64"),
+		});
+
+		const tool = getTool("solana_buildMeteoraSwapTransaction");
+		const result = await tool.execute("compose-meteora", {
+			userPublicKey,
+			inputMint,
+			outputMint,
+			amountRaw: "2000000",
+			dexes,
+			network: "mainnet-beta",
+		});
+
+		expect(runtimeMocks.getJupiterQuote).toHaveBeenCalledWith(
+			expect.objectContaining({
+				dexes,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			protocol: "meteora",
+			dexes,
+			userPublicKey,
+			inputMint,
+			outputMint,
+		});
+	});
 });
