@@ -332,4 +332,23 @@ describe("compose tools", () => {
 			outputMint,
 		});
 	});
+
+	it("fails clearly when Orca route is unavailable", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		runtimeMocks.getJupiterQuote.mockResolvedValue({
+			outAmount: "0",
+			routePlan: [],
+		});
+
+		const tool = getTool("solana_buildOrcaSwapTransaction");
+		await expect(
+			tool.execute("compose-orca-no-route", {
+				userPublicKey: Keypair.generate().publicKey.toBase58(),
+				inputMint: Keypair.generate().publicKey.toBase58(),
+				outputMint: Keypair.generate().publicKey.toBase58(),
+				amountRaw: "1000000",
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("No Orca route found");
+	});
 });

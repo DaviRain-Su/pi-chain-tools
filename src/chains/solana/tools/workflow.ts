@@ -374,6 +374,36 @@ function getDefaultDexesForIntentType(
 	return undefined;
 }
 
+function assertProtocolRouteAvailability(
+	intentType: WorkflowIntentType,
+	dexes: string[] | undefined,
+	routePlan: unknown[],
+	outAmount: string | null,
+): void {
+	if (
+		intentType !== "solana.swap.orca" &&
+		intentType !== "solana.swap.meteora"
+	) {
+		return;
+	}
+	const hasRoute = routePlan.length > 0;
+	const hasPositiveOutAmount =
+		typeof outAmount === "string" &&
+		/^\d+$/.test(outAmount) &&
+		BigInt(outAmount) > 0n;
+	if (hasRoute || hasPositiveOutAmount) {
+		return;
+	}
+	const protocol = intentType === "solana.swap.orca" ? "Orca" : "Meteora";
+	const resolvedDexes =
+		dexes && dexes.length > 0
+			? dexes
+			: (getDefaultDexesForIntentType(intentType) ?? []);
+	throw new Error(
+		`No ${protocol} route found under dex constraints [${resolvedDexes.join(", ")}]. Try intentType=solana.swap.jupiter or relax dex constraints.`,
+	);
+}
+
 function isReadIntent(intent: WorkflowIntent): intent is ReadWorkflowIntent {
 	return isReadIntentType(intent.type);
 }
@@ -1884,6 +1914,21 @@ async function prepareJupiterSwapSimulation(
 		dexes: intent.dexes,
 		excludeDexes: intent.excludeDexes,
 	});
+	const quotePayload =
+		quote && typeof quote === "object"
+			? (quote as Record<string, unknown>)
+			: {};
+	const routePlan = Array.isArray(quotePayload.routePlan)
+		? quotePayload.routePlan
+		: [];
+	const outAmount =
+		typeof quotePayload.outAmount === "string" ? quotePayload.outAmount : null;
+	assertProtocolRouteAvailability(
+		intent.type,
+		intent.dexes,
+		routePlan,
+		outAmount,
+	);
 	const priorityLevel = parseJupiterPriorityLevel(
 		typeof params.priorityLevel === "string" ? params.priorityLevel : undefined,
 	);
@@ -1967,13 +2012,6 @@ async function prepareJupiterSwapSimulation(
 					commitment,
 				})
 			: await connection.simulateTransaction(tx);
-	const quotePayload =
-		quote && typeof quote === "object"
-			? (quote as Record<string, unknown>)
-			: {};
-	const routePlan = Array.isArray(quotePayload.routePlan)
-		? quotePayload.routePlan
-		: [];
 	return {
 		tx,
 		version,
@@ -1986,10 +2024,7 @@ async function prepareJupiterSwapSimulation(
 		context: {
 			quote,
 			swapResponse: swapPayload,
-			outAmount:
-				typeof quotePayload.outAmount === "string"
-					? quotePayload.outAmount
-					: null,
+			outAmount,
 			routeCount: routePlan.length,
 			jupiterBaseUrl: getJupiterApiBaseUrl(),
 		},

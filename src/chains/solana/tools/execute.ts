@@ -64,6 +64,26 @@ function resolveScopedDexes(
 	return dexes && dexes.length > 0 ? dexes : [...defaultDexes];
 }
 
+function assertScopedRouteAvailability(
+	protocol: "orca" | "meteora",
+	dexes: string[],
+	routePlan: unknown[],
+	outAmount: string | null,
+): void {
+	const hasRoute = routePlan.length > 0;
+	const hasPositiveOutAmount =
+		typeof outAmount === "string" &&
+		/^\d+$/.test(outAmount) &&
+		BigInt(outAmount) > 0n;
+	if (hasRoute || hasPositiveOutAmount) {
+		return;
+	}
+	const label = protocol === "orca" ? "Orca" : "Meteora";
+	throw new Error(
+		`No ${label} route found under dex constraints [${dexes.join(", ")}]. Try solana_jupiterSwap or adjust dexes.`,
+	);
+}
+
 async function buildSplTransferInstructions(
 	connection: Connection,
 	fromOwner: PublicKey,
@@ -220,6 +240,16 @@ async function executeScopedJupiterSwap(
 		dexes,
 		excludeDexes: params.excludeDexes,
 	});
+	const quotePayload =
+		quote && typeof quote === "object"
+			? (quote as Record<string, unknown>)
+			: {};
+	const routePlan = Array.isArray(quotePayload.routePlan)
+		? quotePayload.routePlan
+		: [];
+	const outAmount =
+		typeof quotePayload.outAmount === "string" ? quotePayload.outAmount : null;
+	assertScopedRouteAvailability(protocol, dexes, routePlan, outAmount);
 	const swapResponse = await buildJupiterSwapTransaction({
 		userPublicKey: signerPublicKey,
 		quoteResponse: quote,
@@ -247,15 +277,6 @@ async function executeScopedJupiterSwap(
 	}
 
 	const commitment = parseFinality(params.commitment);
-	const quotePayload =
-		quote && typeof quote === "object"
-			? (quote as Record<string, unknown>)
-			: {};
-	const routePlan = Array.isArray(quotePayload.routePlan)
-		? quotePayload.routePlan
-		: [];
-	const outAmount =
-		typeof quotePayload.outAmount === "string" ? quotePayload.outAmount : null;
 
 	if (params.simulate === true) {
 		const simulation =

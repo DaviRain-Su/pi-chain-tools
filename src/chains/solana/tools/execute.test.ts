@@ -529,6 +529,29 @@ describe("protocol-scoped Jupiter swap tools", () => {
 			simulated: true,
 		});
 	});
+
+	it("fails clearly when Orca route is unavailable", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		runtimeMocks.getJupiterQuote.mockResolvedValue({
+			outAmount: "0",
+			routePlan: [],
+		});
+
+		const tool = getTool("solana_orcaSwap");
+		await expect(
+			tool.execute("orca-no-route", {
+				fromSecretKey: "mock",
+				inputMint: Keypair.generate().publicKey.toBase58(),
+				outputMint: Keypair.generate().publicKey.toBase58(),
+				amountRaw: "1000",
+				network: "mainnet-beta",
+				simulate: true,
+				confirmMainnet: true,
+			}),
+		).rejects.toThrow("No Orca route found");
+	});
 });
 
 describe("solana_raydiumSwap", () => {

@@ -59,6 +59,26 @@ function resolveScopedDexes(
 	return dexes && dexes.length > 0 ? dexes : [...defaultDexes];
 }
 
+function assertScopedRouteAvailability(
+	protocol: "orca" | "meteora",
+	dexes: string[],
+	routePlan: unknown[],
+	outAmount: string | null,
+): void {
+	const hasRoute = routePlan.length > 0;
+	const hasPositiveOutAmount =
+		typeof outAmount === "string" &&
+		/^\d+$/.test(outAmount) &&
+		BigInt(outAmount) > 0n;
+	if (hasRoute || hasPositiveOutAmount) {
+		return;
+	}
+	const label = protocol === "orca" ? "Orca" : "Meteora";
+	throw new Error(
+		`No ${label} route found under dex constraints [${dexes.join(", ")}]. Try solana_buildJupiterSwapTransaction or adjust dexes.`,
+	);
+}
+
 function createTransferTransaction(
 	fromAddress: string,
 	toAddress: string,
@@ -278,6 +298,7 @@ async function buildScopedJupiterSwapTransaction(
 	const routePlan = Array.isArray(quotePayload.routePlan)
 		? quotePayload.routePlan
 		: [];
+	assertScopedRouteAvailability(protocol, dexes, routePlan, outAmount);
 	const protocolLabel = protocol === "orca" ? "Orca" : "Meteora";
 	return {
 		content: [

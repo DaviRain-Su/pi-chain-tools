@@ -658,6 +658,27 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("fails clearly when Orca-scoped route is unavailable", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		runtimeMocks.getJupiterQuote.mockResolvedValue({
+			outAmount: "0",
+			routePlan: [],
+		});
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-intent-swap-orca-no-route", {
+				runId: "run-intent-swap-orca-no-route",
+				runMode: "simulate",
+				intentType: "solana.swap.orca",
+				inputMint: SOL_MINT,
+				outputMint: USDC_MINT,
+				amountRaw: "1000000",
+			}),
+		).rejects.toThrow("No Orca route found");
+	});
+
 	it("parses USDC ui amount and slippage percent from intentText", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
