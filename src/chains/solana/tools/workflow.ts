@@ -130,6 +130,7 @@ type ParsedIntentTextFields = Partial<{
 	withdrawAmountUi: string;
 	tokenMint: string;
 	positionMint: string;
+	allPositions: boolean;
 	poolAddress: string;
 	positionAddress: string;
 	reserveMint: string;
@@ -379,6 +380,7 @@ type OrcaClosePositionIntent = {
 	type: "solana.lp.orca.close";
 	ownerAddress: string;
 	positionMint: string;
+	positionMints?: string[];
 	slippageBps?: number;
 };
 
@@ -386,6 +388,12 @@ type OrcaHarvestPositionIntent = {
 	type: "solana.lp.orca.harvest";
 	ownerAddress: string;
 	positionMint: string;
+	positionMints?: string[];
+};
+
+type MeteoraPositionTarget = {
+	poolAddress: string;
+	positionAddress: string;
 };
 
 type MeteoraAddLiquidityIntent = {
@@ -409,6 +417,7 @@ type MeteoraRemoveLiquidityIntent = {
 	ownerAddress: string;
 	poolAddress: string;
 	positionAddress: string;
+	positionTargets?: MeteoraPositionTarget[];
 	fromBinId?: number;
 	toBinId?: number;
 	bps?: number;
@@ -646,13 +655,14 @@ const ORCA_CLOSE_POSITION_KEYWORD_REGEX =
 const ORCA_HARVEST_POSITION_KEYWORD_REGEX =
 	/(orca.*(\bharvest\b|\bclaim\b|\bcollect\b|领取|收取).*(fees?|rewards?|fee|reward|手续费|奖励|收益|position|仓位)|(fees?|rewards?|fee|reward|手续费|奖励|收益).*(orca).*(\bharvest\b|\bclaim\b|\bcollect\b|领取|收取))/i;
 const ORCA_INCREASE_LIQUIDITY_KEYWORD_REGEX =
-	/(orca.*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入).*(liquidity|lp|流动性)|(liquidity|lp|流动性).*(orca).*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入))/i;
+	/(orca.*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入).*(liquidity|lp|position|positions|流动性|仓位)|(liquidity|lp|position|positions|流动性|仓位).*(orca).*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入))/i;
 const ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX =
-	/(orca.*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取).*(liquidity|lp|流动性)|(liquidity|lp|流动性).*(orca).*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取))/i;
+	/(orca.*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取).*(liquidity|lp|position|positions|流动性|仓位)|(liquidity|lp|position|positions|流动性|仓位).*(orca).*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取))/i;
 const METEORA_ADD_LIQUIDITY_KEYWORD_REGEX =
-	/((meteora|dlmm).*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入).*(liquidity|lp|流动性)|(liquidity|lp|流动性).*(meteora|dlmm).*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入))/i;
+	/((meteora|dlmm).*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入).*(liquidity|lp|position|positions|流动性|仓位)|(liquidity|lp|position|positions|流动性|仓位).*(meteora|dlmm).*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入))/i;
 const METEORA_REMOVE_LIQUIDITY_KEYWORD_REGEX =
-	/((meteora|dlmm).*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取).*(liquidity|lp|流动性)|(liquidity|lp|流动性).*(meteora|dlmm).*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取))/i;
+	/((meteora|dlmm).*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取).*(liquidity|lp|position|positions|流动性|仓位)|(liquidity|lp|position|positions|流动性|仓位).*(meteora|dlmm).*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取))/i;
+const ALL_POSITIONS_KEYWORD_REGEX = /\b(all|every)\b|全部|所有/i;
 const KAMINO_DEPOSIT_KEYWORD_REGEX =
 	/(kamino.*(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出)|(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出).*kamino)/i;
 const KAMINO_BORROW_KEYWORD_REGEX =
@@ -931,6 +941,18 @@ function parsePositiveNumber(value: string): number | null {
 		return null;
 	}
 	return parsed;
+}
+
+function hasAllPositionsHint(intentText: string): boolean {
+	if (!ALL_POSITIONS_KEYWORD_REGEX.test(intentText)) {
+		return false;
+	}
+	return (
+		/\bpositions?\b|\blp\b|仓位|头寸|流动性/i.test(intentText) ||
+		/\bclose\b|\bharvest\b|\bclaim\b|\bcollect\b|\bremove\b|\bdecrease\b|\bwithdraw\b|平仓|关闭|领取|收取|减少|移除|提取/i.test(
+			intentText,
+		)
+	);
 }
 
 function sanitizeTokenCandidate(value: string): string {
@@ -1798,6 +1820,7 @@ function parseOrcaLiquidityIntentText(
 	const positionMintMatch = intentText.match(
 		/\b(?:positionMint|position(?:Address)?|position)\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
 	);
+	const hasExplicitPositionMint = Boolean(positionMintMatch?.[1]);
 	if (positionMintMatch?.[1]) {
 		const positionMint = parseMintFromCandidate(positionMintMatch[1]);
 		if (positionMint) {
@@ -1814,6 +1837,15 @@ function parseOrcaLiquidityIntentText(
 		}
 	}
 	const addresses = intentText.match(BASE58_PUBLIC_KEY_REGEX) ?? [];
+	if (
+		(parsed.intentType === "solana.lp.orca.close" ||
+			parsed.intentType === "solana.lp.orca.harvest") &&
+		!parsed.positionMint &&
+		!hasExplicitPositionMint &&
+		hasAllPositionsHint(intentText)
+	) {
+		parsed.allPositions = true;
+	}
 	if (parsed.intentType === "solana.lp.orca.open" && !parsed.poolAddress) {
 		const inferredPool = addresses[0]
 			? parseMintFromCandidate(addresses[0])
@@ -1827,7 +1859,8 @@ function parseOrcaLiquidityIntentText(
 			parsed.intentType === "solana.lp.orca.harvest" ||
 			parsed.intentType === "solana.lp.orca.increase" ||
 			parsed.intentType === "solana.lp.orca.decrease") &&
-		!parsed.positionMint
+		!parsed.positionMint &&
+		parsed.allPositions !== true
 	) {
 		const inferredPosition = addresses.length
 			? parseMintFromCandidate(addresses[addresses.length - 1] ?? "")
@@ -2118,6 +2151,7 @@ function parseMeteoraLiquidityIntentText(
 	const positionAddressMatch = intentText.match(
 		/\b(?:positionAddress|lpPositionAddress|position)\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
 	);
+	const hasExplicitPositionAddress = Boolean(positionAddressMatch?.[1]);
 	if (positionAddressMatch?.[1]) {
 		const positionAddress = parseMintFromCandidate(positionAddressMatch[1]);
 		if (positionAddress) {
@@ -2125,6 +2159,14 @@ function parseMeteoraLiquidityIntentText(
 		}
 	}
 	const addresses = intentText.match(BASE58_PUBLIC_KEY_REGEX) ?? [];
+	if (
+		parsed.intentType === "solana.lp.meteora.remove" &&
+		!parsed.positionAddress &&
+		!hasExplicitPositionAddress &&
+		hasAllPositionsHint(intentText)
+	) {
+		parsed.allPositions = true;
+	}
 	if (
 		(parsed.intentType === "solana.lp.meteora.add" ||
 			parsed.intentType === "solana.lp.meteora.remove") &&
@@ -2140,7 +2182,8 @@ function parseMeteoraLiquidityIntentText(
 	if (
 		(parsed.intentType === "solana.lp.meteora.add" ||
 			parsed.intentType === "solana.lp.meteora.remove") &&
-		!parsed.positionAddress
+		!parsed.positionAddress &&
+		parsed.allPositions !== true
 	) {
 		const inferredPosition = addresses[1]
 			? parseMintFromCandidate(addresses[1])
@@ -3929,17 +3972,47 @@ async function resolveMeteoraPoolTokenMintsForAdd(args: {
 	};
 }
 
-async function resolveOrcaPositionMintForIntent(args: {
+async function resolveOrcaPositionMintsForIntent(args: {
 	network: string;
 	ownerAddress: string;
 	positionMint: string | undefined;
+	allPositions: boolean;
 	fieldName: string;
-}): Promise<string> {
+}): Promise<string[]> {
+	if (
+		args.allPositions &&
+		typeof args.positionMint === "string" &&
+		args.positionMint.trim().length > 0
+	) {
+		throw new Error(
+			`Cannot combine allPositions=true with ${args.fieldName}. Provide either allPositions=true or a single ${args.fieldName}.`,
+		);
+	}
+	if (args.allPositions) {
+		const positions = await getOrcaWhirlpoolPositions({
+			address: args.ownerAddress,
+			network: args.network,
+		});
+		const positionMints = positions.positions
+			.map((position) =>
+				typeof position.positionMint === "string" &&
+				position.positionMint.length > 0
+					? new PublicKey(normalizeAtPath(position.positionMint)).toBase58()
+					: null,
+			)
+			.filter((value): value is string => value !== null);
+		if (positionMints.length === 0) {
+			throw new Error(
+				`No Orca Whirlpool positions found for ownerAddress=${args.ownerAddress}.`,
+			);
+		}
+		return uniqueStrings(positionMints);
+	}
 	if (
 		typeof args.positionMint === "string" &&
 		args.positionMint.trim().length > 0
 	) {
-		return new PublicKey(normalizeAtPath(args.positionMint)).toBase58();
+		return [new PublicKey(normalizeAtPath(args.positionMint)).toBase58()];
 	}
 	const positions = await getOrcaWhirlpoolPositions({
 		address: args.ownerAddress,
@@ -3961,7 +4034,26 @@ async function resolveOrcaPositionMintForIntent(args: {
 			`Unable to resolve Orca position for ownerAddress=${args.ownerAddress}. Provide ${args.fieldName}.`,
 		);
 	}
-	return new PublicKey(normalizeAtPath(onlyPosition.positionMint)).toBase58();
+	return [new PublicKey(normalizeAtPath(onlyPosition.positionMint)).toBase58()];
+}
+
+async function resolveOrcaPositionMintForIntent(args: {
+	network: string;
+	ownerAddress: string;
+	positionMint: string | undefined;
+	fieldName: string;
+}): Promise<string> {
+	const positionMints = await resolveOrcaPositionMintsForIntent({
+		...args,
+		allPositions: false,
+	});
+	const positionMint = positionMints[0];
+	if (!positionMint) {
+		throw new Error(
+			`Unable to resolve Orca position for ownerAddress=${args.ownerAddress}. Provide ${args.fieldName}.`,
+		);
+	}
+	return positionMint;
 }
 
 async function resolveOrcaPositionTokenMintsForIntent(args: {
@@ -4095,6 +4187,77 @@ async function resolveMeteoraPositionForIntent(args: {
 		);
 	}
 	return resolved;
+}
+
+async function resolveMeteoraPositionTargetsForRemove(args: {
+	network: string;
+	ownerAddress: string;
+	poolAddress: string | undefined;
+	positionAddress: string | undefined;
+	allPositions: boolean;
+}): Promise<MeteoraPositionTarget[]> {
+	const providedPoolAddress =
+		typeof args.poolAddress === "string" && args.poolAddress.trim().length > 0
+			? new PublicKey(normalizeAtPath(args.poolAddress)).toBase58()
+			: undefined;
+	const providedPositionAddress =
+		typeof args.positionAddress === "string" &&
+		args.positionAddress.trim().length > 0
+			? new PublicKey(normalizeAtPath(args.positionAddress)).toBase58()
+			: undefined;
+	if (!args.allPositions) {
+		const resolved = await resolveMeteoraPositionForIntent({
+			network: args.network,
+			ownerAddress: args.ownerAddress,
+			poolAddress: providedPoolAddress,
+			positionAddress: providedPositionAddress,
+		});
+		return [
+			{
+				poolAddress: resolved.poolAddress,
+				positionAddress: resolved.positionAddress,
+			},
+		];
+	}
+	if (providedPositionAddress) {
+		throw new Error(
+			"Cannot combine allPositions=true with positionAddress for intentType=solana.lp.meteora.remove",
+		);
+	}
+	const positions = await getMeteoraDlmmPositions({
+		address: args.ownerAddress,
+		network: args.network,
+	});
+	const targets = positions.pools
+		.filter((pool) =>
+			providedPoolAddress ? pool.poolAddress === providedPoolAddress : true,
+		)
+		.flatMap((pool) =>
+			pool.positions.map((position) => ({
+				poolAddress: new PublicKey(
+					normalizeAtPath(pool.poolAddress),
+				).toBase58(),
+				positionAddress: new PublicKey(
+					normalizeAtPath(position.positionAddress),
+				).toBase58(),
+			})),
+		);
+	if (targets.length === 0) {
+		throw new Error(
+			`No Meteora positions found for ownerAddress=${args.ownerAddress}${providedPoolAddress ? ` in poolAddress=${providedPoolAddress}` : ""}.`,
+		);
+	}
+	const dedupedTargets: MeteoraPositionTarget[] = [];
+	const seen = new Set<string>();
+	for (const target of targets) {
+		const key = `${target.poolAddress}:${target.positionAddress}`;
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		dedupedTargets.push(target);
+	}
+	return dedupedTargets;
 }
 
 function normalizeOptionalNonNegativeRawAmount(value: unknown): string {
@@ -4613,19 +4776,22 @@ async function normalizeIntent(
 				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
 			);
 		}
-		const positionMint = await resolveOrcaPositionMintForIntent({
+		const positionMints = await resolveOrcaPositionMintsForIntent({
 			network,
 			ownerAddress,
 			positionMint:
 				typeof normalizedParams.positionMint === "string"
 					? normalizedParams.positionMint
 					: undefined,
+			allPositions: normalizedParams.allPositions === true,
 			fieldName: "positionMint",
 		});
+		const positionMint = ensureString(positionMints[0], "positionMint");
 		return {
 			type: intentType,
 			ownerAddress,
 			positionMint,
+			...(positionMints.length > 1 ? { positionMints } : {}),
 			slippageBps: parseOptionalOrcaSlippageBps(normalizedParams.slippageBps),
 		};
 	}
@@ -4642,19 +4808,22 @@ async function normalizeIntent(
 				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
 			);
 		}
-		const positionMint = await resolveOrcaPositionMintForIntent({
+		const positionMints = await resolveOrcaPositionMintsForIntent({
 			network,
 			ownerAddress,
 			positionMint:
 				typeof normalizedParams.positionMint === "string"
 					? normalizedParams.positionMint
 					: undefined,
+			allPositions: normalizedParams.allPositions === true,
 			fieldName: "positionMint",
 		});
+		const positionMint = ensureString(positionMints[0], "positionMint");
 		return {
 			type: intentType,
 			ownerAddress,
 			positionMint,
+			...(positionMints.length > 1 ? { positionMints } : {}),
 		};
 	}
 	if (intentType === "solana.lp.orca.increase") {
@@ -5321,7 +5490,8 @@ async function normalizeIntent(
 				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
 			);
 		}
-		const resolvedMeteoraPosition = await resolveMeteoraPositionForIntent({
+		const allPositions = normalizedParams.allPositions === true;
+		const resolvedTargets = await resolveMeteoraPositionTargetsForRemove({
 			network,
 			ownerAddress,
 			poolAddress:
@@ -5332,9 +5502,16 @@ async function normalizeIntent(
 				typeof normalizedParams.positionAddress === "string"
 					? normalizedParams.positionAddress
 					: undefined,
+			allPositions,
 		});
-		const poolAddress = resolvedMeteoraPosition.poolAddress;
-		const positionAddress = resolvedMeteoraPosition.positionAddress;
+		const primaryTarget = resolvedTargets[0];
+		if (!primaryTarget) {
+			throw new Error(
+				`Unable to resolve Meteora remove target for ownerAddress=${ownerAddress}`,
+			);
+		}
+		const poolAddress = primaryTarget.poolAddress;
+		const positionAddress = primaryTarget.positionAddress;
 		const fromBinId = parseOptionalIntegerField(
 			normalizedParams.fromBinId,
 			"fromBinId",
@@ -5406,6 +5583,11 @@ async function normalizeIntent(
 		if (hasGenericAmountInput && hasSideAmountInput) {
 			throw new Error(
 				"Provide either amountUi/tokenMint (or amountRaw/tokenMint) or side-specific totalX/totalY amount fields, not both",
+			);
+		}
+		if (allPositions && (hasGenericAmountInput || hasSideAmountInput)) {
+			throw new Error(
+				"allPositions=true only supports bps-based Meteora remove. Remove amountRaw/amountUi/totalXAmount*/totalYAmount* fields.",
 			);
 		}
 		const genericTokenMint =
@@ -5550,6 +5732,9 @@ async function normalizeIntent(
 			ownerAddress,
 			poolAddress,
 			positionAddress,
+			...(resolvedTargets.length > 1
+				? { positionTargets: resolvedTargets }
+				: {}),
 			...(fromBinId !== undefined ? { fromBinId } : {}),
 			...(toBinId !== undefined ? { toBinId } : {}),
 			...(bps !== undefined ? { bps } : {}),
@@ -7438,37 +7623,107 @@ async function prepareOrcaClosePositionSimulation(
 			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
 		);
 	}
+	const positionMints = uniqueStrings(
+		intent.positionMints && intent.positionMints.length > 0
+			? intent.positionMints
+			: [intent.positionMint],
+	);
+	if (positionMints.length === 0) {
+		throw new Error("positionMint is required");
+	}
 	const connection = getConnection(network);
-	const build = await buildOrcaClosePositionInstructions({
-		ownerAddress: intent.ownerAddress,
-		positionMint: intent.positionMint,
-		slippageBps: intent.slippageBps,
-		network,
-	});
-	const tx = new Transaction().add(...build.instructions);
-	tx.feePayer = signer.publicKey;
-	const latestBlockhash = await connection.getLatestBlockhash();
-	tx.recentBlockhash = latestBlockhash.blockhash;
-	tx.partialSign(signer);
-	const simulation = await connection.simulateTransaction(tx);
+	const preparedEntries: Array<{
+		positionMint: string;
+		latestBlockhash: { blockhash: string; lastValidBlockHeight: number };
+		build: Awaited<ReturnType<typeof buildOrcaClosePositionInstructions>>;
+		tx: Transaction;
+		simulation: Awaited<ReturnType<typeof connection.simulateTransaction>>;
+	}> = [];
+	for (const positionMint of positionMints) {
+		const build = await buildOrcaClosePositionInstructions({
+			ownerAddress: intent.ownerAddress,
+			positionMint,
+			slippageBps: intent.slippageBps,
+			network,
+		});
+		const tx = new Transaction().add(...build.instructions);
+		tx.feePayer = signer.publicKey;
+		const latestBlockhash = await connection.getLatestBlockhash();
+		tx.recentBlockhash = latestBlockhash.blockhash;
+		tx.partialSign(signer);
+		const simulation = await connection.simulateTransaction(tx);
+		preparedEntries.push({
+			positionMint,
+			latestBlockhash,
+			build,
+			tx,
+			simulation,
+		});
+	}
+	const primaryEntry = preparedEntries[0];
+	if (!primaryEntry) {
+		throw new Error("No Orca close-position targets resolved");
+	}
+	const simulationOk = preparedEntries.every(
+		(entry) => entry.simulation.value.err == null,
+	);
+	const firstErr =
+		preparedEntries.find((entry) => entry.simulation.value.err != null)
+			?.simulation.value.err ?? null;
+	const combinedLogs = preparedEntries.flatMap(
+		(entry) => entry.simulation.value.logs ?? [],
+	);
+	const totalUnits = preparedEntries.reduce<number | null>((total, entry) => {
+		const units = entry.simulation.value.unitsConsumed ?? null;
+		if (units == null) {
+			return total;
+		}
+		return (total ?? 0) + units;
+	}, null);
 	return {
-		tx,
+		tx: primaryEntry.tx,
 		version: "legacy",
+		...(preparedEntries.length > 1
+			? {
+					signedTransactions: preparedEntries.map((entry) => ({
+						tx: entry.tx,
+						version: "legacy" as const,
+					})),
+				}
+			: {}),
 		simulation: {
-			ok: simulation.value.err == null,
-			err: simulation.value.err ?? null,
-			logs: simulation.value.logs ?? [],
-			unitsConsumed: simulation.value.unitsConsumed ?? null,
+			ok: simulationOk,
+			err: firstErr,
+			logs: combinedLogs,
+			unitsConsumed: totalUnits,
 		},
 		context: {
-			latestBlockhash,
-			ownerAddress: build.ownerAddress,
-			positionMint: build.positionMint,
-			slippageBps: build.slippageBps,
-			instructionCount: build.instructionCount,
-			quote: build.quote,
-			feesQuote: build.feesQuote,
-			rewardsQuote: build.rewardsQuote,
+			latestBlockhash: primaryEntry.latestBlockhash,
+			ownerAddress: primaryEntry.build.ownerAddress,
+			positionMint: primaryEntry.build.positionMint,
+			...(positionMints.length > 1 ? { positionMints } : {}),
+			slippageBps: primaryEntry.build.slippageBps,
+			instructionCount: primaryEntry.build.instructionCount,
+			quote: primaryEntry.build.quote,
+			feesQuote: primaryEntry.build.feesQuote,
+			rewardsQuote: primaryEntry.build.rewardsQuote,
+			...(preparedEntries.length > 1
+				? {
+						txCount: preparedEntries.length,
+						targets: preparedEntries.map((entry) => ({
+							positionMint: entry.positionMint,
+							latestBlockhash: entry.latestBlockhash,
+							instructionCount: entry.build.instructionCount,
+							quote: entry.build.quote,
+							feesQuote: entry.build.feesQuote,
+							rewardsQuote: entry.build.rewardsQuote,
+							ok: entry.simulation.value.err == null,
+							err: entry.simulation.value.err ?? null,
+							logs: entry.simulation.value.logs ?? [],
+							unitsConsumed: entry.simulation.value.unitsConsumed ?? null,
+						})),
+					}
+				: {}),
 		},
 	};
 }
@@ -7484,34 +7739,103 @@ async function prepareOrcaHarvestPositionSimulation(
 			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
 		);
 	}
+	const positionMints = uniqueStrings(
+		intent.positionMints && intent.positionMints.length > 0
+			? intent.positionMints
+			: [intent.positionMint],
+	);
+	if (positionMints.length === 0) {
+		throw new Error("positionMint is required");
+	}
 	const connection = getConnection(network);
-	const build = await buildOrcaHarvestPositionInstructions({
-		ownerAddress: intent.ownerAddress,
-		positionMint: intent.positionMint,
-		network,
-	});
-	const tx = new Transaction().add(...build.instructions);
-	tx.feePayer = signer.publicKey;
-	const latestBlockhash = await connection.getLatestBlockhash();
-	tx.recentBlockhash = latestBlockhash.blockhash;
-	tx.partialSign(signer);
-	const simulation = await connection.simulateTransaction(tx);
+	const preparedEntries: Array<{
+		positionMint: string;
+		latestBlockhash: { blockhash: string; lastValidBlockHeight: number };
+		build: Awaited<ReturnType<typeof buildOrcaHarvestPositionInstructions>>;
+		tx: Transaction;
+		simulation: Awaited<ReturnType<typeof connection.simulateTransaction>>;
+	}> = [];
+	for (const positionMint of positionMints) {
+		const build = await buildOrcaHarvestPositionInstructions({
+			ownerAddress: intent.ownerAddress,
+			positionMint,
+			network,
+		});
+		const tx = new Transaction().add(...build.instructions);
+		tx.feePayer = signer.publicKey;
+		const latestBlockhash = await connection.getLatestBlockhash();
+		tx.recentBlockhash = latestBlockhash.blockhash;
+		tx.partialSign(signer);
+		const simulation = await connection.simulateTransaction(tx);
+		preparedEntries.push({
+			positionMint,
+			latestBlockhash,
+			build,
+			tx,
+			simulation,
+		});
+	}
+	const primaryEntry = preparedEntries[0];
+	if (!primaryEntry) {
+		throw new Error("No Orca harvest-position targets resolved");
+	}
+	const simulationOk = preparedEntries.every(
+		(entry) => entry.simulation.value.err == null,
+	);
+	const firstErr =
+		preparedEntries.find((entry) => entry.simulation.value.err != null)
+			?.simulation.value.err ?? null;
+	const combinedLogs = preparedEntries.flatMap(
+		(entry) => entry.simulation.value.logs ?? [],
+	);
+	const totalUnits = preparedEntries.reduce<number | null>((total, entry) => {
+		const units = entry.simulation.value.unitsConsumed ?? null;
+		if (units == null) {
+			return total;
+		}
+		return (total ?? 0) + units;
+	}, null);
 	return {
-		tx,
+		tx: primaryEntry.tx,
 		version: "legacy",
+		...(preparedEntries.length > 1
+			? {
+					signedTransactions: preparedEntries.map((entry) => ({
+						tx: entry.tx,
+						version: "legacy" as const,
+					})),
+				}
+			: {}),
 		simulation: {
-			ok: simulation.value.err == null,
-			err: simulation.value.err ?? null,
-			logs: simulation.value.logs ?? [],
-			unitsConsumed: simulation.value.unitsConsumed ?? null,
+			ok: simulationOk,
+			err: firstErr,
+			logs: combinedLogs,
+			unitsConsumed: totalUnits,
 		},
 		context: {
-			latestBlockhash,
-			ownerAddress: build.ownerAddress,
-			positionMint: build.positionMint,
-			instructionCount: build.instructionCount,
-			feesQuote: build.feesQuote,
-			rewardsQuote: build.rewardsQuote,
+			latestBlockhash: primaryEntry.latestBlockhash,
+			ownerAddress: primaryEntry.build.ownerAddress,
+			positionMint: primaryEntry.build.positionMint,
+			...(positionMints.length > 1 ? { positionMints } : {}),
+			instructionCount: primaryEntry.build.instructionCount,
+			feesQuote: primaryEntry.build.feesQuote,
+			rewardsQuote: primaryEntry.build.rewardsQuote,
+			...(preparedEntries.length > 1
+				? {
+						txCount: preparedEntries.length,
+						targets: preparedEntries.map((entry) => ({
+							positionMint: entry.positionMint,
+							latestBlockhash: entry.latestBlockhash,
+							instructionCount: entry.build.instructionCount,
+							feesQuote: entry.build.feesQuote,
+							rewardsQuote: entry.build.rewardsQuote,
+							ok: entry.simulation.value.err == null,
+							err: entry.simulation.value.err ?? null,
+							logs: entry.simulation.value.logs ?? [],
+							unitsConsumed: entry.simulation.value.unitsConsumed ?? null,
+						})),
+					}
+				: {}),
 		},
 	};
 }
@@ -7586,48 +7910,121 @@ async function prepareMeteoraRemoveLiquiditySimulation(
 			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
 		);
 	}
+	const positionTargets =
+		intent.positionTargets && intent.positionTargets.length > 0
+			? intent.positionTargets
+			: [
+					{
+						poolAddress: intent.poolAddress,
+						positionAddress: intent.positionAddress,
+					},
+				];
 	const connection = getConnection(network);
-	const build = await buildMeteoraRemoveLiquidityInstructions({
-		ownerAddress: intent.ownerAddress,
-		poolAddress: intent.poolAddress,
-		positionAddress: intent.positionAddress,
-		fromBinId: intent.fromBinId,
-		toBinId: intent.toBinId,
-		bps: intent.bps,
-		shouldClaimAndClose: intent.shouldClaimAndClose,
-		skipUnwrapSol: intent.skipUnwrapSol,
-		network,
-	});
-	const tx = new Transaction().add(...build.instructions);
-	tx.feePayer = signer.publicKey;
-	const latestBlockhash = await connection.getLatestBlockhash();
-	tx.recentBlockhash = latestBlockhash.blockhash;
-	tx.partialSign(signer);
-	const simulation = await connection.simulateTransaction(tx);
+	const preparedEntries: Array<{
+		poolAddress: string;
+		positionAddress: string;
+		latestBlockhash: { blockhash: string; lastValidBlockHeight: number };
+		build: Awaited<ReturnType<typeof buildMeteoraRemoveLiquidityInstructions>>;
+		tx: Transaction;
+		simulation: Awaited<ReturnType<typeof connection.simulateTransaction>>;
+	}> = [];
+	for (const target of positionTargets) {
+		const build = await buildMeteoraRemoveLiquidityInstructions({
+			ownerAddress: intent.ownerAddress,
+			poolAddress: target.poolAddress,
+			positionAddress: target.positionAddress,
+			fromBinId: intent.fromBinId,
+			toBinId: intent.toBinId,
+			bps: intent.bps,
+			shouldClaimAndClose: intent.shouldClaimAndClose,
+			skipUnwrapSol: intent.skipUnwrapSol,
+			network,
+		});
+		const tx = new Transaction().add(...build.instructions);
+		tx.feePayer = signer.publicKey;
+		const latestBlockhash = await connection.getLatestBlockhash();
+		tx.recentBlockhash = latestBlockhash.blockhash;
+		tx.partialSign(signer);
+		const simulation = await connection.simulateTransaction(tx);
+		preparedEntries.push({
+			poolAddress: target.poolAddress,
+			positionAddress: target.positionAddress,
+			latestBlockhash,
+			build,
+			tx,
+			simulation,
+		});
+	}
+	const primaryEntry = preparedEntries[0];
+	if (!primaryEntry) {
+		throw new Error("No Meteora remove-liquidity targets resolved");
+	}
+	const simulationOk = preparedEntries.every(
+		(entry) => entry.simulation.value.err == null,
+	);
+	const firstErr =
+		preparedEntries.find((entry) => entry.simulation.value.err != null)
+			?.simulation.value.err ?? null;
+	const combinedLogs = preparedEntries.flatMap(
+		(entry) => entry.simulation.value.logs ?? [],
+	);
+	const totalUnits = preparedEntries.reduce<number | null>((total, entry) => {
+		const units = entry.simulation.value.unitsConsumed ?? null;
+		if (units == null) {
+			return total;
+		}
+		return (total ?? 0) + units;
+	}, null);
 	return {
-		tx,
+		tx: primaryEntry.tx,
 		version: "legacy",
+		...(preparedEntries.length > 1
+			? {
+					signedTransactions: preparedEntries.map((entry) => ({
+						tx: entry.tx,
+						version: "legacy" as const,
+					})),
+				}
+			: {}),
 		simulation: {
-			ok: simulation.value.err == null,
-			err: simulation.value.err ?? null,
-			logs: simulation.value.logs ?? [],
-			unitsConsumed: simulation.value.unitsConsumed ?? null,
+			ok: simulationOk,
+			err: firstErr,
+			logs: combinedLogs,
+			unitsConsumed: totalUnits,
 		},
 		context: {
-			latestBlockhash,
-			ownerAddress: build.ownerAddress,
-			poolAddress: build.poolAddress,
-			positionAddress: build.positionAddress,
-			fromBinId: build.fromBinId,
-			toBinId: build.toBinId,
-			bps: build.bps,
-			shouldClaimAndClose: build.shouldClaimAndClose,
-			skipUnwrapSol: build.skipUnwrapSol,
-			positionLowerBinId: build.positionLowerBinId,
-			positionUpperBinId: build.positionUpperBinId,
-			activeBinId: build.activeBinId,
-			instructionCount: build.instructionCount,
-			sourceTransactionCount: build.transactionCount,
+			latestBlockhash: primaryEntry.latestBlockhash,
+			ownerAddress: primaryEntry.build.ownerAddress,
+			poolAddress: primaryEntry.build.poolAddress,
+			positionAddress: primaryEntry.build.positionAddress,
+			...(preparedEntries.length > 1 ? { positionTargets } : {}),
+			fromBinId: primaryEntry.build.fromBinId,
+			toBinId: primaryEntry.build.toBinId,
+			bps: primaryEntry.build.bps,
+			shouldClaimAndClose: primaryEntry.build.shouldClaimAndClose,
+			skipUnwrapSol: primaryEntry.build.skipUnwrapSol,
+			positionLowerBinId: primaryEntry.build.positionLowerBinId,
+			positionUpperBinId: primaryEntry.build.positionUpperBinId,
+			activeBinId: primaryEntry.build.activeBinId,
+			instructionCount: primaryEntry.build.instructionCount,
+			sourceTransactionCount: primaryEntry.build.transactionCount,
+			...(preparedEntries.length > 1
+				? {
+						txCount: preparedEntries.length,
+						targets: preparedEntries.map((entry) => ({
+							poolAddress: entry.poolAddress,
+							positionAddress: entry.positionAddress,
+							latestBlockhash: entry.latestBlockhash,
+							instructionCount: entry.build.instructionCount,
+							sourceTransactionCount: entry.build.transactionCount,
+							bps: entry.build.bps,
+							ok: entry.simulation.value.err == null,
+							err: entry.simulation.value.err ?? null,
+							logs: entry.simulation.value.logs ?? [],
+							unitsConsumed: entry.simulation.value.unitsConsumed ?? null,
+						})),
+					}
+				: {}),
 			...(intent.bpsDerivation ? { bpsDerivation: intent.bpsDerivation } : {}),
 		},
 	};
@@ -8486,6 +8883,12 @@ export function createSolanaWorkflowTools() {
 					Type.String({
 						description:
 							"Meteora position address for intentType=solana.lp.meteora.add / solana.lp.meteora.remove",
+					}),
+				),
+				allPositions: Type.Optional(
+					Type.Boolean({
+						description:
+							"Batch helper for intentType=solana.lp.orca.close / solana.lp.orca.harvest / solana.lp.meteora.remove. When true, run against all resolved positions owned by signer (or all positions in poolAddress for Meteora remove).",
 					}),
 				),
 				reserveMint: Type.Optional(

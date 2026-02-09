@@ -4414,6 +4414,140 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Orca close intentText with all-positions shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMintA = Keypair.generate().publicKey.toBase58();
+		const positionMintB = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 2,
+			bundleCount: 0,
+			poolCount: 2,
+			whirlpoolAddresses: [
+				Keypair.generate().publicKey.toBase58(),
+				Keypair.generate().publicKey.toBase58(),
+			],
+			positions: [
+				{ positionMint: positionMintA },
+				{ positionMint: positionMintB },
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-close-all-intent", {
+			runId: "run-orca-close-all-intent",
+			runMode: "analysis",
+			intentText: "orca close all positions",
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-orca-close-all-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.close",
+						positionMint: positionMintA,
+						positionMints: [positionMintA, positionMintB],
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates Orca close with allPositions across multiple positions", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMintA = Keypair.generate().publicKey.toBase58();
+		const positionMintB = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 2,
+			bundleCount: 0,
+			poolCount: 2,
+			whirlpoolAddresses: [
+				Keypair.generate().publicKey.toBase58(),
+				Keypair.generate().publicKey.toBase58(),
+			],
+			positions: [
+				{ positionMint: positionMintA },
+				{ positionMint: positionMintB },
+			],
+			queryErrors: [],
+		});
+		runtimeMocks.buildOrcaClosePositionInstructions.mockImplementation(
+			async (args: { positionMint: string }) => ({
+				network: "devnet",
+				ownerAddress: signer.publicKey.toBase58(),
+				positionMint: args.positionMint,
+				slippageBps: 75,
+				instructionCount: 1,
+				quote: { tokenMinA: "1", tokenMinB: "1" },
+				feesQuote: { tokenA: "1", tokenB: "1" },
+				rewardsQuote: [],
+				instructions: [
+					new TransactionInstruction({
+						programId: Keypair.generate().publicKey,
+						keys: [],
+						data: Buffer.from([21]),
+					}),
+				],
+			}),
+		);
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 91,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 220,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-close-all-sim", {
+			runId: "run-orca-close-all-sim",
+			intentType: "solana.lp.orca.close",
+			runMode: "simulate",
+			allPositions: true,
+			slippageBps: 75,
+		});
+
+		expect(
+			runtimeMocks.buildOrcaClosePositionInstructions,
+		).toHaveBeenCalledTimes(2);
+		expect(result.details).toMatchObject({
+			runId: "run-orca-close-all-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.close",
+						positionMints: [positionMintA, positionMintB],
+					},
+				},
+				simulate: {
+					ok: true,
+					context: {
+						txCount: 2,
+						positionMints: [positionMintA, positionMintB],
+					},
+				},
+			},
+		});
+	});
+
 	it("parses Orca harvest intentText with position shorthand", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -4564,6 +4698,92 @@ describe("w3rt_run_workflow_v0", () => {
 				},
 				simulate: {
 					ok: true,
+				},
+			},
+		});
+	});
+
+	it("simulates Orca harvest with allPositions across multiple positions", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMintA = Keypair.generate().publicKey.toBase58();
+		const positionMintB = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 2,
+			bundleCount: 0,
+			poolCount: 2,
+			whirlpoolAddresses: [
+				Keypair.generate().publicKey.toBase58(),
+				Keypair.generate().publicKey.toBase58(),
+			],
+			positions: [
+				{ positionMint: positionMintA },
+				{ positionMint: positionMintB },
+			],
+			queryErrors: [],
+		});
+		runtimeMocks.buildOrcaHarvestPositionInstructions.mockImplementation(
+			async (args: { positionMint: string }) => ({
+				network: "devnet",
+				ownerAddress: signer.publicKey.toBase58(),
+				positionMint: args.positionMint,
+				instructionCount: 1,
+				feesQuote: { feeOwedA: "1", feeOwedB: "2" },
+				rewardsQuote: { rewards: [] },
+				instructions: [
+					new TransactionInstruction({
+						programId: Keypair.generate().publicKey,
+						keys: [],
+						data: Buffer.from([22]),
+					}),
+				],
+			}),
+		);
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 92,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 180,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-harvest-all-sim", {
+			runId: "run-orca-harvest-all-sim",
+			intentType: "solana.lp.orca.harvest",
+			runMode: "simulate",
+			allPositions: true,
+		});
+
+		expect(
+			runtimeMocks.buildOrcaHarvestPositionInstructions,
+		).toHaveBeenCalledTimes(2);
+		expect(result.details).toMatchObject({
+			runId: "run-orca-harvest-all-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.harvest",
+						positionMints: [positionMintA, positionMintB],
+					},
+				},
+				simulate: {
+					ok: true,
+					context: {
+						txCount: 2,
+						positionMints: [positionMintA, positionMintB],
+					},
 				},
 			},
 		});
@@ -5236,6 +5456,104 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Meteora remove intentText with all-positions shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddressA = Keypair.generate().publicKey.toBase58();
+		const poolAddressB = Keypair.generate().publicKey.toBase58();
+		const positionAddressA = Keypair.generate().publicKey.toBase58();
+		const positionAddressB = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 2,
+			poolCount: 2,
+			poolAddresses: [poolAddressA, poolAddressB],
+			pools: [
+				{
+					poolAddress: poolAddressA,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress: positionAddressA,
+							poolAddress: poolAddressA,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -5,
+							upperBinId: 7,
+							totalXAmountRaw: "1000",
+							totalYAmountRaw: "2000",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+				{
+					poolAddress: poolAddressB,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress: positionAddressB,
+							poolAddress: poolAddressB,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -8,
+							upperBinId: 8,
+							totalXAmountRaw: "3000",
+							totalYAmountRaw: "4000",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-remove-all-intent", {
+			runId: "run-meteora-remove-all-intent",
+			runMode: "analysis",
+			intentText: "meteora remove all positions half",
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-remove-all-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.remove",
+						poolAddress: poolAddressA,
+						positionAddress: positionAddressA,
+						bps: 5000,
+						positionTargets: [
+							{
+								poolAddress: poolAddressA,
+								positionAddress: positionAddressA,
+							},
+							{
+								poolAddress: poolAddressB,
+								positionAddress: positionAddressB,
+							},
+						],
+					},
+				},
+			},
+		});
+	});
+
 	it("infers Meteora remove pool/position from single owner position", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -5894,5 +6212,215 @@ describe("w3rt_run_workflow_v0", () => {
 				},
 			},
 		});
+	});
+
+	it("simulates Meteora remove with allPositions across multiple positions", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddressA = Keypair.generate().publicKey.toBase58();
+		const poolAddressB = Keypair.generate().publicKey.toBase58();
+		const positionAddressA = Keypair.generate().publicKey.toBase58();
+		const positionAddressB = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 2,
+			poolCount: 2,
+			poolAddresses: [poolAddressA, poolAddressB],
+			pools: [
+				{
+					poolAddress: poolAddressA,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress: positionAddressA,
+							poolAddress: poolAddressA,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -5,
+							upperBinId: 7,
+							totalXAmountRaw: "1000",
+							totalYAmountRaw: "2000",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+				{
+					poolAddress: poolAddressB,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress: positionAddressB,
+							poolAddress: poolAddressB,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -8,
+							upperBinId: 8,
+							totalXAmountRaw: "3000",
+							totalYAmountRaw: "4000",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		runtimeMocks.buildMeteoraRemoveLiquidityInstructions.mockImplementation(
+			async (args: { poolAddress: string; positionAddress: string }) => ({
+				network: "devnet",
+				ownerAddress: signer.publicKey.toBase58(),
+				poolAddress: args.poolAddress,
+				positionAddress: args.positionAddress,
+				fromBinId: -5,
+				toBinId: 7,
+				bps: 5000,
+				shouldClaimAndClose: false,
+				skipUnwrapSol: false,
+				positionLowerBinId: -8,
+				positionUpperBinId: 8,
+				activeBinId: 0,
+				instructionCount: 1,
+				transactionCount: 1,
+				instructions: [
+					new TransactionInstruction({
+						programId: Keypair.generate().publicKey,
+						keys: [],
+						data: Buffer.from([31]),
+					}),
+				],
+			}),
+		);
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 97,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 300,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-remove-all-sim", {
+			runId: "run-meteora-remove-all-sim",
+			intentType: "solana.lp.meteora.remove",
+			runMode: "simulate",
+			allPositions: true,
+			bps: 5000,
+		});
+
+		expect(
+			runtimeMocks.buildMeteoraRemoveLiquidityInstructions,
+		).toHaveBeenCalledTimes(2);
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-remove-all-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.remove",
+						positionTargets: [
+							{
+								poolAddress: poolAddressA,
+								positionAddress: positionAddressA,
+							},
+							{
+								poolAddress: poolAddressB,
+								positionAddress: positionAddressB,
+							},
+						],
+					},
+				},
+				simulate: {
+					ok: true,
+					context: {
+						txCount: 2,
+						positionTargets: [
+							{
+								poolAddress: poolAddressA,
+								positionAddress: positionAddressA,
+							},
+							{
+								poolAddress: poolAddressB,
+								positionAddress: positionAddressB,
+							},
+						],
+					},
+				},
+			},
+		});
+	});
+
+	it("rejects Meteora remove allPositions when amount fields are provided", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -5,
+							upperBinId: 7,
+							totalXAmountRaw: "1000",
+							totalYAmountRaw: "2000",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-meteora-remove-all-amount-conflict", {
+				runId: "run-meteora-remove-all-amount-conflict",
+				intentType: "solana.lp.meteora.remove",
+				runMode: "analysis",
+				allPositions: true,
+				amountUi: "1",
+				tokenMint: "USDC",
+			}),
+		).rejects.toThrow(
+			"allPositions=true only supports bps-based Meteora remove. Remove amountRaw/amountUi/totalXAmount*/totalYAmount* fields.",
+		);
 	});
 });
