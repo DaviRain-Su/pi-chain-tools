@@ -33,6 +33,8 @@ import {
 	buildKaminoRepayAndWithdrawInstructions,
 	buildKaminoRepayInstructions,
 	buildKaminoWithdrawInstructions,
+	buildOrcaDecreaseLiquidityInstructions,
+	buildOrcaIncreaseLiquidityInstructions,
 	buildRaydiumSwapTransactions,
 	callJupiterApi,
 	commitmentSchema,
@@ -87,6 +89,8 @@ type WorkflowIntentType =
 	| "solana.stake.authorizeWithdrawer"
 	| "solana.stake.deactivate"
 	| "solana.stake.withdraw"
+	| "solana.lp.orca.increase"
+	| "solana.lp.orca.decrease"
 	| "solana.swap.jupiter"
 	| "solana.swap.raydium"
 	| "solana.swap.orca"
@@ -109,6 +113,7 @@ type ParsedIntentTextFields = Partial<{
 	repayAmountUi: string;
 	withdrawAmountUi: string;
 	tokenMint: string;
+	positionMint: string;
 	reserveMint: string;
 	depositReserveMint: string;
 	borrowReserveMint: string;
@@ -117,6 +122,9 @@ type ParsedIntentTextFields = Partial<{
 	inputMint: string;
 	outputMint: string;
 	amountRaw: string;
+	liquidityAmountRaw: string;
+	tokenAAmountRaw: string;
+	tokenBAmountRaw: string;
 	depositAmountRaw: string;
 	borrowAmountRaw: string;
 	repayAmountRaw: string;
@@ -296,6 +304,23 @@ type KaminoRepayAndWithdrawIntent = {
 	currentSlot?: string;
 };
 
+type OrcaLiquidityIntentInput = {
+	ownerAddress: string;
+	positionMint: string;
+	liquidityAmountRaw?: string;
+	tokenAAmountRaw?: string;
+	tokenBAmountRaw?: string;
+	slippageBps?: number;
+};
+
+type OrcaIncreaseLiquidityIntent = {
+	type: "solana.lp.orca.increase";
+} & OrcaLiquidityIntentInput;
+
+type OrcaDecreaseLiquidityIntent = {
+	type: "solana.lp.orca.decrease";
+} & OrcaLiquidityIntentInput;
+
 type JupiterSwapIntent = {
 	type: "solana.swap.jupiter" | "solana.swap.orca" | "solana.swap.meteora";
 	userPublicKey: string;
@@ -343,6 +368,8 @@ type WorkflowIntent =
 	| KaminoRepayIntent
 	| KaminoRepayAndWithdrawIntent
 	| KaminoWithdrawIntent
+	| OrcaIncreaseLiquidityIntent
+	| OrcaDecreaseLiquidityIntent
 	| JupiterSwapIntent
 	| RaydiumSwapIntent
 	| {
@@ -492,6 +519,10 @@ const DEFI_POSITIONS_KEYWORD_REGEX =
 	/(defi|de-fi|protocol\s+positions?|协议仓位|staking|stake|质押|farm|yield|收益)/i;
 const ORCA_POSITIONS_KEYWORD_REGEX =
 	/(orca.*(whirlpool|lp|liquidity|position|positions|仓位|流动性)|(whirlpool|lp|liquidity|position|positions|仓位|流动性).*orca)/i;
+const ORCA_INCREASE_LIQUIDITY_KEYWORD_REGEX =
+	/(orca.*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入).*(liquidity|lp|流动性)|(liquidity|lp|流动性).*(orca).*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入))/i;
+const ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX =
+	/(orca.*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取).*(liquidity|lp|流动性)|(liquidity|lp|流动性).*(orca).*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取))/i;
 const KAMINO_DEPOSIT_KEYWORD_REGEX =
 	/(kamino.*(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出)|(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出).*kamino)/i;
 const KAMINO_BORROW_KEYWORD_REGEX =
@@ -1598,6 +1629,68 @@ function parseKaminoRepayAndWithdrawIntentText(
 	);
 }
 
+function parseOrcaLiquidityIntentText(
+	intentText: string,
+): ParsedIntentTextFields {
+	const parsed: ParsedIntentTextFields = {};
+	const lower = intentText.toLowerCase();
+	if (lower.includes("solana.lp.orca.increase")) {
+		parsed.intentType = "solana.lp.orca.increase";
+	} else if (lower.includes("solana.lp.orca.decrease")) {
+		parsed.intentType = "solana.lp.orca.decrease";
+	} else if (ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.lp.orca.decrease";
+	} else if (ORCA_INCREASE_LIQUIDITY_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.lp.orca.increase";
+	}
+	const ownerAddressMatch = intentText.match(
+		/\bownerAddress\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (ownerAddressMatch?.[1]) {
+		const ownerAddress = parseMintFromCandidate(ownerAddressMatch[1]);
+		if (ownerAddress) {
+			parsed.ownerAddress = ownerAddress;
+		}
+	}
+	const positionMintMatch = intentText.match(
+		/\bpositionMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (positionMintMatch?.[1]) {
+		const positionMint = parseMintFromCandidate(positionMintMatch[1]);
+		if (positionMint) {
+			parsed.positionMint = positionMint;
+		}
+	}
+	const liquidityAmountRawMatch = intentText.match(
+		/\bliquidityAmountRaw\s*[=:]\s*([0-9]+)\b/i,
+	);
+	if (liquidityAmountRawMatch?.[1]) {
+		parsed.liquidityAmountRaw = liquidityAmountRawMatch[1];
+	}
+	const tokenAAmountRawMatch = intentText.match(
+		/\btokenAAmountRaw\s*[=:]\s*([0-9]+)\b/i,
+	);
+	if (tokenAAmountRawMatch?.[1]) {
+		parsed.tokenAAmountRaw = tokenAAmountRawMatch[1];
+	}
+	const tokenBAmountRawMatch = intentText.match(
+		/\btokenBAmountRaw\s*[=:]\s*([0-9]+)\b/i,
+	);
+	if (tokenBAmountRawMatch?.[1]) {
+		parsed.tokenBAmountRaw = tokenBAmountRawMatch[1];
+	}
+	const slippageBpsMatch = intentText.match(
+		/\bslippageBps\s*[=:]\s*([0-9]+)\b/i,
+	);
+	if (slippageBpsMatch?.[1]) {
+		const slippageBps = Number.parseInt(slippageBpsMatch[1], 10);
+		if (Number.isFinite(slippageBps)) {
+			parsed.slippageBps = slippageBps;
+		}
+	}
+	return parsed;
+}
+
 function detectStakeIntentTypeFromText(
 	intentText: string,
 ): Extract<WorkflowIntentType, `solana.stake.${string}`> | undefined {
@@ -2144,6 +2237,18 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 			intentType: "solana.lend.kamino.withdraw",
 		};
 	}
+	if (lower.includes("solana.lp.orca.increase")) {
+		return {
+			...parseOrcaLiquidityIntentText(trimmed),
+			intentType: "solana.lp.orca.increase",
+		};
+	}
+	if (lower.includes("solana.lp.orca.decrease")) {
+		return {
+			...parseOrcaLiquidityIntentText(trimmed),
+			intentType: "solana.lp.orca.decrease",
+		};
+	}
 	if (lower.includes("solana.stake.createanddelegate")) {
 		return {
 			...parseStakeIntentText(trimmed),
@@ -2226,6 +2331,12 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	if (KAMINO_DEPOSIT_KEYWORD_REGEX.test(trimmed)) {
 		return parseKaminoDepositIntentText(trimmed);
 	}
+	if (
+		ORCA_INCREASE_LIQUIDITY_KEYWORD_REGEX.test(trimmed) ||
+		ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX.test(trimmed)
+	) {
+		return parseOrcaLiquidityIntentText(trimmed);
+	}
 	if (hasStakeOperationKeywords && !hasSwapKeywords && !hasTransferKeywords) {
 		return parseStakeIntentText(trimmed);
 	}
@@ -2238,6 +2349,16 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	const stakeFields = parseStakeIntentText(trimmed);
 	if (stakeFields.intentType) {
 		return stakeFields;
+	}
+	const orcaLiquidityFields = parseOrcaLiquidityIntentText(trimmed);
+	if (
+		orcaLiquidityFields.intentType ||
+		orcaLiquidityFields.positionMint ||
+		orcaLiquidityFields.liquidityAmountRaw ||
+		orcaLiquidityFields.tokenAAmountRaw ||
+		orcaLiquidityFields.tokenBAmountRaw
+	) {
+		return orcaLiquidityFields;
 	}
 	const swapFields = parseSwapIntentText(trimmed);
 	if (
@@ -2303,6 +2424,8 @@ function resolveIntentType(
 		params.intentType === "solana.stake.authorizeWithdrawer" ||
 		params.intentType === "solana.stake.deactivate" ||
 		params.intentType === "solana.stake.withdraw" ||
+		params.intentType === "solana.lp.orca.increase" ||
+		params.intentType === "solana.lp.orca.decrease" ||
 		params.intentType === "solana.swap.jupiter" ||
 		params.intentType === "solana.swap.raydium" ||
 		params.intentType === "solana.swap.orca" ||
@@ -2316,6 +2439,30 @@ function resolveIntentType(
 		params.intentType === "solana.read.lendingPositions"
 	) {
 		return params.intentType;
+	}
+	const hasOrcaLiquidityAmountField =
+		typeof params.liquidityAmountRaw === "string" ||
+		typeof params.tokenAAmountRaw === "string" ||
+		typeof params.tokenBAmountRaw === "string";
+	if (typeof params.positionMint === "string" && hasOrcaLiquidityAmountField) {
+		const intentText =
+			typeof params.intentText === "string" ? params.intentText : "";
+		if (ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX.test(intentText)) {
+			return "solana.lp.orca.decrease";
+		}
+		return "solana.lp.orca.increase";
+	}
+	if (
+		typeof params.intentText === "string" &&
+		ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX.test(params.intentText)
+	) {
+		return "solana.lp.orca.decrease";
+	}
+	if (
+		typeof params.intentText === "string" &&
+		ORCA_INCREASE_LIQUIDITY_KEYWORD_REGEX.test(params.intentText)
+	) {
+		return "solana.lp.orca.increase";
 	}
 	if (
 		typeof params.address === "string" &&
@@ -2656,6 +2803,66 @@ function parseOptionalCurrentSlot(value: unknown): string | undefined {
 	throw new Error("currentSlot must be a non-negative integer");
 }
 
+function parseOptionalOrcaSlippageBps(value: unknown): number | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		throw new Error("slippageBps must be an integer between 0 and 10000");
+	}
+	const normalized = Math.floor(value);
+	if (normalized < 0 || normalized > 10_000) {
+		throw new Error("slippageBps must be an integer between 0 and 10000");
+	}
+	return normalized;
+}
+
+function parseOrcaLiquidityActionInput(params: Record<string, unknown>): {
+	liquidityAmountRaw?: string;
+	tokenAAmountRaw?: string;
+	tokenBAmountRaw?: string;
+} {
+	const liquidityAmountRaw =
+		typeof params.liquidityAmountRaw === "string" &&
+		params.liquidityAmountRaw.trim().length > 0
+			? parsePositiveBigInt(
+					params.liquidityAmountRaw,
+					"liquidityAmountRaw",
+				).toString()
+			: undefined;
+	const tokenAAmountRaw =
+		typeof params.tokenAAmountRaw === "string" &&
+		params.tokenAAmountRaw.trim().length > 0
+			? parsePositiveBigInt(
+					params.tokenAAmountRaw,
+					"tokenAAmountRaw",
+				).toString()
+			: undefined;
+	const tokenBAmountRaw =
+		typeof params.tokenBAmountRaw === "string" &&
+		params.tokenBAmountRaw.trim().length > 0
+			? parsePositiveBigInt(
+					params.tokenBAmountRaw,
+					"tokenBAmountRaw",
+				).toString()
+			: undefined;
+	const providedCount = [
+		liquidityAmountRaw,
+		tokenAAmountRaw,
+		tokenBAmountRaw,
+	].filter((value) => value !== undefined).length;
+	if (providedCount !== 1) {
+		throw new Error(
+			"Provide exactly one of liquidityAmountRaw, tokenAAmountRaw, tokenBAmountRaw",
+		);
+	}
+	return {
+		liquidityAmountRaw,
+		tokenAAmountRaw,
+		tokenBAmountRaw,
+	};
+}
+
 async function normalizeIntent(
 	params: Record<string, unknown>,
 	signerPublicKey: string,
@@ -2813,6 +3020,36 @@ async function normalizeIntent(
 			protocol: "kamino",
 			programId,
 			limitMarkets,
+		};
+	}
+	if (
+		intentType === "solana.lp.orca.increase" ||
+		intentType === "solana.lp.orca.decrease"
+	) {
+		const ownerAddress = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.ownerAddress === "string"
+					? normalizedParams.ownerAddress
+					: signerPublicKey,
+			),
+		).toBase58();
+		if (ownerAddress !== signerPublicKey) {
+			throw new Error(
+				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
+			);
+		}
+		const positionMint = new PublicKey(
+			normalizeAtPath(
+				ensureString(normalizedParams.positionMint, "positionMint"),
+			),
+		).toBase58();
+		const liquidityAction = parseOrcaLiquidityActionInput(normalizedParams);
+		return {
+			type: intentType,
+			ownerAddress,
+			positionMint,
+			...liquidityAction,
+			slippageBps: parseOptionalOrcaSlippageBps(normalizedParams.slippageBps),
 		};
 	}
 	if (intentType === "solana.lend.kamino.depositAndBorrow") {
@@ -4401,6 +4638,104 @@ async function prepareKaminoRepayAndWithdrawSimulation(
 	};
 }
 
+async function prepareOrcaIncreaseLiquiditySimulation(
+	network: string,
+	signer: Keypair,
+	intent: OrcaIncreaseLiquidityIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.ownerAddress !== signerAddress) {
+		throw new Error(
+			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const build = await buildOrcaIncreaseLiquidityInstructions({
+		ownerAddress: intent.ownerAddress,
+		positionMint: intent.positionMint,
+		liquidityAmountRaw: intent.liquidityAmountRaw,
+		tokenAAmountRaw: intent.tokenAAmountRaw,
+		tokenBAmountRaw: intent.tokenBAmountRaw,
+		slippageBps: intent.slippageBps,
+		network,
+	});
+	const tx = new Transaction().add(...build.instructions);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			latestBlockhash,
+			ownerAddress: build.ownerAddress,
+			positionMint: build.positionMint,
+			quoteParamKind: build.quoteParamKind,
+			quoteParamAmountRaw: build.quoteParamAmountRaw,
+			slippageBps: build.slippageBps,
+			instructionCount: build.instructionCount,
+			quote: build.quote,
+		},
+	};
+}
+
+async function prepareOrcaDecreaseLiquiditySimulation(
+	network: string,
+	signer: Keypair,
+	intent: OrcaDecreaseLiquidityIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.ownerAddress !== signerAddress) {
+		throw new Error(
+			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const build = await buildOrcaDecreaseLiquidityInstructions({
+		ownerAddress: intent.ownerAddress,
+		positionMint: intent.positionMint,
+		liquidityAmountRaw: intent.liquidityAmountRaw,
+		tokenAAmountRaw: intent.tokenAAmountRaw,
+		tokenBAmountRaw: intent.tokenBAmountRaw,
+		slippageBps: intent.slippageBps,
+		network,
+	});
+	const tx = new Transaction().add(...build.instructions);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			latestBlockhash,
+			ownerAddress: build.ownerAddress,
+			positionMint: build.positionMint,
+			quoteParamKind: build.quoteParamKind,
+			quoteParamAmountRaw: build.quoteParamAmountRaw,
+			slippageBps: build.slippageBps,
+			instructionCount: build.instructionCount,
+			quote: build.quote,
+		},
+	};
+}
+
 async function prepareStakeCreateAndDelegateSimulation(
 	network: string,
 	signer: Keypair,
@@ -4957,6 +5292,12 @@ async function prepareSimulation(
 	if (intent.type === "solana.lend.kamino.withdraw") {
 		return prepareKaminoWithdrawSimulation(network, signer, intent);
 	}
+	if (intent.type === "solana.lp.orca.increase") {
+		return prepareOrcaIncreaseLiquiditySimulation(network, signer, intent);
+	}
+	if (intent.type === "solana.lp.orca.decrease") {
+		return prepareOrcaDecreaseLiquiditySimulation(network, signer, intent);
+	}
 	if (intent.type === "solana.stake.createAndDelegate") {
 		return prepareStakeCreateAndDelegateSimulation(network, signer, intent);
 	}
@@ -5063,6 +5404,8 @@ export function createSolanaWorkflowTools() {
 						Type.Literal("solana.stake.authorizeWithdrawer"),
 						Type.Literal("solana.stake.deactivate"),
 						Type.Literal("solana.stake.withdraw"),
+						Type.Literal("solana.lp.orca.increase"),
+						Type.Literal("solana.lp.orca.decrease"),
 						Type.Literal("solana.swap.jupiter"),
 						Type.Literal("solana.swap.orca"),
 						Type.Literal("solana.swap.meteora"),
@@ -5184,6 +5527,12 @@ export function createSolanaWorkflowTools() {
 							"Optional owner assertion for Kamino lending intents. Must match signer address.",
 					}),
 				),
+				positionMint: Type.Optional(
+					Type.String({
+						description:
+							"Orca position mint for intentType=solana.lp.orca.increase / solana.lp.orca.decrease",
+					}),
+				),
 				reserveMint: Type.Optional(
 					Type.String({
 						description:
@@ -5236,6 +5585,24 @@ export function createSolanaWorkflowTools() {
 					Type.String({
 						description:
 							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl / solana.lend.kamino.borrow / solana.lend.kamino.deposit / solana.lend.kamino.repay / solana.lend.kamino.withdraw",
+					}),
+				),
+				liquidityAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Liquidity amount (raw integer) for intentType=solana.lp.orca.increase / solana.lp.orca.decrease. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				tokenAAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token A amount (raw integer) for intentType=solana.lp.orca.increase / solana.lp.orca.decrease. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				tokenBAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token B amount (raw integer) for intentType=solana.lp.orca.increase / solana.lp.orca.decrease. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
 					}),
 				),
 				depositAmountRaw: Type.Optional(
@@ -5362,7 +5729,14 @@ export function createSolanaWorkflowTools() {
 							"Maximum markets to query/return for intentType=solana.read.lendingMarkets or solana.read.lendingPositions",
 					}),
 				),
-				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+				slippageBps: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 10_000,
+						description:
+							"Slippage in bps for swap intents and Orca liquidity intents",
+					}),
+				),
 				swapMode: jupiterSwapModeSchema(),
 				txVersion: raydiumTxVersionSchema(),
 				swapType: raydiumSwapTypeSchema(),

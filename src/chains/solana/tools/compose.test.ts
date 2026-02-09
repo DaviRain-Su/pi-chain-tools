@@ -15,6 +15,8 @@ const runtimeMocks = vi.hoisted(() => ({
 	buildKaminoRepayAndWithdrawInstructions: vi.fn(),
 	buildKaminoRepayInstructions: vi.fn(),
 	buildKaminoWithdrawInstructions: vi.fn(),
+	buildOrcaDecreaseLiquidityInstructions: vi.fn(),
+	buildOrcaIncreaseLiquidityInstructions: vi.fn(),
 	buildJupiterSwapInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
 	buildRaydiumSwapTransactions: vi.fn(),
@@ -60,6 +62,10 @@ vi.mock("../runtime.js", async () => {
 		buildKaminoRepayInstructions: runtimeMocks.buildKaminoRepayInstructions,
 		buildKaminoWithdrawInstructions:
 			runtimeMocks.buildKaminoWithdrawInstructions,
+		buildOrcaDecreaseLiquidityInstructions:
+			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
+		buildOrcaIncreaseLiquidityInstructions:
+			runtimeMocks.buildOrcaIncreaseLiquidityInstructions,
 		buildJupiterSwapInstructions: runtimeMocks.buildJupiterSwapInstructions,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
 		buildRaydiumSwapTransactions: runtimeMocks.buildRaydiumSwapTransactions,
@@ -1039,5 +1045,120 @@ describe("compose tools", () => {
 				network: "mainnet-beta",
 			}),
 		).rejects.toThrow("No Orca route found");
+	});
+
+	it("builds Orca increase-liquidity transaction", async () => {
+		const ownerAddress = Keypair.generate().publicKey.toBase58();
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 55,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 9000 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		runtimeMocks.buildOrcaIncreaseLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress,
+			positionMint,
+			quoteParamKind: "liquidity",
+			quoteParamAmountRaw: "100",
+			slippageBps: 120,
+			instructionCount: 1,
+			quote: { tokenMaxA: "1", tokenMaxB: "2" },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([1]),
+				}),
+			],
+		});
+
+		const tool = getTool("solana_buildOrcaIncreaseLiquidityTransaction");
+		const result = await tool.execute("compose-orca-lp-increase", {
+			ownerAddress,
+			positionMint,
+			liquidityAmountRaw: "100",
+			slippageBps: 120,
+			asLegacyTransaction: false,
+			network: "devnet",
+		});
+
+		expect(
+			runtimeMocks.buildOrcaIncreaseLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress,
+				positionMint,
+				liquidityAmountRaw: "100",
+				slippageBps: 120,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			version: "v0",
+			ownerAddress,
+			positionMint,
+			quoteParamKind: "liquidity",
+			quoteParamAmountRaw: "100",
+		});
+	});
+
+	it("builds Orca decrease-liquidity transaction", async () => {
+		const ownerAddress = Keypair.generate().publicKey.toBase58();
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 56,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 8000 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		runtimeMocks.buildOrcaDecreaseLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress,
+			positionMint,
+			quoteParamKind: "tokenA",
+			quoteParamAmountRaw: "42",
+			slippageBps: 80,
+			instructionCount: 1,
+			quote: { tokenMinA: "1", tokenMinB: "1" },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([2]),
+				}),
+			],
+		});
+
+		const tool = getTool("solana_buildOrcaDecreaseLiquidityTransaction");
+		const result = await tool.execute("compose-orca-lp-decrease", {
+			ownerAddress,
+			positionMint,
+			tokenAAmountRaw: "42",
+			slippageBps: 80,
+			network: "devnet",
+		});
+
+		expect(
+			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress,
+				positionMint,
+				tokenAAmountRaw: "42",
+				slippageBps: 80,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			version: "legacy",
+			ownerAddress,
+			positionMint,
+			quoteParamKind: "tokenA",
+			quoteParamAmountRaw: "42",
+		});
 	});
 });

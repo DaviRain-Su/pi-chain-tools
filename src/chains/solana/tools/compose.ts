@@ -31,6 +31,8 @@ import {
 	buildKaminoRepayAndWithdrawInstructions,
 	buildKaminoRepayInstructions,
 	buildKaminoWithdrawInstructions,
+	buildOrcaDecreaseLiquidityInstructions,
+	buildOrcaIncreaseLiquidityInstructions,
 	buildRaydiumSwapTransactions,
 	getConnection,
 	getExplorerAddressUrl,
@@ -1674,6 +1676,246 @@ export function createSolanaComposeTools() {
 						inputMintExplorer: getExplorerAddressUrl(inputMint, params.network),
 						outputMintExplorer: getExplorerAddressUrl(
 							outputMint,
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildOrcaIncreaseLiquidityTransaction`,
+			label: "Solana Build Orca Increase Liquidity Transaction",
+			description:
+				"Build an unsigned Orca Whirlpool increase-liquidity transaction (legacy or v0, base64)",
+			parameters: Type.Object({
+				ownerAddress: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				positionMint: Type.String({
+					description: "Orca position mint address",
+				}),
+				liquidityAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Liquidity delta as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				tokenAAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token A amount as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				tokenBAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token B amount as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				slippageBps: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 10_000,
+						description: "Slippage tolerance in basis points (default 100)",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Build legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const ownerAddress = new PublicKey(
+					normalizeAtPath(params.ownerAddress),
+				).toBase58();
+				const positionMint = new PublicKey(
+					normalizeAtPath(params.positionMint),
+				).toBase58();
+				const connection = getConnection(params.network);
+				const build = await buildOrcaIncreaseLiquidityInstructions({
+					ownerAddress,
+					positionMint,
+					liquidityAmountRaw: params.liquidityAmountRaw,
+					tokenAAmountRaw: params.tokenAAmountRaw,
+					tokenBAmountRaw: params.tokenBAmountRaw,
+					slippageBps: params.slippageBps,
+					network: params.network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? createLegacyTransaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						)
+					: createV0Transaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						);
+				const feeResult = await connection.getFeeForMessage(
+					tx instanceof VersionedTransaction ? tx.message : tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 =
+					tx instanceof VersionedTransaction
+						? Buffer.from(tx.serialize()).toString("base64")
+						: tx
+								.serialize({
+									requireAllSignatures: false,
+									verifySignatures: false,
+								})
+								.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned Orca increase-liquidity transaction built",
+						},
+					],
+					details: {
+						txBase64,
+						version: asLegacyTransaction ? "legacy" : "v0",
+						network: build.network,
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						ownerAddress: build.ownerAddress,
+						positionMint: build.positionMint,
+						quoteParamKind: build.quoteParamKind,
+						quoteParamAmountRaw: build.quoteParamAmountRaw,
+						slippageBps: build.slippageBps,
+						instructionCount: build.instructionCount,
+						quote: build.quote,
+						ownerExplorer: getExplorerAddressUrl(
+							build.ownerAddress,
+							params.network,
+						),
+						positionMintExplorer: getExplorerAddressUrl(
+							build.positionMint,
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildOrcaDecreaseLiquidityTransaction`,
+			label: "Solana Build Orca Decrease Liquidity Transaction",
+			description:
+				"Build an unsigned Orca Whirlpool decrease-liquidity transaction (legacy or v0, base64)",
+			parameters: Type.Object({
+				ownerAddress: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				positionMint: Type.String({
+					description: "Orca position mint address",
+				}),
+				liquidityAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Liquidity delta as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				tokenAAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token A amount as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				tokenBAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token B amount as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				slippageBps: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 10_000,
+						description: "Slippage tolerance in basis points (default 100)",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Build legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const ownerAddress = new PublicKey(
+					normalizeAtPath(params.ownerAddress),
+				).toBase58();
+				const positionMint = new PublicKey(
+					normalizeAtPath(params.positionMint),
+				).toBase58();
+				const connection = getConnection(params.network);
+				const build = await buildOrcaDecreaseLiquidityInstructions({
+					ownerAddress,
+					positionMint,
+					liquidityAmountRaw: params.liquidityAmountRaw,
+					tokenAAmountRaw: params.tokenAAmountRaw,
+					tokenBAmountRaw: params.tokenBAmountRaw,
+					slippageBps: params.slippageBps,
+					network: params.network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? createLegacyTransaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						)
+					: createV0Transaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						);
+				const feeResult = await connection.getFeeForMessage(
+					tx instanceof VersionedTransaction ? tx.message : tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 =
+					tx instanceof VersionedTransaction
+						? Buffer.from(tx.serialize()).toString("base64")
+						: tx
+								.serialize({
+									requireAllSignatures: false,
+									verifySignatures: false,
+								})
+								.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned Orca decrease-liquidity transaction built",
+						},
+					],
+					details: {
+						txBase64,
+						version: asLegacyTransaction ? "legacy" : "v0",
+						network: build.network,
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						ownerAddress: build.ownerAddress,
+						positionMint: build.positionMint,
+						quoteParamKind: build.quoteParamKind,
+						quoteParamAmountRaw: build.quoteParamAmountRaw,
+						slippageBps: build.slippageBps,
+						instructionCount: build.instructionCount,
+						quote: build.quote,
+						ownerExplorer: getExplorerAddressUrl(
+							build.ownerAddress,
+							params.network,
+						),
+						positionMintExplorer: getExplorerAddressUrl(
+							build.positionMint,
 							params.network,
 						),
 					},

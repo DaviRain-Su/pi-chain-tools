@@ -17,6 +17,8 @@ const runtimeMocks = vi.hoisted(() => ({
 	buildKaminoRepayAndWithdrawInstructions: vi.fn(),
 	buildKaminoRepayInstructions: vi.fn(),
 	buildKaminoWithdrawInstructions: vi.fn(),
+	buildOrcaDecreaseLiquidityInstructions: vi.fn(),
+	buildOrcaIncreaseLiquidityInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
 	buildRaydiumSwapTransactions: vi.fn(),
 	getJupiterApiBaseUrl: vi.fn(() => "https://lite-api.jup.ag"),
@@ -67,6 +69,10 @@ vi.mock("../runtime.js", async () => {
 		buildKaminoRepayInstructions: runtimeMocks.buildKaminoRepayInstructions,
 		buildKaminoWithdrawInstructions:
 			runtimeMocks.buildKaminoWithdrawInstructions,
+		buildOrcaDecreaseLiquidityInstructions:
+			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
+		buildOrcaIncreaseLiquidityInstructions:
+			runtimeMocks.buildOrcaIncreaseLiquidityInstructions,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
 		buildRaydiumSwapTransactions: runtimeMocks.buildRaydiumSwapTransactions,
 		getJupiterApiBaseUrl: runtimeMocks.getJupiterApiBaseUrl,
@@ -2046,6 +2052,89 @@ describe("native stake execute tools", () => {
 			toAddress,
 			lamports: 500_000_000,
 			network: "devnet",
+		});
+	});
+
+	it("blocks mainnet Orca increase-liquidity unless confirmMainnet=true", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const tool = getTool("solana_orcaIncreaseLiquidity");
+
+		await expect(
+			tool.execute("orca-increase-mainnet", {
+				fromSecretKey: "mock",
+				positionMint: Keypair.generate().publicKey.toBase58(),
+				liquidityAmountRaw: "10",
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+		expect(runtimeMocks.getConnection).not.toHaveBeenCalled();
+	});
+
+	it("simulates Orca decrease-liquidity transaction", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("devnet");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.buildOrcaDecreaseLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			positionMint,
+			quoteParamKind: "tokenB",
+			quoteParamAmountRaw: "77",
+			slippageBps: 90,
+			instructionCount: 1,
+			quote: { tokenMinA: "1", tokenMinB: "1" },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([7]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 999,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 321,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_orcaDecreaseLiquidity");
+		const result = await tool.execute("orca-decrease-sim", {
+			fromSecretKey: "mock",
+			positionMint,
+			tokenBAmountRaw: "77",
+			slippageBps: 90,
+			simulate: true,
+			network: "devnet",
+		});
+
+		expect(
+			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				positionMint,
+				tokenBAmountRaw: "77",
+				slippageBps: 90,
+			}),
+		);
+		expect(connection.simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			simulated: true,
+			version: "legacy",
+			ownerAddress: signer.publicKey.toBase58(),
+			positionMint,
+			quoteParamKind: "tokenB",
+			quoteParamAmountRaw: "77",
 		});
 	});
 });

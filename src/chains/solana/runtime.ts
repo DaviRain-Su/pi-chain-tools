@@ -12,7 +12,11 @@ import {
 	KaminoMarket,
 	VanillaObligation,
 } from "@kamino-finance/klend-sdk";
-import { fetchPositionsForOwner } from "@orca-so/whirlpools";
+import {
+	decreaseLiquidityInstructions,
+	fetchPositionsForOwner,
+	increaseLiquidityInstructions,
+} from "@orca-so/whirlpools";
 import { fetchAllMaybeWhirlpool } from "@orca-so/whirlpools-client";
 import {
 	API_URLS as RAYDIUM_API_URLS,
@@ -519,6 +523,104 @@ function parseKaminoExtraComputeUnits(value: number | undefined): number {
 		);
 	}
 	return value;
+}
+
+function parseOrcaSlippageBps(value: number | undefined): number {
+	if (value === undefined) {
+		return 100;
+	}
+	if (!Number.isInteger(value) || value < 0 || value > 10_000) {
+		throw new Error("slippageBps must be an integer between 0 and 10000");
+	}
+	return value;
+}
+
+type OrcaParsedQuoteParam = {
+	kind: OrcaLiquidityQuoteParamKind;
+	amountRaw: string;
+	param: { liquidity: bigint } | { tokenA: bigint } | { tokenB: bigint };
+};
+
+function parseOrcaQuoteParam(
+	request: OrcaLiquidityInstructionsRequest,
+): OrcaParsedQuoteParam {
+	const provided = [
+		{
+			kind: "liquidity" as const,
+			field: "liquidityAmountRaw",
+			value: request.liquidityAmountRaw,
+		},
+		{
+			kind: "tokenA" as const,
+			field: "tokenAAmountRaw",
+			value: request.tokenAAmountRaw,
+		},
+		{
+			kind: "tokenB" as const,
+			field: "tokenBAmountRaw",
+			value: request.tokenBAmountRaw,
+		},
+	].filter(
+		(
+			entry,
+		): entry is {
+			kind: OrcaLiquidityQuoteParamKind;
+			field: "liquidityAmountRaw" | "tokenAAmountRaw" | "tokenBAmountRaw";
+			value: string;
+		} => typeof entry.value === "string" && entry.value.trim().length > 0,
+	);
+
+	if (provided.length !== 1) {
+		throw new Error(
+			"Provide exactly one of liquidityAmountRaw, tokenAAmountRaw, tokenBAmountRaw",
+		);
+	}
+	const selected = provided[0];
+	if (!selected) {
+		throw new Error(
+			"Provide exactly one of liquidityAmountRaw, tokenAAmountRaw, tokenBAmountRaw",
+		);
+	}
+	const amountRaw = parsePositiveBigInt(
+		selected.value,
+		selected.field,
+	).toString();
+	const amount = BigInt(amountRaw);
+	if (selected.kind === "liquidity") {
+		return {
+			kind: selected.kind,
+			amountRaw,
+			param: { liquidity: amount },
+		};
+	}
+	if (selected.kind === "tokenA") {
+		return {
+			kind: selected.kind,
+			amountRaw,
+			param: { tokenA: amount },
+		};
+	}
+	return {
+		kind: selected.kind,
+		amountRaw,
+		param: { tokenB: amount },
+	};
+}
+
+function normalizeBigIntFields(value: unknown): unknown {
+	if (typeof value === "bigint") {
+		return value.toString();
+	}
+	if (Array.isArray(value)) {
+		return value.map((entry) => normalizeBigIntFields(entry));
+	}
+	if (!value || typeof value !== "object") {
+		return value;
+	}
+	const entries = Object.entries(value as Record<string, unknown>).map(
+		([key, entry]) => [key, normalizeBigIntFields(entry)] as const,
+	);
+	return Object.fromEntries(entries);
 }
 
 type KaminoRepayCurrentSlot = Parameters<typeof KaminoAction.buildRepayTxns>[7];
@@ -1171,6 +1273,84 @@ export async function buildKaminoRepayAndWithdrawInstructions(
 	};
 }
 
+export async function buildOrcaIncreaseLiquidityInstructions(
+	request: OrcaIncreaseLiquidityInstructionsRequest,
+): Promise<OrcaIncreaseLiquidityInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const positionMint = new PublicKey(
+		normalizeAtPath(request.positionMint),
+	).toBase58();
+	const slippageBps = parseOrcaSlippageBps(request.slippageBps);
+	const quoteParam = parseOrcaQuoteParam(request);
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+	const result = await increaseLiquidityInstructions(
+		rpc as never,
+		address(positionMint),
+		quoteParam.param as never,
+		slippageBps,
+		createNoopSigner(address(ownerAddress)),
+	);
+	const instructions = result.instructions.map(convertKitInstructionToLegacy);
+	const normalizedQuote = normalizeBigIntFields(result.quote);
+	const quote =
+		normalizedQuote && typeof normalizedQuote === "object"
+			? (normalizedQuote as Record<string, unknown>)
+			: {};
+	return {
+		network,
+		ownerAddress,
+		positionMint,
+		quoteParamKind: quoteParam.kind,
+		quoteParamAmountRaw: quoteParam.amountRaw,
+		slippageBps,
+		instructionCount: instructions.length,
+		quote,
+		instructions,
+	};
+}
+
+export async function buildOrcaDecreaseLiquidityInstructions(
+	request: OrcaDecreaseLiquidityInstructionsRequest,
+): Promise<OrcaDecreaseLiquidityInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const positionMint = new PublicKey(
+		normalizeAtPath(request.positionMint),
+	).toBase58();
+	const slippageBps = parseOrcaSlippageBps(request.slippageBps);
+	const quoteParam = parseOrcaQuoteParam(request);
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+	const result = await decreaseLiquidityInstructions(
+		rpc as never,
+		address(positionMint),
+		quoteParam.param as never,
+		slippageBps,
+		createNoopSigner(address(ownerAddress)),
+	);
+	const instructions = result.instructions.map(convertKitInstructionToLegacy);
+	const normalizedQuote = normalizeBigIntFields(result.quote);
+	const quote =
+		normalizedQuote && typeof normalizedQuote === "object"
+			? (normalizedQuote as Record<string, unknown>)
+			: {};
+	return {
+		network,
+		ownerAddress,
+		positionMint,
+		quoteParamKind: quoteParam.kind,
+		quoteParamAmountRaw: quoteParam.amountRaw,
+		slippageBps,
+		instructionCount: instructions.length,
+		quote,
+		instructions,
+	};
+}
+
 function truncateText(value: string): string {
 	if (value.length <= 500) return value;
 	return `${value.slice(0, 500)}...`;
@@ -1452,6 +1632,39 @@ export type KaminoLendingMarketsResult = {
 	marketQueryLimit: number;
 	markets: KaminoLendingMarketSummary[];
 };
+
+export type OrcaLiquidityQuoteParamKind = "liquidity" | "tokenA" | "tokenB";
+
+export type OrcaLiquidityInstructionsRequest = {
+	ownerAddress: string;
+	positionMint: string;
+	liquidityAmountRaw?: string;
+	tokenAAmountRaw?: string;
+	tokenBAmountRaw?: string;
+	slippageBps?: number;
+	network?: string;
+};
+
+export type OrcaLiquidityInstructionsResult = {
+	network: SolanaNetwork;
+	ownerAddress: string;
+	positionMint: string;
+	quoteParamKind: OrcaLiquidityQuoteParamKind;
+	quoteParamAmountRaw: string;
+	slippageBps: number;
+	instructionCount: number;
+	quote: Record<string, unknown>;
+	instructions: TransactionInstruction[];
+};
+
+export type OrcaIncreaseLiquidityInstructionsRequest =
+	OrcaLiquidityInstructionsRequest;
+export type OrcaIncreaseLiquidityInstructionsResult =
+	OrcaLiquidityInstructionsResult;
+export type OrcaDecreaseLiquidityInstructionsRequest =
+	OrcaLiquidityInstructionsRequest;
+export type OrcaDecreaseLiquidityInstructionsResult =
+	OrcaLiquidityInstructionsResult;
 
 export type OrcaWhirlpoolPositionReward = {
 	index: number;

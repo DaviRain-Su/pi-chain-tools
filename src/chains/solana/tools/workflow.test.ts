@@ -15,6 +15,8 @@ const runtimeMocks = vi.hoisted(() => ({
 	buildKaminoRepayInstructions: vi.fn(),
 	buildKaminoRepayAndWithdrawInstructions: vi.fn(),
 	buildKaminoWithdrawInstructions: vi.fn(),
+	buildOrcaDecreaseLiquidityInstructions: vi.fn(),
+	buildOrcaIncreaseLiquidityInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
 	buildRaydiumSwapTransactions: vi.fn(),
 	callJupiterApi: vi.fn(),
@@ -69,6 +71,10 @@ vi.mock("../runtime.js", async () => {
 			runtimeMocks.buildKaminoRepayAndWithdrawInstructions,
 		buildKaminoWithdrawInstructions:
 			runtimeMocks.buildKaminoWithdrawInstructions,
+		buildOrcaDecreaseLiquidityInstructions:
+			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
+		buildOrcaIncreaseLiquidityInstructions:
+			runtimeMocks.buildOrcaIncreaseLiquidityInstructions,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
 		buildRaydiumSwapTransactions: runtimeMocks.buildRaydiumSwapTransactions,
 		callJupiterApi: runtimeMocks.callJupiterApi,
@@ -2964,6 +2970,108 @@ describe("w3rt_run_workflow_v0", () => {
 		expect(executed.details).toMatchObject({
 			runId: "run-mainnet",
 			status: "executed",
+		});
+	});
+
+	it("analyzes Orca increase-liquidity workflow intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-lp-analysis", {
+			runId: "run-orca-lp-analysis",
+			intentType: "solana.lp.orca.increase",
+			runMode: "analysis",
+			positionMint,
+			liquidityAmountRaw: "123",
+		});
+
+		expect(runtimeMocks.getConnection).not.toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			runId: "run-orca-lp-analysis",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.increase",
+						positionMint,
+						liquidityAmountRaw: "123",
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates Orca decrease-liquidity workflow intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.buildOrcaDecreaseLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			positionMint,
+			quoteParamKind: "tokenA",
+			quoteParamAmountRaw: "55",
+			slippageBps: 75,
+			instructionCount: 1,
+			quote: { tokenMinA: "1", tokenMinB: "1" },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([5]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 77,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 222,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-lp-sim", {
+			runId: "run-orca-lp-sim",
+			intentType: "solana.lp.orca.decrease",
+			runMode: "simulate",
+			positionMint,
+			tokenAAmountRaw: "55",
+		});
+
+		expect(
+			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				positionMint,
+				tokenAAmountRaw: "55",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-orca-lp-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.decrease",
+						positionMint,
+						tokenAAmountRaw: "55",
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
 		});
 	});
 });
