@@ -5229,6 +5229,69 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Meteora remove intentText with side-specific x amount shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -5,
+							upperBinId: 7,
+							totalXAmountRaw: "4000000",
+							totalYAmountRaw: "10000000",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-remove-side-intent", {
+			runId: "run-meteora-remove-side-intent",
+			runMode: "analysis",
+			intentText: `meteora remove liquidity ${poolAddress} ${positionAddress} x 1 USDC`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-remove-side-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.remove",
+						poolAddress,
+						positionAddress,
+						bps: 2500,
+					},
+				},
+			},
+		});
+	});
+
 	it("rejects Meteora remove generic amountUi when tokenMint is missing", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -5269,7 +5332,63 @@ describe("w3rt_run_workflow_v0", () => {
 				tokenMint: "USDC",
 			}),
 		).rejects.toThrow(
-			"Provide either bps or amountUi/tokenMint (or amountRaw/tokenMint), not both",
+			"Provide either bps or amount fields (generic or side-specific), not both",
+		);
+	});
+
+	it("rejects Meteora remove side-specific amount when both sides are provided", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -5,
+							upperBinId: 7,
+							totalXAmountRaw: "4000000",
+							totalYAmountRaw: "10000000",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-meteora-remove-side-conflict", {
+				runId: "run-meteora-remove-side-conflict",
+				intentType: "solana.lp.meteora.remove",
+				runMode: "analysis",
+				poolAddress,
+				positionAddress,
+				totalXAmountUi: "1",
+				totalYAmountUi: "0.001",
+			}),
+		).rejects.toThrow(
+			"Provide exactly one side amount among totalXAmountRaw/totalXAmountUi/totalYAmountRaw/totalYAmountUi for intentType=solana.lp.meteora.remove",
 		);
 	});
 

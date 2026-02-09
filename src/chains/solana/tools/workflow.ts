@@ -2184,6 +2184,9 @@ function parseMeteoraLiquidityIntentText(
 	if (xAmountWithTokenMatch?.[1] && xAmountWithTokenMint) {
 		parsed.totalXAmountUi = parsed.totalXAmountUi ?? xAmountWithTokenMatch[1];
 		parsed.tokenXMint = parsed.tokenXMint ?? xAmountWithTokenMint;
+		if (parsed.totalXAmountRaw === xAmountWithTokenMatch[1]) {
+			parsed.totalXAmountRaw = undefined;
+		}
 	}
 	const yAmountWithTokenMatch = intentText.match(
 		/\b(?:y|tokenY|amountY)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9._-]{1,15}|[1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
@@ -2194,6 +2197,9 @@ function parseMeteoraLiquidityIntentText(
 	if (yAmountWithTokenMatch?.[1] && yAmountWithTokenMint) {
 		parsed.totalYAmountUi = parsed.totalYAmountUi ?? yAmountWithTokenMatch[1];
 		parsed.tokenYMint = parsed.tokenYMint ?? yAmountWithTokenMint;
+		if (parsed.totalYAmountRaw === yAmountWithTokenMatch[1]) {
+			parsed.totalYAmountRaw = undefined;
+		}
 	}
 	const genericTokenMintMatch = intentText.match(
 		/\btokenMint\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
@@ -4142,7 +4148,7 @@ async function resolveMeteoraPositionDetailsForRemove(args: {
 function deriveMeteoraRemoveBpsFromRawAmount(args: {
 	requestedAmountRaw: string;
 	positionAmountRaw: string;
-	field: "amountRaw" | "amountUi";
+	field: string;
 	tokenMint: string;
 	poolAddress: string;
 	positionAddress: string;
@@ -5255,6 +5261,45 @@ async function normalizeIntent(
 		) {
 			throw new Error("fromBinId must be <= toBinId");
 		}
+		const totalXAmountRawInput =
+			typeof normalizedParams.totalXAmountRaw === "string" &&
+			normalizedParams.totalXAmountRaw.trim().length > 0
+				? parseNonNegativeRawAmount(
+						normalizedParams.totalXAmountRaw,
+						"totalXAmountRaw",
+					)
+				: undefined;
+		const totalYAmountRawInput =
+			typeof normalizedParams.totalYAmountRaw === "string" &&
+			normalizedParams.totalYAmountRaw.trim().length > 0
+				? parseNonNegativeRawAmount(
+						normalizedParams.totalYAmountRaw,
+						"totalYAmountRaw",
+					)
+				: undefined;
+		const totalXAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.totalXAmountUi,
+			"totalXAmountUi",
+		);
+		const totalYAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.totalYAmountUi,
+			"totalYAmountUi",
+		);
+		if (totalXAmountRawInput !== undefined && totalXAmountUi !== undefined) {
+			throw new Error(
+				"Provide either totalXAmountRaw or totalXAmountUi, not both",
+			);
+		}
+		if (totalYAmountRawInput !== undefined && totalYAmountUi !== undefined) {
+			throw new Error(
+				"Provide either totalYAmountRaw or totalYAmountUi, not both",
+			);
+		}
+		const hasSideAmountInput =
+			totalXAmountRawInput !== undefined ||
+			totalYAmountRawInput !== undefined ||
+			totalXAmountUi !== undefined ||
+			totalYAmountUi !== undefined;
 		const genericAmountRawInput =
 			typeof normalizedParams.amountRaw === "string" &&
 			normalizedParams.amountRaw.trim().length > 0
@@ -5269,6 +5314,11 @@ async function normalizeIntent(
 		}
 		const hasGenericAmountInput =
 			genericAmountRawInput !== undefined || genericAmountUi !== undefined;
+		if (hasGenericAmountInput && hasSideAmountInput) {
+			throw new Error(
+				"Provide either amountUi/tokenMint (or amountRaw/tokenMint) or side-specific totalX/totalY amount fields, not both",
+			);
+		}
 		const genericTokenMint =
 			hasGenericAmountInput &&
 			typeof normalizedParams.tokenMint === "string" &&
@@ -5280,41 +5330,119 @@ async function normalizeIntent(
 				"tokenMint is required when amountUi or amountRaw is provided for intentType=solana.lp.meteora.remove",
 			);
 		}
+		const tokenXMintHint =
+			typeof normalizedParams.tokenXMint === "string" &&
+			normalizedParams.tokenXMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenXMint, "tokenXMint")
+				: undefined;
+		const tokenYMintHint =
+			typeof normalizedParams.tokenYMint === "string" &&
+			normalizedParams.tokenYMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenYMint, "tokenYMint")
+				: undefined;
 		let bps = parseOptionalMeteoraBps(normalizedParams.bps);
-		if (bps !== undefined && hasGenericAmountInput) {
+		if (bps !== undefined && (hasGenericAmountInput || hasSideAmountInput)) {
 			throw new Error(
-				"Provide either bps or amountUi/tokenMint (or amountRaw/tokenMint), not both",
+				"Provide either bps or amount fields (generic or side-specific), not both",
 			);
 		}
-		if (hasGenericAmountInput && genericTokenMint) {
+		if (hasGenericAmountInput || hasSideAmountInput) {
 			const positionDetails = await resolveMeteoraPositionDetailsForRemove({
 				network,
 				ownerAddress,
 				poolAddress,
 				positionAddress,
 			});
-			const requestedAmountRaw =
-				genericAmountRawInput ??
-				decimalUiAmountToRaw(
-					ensureString(genericAmountUi, "amountUi"),
-					await fetchTokenDecimals(network, genericTokenMint),
-					"amountUi",
-				);
-			let positionAmountRaw: string;
-			if (genericTokenMint === positionDetails.tokenXMint) {
-				positionAmountRaw = positionDetails.totalXAmountRaw;
-			} else if (genericTokenMint === positionDetails.tokenYMint) {
-				positionAmountRaw = positionDetails.totalYAmountRaw;
-			} else {
+			if (
+				tokenXMintHint !== undefined &&
+				tokenXMintHint !== positionDetails.tokenXMint
+			) {
 				throw new Error(
-					`tokenMint mismatch for poolAddress=${poolAddress}: expected ${positionDetails.tokenXMint} or ${positionDetails.tokenYMint}, got ${genericTokenMint}`,
+					`tokenXMint mismatch for poolAddress=${poolAddress}: expected ${positionDetails.tokenXMint}, got ${tokenXMintHint}`,
 				);
+			}
+			if (
+				tokenYMintHint !== undefined &&
+				tokenYMintHint !== positionDetails.tokenYMint
+			) {
+				throw new Error(
+					`tokenYMint mismatch for poolAddress=${poolAddress}: expected ${positionDetails.tokenYMint}, got ${tokenYMintHint}`,
+				);
+			}
+			let requestedAmountRaw: string;
+			let positionAmountRaw: string;
+			let requestedTokenMint: string;
+			let requestedField: string;
+			if (hasGenericAmountInput && genericTokenMint) {
+				requestedAmountRaw =
+					genericAmountRawInput ??
+					decimalUiAmountToRaw(
+						ensureString(genericAmountUi, "amountUi"),
+						await fetchTokenDecimals(network, genericTokenMint),
+						"amountUi",
+					);
+				if (genericTokenMint === positionDetails.tokenXMint) {
+					positionAmountRaw = positionDetails.totalXAmountRaw;
+				} else if (genericTokenMint === positionDetails.tokenYMint) {
+					positionAmountRaw = positionDetails.totalYAmountRaw;
+				} else {
+					throw new Error(
+						`tokenMint mismatch for poolAddress=${poolAddress}: expected ${positionDetails.tokenXMint} or ${positionDetails.tokenYMint}, got ${genericTokenMint}`,
+					);
+				}
+				requestedTokenMint = genericTokenMint;
+				requestedField =
+					genericAmountRawInput !== undefined ? "amountRaw" : "amountUi";
+			} else {
+				const totalXRequestedRaw =
+					totalXAmountRawInput ??
+					(totalXAmountUi !== undefined
+						? decimalUiAmountToRaw(
+								totalXAmountUi,
+								await fetchTokenDecimals(network, positionDetails.tokenXMint),
+								"totalXAmountUi",
+							)
+						: undefined);
+				const totalYRequestedRaw =
+					totalYAmountRawInput ??
+					(totalYAmountUi !== undefined
+						? decimalUiAmountToRaw(
+								totalYAmountUi,
+								await fetchTokenDecimals(network, positionDetails.tokenYMint),
+								"totalYAmountUi",
+							)
+						: undefined);
+				const requestedSideCount =
+					(totalXRequestedRaw !== undefined ? 1 : 0) +
+					(totalYRequestedRaw !== undefined ? 1 : 0);
+				if (requestedSideCount !== 1) {
+					throw new Error(
+						"Provide exactly one side amount among totalXAmountRaw/totalXAmountUi/totalYAmountRaw/totalYAmountUi for intentType=solana.lp.meteora.remove",
+					);
+				}
+				if (totalXRequestedRaw !== undefined) {
+					requestedAmountRaw = totalXRequestedRaw;
+					positionAmountRaw = positionDetails.totalXAmountRaw;
+					requestedTokenMint = positionDetails.tokenXMint;
+					requestedField =
+						totalXAmountRawInput !== undefined
+							? "totalXAmountRaw"
+							: "totalXAmountUi";
+				} else {
+					requestedAmountRaw = ensureString(totalYRequestedRaw, "totalYAmount");
+					positionAmountRaw = positionDetails.totalYAmountRaw;
+					requestedTokenMint = positionDetails.tokenYMint;
+					requestedField =
+						totalYAmountRawInput !== undefined
+							? "totalYAmountRaw"
+							: "totalYAmountUi";
+				}
 			}
 			bps = deriveMeteoraRemoveBpsFromRawAmount({
 				requestedAmountRaw,
 				positionAmountRaw,
-				field: genericAmountRawInput !== undefined ? "amountRaw" : "amountUi",
-				tokenMint: genericTokenMint,
+				field: requestedField,
+				tokenMint: requestedTokenMint,
 				poolAddress,
 				positionAddress,
 			});
@@ -8227,13 +8355,13 @@ export function createSolanaWorkflowTools() {
 				tokenXMint: Type.Optional(
 					Type.String({
 						description:
-							"Optional token X mint hint for intentType=solana.lp.meteora.add when using totalXAmountUi/totalYAmountUi.",
+							"Optional token X mint hint for intentType=solana.lp.meteora.add / solana.lp.meteora.remove when using totalXAmountUi/totalYAmountUi.",
 					}),
 				),
 				tokenYMint: Type.Optional(
 					Type.String({
 						description:
-							"Optional token Y mint hint for intentType=solana.lp.meteora.add when using totalXAmountUi/totalYAmountUi.",
+							"Optional token Y mint hint for intentType=solana.lp.meteora.add / solana.lp.meteora.remove when using totalXAmountUi/totalYAmountUi.",
 					}),
 				),
 				ownerAddress: Type.Optional(
@@ -8375,25 +8503,25 @@ export function createSolanaWorkflowTools() {
 				totalXAmountRaw: Type.Optional(
 					Type.String({
 						description:
-							"Token X amount (raw integer) for intentType=solana.lp.meteora.add",
+							"Token X amount (raw integer) for intentType=solana.lp.meteora.add / solana.lp.meteora.remove. For remove, provide only one side amount.",
 					}),
 				),
 				totalYAmountRaw: Type.Optional(
 					Type.String({
 						description:
-							"Token Y amount (raw integer) for intentType=solana.lp.meteora.add",
+							"Token Y amount (raw integer) for intentType=solana.lp.meteora.add / solana.lp.meteora.remove. For remove, provide only one side amount.",
 					}),
 				),
 				totalXAmountUi: Type.Optional(
 					Type.String({
 						description:
-							"Token X amount (UI decimal string) for intentType=solana.lp.meteora.add. Can be used instead of totalXAmountRaw.",
+							"Token X amount (UI decimal string) for intentType=solana.lp.meteora.add / solana.lp.meteora.remove. Can be used instead of totalXAmountRaw.",
 					}),
 				),
 				totalYAmountUi: Type.Optional(
 					Type.String({
 						description:
-							"Token Y amount (UI decimal string) for intentType=solana.lp.meteora.add. Can be used instead of totalYAmountRaw.",
+							"Token Y amount (UI decimal string) for intentType=solana.lp.meteora.add / solana.lp.meteora.remove. Can be used instead of totalYAmountRaw.",
 					}),
 				),
 				minBinId: Type.Optional(
