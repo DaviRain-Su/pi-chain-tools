@@ -3711,6 +3711,107 @@ async function resolveMeteoraPoolTokenMintsForAdd(args: {
 	};
 }
 
+async function resolveOrcaPositionMintForIntent(args: {
+	network: string;
+	ownerAddress: string;
+	positionMint: string | undefined;
+	fieldName: string;
+}): Promise<string> {
+	if (
+		typeof args.positionMint === "string" &&
+		args.positionMint.trim().length > 0
+	) {
+		return new PublicKey(normalizeAtPath(args.positionMint)).toBase58();
+	}
+	const positions = await getOrcaWhirlpoolPositions({
+		address: args.ownerAddress,
+		network: args.network,
+	});
+	if (positions.positionCount === 0) {
+		throw new Error(
+			`No Orca Whirlpool positions found for ownerAddress=${args.ownerAddress}. Provide ${args.fieldName}.`,
+		);
+	}
+	if (positions.positionCount > 1) {
+		throw new Error(
+			`Multiple Orca Whirlpool positions found (${positions.positionCount}) for ownerAddress=${args.ownerAddress}. Provide ${args.fieldName}.`,
+		);
+	}
+	const onlyPosition = positions.positions[0];
+	if (!onlyPosition || !onlyPosition.positionMint) {
+		throw new Error(
+			`Unable to resolve Orca position for ownerAddress=${args.ownerAddress}. Provide ${args.fieldName}.`,
+		);
+	}
+	return new PublicKey(normalizeAtPath(onlyPosition.positionMint)).toBase58();
+}
+
+async function resolveMeteoraPositionForIntent(args: {
+	network: string;
+	ownerAddress: string;
+	poolAddress: string | undefined;
+	positionAddress: string | undefined;
+}): Promise<{
+	poolAddress: string;
+	positionAddress: string;
+	tokenXMint?: string;
+	tokenYMint?: string;
+}> {
+	const providedPoolAddress =
+		typeof args.poolAddress === "string" && args.poolAddress.trim().length > 0
+			? new PublicKey(normalizeAtPath(args.poolAddress)).toBase58()
+			: undefined;
+	const providedPositionAddress =
+		typeof args.positionAddress === "string" &&
+		args.positionAddress.trim().length > 0
+			? new PublicKey(normalizeAtPath(args.positionAddress)).toBase58()
+			: undefined;
+	if (providedPoolAddress && providedPositionAddress) {
+		return {
+			poolAddress: providedPoolAddress,
+			positionAddress: providedPositionAddress,
+		};
+	}
+	const positions = await getMeteoraDlmmPositions({
+		address: args.ownerAddress,
+		network: args.network,
+	});
+	const candidates = positions.pools
+		.flatMap((pool) =>
+			pool.positions.map((position) => ({
+				poolAddress: pool.poolAddress,
+				positionAddress: position.positionAddress,
+				tokenXMint: pool.tokenXMint ?? undefined,
+				tokenYMint: pool.tokenYMint ?? undefined,
+			})),
+		)
+		.filter((entry) =>
+			providedPoolAddress ? entry.poolAddress === providedPoolAddress : true,
+		)
+		.filter((entry) =>
+			providedPositionAddress
+				? entry.positionAddress === providedPositionAddress
+				: true,
+		);
+	if (candidates.length === 0) {
+		throw new Error(
+			`No Meteora positions found for ownerAddress=${args.ownerAddress} with provided pool/position filters. Provide poolAddress and positionAddress.`,
+		);
+	}
+	if (candidates.length > 1) {
+		throw new Error(
+			`Multiple Meteora positions found (${candidates.length}) for ownerAddress=${args.ownerAddress}. Provide poolAddress and positionAddress.`,
+		);
+	}
+	const resolved = candidates[0];
+	if (!resolved) {
+		throw new Error(
+			`Unable to resolve Meteora position for ownerAddress=${args.ownerAddress}. Provide poolAddress and positionAddress.`,
+		);
+	}
+	return resolved;
+}
+
 async function normalizeIntent(
 	params: Record<string, unknown>,
 	signerPublicKey: string,
@@ -3945,11 +4046,15 @@ async function normalizeIntent(
 				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
 			);
 		}
-		const positionMint = new PublicKey(
-			normalizeAtPath(
-				ensureString(normalizedParams.positionMint, "positionMint"),
-			),
-		).toBase58();
+		const positionMint = await resolveOrcaPositionMintForIntent({
+			network,
+			ownerAddress,
+			positionMint:
+				typeof normalizedParams.positionMint === "string"
+					? normalizedParams.positionMint
+					: undefined,
+			fieldName: "positionMint",
+		});
 		return {
 			type: intentType,
 			ownerAddress,
@@ -3970,11 +4075,15 @@ async function normalizeIntent(
 				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
 			);
 		}
-		const positionMint = new PublicKey(
-			normalizeAtPath(
-				ensureString(normalizedParams.positionMint, "positionMint"),
-			),
-		).toBase58();
+		const positionMint = await resolveOrcaPositionMintForIntent({
+			network,
+			ownerAddress,
+			positionMint:
+				typeof normalizedParams.positionMint === "string"
+					? normalizedParams.positionMint
+					: undefined,
+			fieldName: "positionMint",
+		});
 		return {
 			type: intentType,
 			ownerAddress,
@@ -3994,11 +4103,15 @@ async function normalizeIntent(
 				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
 			);
 		}
-		const positionMint = new PublicKey(
-			normalizeAtPath(
-				ensureString(normalizedParams.positionMint, "positionMint"),
-			),
-		).toBase58();
+		const positionMint = await resolveOrcaPositionMintForIntent({
+			network,
+			ownerAddress,
+			positionMint:
+				typeof normalizedParams.positionMint === "string"
+					? normalizedParams.positionMint
+					: undefined,
+			fieldName: "positionMint",
+		});
 		const liquidityAction = parseOrcaLiquidityActionInput(normalizedParams);
 		return {
 			type: intentType,
@@ -4021,11 +4134,15 @@ async function normalizeIntent(
 				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
 			);
 		}
-		const positionMint = new PublicKey(
-			normalizeAtPath(
-				ensureString(normalizedParams.positionMint, "positionMint"),
-			),
-		).toBase58();
+		const positionMint = await resolveOrcaPositionMintForIntent({
+			network,
+			ownerAddress,
+			positionMint:
+				typeof normalizedParams.positionMint === "string"
+					? normalizedParams.positionMint
+					: undefined,
+			fieldName: "positionMint",
+		});
 		const liquidityAction =
 			parseOrcaDecreaseLiquidityActionInput(normalizedParams);
 		return {
@@ -4049,16 +4166,20 @@ async function normalizeIntent(
 				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
 			);
 		}
-		const poolAddress = new PublicKey(
-			normalizeAtPath(
-				ensureString(normalizedParams.poolAddress, "poolAddress"),
-			),
-		).toBase58();
-		const positionAddress = new PublicKey(
-			normalizeAtPath(
-				ensureString(normalizedParams.positionAddress, "positionAddress"),
-			),
-		).toBase58();
+		const resolvedMeteoraPosition = await resolveMeteoraPositionForIntent({
+			network,
+			ownerAddress,
+			poolAddress:
+				typeof normalizedParams.poolAddress === "string"
+					? normalizedParams.poolAddress
+					: undefined,
+			positionAddress:
+				typeof normalizedParams.positionAddress === "string"
+					? normalizedParams.positionAddress
+					: undefined,
+		});
+		const poolAddress = resolvedMeteoraPosition.poolAddress;
+		const positionAddress = resolvedMeteoraPosition.positionAddress;
 		const totalXAmountRawInput =
 			typeof normalizedParams.totalXAmountRaw === "string" &&
 			normalizedParams.totalXAmountRaw.trim().length > 0
@@ -4099,12 +4220,12 @@ async function normalizeIntent(
 			typeof normalizedParams.tokenXMint === "string" &&
 			normalizedParams.tokenXMint.trim().length > 0
 				? await ensureMint(normalizedParams.tokenXMint, "tokenXMint")
-				: undefined;
+				: resolvedMeteoraPosition.tokenXMint;
 		let tokenYMint =
 			typeof normalizedParams.tokenYMint === "string" &&
 			normalizedParams.tokenYMint.trim().length > 0
 				? await ensureMint(normalizedParams.tokenYMint, "tokenYMint")
-				: undefined;
+				: resolvedMeteoraPosition.tokenYMint;
 		const hasUiAmounts =
 			totalXAmountUi !== undefined || totalYAmountUi !== undefined;
 		if (hasUiAmounts && (!tokenXMint || !tokenYMint)) {
@@ -4205,16 +4326,20 @@ async function normalizeIntent(
 				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
 			);
 		}
-		const poolAddress = new PublicKey(
-			normalizeAtPath(
-				ensureString(normalizedParams.poolAddress, "poolAddress"),
-			),
-		).toBase58();
-		const positionAddress = new PublicKey(
-			normalizeAtPath(
-				ensureString(normalizedParams.positionAddress, "positionAddress"),
-			),
-		).toBase58();
+		const resolvedMeteoraPosition = await resolveMeteoraPositionForIntent({
+			network,
+			ownerAddress,
+			poolAddress:
+				typeof normalizedParams.poolAddress === "string"
+					? normalizedParams.poolAddress
+					: undefined,
+			positionAddress:
+				typeof normalizedParams.positionAddress === "string"
+					? normalizedParams.positionAddress
+					: undefined,
+		});
+		const poolAddress = resolvedMeteoraPosition.poolAddress;
+		const positionAddress = resolvedMeteoraPosition.positionAddress;
 		const fromBinId = parseOptionalIntegerField(
 			normalizedParams.fromBinId,
 			"fromBinId",

@@ -3597,6 +3597,68 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("infers Orca harvest position when owner has a single position", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			bundleCount: 0,
+			poolCount: 1,
+			whirlpoolAddresses: [Keypair.generate().publicKey.toBase58()],
+			positions: [
+				{
+					positionAddress: Keypair.generate().publicKey.toBase58(),
+					positionMint,
+					positionBundleAddress: null,
+					isBundledPosition: false,
+					bundlePositionCount: null,
+					tokenProgram: "token",
+					whirlpoolAddress: Keypair.generate().publicKey.toBase58(),
+					tokenMintA: SOL_MINT,
+					tokenMintB: USDC_MINT,
+					tickSpacing: 64,
+					feeRate: 3000,
+					currentTickIndex: 0,
+					liquidity: "1000",
+					tickLowerIndex: -128,
+					tickUpperIndex: 128,
+					feeOwedA: "0",
+					feeOwedB: "0",
+					rewards: [],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-harvest-infer-position", {
+			runId: "run-orca-harvest-infer-position",
+			runMode: "analysis",
+			intentText: "orca harvest fees rewards",
+		});
+
+		expect(runtimeMocks.getOrcaWhirlpoolPositions).toHaveBeenCalledWith({
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-orca-harvest-infer-position",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.harvest",
+						positionMint,
+					},
+				},
+			},
+		});
+	});
+
 	it("simulates Orca harvest-position workflow intent", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -3725,6 +3787,74 @@ describe("w3rt_run_workflow_v0", () => {
 						minBinId: -10,
 						maxBinId: 20,
 						strategyType: "Curve",
+					},
+				},
+			},
+		});
+	});
+
+	it("infers Meteora add pool/position from single owner position", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -10,
+							upperBinId: 20,
+							totalXAmountRaw: "0",
+							totalYAmountRaw: "0",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-add-infer-position", {
+			runId: "run-meteora-add-infer-position",
+			runMode: "analysis",
+			intentText: "meteora add liquidity x 1.5 USDC y 0.01 SOL",
+		});
+
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-add-infer-position",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.add",
+						poolAddress,
+						positionAddress,
+						totalXAmountRaw: "1500000",
+						totalYAmountRaw: "10000000",
 					},
 				},
 			},
@@ -4013,6 +4143,73 @@ describe("w3rt_run_workflow_v0", () => {
 
 		expect(result.details).toMatchObject({
 			runId: "run-meteora-remove-half-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.remove",
+						poolAddress,
+						positionAddress,
+						bps: 5000,
+					},
+				},
+			},
+		});
+	});
+
+	it("infers Meteora remove pool/position from single owner position", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -5,
+							upperBinId: 7,
+							totalXAmountRaw: "0",
+							totalYAmountRaw: "0",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-remove-infer-position", {
+			runId: "run-meteora-remove-infer-position",
+			runMode: "analysis",
+			intentText: "meteora remove liquidity half",
+		});
+
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-remove-infer-position",
 			status: "analysis",
 			artifacts: {
 				analysis: {

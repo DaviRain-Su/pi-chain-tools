@@ -32,6 +32,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 - Orca LP decrease supports ratio-based input (`liquidityBps`, intentText like `decrease 50%`)
 - Meteora DLMM LP lifecycle compose/execute/workflow support (add/remove)
 - Meteora add-liquidity supports UI amount inputs (`totalXAmountUi`/`totalYAmountUi`) and natural-language x/y token amounts
+- Workflow can auto-resolve Orca/Meteora position ids for LP intents when the owner has a single matching position (fewer structured params needed)
 - Native stake operation tools: create+delegate/delegate/authorize/deactivate/withdraw
 - Workflow/read support for `solana.read.defiPositions` + `solana_getDefiPositions`
 - Workflow/read support for `solana.read.lendingMarkets` / `solana.read.lendingPositions`
