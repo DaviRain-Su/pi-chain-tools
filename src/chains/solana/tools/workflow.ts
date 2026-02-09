@@ -146,6 +146,10 @@ type ParsedIntentTextFields = Partial<{
 	liquidityAmountRaw: string;
 	tokenAAmountRaw: string;
 	tokenBAmountRaw: string;
+	tokenAAmountUi: string;
+	tokenBAmountUi: string;
+	tokenAMint: string;
+	tokenBMint: string;
 	tokenXMint: string;
 	tokenYMint: string;
 	liquidityBps: number;
@@ -1866,22 +1870,86 @@ function parseOrcaLiquidityIntentText(
 		}
 	}
 	const liquidityAmountRawMatch = intentText.match(
-		/\b(?:liquidityAmountRaw|liquidityAmount|liquidityRaw|liquidity|lpAmountRaw|lpAmount)\s*[=:]?\s*([0-9]+)\b/i,
+		/\b(?:liquidityAmountRaw|liquidityAmount|liquidityRaw|liquidity|lpAmountRaw|lpAmount)\s*[=:]?\s*([0-9]+)(?!\.[0-9])\b/i,
 	);
 	if (liquidityAmountRawMatch?.[1]) {
 		parsed.liquidityAmountRaw = liquidityAmountRawMatch[1];
 	}
 	const tokenAAmountRawMatch = intentText.match(
-		/\b(?:tokenAAmountRaw|tokenAAmount|tokenARaw|tokenA|amountA(?:Raw)?|aAmount(?:Raw)?)\s*[=:]?\s*([0-9]+)\b/i,
+		/\b(?:tokenAAmountRaw|tokenAAmount|tokenARaw|tokenA|amountA(?:Raw)?|aAmount(?:Raw)?)\s*[=:]?\s*([0-9]+)(?!\.[0-9])\b/i,
 	);
 	if (tokenAAmountRawMatch?.[1]) {
 		parsed.tokenAAmountRaw = tokenAAmountRawMatch[1];
 	}
 	const tokenBAmountRawMatch = intentText.match(
-		/\b(?:tokenBAmountRaw|tokenBAmount|tokenBRaw|tokenB|amountB(?:Raw)?|bAmount(?:Raw)?)\s*[=:]?\s*([0-9]+)\b/i,
+		/\b(?:tokenBAmountRaw|tokenBAmount|tokenBRaw|tokenB|amountB(?:Raw)?|bAmount(?:Raw)?)\s*[=:]?\s*([0-9]+)(?!\.[0-9])\b/i,
 	);
 	if (tokenBAmountRawMatch?.[1]) {
 		parsed.tokenBAmountRaw = tokenBAmountRawMatch[1];
+	}
+	const tokenAMintMatch = intentText.match(
+		/\b(?:tokenAMint|aMint)\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
+	);
+	if (tokenAMintMatch?.[1]) {
+		const tokenAMint = parseMintOrSymbolCandidate(tokenAMintMatch[1]);
+		if (tokenAMint) {
+			parsed.tokenAMint = tokenAMint;
+		}
+	}
+	const tokenBMintMatch = intentText.match(
+		/\b(?:tokenBMint|bMint)\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
+	);
+	if (tokenBMintMatch?.[1]) {
+		const tokenBMint = parseMintOrSymbolCandidate(tokenBMintMatch[1]);
+		if (tokenBMint) {
+			parsed.tokenBMint = tokenBMint;
+		}
+	}
+	const tokenAAmountUiMatch =
+		intentText.match(
+			/\b(?:tokenAAmountUi|amountAUi|tokenAUi|aAmountUi|aUi)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+		) ??
+		(parsed.tokenAAmountRaw === undefined
+			? intentText.match(
+					/\b(?:tokenA|amountA|aAmount)\s*[=:]?\s*([0-9]+\.[0-9]+)\b/i,
+				)
+			: null);
+	if (tokenAAmountUiMatch?.[1]) {
+		parsed.tokenAAmountUi = tokenAAmountUiMatch[1];
+	}
+	const tokenBAmountUiMatch =
+		intentText.match(
+			/\b(?:tokenBAmountUi|amountBUi|tokenBUi|bAmountUi|bUi)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+		) ??
+		(parsed.tokenBAmountRaw === undefined
+			? intentText.match(
+					/\b(?:tokenB|amountB|bAmount)\s*[=:]?\s*([0-9]+\.[0-9]+)\b/i,
+				)
+			: null);
+	if (tokenBAmountUiMatch?.[1]) {
+		parsed.tokenBAmountUi = tokenBAmountUiMatch[1];
+	}
+	const tokenAAmountWithTokenMatch = intentText.match(
+		/\b(?:tokenA|amountA|aAmount|a)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9._-]{1,15}|[1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	const tokenAAmountWithTokenMint = tokenAAmountWithTokenMatch?.[2]
+		? parseMintOrKnownSymbolCandidate(tokenAAmountWithTokenMatch[2])
+		: undefined;
+	if (tokenAAmountWithTokenMatch?.[1] && tokenAAmountWithTokenMint) {
+		parsed.tokenAAmountUi =
+			parsed.tokenAAmountUi ?? tokenAAmountWithTokenMatch[1];
+		parsed.tokenAMint = parsed.tokenAMint ?? tokenAAmountWithTokenMint;
+	}
+	const tokenBAmountWithTokenMatch = intentText.match(
+		/\b(?:tokenB|amountB|bAmount|b)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9._-]{1,15}|[1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	const tokenBAmountWithTokenMint = tokenBAmountWithTokenMatch?.[2]
+		? parseMintOrKnownSymbolCandidate(tokenBAmountWithTokenMatch[2])
+		: undefined;
+	if (tokenBAmountWithTokenMatch?.[1] && tokenBAmountWithTokenMint) {
+		parsed.tokenBAmountUi =
+			parsed.tokenBAmountUi ?? tokenBAmountWithTokenMatch[1];
+		parsed.tokenBMint = parsed.tokenBMint ?? tokenBAmountWithTokenMint;
 	}
 	const liquidityBpsMatch = intentText.match(
 		/\b(?:liquidityBps|decreaseBps|removeBps|withdrawBps|positionBps)\s*[=:]?\s*([0-9]+)\b/i,
@@ -2931,6 +2999,10 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 		orcaLiquidityFields.liquidityAmountRaw ||
 		orcaLiquidityFields.tokenAAmountRaw ||
 		orcaLiquidityFields.tokenBAmountRaw ||
+		orcaLiquidityFields.tokenAAmountUi ||
+		orcaLiquidityFields.tokenBAmountUi ||
+		orcaLiquidityFields.tokenAMint ||
+		orcaLiquidityFields.tokenBMint ||
 		orcaLiquidityFields.liquidityBps !== undefined ||
 		orcaLiquidityFields.lowerPrice !== undefined ||
 		orcaLiquidityFields.upperPrice !== undefined ||
@@ -3049,6 +3121,9 @@ function resolveIntentType(
 		typeof params.liquidityAmountRaw === "string" ||
 		typeof params.tokenAAmountRaw === "string" ||
 		typeof params.tokenBAmountRaw === "string";
+	const hasOrcaUiLiquidityAmountField =
+		typeof params.tokenAAmountUi === "string" ||
+		typeof params.tokenBAmountUi === "string";
 	const hasOrcaLiquidityBpsField = typeof params.liquidityBps === "number";
 	if (
 		typeof params.poolAddress === "string" &&
@@ -3074,13 +3149,15 @@ function resolveIntentType(
 	}
 	if (
 		typeof params.poolAddress === "string" &&
-		hasOrcaRawLiquidityAmountField
+		(hasOrcaRawLiquidityAmountField || hasOrcaUiLiquidityAmountField)
 	) {
 		return "solana.lp.orca.open";
 	}
 	if (
 		typeof params.positionMint === "string" &&
-		(hasOrcaRawLiquidityAmountField || hasOrcaLiquidityBpsField)
+		(hasOrcaRawLiquidityAmountField ||
+			hasOrcaUiLiquidityAmountField ||
+			hasOrcaLiquidityBpsField)
 	) {
 		if (
 			hasOrcaLiquidityBpsField ||
@@ -3587,12 +3664,32 @@ function parseOrcaDecreaseLiquidityActionInput(
 		typeof params.liquidityAmountRaw === "string" ||
 		typeof params.tokenAAmountRaw === "string" ||
 		typeof params.tokenBAmountRaw === "string";
-	if (hasRawAmountInput) {
+	const hasUiAmountInput =
+		typeof params.tokenAAmountUi === "string" ||
+		typeof params.tokenBAmountUi === "string";
+	if (hasRawAmountInput || hasUiAmountInput) {
 		throw new Error(
-			"Provide either liquidityBps or one of liquidityAmountRaw, tokenAAmountRaw, tokenBAmountRaw",
+			"Provide either liquidityBps or one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw/tokenAAmountUi/tokenBAmountUi",
 		);
 	}
 	return { liquidityBps };
+}
+
+function parseOptionalPositiveUiAmountField(
+	value: unknown,
+	field: string,
+): string | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== "string") {
+		throw new Error(`${field} must be a positive decimal string`);
+	}
+	const trimmed = value.trim();
+	if (!/^[0-9]+(?:\.[0-9]+)?$/.test(trimmed)) {
+		throw new Error(`${field} must be a positive decimal string`);
+	}
+	return trimmed;
 }
 
 function parsePositiveNumberField(value: unknown, field: string): number {
@@ -3744,6 +3841,41 @@ async function resolveOrcaPositionMintForIntent(args: {
 		);
 	}
 	return new PublicKey(normalizeAtPath(onlyPosition.positionMint)).toBase58();
+}
+
+async function resolveOrcaPositionTokenMintsForIntent(args: {
+	network: string;
+	ownerAddress: string;
+	positionMint: string;
+}): Promise<{
+	tokenMintA: string;
+	tokenMintB: string;
+}> {
+	const positions = await getOrcaWhirlpoolPositions({
+		address: args.ownerAddress,
+		network: args.network,
+	});
+	const matchedPosition = positions.positions.find(
+		(position) => position.positionMint === args.positionMint,
+	);
+	if (!matchedPosition) {
+		throw new Error(
+			`Orca position not found for ownerAddress=${args.ownerAddress} positionMint=${args.positionMint}`,
+		);
+	}
+	if (!matchedPosition.tokenMintA || !matchedPosition.tokenMintB) {
+		throw new Error(
+			`Orca position token mints unavailable for positionMint=${args.positionMint}`,
+		);
+	}
+	return {
+		tokenMintA: new PublicKey(
+			normalizeAtPath(matchedPosition.tokenMintA),
+		).toBase58(),
+		tokenMintB: new PublicKey(
+			normalizeAtPath(matchedPosition.tokenMintB),
+		).toBase58(),
+	};
 }
 
 async function resolveMeteoraPositionForIntent(args: {
@@ -4005,7 +4137,77 @@ async function normalizeIntent(
 				ensureString(normalizedParams.poolAddress, "poolAddress"),
 			),
 		).toBase58();
-		const liquidityAction = parseOrcaLiquidityActionInput(normalizedParams);
+		const tokenAAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.tokenAAmountUi,
+			"tokenAAmountUi",
+		);
+		const tokenBAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.tokenBAmountUi,
+			"tokenBAmountUi",
+		);
+		if (
+			tokenAAmountUi &&
+			typeof normalizedParams.tokenAAmountRaw === "string" &&
+			normalizedParams.tokenAAmountRaw.trim().length > 0
+		) {
+			throw new Error(
+				"Provide either tokenAAmountRaw or tokenAAmountUi for Orca LP intents, not both",
+			);
+		}
+		if (
+			tokenBAmountUi &&
+			typeof normalizedParams.tokenBAmountRaw === "string" &&
+			normalizedParams.tokenBAmountRaw.trim().length > 0
+		) {
+			throw new Error(
+				"Provide either tokenBAmountRaw or tokenBAmountUi for Orca LP intents, not both",
+			);
+		}
+		let tokenAAmountRawFromUi: string | undefined;
+		if (tokenAAmountUi) {
+			const tokenAMint =
+				typeof normalizedParams.tokenAMint === "string" &&
+				normalizedParams.tokenAMint.trim().length > 0
+					? await ensureMint(normalizedParams.tokenAMint, "tokenAMint")
+					: undefined;
+			if (!tokenAMint) {
+				throw new Error(
+					"tokenAMint is required when tokenAAmountUi is provided for intentType=solana.lp.orca.open",
+				);
+			}
+			tokenAAmountRawFromUi = decimalUiAmountToRaw(
+				tokenAAmountUi,
+				await fetchTokenDecimals(network, tokenAMint),
+				"tokenAAmountUi",
+			);
+		}
+		let tokenBAmountRawFromUi: string | undefined;
+		if (tokenBAmountUi) {
+			const tokenBMint =
+				typeof normalizedParams.tokenBMint === "string" &&
+				normalizedParams.tokenBMint.trim().length > 0
+					? await ensureMint(normalizedParams.tokenBMint, "tokenBMint")
+					: undefined;
+			if (!tokenBMint) {
+				throw new Error(
+					"tokenBMint is required when tokenBAmountUi is provided for intentType=solana.lp.orca.open",
+				);
+			}
+			tokenBAmountRawFromUi = decimalUiAmountToRaw(
+				tokenBAmountUi,
+				await fetchTokenDecimals(network, tokenBMint),
+				"tokenBAmountUi",
+			);
+		}
+		const liquidityAction = parseOrcaLiquidityActionInput({
+			...normalizedParams,
+			...(tokenAAmountRawFromUi !== undefined
+				? { tokenAAmountRaw: tokenAAmountRawFromUi }
+				: {}),
+			...(tokenBAmountRawFromUi !== undefined
+				? { tokenBAmountRaw: tokenBAmountRawFromUi }
+				: {}),
+		});
 		const fullRange = normalizedParams.fullRange === true;
 		let lowerPrice: number | undefined;
 		let upperPrice: number | undefined;
@@ -4112,7 +4314,104 @@ async function normalizeIntent(
 					: undefined,
 			fieldName: "positionMint",
 		});
-		const liquidityAction = parseOrcaLiquidityActionInput(normalizedParams);
+		const tokenAAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.tokenAAmountUi,
+			"tokenAAmountUi",
+		);
+		const tokenBAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.tokenBAmountUi,
+			"tokenBAmountUi",
+		);
+		if (
+			tokenAAmountUi &&
+			typeof normalizedParams.tokenAAmountRaw === "string" &&
+			normalizedParams.tokenAAmountRaw.trim().length > 0
+		) {
+			throw new Error(
+				"Provide either tokenAAmountRaw or tokenAAmountUi for Orca LP intents, not both",
+			);
+		}
+		if (
+			tokenBAmountUi &&
+			typeof normalizedParams.tokenBAmountRaw === "string" &&
+			normalizedParams.tokenBAmountRaw.trim().length > 0
+		) {
+			throw new Error(
+				"Provide either tokenBAmountRaw or tokenBAmountUi for Orca LP intents, not both",
+			);
+		}
+		const hasUiAmountInput =
+			tokenAAmountUi !== undefined || tokenBAmountUi !== undefined;
+		const hasTokenMintHint =
+			typeof normalizedParams.tokenAMint === "string" ||
+			typeof normalizedParams.tokenBMint === "string";
+		const positionMints =
+			hasUiAmountInput || hasTokenMintHint
+				? await resolveOrcaPositionTokenMintsForIntent({
+						network,
+						ownerAddress,
+						positionMint,
+					})
+				: undefined;
+		if (positionMints && typeof normalizedParams.tokenAMint === "string") {
+			const expectedTokenAMint = await ensureMint(
+				normalizedParams.tokenAMint,
+				"tokenAMint",
+			);
+			if (expectedTokenAMint !== positionMints.tokenMintA) {
+				throw new Error(
+					`tokenAMint mismatch for positionMint=${positionMint}: expected ${positionMints.tokenMintA}, got ${expectedTokenAMint}`,
+				);
+			}
+		}
+		if (positionMints && typeof normalizedParams.tokenBMint === "string") {
+			const expectedTokenBMint = await ensureMint(
+				normalizedParams.tokenBMint,
+				"tokenBMint",
+			);
+			if (expectedTokenBMint !== positionMints.tokenMintB) {
+				throw new Error(
+					`tokenBMint mismatch for positionMint=${positionMint}: expected ${positionMints.tokenMintB}, got ${expectedTokenBMint}`,
+				);
+			}
+		}
+		let tokenAAmountRawFromUi: string | undefined;
+		if (tokenAAmountUi !== undefined) {
+			const tokenMintAForUi = positionMints?.tokenMintA;
+			if (!tokenMintAForUi) {
+				throw new Error(
+					`Orca position token mints unavailable for positionMint=${positionMint}`,
+				);
+			}
+			tokenAAmountRawFromUi = decimalUiAmountToRaw(
+				tokenAAmountUi,
+				await fetchTokenDecimals(network, tokenMintAForUi),
+				"tokenAAmountUi",
+			);
+		}
+		let tokenBAmountRawFromUi: string | undefined;
+		if (tokenBAmountUi !== undefined) {
+			const tokenMintBForUi = positionMints?.tokenMintB;
+			if (!tokenMintBForUi) {
+				throw new Error(
+					`Orca position token mints unavailable for positionMint=${positionMint}`,
+				);
+			}
+			tokenBAmountRawFromUi = decimalUiAmountToRaw(
+				tokenBAmountUi,
+				await fetchTokenDecimals(network, tokenMintBForUi),
+				"tokenBAmountUi",
+			);
+		}
+		const liquidityAction = parseOrcaLiquidityActionInput({
+			...normalizedParams,
+			...(tokenAAmountRawFromUi !== undefined
+				? { tokenAAmountRaw: tokenAAmountRawFromUi }
+				: {}),
+			...(tokenBAmountRawFromUi !== undefined
+				? { tokenBAmountRaw: tokenBAmountRawFromUi }
+				: {}),
+		});
 		return {
 			type: intentType,
 			ownerAddress,
@@ -4143,8 +4442,106 @@ async function normalizeIntent(
 					: undefined,
 			fieldName: "positionMint",
 		});
-		const liquidityAction =
-			parseOrcaDecreaseLiquidityActionInput(normalizedParams);
+		const tokenAAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.tokenAAmountUi,
+			"tokenAAmountUi",
+		);
+		const tokenBAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.tokenBAmountUi,
+			"tokenBAmountUi",
+		);
+		if (
+			tokenAAmountUi &&
+			typeof normalizedParams.tokenAAmountRaw === "string" &&
+			normalizedParams.tokenAAmountRaw.trim().length > 0
+		) {
+			throw new Error(
+				"Provide either tokenAAmountRaw or tokenAAmountUi for Orca LP intents, not both",
+			);
+		}
+		if (
+			tokenBAmountUi &&
+			typeof normalizedParams.tokenBAmountRaw === "string" &&
+			normalizedParams.tokenBAmountRaw.trim().length > 0
+		) {
+			throw new Error(
+				"Provide either tokenBAmountRaw or tokenBAmountUi for Orca LP intents, not both",
+			);
+		}
+		const hasUiAmountInput =
+			tokenAAmountUi !== undefined || tokenBAmountUi !== undefined;
+		const liquidityBps = parseOptionalOrcaLiquidityBps(
+			normalizedParams.liquidityBps,
+		);
+		if (liquidityBps !== undefined && hasUiAmountInput) {
+			throw new Error(
+				"Provide either liquidityBps or one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw/tokenAAmountUi/tokenBAmountUi",
+			);
+		}
+		let liquidityAction:
+			| {
+					liquidityAmountRaw?: string;
+					tokenAAmountRaw?: string;
+					tokenBAmountRaw?: string;
+					liquidityBps?: number;
+			  }
+			| undefined;
+		if (hasUiAmountInput) {
+			const positionMints = await resolveOrcaPositionTokenMintsForIntent({
+				network,
+				ownerAddress,
+				positionMint,
+			});
+			if (typeof normalizedParams.tokenAMint === "string") {
+				const expectedTokenAMint = await ensureMint(
+					normalizedParams.tokenAMint,
+					"tokenAMint",
+				);
+				if (expectedTokenAMint !== positionMints.tokenMintA) {
+					throw new Error(
+						`tokenAMint mismatch for positionMint=${positionMint}: expected ${positionMints.tokenMintA}, got ${expectedTokenAMint}`,
+					);
+				}
+			}
+			if (typeof normalizedParams.tokenBMint === "string") {
+				const expectedTokenBMint = await ensureMint(
+					normalizedParams.tokenBMint,
+					"tokenBMint",
+				);
+				if (expectedTokenBMint !== positionMints.tokenMintB) {
+					throw new Error(
+						`tokenBMint mismatch for positionMint=${positionMint}: expected ${positionMints.tokenMintB}, got ${expectedTokenBMint}`,
+					);
+				}
+			}
+			const tokenAAmountRawFromUi =
+				tokenAAmountUi !== undefined
+					? decimalUiAmountToRaw(
+							tokenAAmountUi,
+							await fetchTokenDecimals(network, positionMints.tokenMintA),
+							"tokenAAmountUi",
+						)
+					: undefined;
+			const tokenBAmountRawFromUi =
+				tokenBAmountUi !== undefined
+					? decimalUiAmountToRaw(
+							tokenBAmountUi,
+							await fetchTokenDecimals(network, positionMints.tokenMintB),
+							"tokenBAmountUi",
+						)
+					: undefined;
+			liquidityAction = parseOrcaDecreaseLiquidityActionInput({
+				...normalizedParams,
+				...(tokenAAmountRawFromUi !== undefined
+					? { tokenAAmountRaw: tokenAAmountRawFromUi }
+					: {}),
+				...(tokenBAmountRawFromUi !== undefined
+					? { tokenBAmountRaw: tokenBAmountRawFromUi }
+					: {}),
+			});
+		} else {
+			liquidityAction = parseOrcaDecreaseLiquidityActionInput(normalizedParams);
+		}
 		return {
 			type: intentType,
 			ownerAddress,
@@ -7248,6 +7645,18 @@ export function createSolanaWorkflowTools() {
 						description: "Token mint for intentType=solana.transfer.spl",
 					}),
 				),
+				tokenAMint: Type.Optional(
+					Type.String({
+						description:
+							"Token A mint (or known symbol) for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease when using tokenAAmountUi.",
+					}),
+				),
+				tokenBMint: Type.Optional(
+					Type.String({
+						description:
+							"Token B mint (or known symbol) for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease when using tokenBAmountUi.",
+					}),
+				),
 				tokenXMint: Type.Optional(
 					Type.String({
 						description:
@@ -7354,6 +7763,18 @@ export function createSolanaWorkflowTools() {
 					Type.String({
 						description:
 							"Token B amount (raw integer) for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				tokenAAmountUi: Type.Optional(
+					Type.String({
+						description:
+							"Token A amount (UI decimal string) for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease. Can be used instead of tokenAAmountRaw.",
+					}),
+				),
+				tokenBAmountUi: Type.Optional(
+					Type.String({
+						description:
+							"Token B amount (UI decimal string) for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease. Can be used instead of tokenBAmountRaw.",
 					}),
 				),
 				liquidityBps: Type.Optional(
