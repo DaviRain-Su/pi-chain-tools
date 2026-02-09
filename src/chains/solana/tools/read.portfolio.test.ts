@@ -376,3 +376,80 @@ describe("solana_getTokenBalance", () => {
 		});
 	});
 });
+
+describe("protocol-scoped Jupiter quote tools", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		runtimeMocks.parseJupiterSwapMode.mockReturnValue("ExactIn");
+		runtimeMocks.parsePositiveBigInt.mockImplementation((value: string) =>
+			BigInt(value),
+		);
+	});
+
+	it("uses Orca default dex filters for solana_getOrcaQuote", async () => {
+		const inputMint = Keypair.generate().publicKey.toBase58();
+		const outputMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getJupiterQuote.mockResolvedValue({
+			outAmount: "999",
+			routePlan: [{ route: "orca" }],
+		});
+
+		const tool = getReadTool("solana_getOrcaQuote");
+		const result = await tool.execute("orca-quote-1", {
+			inputMint,
+			outputMint,
+			amountRaw: "1000000",
+			network: "mainnet-beta",
+		});
+
+		expect(runtimeMocks.assertJupiterNetworkSupported).toHaveBeenCalledWith(
+			"mainnet-beta",
+		);
+		expect(runtimeMocks.getJupiterQuote).toHaveBeenCalledWith(
+			expect.objectContaining({
+				dexes: ["Orca V2", "Orca Whirlpool"],
+			}),
+		);
+		expect(result.details).toMatchObject({
+			protocol: "orca",
+			inputMint,
+			outputMint,
+			amountRaw: "1000000",
+			outAmount: "999",
+			routeCount: 1,
+		});
+	});
+
+	it("supports dex overrides for solana_getMeteoraQuote", async () => {
+		const inputMint = Keypair.generate().publicKey.toBase58();
+		const outputMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getJupiterQuote.mockResolvedValue({
+			outAmount: "888",
+			routePlan: [{ route: "meteora" }],
+		});
+
+		const tool = getReadTool("solana_getMeteoraQuote");
+		const result = await tool.execute("meteora-quote-1", {
+			inputMint,
+			outputMint,
+			amountRaw: "2000000",
+			dexes: ["Meteora DLMM", "Meteora DAMM v2"],
+			network: "mainnet-beta",
+		});
+
+		expect(runtimeMocks.getJupiterQuote).toHaveBeenCalledWith(
+			expect.objectContaining({
+				dexes: ["Meteora DLMM", "Meteora DAMM v2"],
+			}),
+		);
+		expect(result.details).toMatchObject({
+			protocol: "meteora",
+			inputMint,
+			outputMint,
+			amountRaw: "2000000",
+			outAmount: "888",
+			routeCount: 1,
+		});
+	});
+});

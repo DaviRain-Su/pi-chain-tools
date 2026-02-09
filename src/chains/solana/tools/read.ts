@@ -45,6 +45,8 @@ const KNOWN_MINT_SYMBOLS: Record<string, string> = {
 	bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1: "bSOL",
 	"6dhTynDkYsVM7cbF7TKfC9DWB636TcEM935fq7JzL2ES": "BONK",
 };
+const ORCA_DEFAULT_DEXES = ["Orca V2", "Orca Whirlpool"] as const;
+const METEORA_DEFAULT_DEXES = ["Meteora DLMM"] as const;
 
 function formatTokenUiAmount(amountRaw: bigint, decimals: number): string {
 	if (decimals <= 0) {
@@ -753,6 +755,202 @@ export function createSolanaReadTools() {
 						swapMode,
 						outAmount,
 						priceImpactPct,
+						routeCount: routePlan.length,
+						quote,
+						network: parseNetwork(params.network),
+						jupiterBaseUrl: getJupiterApiBaseUrl(),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getOrcaQuote`,
+			label: "Solana Orca Get Quote",
+			description:
+				"Fetch Orca-scoped quote via Jupiter by restricting routes to Orca DEX labels",
+			parameters: Type.Object({
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Amount in raw integer base units",
+				}),
+				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+				swapMode: jupiterSwapModeSchema(),
+				restrictIntermediateTokens: Type.Optional(Type.Boolean()),
+				onlyDirectRoutes: Type.Optional(Type.Boolean()),
+				asLegacyTransaction: Type.Optional(Type.Boolean()),
+				maxAccounts: Type.Optional(Type.Integer({ minimum: 8, maximum: 256 })),
+				dexes: Type.Optional(
+					Type.Array(
+						Type.String({ description: "Optional DEX labels override" }),
+						{
+							minItems: 1,
+							maxItems: 20,
+						},
+					),
+				),
+				excludeDexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				assertJupiterNetworkSupported(params.network);
+				const inputMint = new PublicKey(
+					normalizeAtPath(params.inputMint),
+				).toBase58();
+				const outputMint = new PublicKey(
+					normalizeAtPath(params.outputMint),
+				).toBase58();
+				const amountRaw = parsePositiveBigInt(
+					params.amountRaw,
+					"amountRaw",
+				).toString();
+				const swapMode = parseJupiterSwapMode(params.swapMode);
+				const dexes =
+					params.dexes && params.dexes.length > 0
+						? params.dexes
+						: [...ORCA_DEFAULT_DEXES];
+
+				const quote = await getJupiterQuote({
+					inputMint,
+					outputMint,
+					amount: amountRaw,
+					slippageBps: params.slippageBps,
+					swapMode,
+					restrictIntermediateTokens: params.restrictIntermediateTokens,
+					onlyDirectRoutes: params.onlyDirectRoutes,
+					asLegacyTransaction: params.asLegacyTransaction,
+					maxAccounts: params.maxAccounts,
+					dexes,
+					excludeDexes: params.excludeDexes,
+				});
+				const payload =
+					quote && typeof quote === "object"
+						? (quote as Record<string, unknown>)
+						: {};
+				const routePlan = Array.isArray(payload.routePlan)
+					? payload.routePlan
+					: [];
+				const outAmount =
+					typeof payload.outAmount === "string" ? payload.outAmount : null;
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Orca quote ready: outAmount=${outAmount ?? "unknown"} routeCount=${routePlan.length}`,
+						},
+					],
+					details: {
+						protocol: "orca",
+						inputMint,
+						outputMint,
+						amountRaw,
+						swapMode,
+						dexes,
+						outAmount,
+						routeCount: routePlan.length,
+						quote,
+						network: parseNetwork(params.network),
+						jupiterBaseUrl: getJupiterApiBaseUrl(),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getMeteoraQuote`,
+			label: "Solana Meteora Get Quote",
+			description:
+				"Fetch Meteora-scoped quote via Jupiter by restricting routes to Meteora DEX labels",
+			parameters: Type.Object({
+				inputMint: Type.String({ description: "Input token mint address" }),
+				outputMint: Type.String({ description: "Output token mint address" }),
+				amountRaw: Type.String({
+					description: "Amount in raw integer base units",
+				}),
+				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
+				swapMode: jupiterSwapModeSchema(),
+				restrictIntermediateTokens: Type.Optional(Type.Boolean()),
+				onlyDirectRoutes: Type.Optional(Type.Boolean()),
+				asLegacyTransaction: Type.Optional(Type.Boolean()),
+				maxAccounts: Type.Optional(Type.Integer({ minimum: 8, maximum: 256 })),
+				dexes: Type.Optional(
+					Type.Array(
+						Type.String({ description: "Optional DEX labels override" }),
+						{
+							minItems: 1,
+							maxItems: 20,
+						},
+					),
+				),
+				excludeDexes: Type.Optional(
+					Type.Array(Type.String({ description: "DEX labels to exclude" }), {
+						minItems: 1,
+						maxItems: 20,
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				assertJupiterNetworkSupported(params.network);
+				const inputMint = new PublicKey(
+					normalizeAtPath(params.inputMint),
+				).toBase58();
+				const outputMint = new PublicKey(
+					normalizeAtPath(params.outputMint),
+				).toBase58();
+				const amountRaw = parsePositiveBigInt(
+					params.amountRaw,
+					"amountRaw",
+				).toString();
+				const swapMode = parseJupiterSwapMode(params.swapMode);
+				const dexes =
+					params.dexes && params.dexes.length > 0
+						? params.dexes
+						: [...METEORA_DEFAULT_DEXES];
+
+				const quote = await getJupiterQuote({
+					inputMint,
+					outputMint,
+					amount: amountRaw,
+					slippageBps: params.slippageBps,
+					swapMode,
+					restrictIntermediateTokens: params.restrictIntermediateTokens,
+					onlyDirectRoutes: params.onlyDirectRoutes,
+					asLegacyTransaction: params.asLegacyTransaction,
+					maxAccounts: params.maxAccounts,
+					dexes,
+					excludeDexes: params.excludeDexes,
+				});
+				const payload =
+					quote && typeof quote === "object"
+						? (quote as Record<string, unknown>)
+						: {};
+				const routePlan = Array.isArray(payload.routePlan)
+					? payload.routePlan
+					: [];
+				const outAmount =
+					typeof payload.outAmount === "string" ? payload.outAmount : null;
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Meteora quote ready: outAmount=${outAmount ?? "unknown"} routeCount=${routePlan.length}`,
+						},
+					],
+					details: {
+						protocol: "meteora",
+						inputMint,
+						outputMint,
+						amountRaw,
+						swapMode,
+						dexes,
+						outAmount,
 						routeCount: routePlan.length,
 						quote,
 						network: parseNetwork(params.network),
