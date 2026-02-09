@@ -15,8 +15,12 @@ const runtimeMocks = vi.hoisted(() => ({
 	buildKaminoRepayInstructions: vi.fn(),
 	buildKaminoRepayAndWithdrawInstructions: vi.fn(),
 	buildKaminoWithdrawInstructions: vi.fn(),
+	buildMeteoraAddLiquidityInstructions: vi.fn(),
+	buildMeteoraRemoveLiquidityInstructions: vi.fn(),
+	buildOrcaClosePositionInstructions: vi.fn(),
 	buildOrcaDecreaseLiquidityInstructions: vi.fn(),
 	buildOrcaIncreaseLiquidityInstructions: vi.fn(),
+	buildOrcaOpenPositionInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
 	buildRaydiumSwapTransactions: vi.fn(),
 	callJupiterApi: vi.fn(),
@@ -71,10 +75,18 @@ vi.mock("../runtime.js", async () => {
 			runtimeMocks.buildKaminoRepayAndWithdrawInstructions,
 		buildKaminoWithdrawInstructions:
 			runtimeMocks.buildKaminoWithdrawInstructions,
+		buildMeteoraAddLiquidityInstructions:
+			runtimeMocks.buildMeteoraAddLiquidityInstructions,
+		buildMeteoraRemoveLiquidityInstructions:
+			runtimeMocks.buildMeteoraRemoveLiquidityInstructions,
+		buildOrcaClosePositionInstructions:
+			runtimeMocks.buildOrcaClosePositionInstructions,
 		buildOrcaDecreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
 		buildOrcaIncreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaIncreaseLiquidityInstructions,
+		buildOrcaOpenPositionInstructions:
+			runtimeMocks.buildOrcaOpenPositionInstructions,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
 		buildRaydiumSwapTransactions: runtimeMocks.buildRaydiumSwapTransactions,
 		callJupiterApi: runtimeMocks.callJupiterApi,
@@ -3066,6 +3078,428 @@ describe("w3rt_run_workflow_v0", () => {
 						type: "solana.lp.orca.decrease",
 						positionMint,
 						tokenAAmountRaw: "55",
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
+		});
+	});
+
+	it("parses Orca open intentText with shorthand LP fields", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-open-intent", {
+			runId: "run-orca-open-intent",
+			runMode: "analysis",
+			intentText: `open orca position pool ${poolAddress} full range tokenA 100 slippage 0.5%`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-orca-open-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.open",
+						poolAddress,
+						tokenAAmountRaw: "100",
+						fullRange: true,
+						slippageBps: 50,
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates Orca open-position workflow intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.buildOrcaOpenPositionInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			poolAddress,
+			positionMint,
+			quoteParamKind: "tokenA",
+			quoteParamAmountRaw: "100",
+			fullRange: true,
+			initializationCostLamports: "0",
+			slippageBps: 50,
+			instructionCount: 1,
+			quote: { liquidityAmount: "123" },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([8]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 88,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 333,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-open-sim", {
+			runId: "run-orca-open-sim",
+			intentType: "solana.lp.orca.open",
+			runMode: "simulate",
+			poolAddress,
+			tokenAAmountRaw: "100",
+			fullRange: true,
+			slippageBps: 50,
+		});
+
+		expect(runtimeMocks.buildOrcaOpenPositionInstructions).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				poolAddress,
+				tokenAAmountRaw: "100",
+				fullRange: true,
+				slippageBps: 50,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-orca-open-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.open",
+						poolAddress,
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
+		});
+	});
+
+	it("simulates Orca close-position workflow intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.buildOrcaClosePositionInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			positionMint,
+			slippageBps: 75,
+			instructionCount: 1,
+			quote: { tokenMinA: "1", tokenMinB: "1" },
+			feesQuote: { tokenA: "1", tokenB: "1" },
+			rewardsQuote: [],
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([9]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 89,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 334,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-close-sim", {
+			runId: "run-orca-close-sim",
+			intentType: "solana.lp.orca.close",
+			runMode: "simulate",
+			positionMint,
+			slippageBps: 75,
+		});
+
+		expect(
+			runtimeMocks.buildOrcaClosePositionInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				positionMint,
+				slippageBps: 75,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-orca-close-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.close",
+						positionMint,
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
+		});
+	});
+
+	it("parses Meteora add intentText with shorthand LP fields", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-add-intent", {
+			runId: "run-meteora-add-intent",
+			runMode: "analysis",
+			intentText: `meteora add liquidity ${poolAddress} ${positionAddress} x=1000 y=2000 strategy curve bins -10 to 20 slippage 1%`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-add-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.add",
+						poolAddress,
+						positionAddress,
+						totalXAmountRaw: "1000",
+						totalYAmountRaw: "2000",
+						minBinId: -10,
+						maxBinId: 20,
+						strategyType: "Curve",
+						slippageBps: 100,
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates Meteora add-liquidity workflow intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.buildMeteoraAddLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			poolAddress,
+			positionAddress,
+			totalXAmountRaw: "1000",
+			totalYAmountRaw: "0",
+			minBinId: -10,
+			maxBinId: 20,
+			strategyType: "Curve",
+			singleSidedX: true,
+			slippageBps: 100,
+			activeBinId: 0,
+			instructionCount: 1,
+			transactionCount: 1,
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([10]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 90,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 335,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-add-sim", {
+			runId: "run-meteora-add-sim",
+			intentType: "solana.lp.meteora.add",
+			runMode: "simulate",
+			poolAddress,
+			positionAddress,
+			totalXAmountRaw: "1000",
+			totalYAmountRaw: "0",
+			minBinId: -10,
+			maxBinId: 20,
+			strategyType: "Curve",
+			singleSidedX: true,
+			slippageBps: 100,
+		});
+
+		expect(
+			runtimeMocks.buildMeteoraAddLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				poolAddress,
+				positionAddress,
+				totalXAmountRaw: "1000",
+				totalYAmountRaw: "0",
+				strategyType: "Curve",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-add-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.add",
+						poolAddress,
+						positionAddress,
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
+		});
+	});
+
+	it("parses Meteora remove intentText with shorthand LP fields", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-remove-intent", {
+			runId: "run-meteora-remove-intent",
+			runMode: "analysis",
+			intentText: `meteora remove liquidity ${poolAddress} ${positionAddress} bins -5 to 7 75% claim and close skip unwrap sol`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-remove-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.remove",
+						poolAddress,
+						positionAddress,
+						fromBinId: -5,
+						toBinId: 7,
+						bps: 7500,
+						shouldClaimAndClose: true,
+						skipUnwrapSol: true,
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates Meteora remove-liquidity workflow intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.buildMeteoraRemoveLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			poolAddress,
+			positionAddress,
+			fromBinId: -5,
+			toBinId: 7,
+			bps: 7500,
+			shouldClaimAndClose: true,
+			skipUnwrapSol: true,
+			positionLowerBinId: -8,
+			positionUpperBinId: 8,
+			activeBinId: 0,
+			instructionCount: 1,
+			transactionCount: 1,
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([11]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 91,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 336,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-remove-sim", {
+			runId: "run-meteora-remove-sim",
+			intentType: "solana.lp.meteora.remove",
+			runMode: "simulate",
+			poolAddress,
+			positionAddress,
+			fromBinId: -5,
+			toBinId: 7,
+			bps: 7500,
+			shouldClaimAndClose: true,
+			skipUnwrapSol: true,
+		});
+
+		expect(
+			runtimeMocks.buildMeteoraRemoveLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				poolAddress,
+				positionAddress,
+				fromBinId: -5,
+				toBinId: 7,
+				bps: 7500,
+				shouldClaimAndClose: true,
+				skipUnwrapSol: true,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-remove-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.remove",
+						poolAddress,
+						positionAddress,
 					},
 				},
 				simulate: {

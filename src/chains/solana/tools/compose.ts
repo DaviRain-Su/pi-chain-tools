@@ -31,8 +31,12 @@ import {
 	buildKaminoRepayAndWithdrawInstructions,
 	buildKaminoRepayInstructions,
 	buildKaminoWithdrawInstructions,
+	buildMeteoraAddLiquidityInstructions,
+	buildMeteoraRemoveLiquidityInstructions,
+	buildOrcaClosePositionInstructions,
 	buildOrcaDecreaseLiquidityInstructions,
 	buildOrcaIncreaseLiquidityInstructions,
+	buildOrcaOpenPositionInstructions,
 	buildRaydiumSwapTransactions,
 	getConnection,
 	getExplorerAddressUrl,
@@ -1916,6 +1920,550 @@ export function createSolanaComposeTools() {
 						),
 						positionMintExplorer: getExplorerAddressUrl(
 							build.positionMint,
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildOrcaOpenPositionTransaction`,
+			label: "Solana Build Orca Open Position Transaction",
+			description:
+				"Build an unsigned Orca Whirlpool open-position transaction (legacy or v0, base64)",
+			parameters: Type.Object({
+				ownerAddress: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				poolAddress: Type.String({
+					description: "Orca Whirlpool pool address",
+				}),
+				liquidityAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Liquidity amount as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				tokenAAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token A amount as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				tokenBAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token B amount as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				lowerPrice: Type.Optional(
+					Type.Number({
+						exclusiveMinimum: 0,
+						description:
+							"Lower price bound for concentrated position. Required when fullRange=false.",
+					}),
+				),
+				upperPrice: Type.Optional(
+					Type.Number({
+						exclusiveMinimum: 0,
+						description:
+							"Upper price bound for concentrated position. Required when fullRange=false.",
+					}),
+				),
+				fullRange: Type.Optional(
+					Type.Boolean({
+						description:
+							"Use full-range position when true. When false, lowerPrice/upperPrice are required.",
+					}),
+				),
+				slippageBps: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 10_000,
+						description: "Slippage tolerance in basis points (default 100)",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Build legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const ownerAddress = new PublicKey(
+					normalizeAtPath(params.ownerAddress),
+				).toBase58();
+				const poolAddress = new PublicKey(
+					normalizeAtPath(params.poolAddress),
+				).toBase58();
+				const connection = getConnection(params.network);
+				const build = await buildOrcaOpenPositionInstructions({
+					ownerAddress,
+					poolAddress,
+					liquidityAmountRaw: params.liquidityAmountRaw,
+					tokenAAmountRaw: params.tokenAAmountRaw,
+					tokenBAmountRaw: params.tokenBAmountRaw,
+					lowerPrice: params.lowerPrice,
+					upperPrice: params.upperPrice,
+					fullRange: params.fullRange,
+					slippageBps: params.slippageBps,
+					network: params.network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? createLegacyTransaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						)
+					: createV0Transaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						);
+				const feeResult = await connection.getFeeForMessage(
+					tx instanceof VersionedTransaction ? tx.message : tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 =
+					tx instanceof VersionedTransaction
+						? Buffer.from(tx.serialize()).toString("base64")
+						: tx
+								.serialize({
+									requireAllSignatures: false,
+									verifySignatures: false,
+								})
+								.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned Orca open-position transaction built",
+						},
+					],
+					details: {
+						txBase64,
+						version: asLegacyTransaction ? "legacy" : "v0",
+						network: build.network,
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						ownerAddress: build.ownerAddress,
+						poolAddress: build.poolAddress,
+						positionMint: build.positionMint,
+						quoteParamKind: build.quoteParamKind,
+						quoteParamAmountRaw: build.quoteParamAmountRaw,
+						fullRange: build.fullRange,
+						lowerPrice: build.lowerPrice,
+						upperPrice: build.upperPrice,
+						initializationCostLamports: build.initializationCostLamports,
+						slippageBps: build.slippageBps,
+						instructionCount: build.instructionCount,
+						quote: build.quote,
+						ownerExplorer: getExplorerAddressUrl(
+							build.ownerAddress,
+							params.network,
+						),
+						poolExplorer: getExplorerAddressUrl(
+							build.poolAddress,
+							params.network,
+						),
+						positionMintExplorer: getExplorerAddressUrl(
+							build.positionMint,
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildOrcaClosePositionTransaction`,
+			label: "Solana Build Orca Close Position Transaction",
+			description:
+				"Build an unsigned Orca Whirlpool close-position transaction (legacy or v0, base64)",
+			parameters: Type.Object({
+				ownerAddress: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				positionMint: Type.String({
+					description: "Orca position mint address",
+				}),
+				slippageBps: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 10_000,
+						description: "Slippage tolerance in basis points (default 100)",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Build legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const ownerAddress = new PublicKey(
+					normalizeAtPath(params.ownerAddress),
+				).toBase58();
+				const positionMint = new PublicKey(
+					normalizeAtPath(params.positionMint),
+				).toBase58();
+				const connection = getConnection(params.network);
+				const build = await buildOrcaClosePositionInstructions({
+					ownerAddress,
+					positionMint,
+					slippageBps: params.slippageBps,
+					network: params.network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? createLegacyTransaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						)
+					: createV0Transaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						);
+				const feeResult = await connection.getFeeForMessage(
+					tx instanceof VersionedTransaction ? tx.message : tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 =
+					tx instanceof VersionedTransaction
+						? Buffer.from(tx.serialize()).toString("base64")
+						: tx
+								.serialize({
+									requireAllSignatures: false,
+									verifySignatures: false,
+								})
+								.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned Orca close-position transaction built",
+						},
+					],
+					details: {
+						txBase64,
+						version: asLegacyTransaction ? "legacy" : "v0",
+						network: build.network,
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						ownerAddress: build.ownerAddress,
+						positionMint: build.positionMint,
+						slippageBps: build.slippageBps,
+						instructionCount: build.instructionCount,
+						quote: build.quote,
+						feesQuote: build.feesQuote,
+						rewardsQuote: build.rewardsQuote,
+						ownerExplorer: getExplorerAddressUrl(
+							build.ownerAddress,
+							params.network,
+						),
+						positionMintExplorer: getExplorerAddressUrl(
+							build.positionMint,
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildMeteoraAddLiquidityTransaction`,
+			label: "Solana Build Meteora Add Liquidity Transaction",
+			description:
+				"Build an unsigned Meteora DLMM add-liquidity transaction (legacy or v0, base64)",
+			parameters: Type.Object({
+				ownerAddress: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				poolAddress: Type.String({
+					description: "Meteora DLMM pool address",
+				}),
+				positionAddress: Type.String({
+					description: "Meteora position address",
+				}),
+				totalXAmountRaw: Type.String({
+					description: "Token X amount in raw integer base units",
+				}),
+				totalYAmountRaw: Type.String({
+					description: "Token Y amount in raw integer base units",
+				}),
+				minBinId: Type.Optional(
+					Type.Integer({
+						description: "Optional lower bin id override for strategy range",
+					}),
+				),
+				maxBinId: Type.Optional(
+					Type.Integer({
+						description: "Optional upper bin id override for strategy range",
+					}),
+				),
+				strategyType: Type.Optional(
+					Type.Union([
+						Type.Literal("Spot"),
+						Type.Literal("Curve"),
+						Type.Literal("BidAsk"),
+					]),
+				),
+				singleSidedX: Type.Optional(
+					Type.Boolean({
+						description: "Optional strategy hint for one-sided X liquidity",
+					}),
+				),
+				slippageBps: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 10_000,
+						description: "Slippage tolerance in basis points (default 100)",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Build legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const ownerAddress = new PublicKey(
+					normalizeAtPath(params.ownerAddress),
+				).toBase58();
+				const poolAddress = new PublicKey(
+					normalizeAtPath(params.poolAddress),
+				).toBase58();
+				const positionAddress = new PublicKey(
+					normalizeAtPath(params.positionAddress),
+				).toBase58();
+				const connection = getConnection(params.network);
+				const build = await buildMeteoraAddLiquidityInstructions({
+					ownerAddress,
+					poolAddress,
+					positionAddress,
+					totalXAmountRaw: params.totalXAmountRaw,
+					totalYAmountRaw: params.totalYAmountRaw,
+					minBinId: params.minBinId,
+					maxBinId: params.maxBinId,
+					strategyType: params.strategyType,
+					singleSidedX: params.singleSidedX,
+					slippageBps: params.slippageBps,
+					network: params.network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? createLegacyTransaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						)
+					: createV0Transaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						);
+				const feeResult = await connection.getFeeForMessage(
+					tx instanceof VersionedTransaction ? tx.message : tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 =
+					tx instanceof VersionedTransaction
+						? Buffer.from(tx.serialize()).toString("base64")
+						: tx
+								.serialize({
+									requireAllSignatures: false,
+									verifySignatures: false,
+								})
+								.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned Meteora add-liquidity transaction built",
+						},
+					],
+					details: {
+						txBase64,
+						version: asLegacyTransaction ? "legacy" : "v0",
+						network: build.network,
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						ownerAddress: build.ownerAddress,
+						poolAddress: build.poolAddress,
+						positionAddress: build.positionAddress,
+						totalXAmountRaw: build.totalXAmountRaw,
+						totalYAmountRaw: build.totalYAmountRaw,
+						minBinId: build.minBinId,
+						maxBinId: build.maxBinId,
+						strategyType: build.strategyType,
+						singleSidedX: build.singleSidedX,
+						slippageBps: build.slippageBps,
+						activeBinId: build.activeBinId,
+						instructionCount: build.instructionCount,
+						sourceTransactionCount: build.transactionCount,
+						ownerExplorer: getExplorerAddressUrl(
+							build.ownerAddress,
+							params.network,
+						),
+						poolExplorer: getExplorerAddressUrl(
+							build.poolAddress,
+							params.network,
+						),
+						positionExplorer: getExplorerAddressUrl(
+							build.positionAddress,
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildMeteoraRemoveLiquidityTransaction`,
+			label: "Solana Build Meteora Remove Liquidity Transaction",
+			description:
+				"Build an unsigned Meteora DLMM remove-liquidity transaction (legacy or v0, base64)",
+			parameters: Type.Object({
+				ownerAddress: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				poolAddress: Type.String({
+					description: "Meteora DLMM pool address",
+				}),
+				positionAddress: Type.String({
+					description: "Meteora position address",
+				}),
+				fromBinId: Type.Optional(
+					Type.Integer({
+						description:
+							"Optional start bin id. Defaults to position lower bin.",
+					}),
+				),
+				toBinId: Type.Optional(
+					Type.Integer({
+						description: "Optional end bin id. Defaults to position upper bin.",
+					}),
+				),
+				bps: Type.Optional(
+					Type.Integer({
+						minimum: 1,
+						maximum: 10_000,
+						description:
+							"Liquidity removal ratio in bps (default 10000 = remove all selected bin liquidity).",
+					}),
+				),
+				shouldClaimAndClose: Type.Optional(
+					Type.Boolean({
+						description:
+							"Claim fees/rewards and close position if empty when true (default false)",
+					}),
+				),
+				skipUnwrapSol: Type.Optional(
+					Type.Boolean({
+						description: "Skip SOL unwrap helper instructions when true",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Build legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const ownerAddress = new PublicKey(
+					normalizeAtPath(params.ownerAddress),
+				).toBase58();
+				const poolAddress = new PublicKey(
+					normalizeAtPath(params.poolAddress),
+				).toBase58();
+				const positionAddress = new PublicKey(
+					normalizeAtPath(params.positionAddress),
+				).toBase58();
+				const connection = getConnection(params.network);
+				const build = await buildMeteoraRemoveLiquidityInstructions({
+					ownerAddress,
+					poolAddress,
+					positionAddress,
+					fromBinId: params.fromBinId,
+					toBinId: params.toBinId,
+					bps: params.bps,
+					shouldClaimAndClose: params.shouldClaimAndClose,
+					skipUnwrapSol: params.skipUnwrapSol,
+					network: params.network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? createLegacyTransaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						)
+					: createV0Transaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						);
+				const feeResult = await connection.getFeeForMessage(
+					tx instanceof VersionedTransaction ? tx.message : tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 =
+					tx instanceof VersionedTransaction
+						? Buffer.from(tx.serialize()).toString("base64")
+						: tx
+								.serialize({
+									requireAllSignatures: false,
+									verifySignatures: false,
+								})
+								.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned Meteora remove-liquidity transaction built",
+						},
+					],
+					details: {
+						txBase64,
+						version: asLegacyTransaction ? "legacy" : "v0",
+						network: build.network,
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						ownerAddress: build.ownerAddress,
+						poolAddress: build.poolAddress,
+						positionAddress: build.positionAddress,
+						fromBinId: build.fromBinId,
+						toBinId: build.toBinId,
+						bps: build.bps,
+						shouldClaimAndClose: build.shouldClaimAndClose,
+						skipUnwrapSol: build.skipUnwrapSol,
+						positionLowerBinId: build.positionLowerBinId,
+						positionUpperBinId: build.positionUpperBinId,
+						activeBinId: build.activeBinId,
+						instructionCount: build.instructionCount,
+						sourceTransactionCount: build.transactionCount,
+						ownerExplorer: getExplorerAddressUrl(
+							build.ownerAddress,
+							params.network,
+						),
+						poolExplorer: getExplorerAddressUrl(
+							build.poolAddress,
+							params.network,
+						),
+						positionExplorer: getExplorerAddressUrl(
+							build.positionAddress,
 							params.network,
 						),
 					},

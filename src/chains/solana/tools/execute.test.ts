@@ -17,8 +17,12 @@ const runtimeMocks = vi.hoisted(() => ({
 	buildKaminoRepayAndWithdrawInstructions: vi.fn(),
 	buildKaminoRepayInstructions: vi.fn(),
 	buildKaminoWithdrawInstructions: vi.fn(),
+	buildMeteoraAddLiquidityInstructions: vi.fn(),
+	buildMeteoraRemoveLiquidityInstructions: vi.fn(),
+	buildOrcaClosePositionInstructions: vi.fn(),
 	buildOrcaDecreaseLiquidityInstructions: vi.fn(),
 	buildOrcaIncreaseLiquidityInstructions: vi.fn(),
+	buildOrcaOpenPositionInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
 	buildRaydiumSwapTransactions: vi.fn(),
 	getJupiterApiBaseUrl: vi.fn(() => "https://lite-api.jup.ag"),
@@ -69,10 +73,18 @@ vi.mock("../runtime.js", async () => {
 		buildKaminoRepayInstructions: runtimeMocks.buildKaminoRepayInstructions,
 		buildKaminoWithdrawInstructions:
 			runtimeMocks.buildKaminoWithdrawInstructions,
+		buildMeteoraAddLiquidityInstructions:
+			runtimeMocks.buildMeteoraAddLiquidityInstructions,
+		buildMeteoraRemoveLiquidityInstructions:
+			runtimeMocks.buildMeteoraRemoveLiquidityInstructions,
+		buildOrcaClosePositionInstructions:
+			runtimeMocks.buildOrcaClosePositionInstructions,
 		buildOrcaDecreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
 		buildOrcaIncreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaIncreaseLiquidityInstructions,
+		buildOrcaOpenPositionInstructions:
+			runtimeMocks.buildOrcaOpenPositionInstructions,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
 		buildRaydiumSwapTransactions: runtimeMocks.buildRaydiumSwapTransactions,
 		getJupiterApiBaseUrl: runtimeMocks.getJupiterApiBaseUrl,
@@ -2135,6 +2147,177 @@ describe("native stake execute tools", () => {
 			positionMint,
 			quoteParamKind: "tokenB",
 			quoteParamAmountRaw: "77",
+		});
+	});
+
+	it("simulates Orca open-position transaction", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("devnet");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.buildOrcaOpenPositionInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			poolAddress,
+			positionMint,
+			quoteParamKind: "liquidity",
+			quoteParamAmountRaw: "10",
+			slippageBps: 100,
+			fullRange: true,
+			lowerPrice: null,
+			upperPrice: null,
+			initializationCostLamports: "1234",
+			instructionCount: 1,
+			quote: { tokenMaxA: "1", tokenMaxB: "2" },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([8]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 998,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 300,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_orcaOpenPosition");
+		const result = await tool.execute("orca-open-sim", {
+			fromSecretKey: "mock",
+			poolAddress,
+			liquidityAmountRaw: "10",
+			fullRange: true,
+			simulate: true,
+			network: "devnet",
+		});
+
+		expect(runtimeMocks.buildOrcaOpenPositionInstructions).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				poolAddress,
+				liquidityAmountRaw: "10",
+				fullRange: true,
+			}),
+		);
+		expect(connection.simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			simulated: true,
+			version: "legacy",
+			ownerAddress: signer.publicKey.toBase58(),
+			poolAddress,
+			positionMint,
+			quoteParamKind: "liquidity",
+			quoteParamAmountRaw: "10",
+		});
+	});
+
+	it("blocks mainnet Meteora add-liquidity unless confirmMainnet=true", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const tool = getTool("solana_meteoraAddLiquidity");
+
+		await expect(
+			tool.execute("meteora-add-mainnet", {
+				fromSecretKey: "mock",
+				poolAddress: Keypair.generate().publicKey.toBase58(),
+				positionAddress: Keypair.generate().publicKey.toBase58(),
+				totalXAmountRaw: "1",
+				totalYAmountRaw: "2",
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+		expect(runtimeMocks.getConnection).not.toHaveBeenCalled();
+	});
+
+	it("simulates Meteora remove-liquidity transaction", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("devnet");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.buildMeteoraRemoveLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			poolAddress,
+			positionAddress,
+			fromBinId: -10,
+			toBinId: 10,
+			bps: 5000,
+			shouldClaimAndClose: false,
+			skipUnwrapSol: true,
+			positionLowerBinId: -12,
+			positionUpperBinId: 12,
+			activeBinId: 0,
+			instructionCount: 1,
+			transactionCount: 1,
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([9]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 997,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 333,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_meteoraRemoveLiquidity");
+		const result = await tool.execute("meteora-remove-sim", {
+			fromSecretKey: "mock",
+			poolAddress,
+			positionAddress,
+			fromBinId: -10,
+			toBinId: 10,
+			bps: 5000,
+			simulate: true,
+			network: "devnet",
+		});
+
+		expect(
+			runtimeMocks.buildMeteoraRemoveLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				poolAddress,
+				positionAddress,
+				fromBinId: -10,
+				toBinId: 10,
+				bps: 5000,
+			}),
+		);
+		expect(connection.simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			simulated: true,
+			version: "legacy",
+			ownerAddress: signer.publicKey.toBase58(),
+			poolAddress,
+			positionAddress,
+			fromBinId: -10,
+			toBinId: 10,
+			bps: 5000,
 		});
 	});
 });

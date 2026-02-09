@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -13,9 +14,12 @@ import {
 	VanillaObligation,
 } from "@kamino-finance/klend-sdk";
 import {
+	closePositionInstructions,
 	decreaseLiquidityInstructions,
 	fetchPositionsForOwner,
 	increaseLiquidityInstructions,
+	openFullRangePositionInstructions,
+	openPositionInstructions,
 } from "@orca-so/whirlpools";
 import { fetchAllMaybeWhirlpool } from "@orca-so/whirlpools-client";
 import {
@@ -75,6 +79,83 @@ type TokenAmountInfo = {
 	decimals: number;
 	uiAmount: number | null;
 };
+
+type MeteoraStrategyTypeName = "Spot" | "Curve" | "BidAsk";
+
+type MeteoraDlmmClient = {
+	addLiquidityByStrategy(args: {
+		positionPubKey: PublicKey;
+		totalXAmount: unknown;
+		totalYAmount: unknown;
+		strategy: {
+			minBinId: number;
+			maxBinId: number;
+			strategyType: number;
+			singleSidedX?: boolean;
+		};
+		user: PublicKey;
+		slippage?: number;
+	}): Promise<Transaction | Transaction[]>;
+	removeLiquidity(args: {
+		user: PublicKey;
+		position: PublicKey;
+		fromBinId: number;
+		toBinId: number;
+		bps: unknown;
+		shouldClaimAndClose?: boolean;
+		skipUnwrapSOL?: boolean;
+	}): Promise<Transaction[]>;
+	getPosition(positionPubKey: PublicKey): Promise<{
+		positionData?: {
+			lowerBinId?: number;
+			upperBinId?: number;
+		};
+	}>;
+	getActiveBin(): Promise<{ binId?: number }>;
+};
+
+type MeteoraDlmmModule = {
+	default: {
+		create(
+			connection: Connection,
+			dlmm: PublicKey,
+			opt?: unknown,
+		): Promise<MeteoraDlmmClient>;
+	};
+	StrategyType: {
+		Spot: number;
+		Curve: number;
+		BidAsk: number;
+	};
+};
+
+type BnJsCtor = new (
+	value: string | number | bigint,
+	base?: number,
+) => {
+	toString(base?: number): string;
+	isZero(): boolean;
+};
+
+const cjsRequire = createRequire(import.meta.url);
+let meteoraDlmmModuleCache: MeteoraDlmmModule | null = null;
+let bnJsCtorCache: BnJsCtor | null = null;
+
+function getMeteoraDlmmModule(): MeteoraDlmmModule {
+	if (!meteoraDlmmModuleCache) {
+		meteoraDlmmModuleCache = cjsRequire(
+			"@meteora-ag/dlmm",
+		) as MeteoraDlmmModule;
+	}
+	return meteoraDlmmModuleCache;
+}
+
+function getBnJsCtor(): BnJsCtor {
+	if (!bnJsCtorCache) {
+		bnJsCtorCache = cjsRequire("bn.js") as BnJsCtor;
+	}
+	return bnJsCtorCache;
+}
 
 export type ParsedTokenAccountInfo = {
 	mint: string;
@@ -535,6 +616,91 @@ function parseOrcaSlippageBps(value: number | undefined): number {
 	return value;
 }
 
+function parseMeteoraSlippageBps(value: number | undefined): number {
+	if (value === undefined) {
+		return 100;
+	}
+	if (!Number.isInteger(value) || value < 0 || value > 10_000) {
+		throw new Error("slippageBps must be an integer between 0 and 10000");
+	}
+	return value;
+}
+
+function parseMeteoraRemoveBps(value: number | undefined): number {
+	if (value === undefined) {
+		return 10_000;
+	}
+	if (!Number.isInteger(value) || value < 1 || value > 10_000) {
+		throw new Error("bps must be an integer between 1 and 10000");
+	}
+	return value;
+}
+
+function parseMeteoraBinId(value: number, field: string): number {
+	if (!Number.isInteger(value)) {
+		throw new Error(`${field} must be an integer`);
+	}
+	return value;
+}
+
+function parseNonNegativeBigInt(value: string, field: string): string {
+	const trimmed = value.trim();
+	if (!/^[0-9]+$/.test(trimmed)) {
+		throw new Error(`${field} must be a non-negative integer`);
+	}
+	const parsed = BigInt(trimmed);
+	if (parsed < 0n) {
+		throw new Error(`${field} must be a non-negative integer`);
+	}
+	return parsed.toString();
+}
+
+function parseMeteoraStrategyType(value: string | undefined): {
+	name: MeteoraStrategyTypeName;
+	enumValue: number;
+} {
+	const normalized = (value ?? "Spot").trim().toLowerCase();
+	const module = getMeteoraDlmmModule();
+	if (normalized === "spot") {
+		return {
+			name: "Spot",
+			enumValue: module.StrategyType.Spot,
+		};
+	}
+	if (normalized === "curve") {
+		return {
+			name: "Curve",
+			enumValue: module.StrategyType.Curve,
+		};
+	}
+	if (
+		normalized === "bidask" ||
+		normalized === "bid-ask" ||
+		normalized === "bid_ask"
+	) {
+		return {
+			name: "BidAsk",
+			enumValue: module.StrategyType.BidAsk,
+		};
+	}
+	throw new Error(
+		`strategyType must be one of Spot, Curve, BidAsk (received ${value ?? "undefined"})`,
+	);
+}
+
+function flattenTransactionInstructions(
+	transactions: Transaction | Transaction[],
+): {
+	instructions: TransactionInstruction[];
+	transactionCount: number;
+} {
+	const txList = Array.isArray(transactions) ? transactions : [transactions];
+	return {
+		instructions: txList.flatMap((tx) => tx.instructions),
+		transactionCount: txList.length,
+	};
+}
+
 type OrcaParsedQuoteParam = {
 	kind: OrcaLiquidityQuoteParamKind;
 	amountRaw: string;
@@ -542,7 +708,10 @@ type OrcaParsedQuoteParam = {
 };
 
 function parseOrcaQuoteParam(
-	request: OrcaLiquidityInstructionsRequest,
+	request: Pick<
+		OrcaLiquidityInstructionsRequest,
+		"liquidityAmountRaw" | "tokenAAmountRaw" | "tokenBAmountRaw"
+	>,
 ): OrcaParsedQuoteParam {
 	const provided = [
 		{
@@ -1351,6 +1520,316 @@ export async function buildOrcaDecreaseLiquidityInstructions(
 	};
 }
 
+export async function buildOrcaOpenPositionInstructions(
+	request: OrcaOpenPositionInstructionsRequest,
+): Promise<OrcaOpenPositionInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const poolAddress = new PublicKey(
+		normalizeAtPath(request.poolAddress),
+	).toBase58();
+	const slippageBps = parseOrcaSlippageBps(request.slippageBps);
+	const quoteParam = parseOrcaQuoteParam({
+		liquidityAmountRaw: request.liquidityAmountRaw,
+		tokenAAmountRaw: request.tokenAAmountRaw,
+		tokenBAmountRaw: request.tokenBAmountRaw,
+	});
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+	const fullRange = request.fullRange === true;
+	let lowerPrice: number | null = null;
+	let upperPrice: number | null = null;
+	const result = fullRange
+		? await openFullRangePositionInstructions(
+				rpc as never,
+				address(poolAddress),
+				quoteParam.param as never,
+				slippageBps,
+				createNoopSigner(address(ownerAddress)),
+			)
+		: await (async () => {
+				if (
+					typeof request.lowerPrice !== "number" ||
+					!Number.isFinite(request.lowerPrice) ||
+					request.lowerPrice <= 0
+				) {
+					throw new Error(
+						"lowerPrice must be a positive number when fullRange is false",
+					);
+				}
+				if (
+					typeof request.upperPrice !== "number" ||
+					!Number.isFinite(request.upperPrice) ||
+					request.upperPrice <= 0
+				) {
+					throw new Error(
+						"upperPrice must be a positive number when fullRange is false",
+					);
+				}
+				if (request.upperPrice <= request.lowerPrice) {
+					throw new Error("upperPrice must be greater than lowerPrice");
+				}
+				lowerPrice = request.lowerPrice;
+				upperPrice = request.upperPrice;
+				return openPositionInstructions(
+					rpc as never,
+					address(poolAddress),
+					quoteParam.param as never,
+					request.lowerPrice,
+					request.upperPrice,
+					slippageBps,
+					createNoopSigner(address(ownerAddress)),
+				);
+			})();
+	const instructions = result.instructions.map(convertKitInstructionToLegacy);
+	const normalizedQuote = normalizeBigIntFields(result.quote);
+	const quote =
+		normalizedQuote && typeof normalizedQuote === "object"
+			? (normalizedQuote as Record<string, unknown>)
+			: {};
+	const normalizedInitCost = normalizeBigIntFields(result.initializationCost);
+	const initializationCostLamports =
+		typeof normalizedInitCost === "string"
+			? normalizedInitCost
+			: typeof normalizedInitCost === "number" &&
+					Number.isFinite(normalizedInitCost)
+				? Math.trunc(normalizedInitCost).toString()
+				: "0";
+	return {
+		network,
+		ownerAddress,
+		poolAddress,
+		positionMint: String(result.positionMint),
+		quoteParamKind: quoteParam.kind,
+		quoteParamAmountRaw: quoteParam.amountRaw,
+		slippageBps,
+		fullRange,
+		lowerPrice,
+		upperPrice,
+		initializationCostLamports,
+		instructionCount: instructions.length,
+		quote,
+		instructions,
+	};
+}
+
+export async function buildOrcaClosePositionInstructions(
+	request: OrcaClosePositionInstructionsRequest,
+): Promise<OrcaClosePositionInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const positionMint = new PublicKey(
+		normalizeAtPath(request.positionMint),
+	).toBase58();
+	const slippageBps = parseOrcaSlippageBps(request.slippageBps);
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+	const result = await closePositionInstructions(
+		rpc as never,
+		address(positionMint),
+		slippageBps,
+		createNoopSigner(address(ownerAddress)),
+	);
+	const instructions = result.instructions.map(convertKitInstructionToLegacy);
+	const normalizedQuote = normalizeBigIntFields(result.quote);
+	const normalizedFeesQuote = normalizeBigIntFields(result.feesQuote);
+	const normalizedRewardsQuote = normalizeBigIntFields(result.rewardsQuote);
+	return {
+		network,
+		ownerAddress,
+		positionMint,
+		slippageBps,
+		instructionCount: instructions.length,
+		quote:
+			normalizedQuote && typeof normalizedQuote === "object"
+				? (normalizedQuote as Record<string, unknown>)
+				: {},
+		feesQuote:
+			normalizedFeesQuote && typeof normalizedFeesQuote === "object"
+				? (normalizedFeesQuote as Record<string, unknown>)
+				: {},
+		rewardsQuote:
+			normalizedRewardsQuote && typeof normalizedRewardsQuote === "object"
+				? (normalizedRewardsQuote as Record<string, unknown>)
+				: {},
+		instructions,
+	};
+}
+
+export async function buildMeteoraAddLiquidityInstructions(
+	request: MeteoraAddLiquidityInstructionsRequest,
+): Promise<MeteoraAddLiquidityInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const poolAddress = new PublicKey(
+		normalizeAtPath(request.poolAddress),
+	).toBase58();
+	const positionAddress = new PublicKey(
+		normalizeAtPath(request.positionAddress),
+	).toBase58();
+	const totalXAmountRaw = parseNonNegativeBigInt(
+		request.totalXAmountRaw,
+		"totalXAmountRaw",
+	);
+	const totalYAmountRaw = parseNonNegativeBigInt(
+		request.totalYAmountRaw,
+		"totalYAmountRaw",
+	);
+	if (totalXAmountRaw === "0" && totalYAmountRaw === "0") {
+		throw new Error(
+			"At least one of totalXAmountRaw/totalYAmountRaw must be > 0",
+		);
+	}
+	const slippageBps = parseMeteoraSlippageBps(request.slippageBps);
+	const slippagePercent = slippageBps / 100;
+	const module = getMeteoraDlmmModule();
+	const dlmm = await module.default.create(
+		getConnection(network),
+		new PublicKey(poolAddress),
+	);
+	const position = await dlmm.getPosition(new PublicKey(positionAddress));
+	const positionLowerBinId = position.positionData?.lowerBinId;
+	const positionUpperBinId = position.positionData?.upperBinId;
+	if (
+		typeof positionLowerBinId !== "number" ||
+		typeof positionUpperBinId !== "number"
+	) {
+		throw new Error(
+			`Failed to read Meteora position range for positionAddress=${positionAddress}`,
+		);
+	}
+	const minBinId =
+		request.minBinId !== undefined
+			? parseMeteoraBinId(request.minBinId, "minBinId")
+			: positionLowerBinId;
+	const maxBinId =
+		request.maxBinId !== undefined
+			? parseMeteoraBinId(request.maxBinId, "maxBinId")
+			: positionUpperBinId;
+	if (minBinId > maxBinId) {
+		throw new Error("minBinId must be <= maxBinId");
+	}
+	const strategyType = parseMeteoraStrategyType(request.strategyType);
+	const singleSidedX = request.singleSidedX === true;
+	const Bn = getBnJsCtor();
+	const transactions = await dlmm.addLiquidityByStrategy({
+		positionPubKey: new PublicKey(positionAddress),
+		totalXAmount: new Bn(totalXAmountRaw),
+		totalYAmount: new Bn(totalYAmountRaw),
+		strategy: {
+			minBinId,
+			maxBinId,
+			strategyType: strategyType.enumValue,
+			...(singleSidedX ? { singleSidedX: true } : {}),
+		},
+		user: new PublicKey(ownerAddress),
+		slippage: slippagePercent,
+	});
+	const flattened = flattenTransactionInstructions(transactions);
+	const activeBin = await dlmm.getActiveBin().catch(() => null);
+	return {
+		network,
+		ownerAddress,
+		poolAddress,
+		positionAddress,
+		totalXAmountRaw,
+		totalYAmountRaw,
+		minBinId,
+		maxBinId,
+		strategyType: strategyType.name,
+		singleSidedX,
+		slippageBps,
+		activeBinId:
+			activeBin && typeof activeBin.binId === "number" ? activeBin.binId : null,
+		instructionCount: flattened.instructions.length,
+		transactionCount: flattened.transactionCount,
+		instructions: flattened.instructions,
+	};
+}
+
+export async function buildMeteoraRemoveLiquidityInstructions(
+	request: MeteoraRemoveLiquidityInstructionsRequest,
+): Promise<MeteoraRemoveLiquidityInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const poolAddress = new PublicKey(
+		normalizeAtPath(request.poolAddress),
+	).toBase58();
+	const positionAddress = new PublicKey(
+		normalizeAtPath(request.positionAddress),
+	).toBase58();
+	const bps = parseMeteoraRemoveBps(request.bps);
+	const shouldClaimAndClose = request.shouldClaimAndClose === true;
+	const skipUnwrapSol = request.skipUnwrapSol === true;
+	const module = getMeteoraDlmmModule();
+	const dlmm = await module.default.create(
+		getConnection(network),
+		new PublicKey(poolAddress),
+	);
+	const position = await dlmm.getPosition(new PublicKey(positionAddress));
+	const positionLowerBinId = position.positionData?.lowerBinId;
+	const positionUpperBinId = position.positionData?.upperBinId;
+	if (
+		typeof positionLowerBinId !== "number" ||
+		typeof positionUpperBinId !== "number"
+	) {
+		throw new Error(
+			`Failed to read Meteora position range for positionAddress=${positionAddress}`,
+		);
+	}
+	const requestedFromBinId =
+		request.fromBinId !== undefined
+			? parseMeteoraBinId(request.fromBinId, "fromBinId")
+			: positionLowerBinId;
+	const requestedToBinId =
+		request.toBinId !== undefined
+			? parseMeteoraBinId(request.toBinId, "toBinId")
+			: positionUpperBinId;
+	const fromBinId = Math.max(requestedFromBinId, positionLowerBinId);
+	const toBinId = Math.min(requestedToBinId, positionUpperBinId);
+	if (fromBinId > toBinId) {
+		throw new Error(
+			`Requested bin range has no overlap with position range: requested=[${requestedFromBinId},${requestedToBinId}] position=[${positionLowerBinId},${positionUpperBinId}]`,
+		);
+	}
+	const Bn = getBnJsCtor();
+	const transactions = await dlmm.removeLiquidity({
+		user: new PublicKey(ownerAddress),
+		position: new PublicKey(positionAddress),
+		fromBinId,
+		toBinId,
+		bps: new Bn(bps.toString()),
+		shouldClaimAndClose,
+		skipUnwrapSOL: skipUnwrapSol,
+	});
+	const flattened = flattenTransactionInstructions(transactions);
+	const activeBin = await dlmm.getActiveBin().catch(() => null);
+	return {
+		network,
+		ownerAddress,
+		poolAddress,
+		positionAddress,
+		fromBinId,
+		toBinId,
+		bps,
+		shouldClaimAndClose,
+		skipUnwrapSol,
+		positionLowerBinId,
+		positionUpperBinId,
+		activeBinId:
+			activeBin && typeof activeBin.binId === "number" ? activeBin.binId : null,
+		instructionCount: flattened.instructions.length,
+		transactionCount: flattened.transactionCount,
+		instructions: flattened.instructions,
+	};
+}
+
 function truncateText(value: string): string {
 	if (value.length <= 500) return value;
 	return `${value.slice(0, 500)}...`;
@@ -1665,6 +2144,119 @@ export type OrcaDecreaseLiquidityInstructionsRequest =
 	OrcaLiquidityInstructionsRequest;
 export type OrcaDecreaseLiquidityInstructionsResult =
 	OrcaLiquidityInstructionsResult;
+
+export type OrcaOpenPositionInstructionsRequest = {
+	ownerAddress: string;
+	poolAddress: string;
+	liquidityAmountRaw?: string;
+	tokenAAmountRaw?: string;
+	tokenBAmountRaw?: string;
+	lowerPrice?: number;
+	upperPrice?: number;
+	fullRange?: boolean;
+	slippageBps?: number;
+	network?: string;
+};
+
+export type OrcaOpenPositionInstructionsResult = {
+	network: SolanaNetwork;
+	ownerAddress: string;
+	poolAddress: string;
+	positionMint: string;
+	quoteParamKind: OrcaLiquidityQuoteParamKind;
+	quoteParamAmountRaw: string;
+	slippageBps: number;
+	fullRange: boolean;
+	lowerPrice: number | null;
+	upperPrice: number | null;
+	initializationCostLamports: string;
+	instructionCount: number;
+	quote: Record<string, unknown>;
+	instructions: TransactionInstruction[];
+};
+
+export type OrcaClosePositionInstructionsRequest = {
+	ownerAddress: string;
+	positionMint: string;
+	slippageBps?: number;
+	network?: string;
+};
+
+export type OrcaClosePositionInstructionsResult = {
+	network: SolanaNetwork;
+	ownerAddress: string;
+	positionMint: string;
+	slippageBps: number;
+	instructionCount: number;
+	quote: Record<string, unknown>;
+	feesQuote: Record<string, unknown>;
+	rewardsQuote: Record<string, unknown>;
+	instructions: TransactionInstruction[];
+};
+
+export type MeteoraLiquidityStrategyType = "Spot" | "Curve" | "BidAsk";
+
+export type MeteoraAddLiquidityInstructionsRequest = {
+	ownerAddress: string;
+	poolAddress: string;
+	positionAddress: string;
+	totalXAmountRaw: string;
+	totalYAmountRaw: string;
+	minBinId?: number;
+	maxBinId?: number;
+	strategyType?: MeteoraLiquidityStrategyType;
+	singleSidedX?: boolean;
+	slippageBps?: number;
+	network?: string;
+};
+
+export type MeteoraAddLiquidityInstructionsResult = {
+	network: SolanaNetwork;
+	ownerAddress: string;
+	poolAddress: string;
+	positionAddress: string;
+	totalXAmountRaw: string;
+	totalYAmountRaw: string;
+	minBinId: number;
+	maxBinId: number;
+	strategyType: MeteoraLiquidityStrategyType;
+	singleSidedX: boolean;
+	slippageBps: number;
+	activeBinId: number | null;
+	instructionCount: number;
+	transactionCount: number;
+	instructions: TransactionInstruction[];
+};
+
+export type MeteoraRemoveLiquidityInstructionsRequest = {
+	ownerAddress: string;
+	poolAddress: string;
+	positionAddress: string;
+	fromBinId?: number;
+	toBinId?: number;
+	bps?: number;
+	shouldClaimAndClose?: boolean;
+	skipUnwrapSol?: boolean;
+	network?: string;
+};
+
+export type MeteoraRemoveLiquidityInstructionsResult = {
+	network: SolanaNetwork;
+	ownerAddress: string;
+	poolAddress: string;
+	positionAddress: string;
+	fromBinId: number;
+	toBinId: number;
+	bps: number;
+	shouldClaimAndClose: boolean;
+	skipUnwrapSol: boolean;
+	positionLowerBinId: number;
+	positionUpperBinId: number;
+	activeBinId: number | null;
+	instructionCount: number;
+	transactionCount: number;
+	instructions: TransactionInstruction[];
+};
 
 export type OrcaWhirlpoolPositionReward = {
 	index: number;

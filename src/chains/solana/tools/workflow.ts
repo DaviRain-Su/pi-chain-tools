@@ -33,8 +33,12 @@ import {
 	buildKaminoRepayAndWithdrawInstructions,
 	buildKaminoRepayInstructions,
 	buildKaminoWithdrawInstructions,
+	buildMeteoraAddLiquidityInstructions,
+	buildMeteoraRemoveLiquidityInstructions,
+	buildOrcaClosePositionInstructions,
 	buildOrcaDecreaseLiquidityInstructions,
 	buildOrcaIncreaseLiquidityInstructions,
+	buildOrcaOpenPositionInstructions,
 	buildRaydiumSwapTransactions,
 	callJupiterApi,
 	commitmentSchema,
@@ -89,8 +93,12 @@ type WorkflowIntentType =
 	| "solana.stake.authorizeWithdrawer"
 	| "solana.stake.deactivate"
 	| "solana.stake.withdraw"
+	| "solana.lp.orca.open"
+	| "solana.lp.orca.close"
 	| "solana.lp.orca.increase"
 	| "solana.lp.orca.decrease"
+	| "solana.lp.meteora.add"
+	| "solana.lp.meteora.remove"
 	| "solana.swap.jupiter"
 	| "solana.swap.raydium"
 	| "solana.swap.orca"
@@ -108,12 +116,17 @@ type ParsedIntentTextFields = Partial<{
 	toAddress: string;
 	amountSol: number;
 	amountUi: string;
+	lowerPrice: number;
+	upperPrice: number;
+	fullRange: boolean;
 	depositAmountUi: string;
 	borrowAmountUi: string;
 	repayAmountUi: string;
 	withdrawAmountUi: string;
 	tokenMint: string;
 	positionMint: string;
+	poolAddress: string;
+	positionAddress: string;
 	reserveMint: string;
 	depositReserveMint: string;
 	borrowReserveMint: string;
@@ -122,9 +135,20 @@ type ParsedIntentTextFields = Partial<{
 	inputMint: string;
 	outputMint: string;
 	amountRaw: string;
+	totalXAmountRaw: string;
+	totalYAmountRaw: string;
 	liquidityAmountRaw: string;
 	tokenAAmountRaw: string;
 	tokenBAmountRaw: string;
+	minBinId: number;
+	maxBinId: number;
+	fromBinId: number;
+	toBinId: number;
+	bps: number;
+	shouldClaimAndClose: boolean;
+	skipUnwrapSol: boolean;
+	singleSidedX: boolean;
+	strategyType: "Spot" | "Curve" | "BidAsk";
 	depositAmountRaw: string;
 	borrowAmountRaw: string;
 	repayAmountRaw: string;
@@ -321,6 +345,52 @@ type OrcaDecreaseLiquidityIntent = {
 	type: "solana.lp.orca.decrease";
 } & OrcaLiquidityIntentInput;
 
+type OrcaOpenPositionIntent = {
+	type: "solana.lp.orca.open";
+	ownerAddress: string;
+	poolAddress: string;
+	liquidityAmountRaw?: string;
+	tokenAAmountRaw?: string;
+	tokenBAmountRaw?: string;
+	lowerPrice?: number;
+	upperPrice?: number;
+	fullRange?: boolean;
+	slippageBps?: number;
+};
+
+type OrcaClosePositionIntent = {
+	type: "solana.lp.orca.close";
+	ownerAddress: string;
+	positionMint: string;
+	slippageBps?: number;
+};
+
+type MeteoraAddLiquidityIntent = {
+	type: "solana.lp.meteora.add";
+	ownerAddress: string;
+	poolAddress: string;
+	positionAddress: string;
+	totalXAmountRaw: string;
+	totalYAmountRaw: string;
+	minBinId?: number;
+	maxBinId?: number;
+	strategyType?: "Spot" | "Curve" | "BidAsk";
+	singleSidedX?: boolean;
+	slippageBps?: number;
+};
+
+type MeteoraRemoveLiquidityIntent = {
+	type: "solana.lp.meteora.remove";
+	ownerAddress: string;
+	poolAddress: string;
+	positionAddress: string;
+	fromBinId?: number;
+	toBinId?: number;
+	bps?: number;
+	shouldClaimAndClose?: boolean;
+	skipUnwrapSol?: boolean;
+};
+
 type JupiterSwapIntent = {
 	type: "solana.swap.jupiter" | "solana.swap.orca" | "solana.swap.meteora";
 	userPublicKey: string;
@@ -368,8 +438,12 @@ type WorkflowIntent =
 	| KaminoRepayIntent
 	| KaminoRepayAndWithdrawIntent
 	| KaminoWithdrawIntent
+	| OrcaOpenPositionIntent
+	| OrcaClosePositionIntent
 	| OrcaIncreaseLiquidityIntent
 	| OrcaDecreaseLiquidityIntent
+	| MeteoraAddLiquidityIntent
+	| MeteoraRemoveLiquidityIntent
 	| JupiterSwapIntent
 	| RaydiumSwapIntent
 	| {
@@ -519,10 +593,18 @@ const DEFI_POSITIONS_KEYWORD_REGEX =
 	/(defi|de-fi|protocol\s+positions?|协议仓位|staking|stake|质押|farm|yield|收益)/i;
 const ORCA_POSITIONS_KEYWORD_REGEX =
 	/(orca.*(whirlpool|lp|liquidity|position|positions|仓位|流动性)|(whirlpool|lp|liquidity|position|positions|仓位|流动性).*orca)/i;
+const ORCA_OPEN_POSITION_KEYWORD_REGEX =
+	/(orca.*(\bopen\b|\bcreate\b|\bnew\b|开仓|创建).*(position|仓位)|(position|仓位).*(orca).*(\bopen\b|\bcreate\b|\bnew\b|开仓|创建))/i;
+const ORCA_CLOSE_POSITION_KEYWORD_REGEX =
+	/(orca.*(\bclose\b|\bexit\b|\bcloseout\b|平仓|关闭).*(position|仓位)|(position|仓位).*(orca).*(\bclose\b|\bexit\b|\bcloseout\b|平仓|关闭))/i;
 const ORCA_INCREASE_LIQUIDITY_KEYWORD_REGEX =
 	/(orca.*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入).*(liquidity|lp|流动性)|(liquidity|lp|流动性).*(orca).*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入))/i;
 const ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX =
 	/(orca.*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取).*(liquidity|lp|流动性)|(liquidity|lp|流动性).*(orca).*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取))/i;
+const METEORA_ADD_LIQUIDITY_KEYWORD_REGEX =
+	/((meteora|dlmm).*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入).*(liquidity|lp|流动性)|(liquidity|lp|流动性).*(meteora|dlmm).*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入))/i;
+const METEORA_REMOVE_LIQUIDITY_KEYWORD_REGEX =
+	/((meteora|dlmm).*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取).*(liquidity|lp|流动性)|(liquidity|lp|流动性).*(meteora|dlmm).*(\bremove\b|\bdecrease\b|\bwithdraw\b|\breduce\b|减少|移除|提取))/i;
 const KAMINO_DEPOSIT_KEYWORD_REGEX =
 	/(kamino.*(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出)|(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出).*kamino)/i;
 const KAMINO_BORROW_KEYWORD_REGEX =
@@ -1634,10 +1716,18 @@ function parseOrcaLiquidityIntentText(
 ): ParsedIntentTextFields {
 	const parsed: ParsedIntentTextFields = {};
 	const lower = intentText.toLowerCase();
-	if (lower.includes("solana.lp.orca.increase")) {
+	if (lower.includes("solana.lp.orca.open")) {
+		parsed.intentType = "solana.lp.orca.open";
+	} else if (lower.includes("solana.lp.orca.close")) {
+		parsed.intentType = "solana.lp.orca.close";
+	} else if (lower.includes("solana.lp.orca.increase")) {
 		parsed.intentType = "solana.lp.orca.increase";
 	} else if (lower.includes("solana.lp.orca.decrease")) {
 		parsed.intentType = "solana.lp.orca.decrease";
+	} else if (ORCA_CLOSE_POSITION_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.lp.orca.close";
+	} else if (ORCA_OPEN_POSITION_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.lp.orca.open";
 	} else if (ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX.test(intentText)) {
 		parsed.intentType = "solana.lp.orca.decrease";
 	} else if (ORCA_INCREASE_LIQUIDITY_KEYWORD_REGEX.test(intentText)) {
@@ -1653,7 +1743,7 @@ function parseOrcaLiquidityIntentText(
 		}
 	}
 	const positionMintMatch = intentText.match(
-		/\bpositionMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+		/\b(?:positionMint|position(?:Address)?|position)\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
 	);
 	if (positionMintMatch?.[1]) {
 		const positionMint = parseMintFromCandidate(positionMintMatch[1]);
@@ -1661,31 +1751,331 @@ function parseOrcaLiquidityIntentText(
 			parsed.positionMint = positionMint;
 		}
 	}
+	const poolAddressMatch = intentText.match(
+		/\b(?:poolAddress|whirlpool(?:Address)?|pool|whirlpool)\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (poolAddressMatch?.[1]) {
+		const poolAddress = parseMintFromCandidate(poolAddressMatch[1]);
+		if (poolAddress) {
+			parsed.poolAddress = poolAddress;
+		}
+	}
+	const addresses = intentText.match(BASE58_PUBLIC_KEY_REGEX) ?? [];
+	if (parsed.intentType === "solana.lp.orca.open" && !parsed.poolAddress) {
+		const inferredPool = addresses[0]
+			? parseMintFromCandidate(addresses[0])
+			: undefined;
+		if (inferredPool) {
+			parsed.poolAddress = inferredPool;
+		}
+	}
+	if (
+		(parsed.intentType === "solana.lp.orca.close" ||
+			parsed.intentType === "solana.lp.orca.increase" ||
+			parsed.intentType === "solana.lp.orca.decrease") &&
+		!parsed.positionMint
+	) {
+		const inferredPosition = addresses.length
+			? parseMintFromCandidate(addresses[addresses.length - 1] ?? "")
+			: undefined;
+		if (inferredPosition) {
+			parsed.positionMint = inferredPosition;
+		}
+	}
+	if (
+		/\bfullRange\s*[=:]\s*true\b/i.test(intentText) ||
+		/\bfull\s*range\b|全区间|全范围/i.test(intentText)
+	) {
+		parsed.fullRange = true;
+	}
+	const lowerPriceMatch = intentText.match(
+		/\b(?:lowerPrice|lower)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+	);
+	if (lowerPriceMatch?.[1]) {
+		const lowerPrice = Number.parseFloat(lowerPriceMatch[1]);
+		if (Number.isFinite(lowerPrice) && lowerPrice > 0) {
+			parsed.lowerPrice = lowerPrice;
+		}
+	}
+	const upperPriceMatch = intentText.match(
+		/\b(?:upperPrice|upper)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+	);
+	if (upperPriceMatch?.[1]) {
+		const upperPrice = Number.parseFloat(upperPriceMatch[1]);
+		if (Number.isFinite(upperPrice) && upperPrice > 0) {
+			parsed.upperPrice = upperPrice;
+		}
+	}
+	if (parsed.lowerPrice === undefined || parsed.upperPrice === undefined) {
+		const rangeMatch = intentText.match(
+			/\b(?:price\s*range|range|价格区间|区间)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:-|~|to|到)\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+		);
+		if (rangeMatch?.[1] && rangeMatch?.[2]) {
+			const lowerFromRange = Number.parseFloat(rangeMatch[1]);
+			const upperFromRange = Number.parseFloat(rangeMatch[2]);
+			if (
+				Number.isFinite(lowerFromRange) &&
+				Number.isFinite(upperFromRange) &&
+				lowerFromRange > 0 &&
+				upperFromRange > 0
+			) {
+				if (parsed.lowerPrice === undefined) {
+					parsed.lowerPrice = lowerFromRange;
+				}
+				if (parsed.upperPrice === undefined) {
+					parsed.upperPrice = upperFromRange;
+				}
+			}
+		}
+	}
 	const liquidityAmountRawMatch = intentText.match(
-		/\bliquidityAmountRaw\s*[=:]\s*([0-9]+)\b/i,
+		/\b(?:liquidityAmountRaw|liquidityAmount|liquidityRaw|liquidity|lpAmountRaw|lpAmount)\s*[=:]?\s*([0-9]+)\b/i,
 	);
 	if (liquidityAmountRawMatch?.[1]) {
 		parsed.liquidityAmountRaw = liquidityAmountRawMatch[1];
 	}
 	const tokenAAmountRawMatch = intentText.match(
-		/\btokenAAmountRaw\s*[=:]\s*([0-9]+)\b/i,
+		/\b(?:tokenAAmountRaw|tokenAAmount|tokenARaw|tokenA|amountA(?:Raw)?|aAmount(?:Raw)?)\s*[=:]?\s*([0-9]+)\b/i,
 	);
 	if (tokenAAmountRawMatch?.[1]) {
 		parsed.tokenAAmountRaw = tokenAAmountRawMatch[1];
 	}
 	const tokenBAmountRawMatch = intentText.match(
-		/\btokenBAmountRaw\s*[=:]\s*([0-9]+)\b/i,
+		/\b(?:tokenBAmountRaw|tokenBAmount|tokenBRaw|tokenB|amountB(?:Raw)?|bAmount(?:Raw)?)\s*[=:]?\s*([0-9]+)\b/i,
 	);
 	if (tokenBAmountRawMatch?.[1]) {
 		parsed.tokenBAmountRaw = tokenBAmountRawMatch[1];
 	}
-	const slippageBpsMatch = intentText.match(
-		/\bslippageBps\s*[=:]\s*([0-9]+)\b/i,
-	);
+	const slippageBpsMatch =
+		intentText.match(/\bslippageBps\s*[=:]?\s*([0-9]+)\b/i) ??
+		intentText.match(/\b([0-9]+)\s*bps\b/i);
 	if (slippageBpsMatch?.[1]) {
 		const slippageBps = Number.parseInt(slippageBpsMatch[1], 10);
 		if (Number.isFinite(slippageBps)) {
 			parsed.slippageBps = slippageBps;
+		}
+	}
+	if (parsed.slippageBps === undefined) {
+		const slippagePercentMatch =
+			intentText.match(/\bslippage\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i) ??
+			intentText.match(/滑点\s*([0-9]+(?:\.[0-9]+)?)\s*%/i);
+		if (slippagePercentMatch?.[1]) {
+			const slippagePercent = parsePositiveNumber(slippagePercentMatch[1]);
+			if (slippagePercent != null) {
+				parsed.slippageBps = Math.round(slippagePercent * 100);
+			}
+		}
+	}
+	return parsed;
+}
+
+function parseMeteoraLiquidityIntentText(
+	intentText: string,
+): ParsedIntentTextFields {
+	const parsed: ParsedIntentTextFields = {};
+	const lower = intentText.toLowerCase();
+	if (lower.includes("solana.lp.meteora.add")) {
+		parsed.intentType = "solana.lp.meteora.add";
+	} else if (lower.includes("solana.lp.meteora.remove")) {
+		parsed.intentType = "solana.lp.meteora.remove";
+	} else if (METEORA_REMOVE_LIQUIDITY_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.lp.meteora.remove";
+	} else if (METEORA_ADD_LIQUIDITY_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.lp.meteora.add";
+	}
+
+	const ownerAddressMatch = intentText.match(
+		/\bownerAddress\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (ownerAddressMatch?.[1]) {
+		const ownerAddress = parseMintFromCandidate(ownerAddressMatch[1]);
+		if (ownerAddress) {
+			parsed.ownerAddress = ownerAddress;
+		}
+	}
+	const poolAddressMatch = intentText.match(
+		/\b(?:poolAddress|dlmmPoolAddress|lbPairAddress|pool|lbpair)\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (poolAddressMatch?.[1]) {
+		const poolAddress = parseMintFromCandidate(poolAddressMatch[1]);
+		if (poolAddress) {
+			parsed.poolAddress = poolAddress;
+		}
+	}
+	const positionAddressMatch = intentText.match(
+		/\b(?:positionAddress|lpPositionAddress|position)\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (positionAddressMatch?.[1]) {
+		const positionAddress = parseMintFromCandidate(positionAddressMatch[1]);
+		if (positionAddress) {
+			parsed.positionAddress = positionAddress;
+		}
+	}
+	const addresses = intentText.match(BASE58_PUBLIC_KEY_REGEX) ?? [];
+	if (
+		(parsed.intentType === "solana.lp.meteora.add" ||
+			parsed.intentType === "solana.lp.meteora.remove") &&
+		!parsed.poolAddress
+	) {
+		const inferredPool = addresses[0]
+			? parseMintFromCandidate(addresses[0])
+			: undefined;
+		if (inferredPool) {
+			parsed.poolAddress = inferredPool;
+		}
+	}
+	if (
+		(parsed.intentType === "solana.lp.meteora.add" ||
+			parsed.intentType === "solana.lp.meteora.remove") &&
+		!parsed.positionAddress
+	) {
+		const inferredPosition = addresses[1]
+			? parseMintFromCandidate(addresses[1])
+			: undefined;
+		if (inferredPosition) {
+			parsed.positionAddress = inferredPosition;
+		}
+	}
+	const totalXAmountRawMatch = intentText.match(
+		/\b(?:totalXAmountRaw|amountXRaw|tokenXAmountRaw|xAmountRaw|totalX|amountX|tokenX|x)\s*[=:]?\s*([0-9]+)\b/i,
+	);
+	if (totalXAmountRawMatch?.[1]) {
+		parsed.totalXAmountRaw = totalXAmountRawMatch[1];
+	}
+	const totalYAmountRawMatch = intentText.match(
+		/\b(?:totalYAmountRaw|amountYRaw|tokenYAmountRaw|yAmountRaw|totalY|amountY|tokenY|y)\s*[=:]?\s*([0-9]+)\b/i,
+	);
+	if (totalYAmountRawMatch?.[1]) {
+		parsed.totalYAmountRaw = totalYAmountRawMatch[1];
+	}
+	const minBinIdMatch = intentText.match(/\bminBinId\s*[=:]?\s*(-?[0-9]+)\b/i);
+	if (minBinIdMatch?.[1]) {
+		const minBinId = Number.parseInt(minBinIdMatch[1], 10);
+		if (Number.isFinite(minBinId)) {
+			parsed.minBinId = minBinId;
+		}
+	}
+	const maxBinIdMatch = intentText.match(/\bmaxBinId\s*[=:]?\s*(-?[0-9]+)\b/i);
+	if (maxBinIdMatch?.[1]) {
+		const maxBinId = Number.parseInt(maxBinIdMatch[1], 10);
+		if (Number.isFinite(maxBinId)) {
+			parsed.maxBinId = maxBinId;
+		}
+	}
+	const fromBinIdMatch = intentText.match(
+		/\bfromBinId\s*[=:]?\s*(-?[0-9]+)\b/i,
+	);
+	if (fromBinIdMatch?.[1]) {
+		const fromBinId = Number.parseInt(fromBinIdMatch[1], 10);
+		if (Number.isFinite(fromBinId)) {
+			parsed.fromBinId = fromBinId;
+		}
+	}
+	const toBinIdMatch = intentText.match(/\btoBinId\s*[=:]?\s*(-?[0-9]+)\b/i);
+	if (toBinIdMatch?.[1]) {
+		const toBinId = Number.parseInt(toBinIdMatch[1], 10);
+		if (Number.isFinite(toBinId)) {
+			parsed.toBinId = toBinId;
+		}
+	}
+	const binRangeMatch = intentText.match(
+		/\b(?:bins?|binRange|range|区间)\s*[=:]?\s*(-?[0-9]+)\s*(?:-|~|to|到)\s*(-?[0-9]+)\b/i,
+	);
+	if (binRangeMatch?.[1] && binRangeMatch?.[2]) {
+		const rangeStart = Number.parseInt(binRangeMatch[1], 10);
+		const rangeEnd = Number.parseInt(binRangeMatch[2], 10);
+		if (Number.isFinite(rangeStart) && Number.isFinite(rangeEnd)) {
+			if (
+				parsed.intentType === "solana.lp.meteora.remove" ||
+				METEORA_REMOVE_LIQUIDITY_KEYWORD_REGEX.test(intentText)
+			) {
+				if (parsed.fromBinId === undefined) {
+					parsed.fromBinId = rangeStart;
+				}
+				if (parsed.toBinId === undefined) {
+					parsed.toBinId = rangeEnd;
+				}
+			} else {
+				if (parsed.minBinId === undefined) {
+					parsed.minBinId = rangeStart;
+				}
+				if (parsed.maxBinId === undefined) {
+					parsed.maxBinId = rangeEnd;
+				}
+			}
+		}
+	}
+	const bpsMatch = intentText.match(/\bbps\s*[=:]?\s*([0-9]+)\b/i);
+	if (bpsMatch?.[1]) {
+		const bps = Number.parseInt(bpsMatch[1], 10);
+		if (Number.isFinite(bps)) {
+			parsed.bps = bps;
+		}
+	}
+	if (
+		parsed.bps === undefined &&
+		(parsed.intentType === "solana.lp.meteora.remove" ||
+			METEORA_REMOVE_LIQUIDITY_KEYWORD_REGEX.test(intentText))
+	) {
+		const bpsPercentMatch = intentText.match(/\b([0-9]+(?:\.[0-9]+)?)\s*%/i);
+		if (bpsPercentMatch?.[1]) {
+			const percent = parsePositiveNumber(bpsPercentMatch[1]);
+			if (percent != null) {
+				parsed.bps = Math.round(percent * 100);
+			}
+		} else if (/\b(all|full)\b|全部|全仓|全部仓位/i.test(intentText)) {
+			parsed.bps = 10000;
+		}
+	}
+	const strategyTypeMatch = intentText.match(
+		/\b(?:strategyType|strategy|策略)\s*[=:]?\s*(spot|curve|bidask|bid-ask|bid_ask|现货|曲线|双边)\b/i,
+	);
+	if (strategyTypeMatch?.[1]) {
+		const normalized = strategyTypeMatch[1].toLowerCase();
+		if (normalized === "spot" || normalized === "现货") {
+			parsed.strategyType = "Spot";
+		} else if (normalized === "curve" || normalized === "曲线") {
+			parsed.strategyType = "Curve";
+		} else {
+			parsed.strategyType = "BidAsk";
+		}
+	}
+	if (
+		/\bsingleSidedX\s*[=:]\s*true\b/i.test(intentText) ||
+		/\bsingle[-\s]*sided\s*x\b|单边\s*x|x\s*单边/i.test(intentText)
+	) {
+		parsed.singleSidedX = true;
+	}
+	if (
+		/\bshouldClaimAndClose\s*[=:]\s*true\b/i.test(intentText) ||
+		/\bclaim\b.*\bclose\b|领取.*关闭|收取.*关闭/i.test(intentText)
+	) {
+		parsed.shouldClaimAndClose = true;
+	}
+	if (
+		/\bskipUnwrapSol\s*[=:]\s*true\b/i.test(intentText) ||
+		/\bskip\s*unwrap(?:\s*sol)?\b|不解包\s*sol/i.test(intentText)
+	) {
+		parsed.skipUnwrapSol = true;
+	}
+	const slippageBpsMatch =
+		intentText.match(/\bslippageBps\s*[=:]?\s*([0-9]+)\b/i) ??
+		intentText.match(/\b([0-9]+)\s*bps\b/i);
+	if (slippageBpsMatch?.[1]) {
+		const slippageBps = Number.parseInt(slippageBpsMatch[1], 10);
+		if (Number.isFinite(slippageBps)) {
+			parsed.slippageBps = slippageBps;
+		}
+	}
+	if (parsed.slippageBps === undefined) {
+		const slippagePercentMatch =
+			intentText.match(/\bslippage\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\s*%/i) ??
+			intentText.match(/滑点\s*([0-9]+(?:\.[0-9]+)?)\s*%/i);
+		if (slippagePercentMatch?.[1]) {
+			const slippagePercent = parsePositiveNumber(slippagePercentMatch[1]);
+			if (slippagePercent != null) {
+				parsed.slippageBps = Math.round(slippagePercent * 100);
+			}
 		}
 	}
 	return parsed;
@@ -2249,6 +2639,30 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 			intentType: "solana.lp.orca.decrease",
 		};
 	}
+	if (lower.includes("solana.lp.orca.open")) {
+		return {
+			...parseOrcaLiquidityIntentText(trimmed),
+			intentType: "solana.lp.orca.open",
+		};
+	}
+	if (lower.includes("solana.lp.orca.close")) {
+		return {
+			...parseOrcaLiquidityIntentText(trimmed),
+			intentType: "solana.lp.orca.close",
+		};
+	}
+	if (lower.includes("solana.lp.meteora.add")) {
+		return {
+			...parseMeteoraLiquidityIntentText(trimmed),
+			intentType: "solana.lp.meteora.add",
+		};
+	}
+	if (lower.includes("solana.lp.meteora.remove")) {
+		return {
+			...parseMeteoraLiquidityIntentText(trimmed),
+			intentType: "solana.lp.meteora.remove",
+		};
+	}
 	if (lower.includes("solana.stake.createanddelegate")) {
 		return {
 			...parseStakeIntentText(trimmed),
@@ -2353,12 +2767,31 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	const orcaLiquidityFields = parseOrcaLiquidityIntentText(trimmed);
 	if (
 		orcaLiquidityFields.intentType ||
+		orcaLiquidityFields.poolAddress ||
 		orcaLiquidityFields.positionMint ||
 		orcaLiquidityFields.liquidityAmountRaw ||
 		orcaLiquidityFields.tokenAAmountRaw ||
-		orcaLiquidityFields.tokenBAmountRaw
+		orcaLiquidityFields.tokenBAmountRaw ||
+		orcaLiquidityFields.lowerPrice !== undefined ||
+		orcaLiquidityFields.upperPrice !== undefined ||
+		orcaLiquidityFields.fullRange === true
 	) {
 		return orcaLiquidityFields;
+	}
+	const meteoraLiquidityFields = parseMeteoraLiquidityIntentText(trimmed);
+	if (
+		meteoraLiquidityFields.intentType ||
+		meteoraLiquidityFields.poolAddress ||
+		meteoraLiquidityFields.positionAddress ||
+		meteoraLiquidityFields.totalXAmountRaw ||
+		meteoraLiquidityFields.totalYAmountRaw ||
+		meteoraLiquidityFields.minBinId !== undefined ||
+		meteoraLiquidityFields.maxBinId !== undefined ||
+		meteoraLiquidityFields.fromBinId !== undefined ||
+		meteoraLiquidityFields.toBinId !== undefined ||
+		meteoraLiquidityFields.bps !== undefined
+	) {
+		return meteoraLiquidityFields;
 	}
 	const swapFields = parseSwapIntentText(trimmed);
 	if (
@@ -2424,8 +2857,12 @@ function resolveIntentType(
 		params.intentType === "solana.stake.authorizeWithdrawer" ||
 		params.intentType === "solana.stake.deactivate" ||
 		params.intentType === "solana.stake.withdraw" ||
+		params.intentType === "solana.lp.orca.open" ||
+		params.intentType === "solana.lp.orca.close" ||
 		params.intentType === "solana.lp.orca.increase" ||
 		params.intentType === "solana.lp.orca.decrease" ||
+		params.intentType === "solana.lp.meteora.add" ||
+		params.intentType === "solana.lp.meteora.remove" ||
 		params.intentType === "solana.swap.jupiter" ||
 		params.intentType === "solana.swap.raydium" ||
 		params.intentType === "solana.swap.orca" ||
@@ -2440,17 +2877,58 @@ function resolveIntentType(
 	) {
 		return params.intentType;
 	}
+	const intentText =
+		typeof params.intentText === "string" ? params.intentText : "";
 	const hasOrcaLiquidityAmountField =
 		typeof params.liquidityAmountRaw === "string" ||
 		typeof params.tokenAAmountRaw === "string" ||
 		typeof params.tokenBAmountRaw === "string";
+	if (
+		typeof params.poolAddress === "string" &&
+		typeof params.positionAddress === "string"
+	) {
+		if (
+			typeof params.bps === "number" ||
+			typeof params.fromBinId === "number" ||
+			typeof params.toBinId === "number" ||
+			METEORA_REMOVE_LIQUIDITY_KEYWORD_REGEX.test(intentText)
+		) {
+			return "solana.lp.meteora.remove";
+		}
+		if (
+			typeof params.totalXAmountRaw === "string" ||
+			typeof params.totalYAmountRaw === "string" ||
+			METEORA_ADD_LIQUIDITY_KEYWORD_REGEX.test(intentText)
+		) {
+			return "solana.lp.meteora.add";
+		}
+	}
+	if (typeof params.poolAddress === "string" && hasOrcaLiquidityAmountField) {
+		return "solana.lp.orca.open";
+	}
 	if (typeof params.positionMint === "string" && hasOrcaLiquidityAmountField) {
-		const intentText =
-			typeof params.intentText === "string" ? params.intentText : "";
 		if (ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX.test(intentText)) {
 			return "solana.lp.orca.decrease";
 		}
 		return "solana.lp.orca.increase";
+	}
+	if (
+		typeof params.positionMint === "string" &&
+		ORCA_CLOSE_POSITION_KEYWORD_REGEX.test(intentText)
+	) {
+		return "solana.lp.orca.close";
+	}
+	if (ORCA_CLOSE_POSITION_KEYWORD_REGEX.test(intentText)) {
+		return "solana.lp.orca.close";
+	}
+	if (ORCA_OPEN_POSITION_KEYWORD_REGEX.test(intentText)) {
+		return "solana.lp.orca.open";
+	}
+	if (METEORA_REMOVE_LIQUIDITY_KEYWORD_REGEX.test(intentText)) {
+		return "solana.lp.meteora.remove";
+	}
+	if (METEORA_ADD_LIQUIDITY_KEYWORD_REGEX.test(intentText)) {
+		return "solana.lp.meteora.add";
 	}
 	if (
 		typeof params.intentText === "string" &&
@@ -2863,6 +3341,83 @@ function parseOrcaLiquidityActionInput(params: Record<string, unknown>): {
 	};
 }
 
+function parsePositiveNumberField(value: unknown, field: string): number {
+	if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+		throw new Error(`${field} must be a positive number`);
+	}
+	return value;
+}
+
+function parseOptionalIntegerField(
+	value: unknown,
+	field: string,
+): number | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		throw new Error(`${field} must be an integer`);
+	}
+	const normalized = Math.trunc(value);
+	if (normalized !== value) {
+		throw new Error(`${field} must be an integer`);
+	}
+	return normalized;
+}
+
+function parseNonNegativeRawAmount(value: unknown, field: string): string {
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		if (!/^[0-9]+$/.test(trimmed)) {
+			throw new Error(`${field} must be a non-negative integer`);
+		}
+		return BigInt(trimmed).toString();
+	}
+	if (typeof value === "number" && Number.isFinite(value)) {
+		if (!Number.isInteger(value) || value < 0) {
+			throw new Error(`${field} must be a non-negative integer`);
+		}
+		return value.toString();
+	}
+	throw new Error(`${field} must be a non-negative integer`);
+}
+
+function parseOptionalMeteoraBps(value: unknown): number | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		throw new Error("bps must be an integer between 1 and 10000");
+	}
+	const normalized = Math.floor(value);
+	if (normalized < 1 || normalized > 10_000) {
+		throw new Error("bps must be an integer between 1 and 10000");
+	}
+	return normalized;
+}
+
+function parseOptionalMeteoraStrategyType(
+	value: unknown,
+): "Spot" | "Curve" | "BidAsk" | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (typeof value !== "string") {
+		throw new Error("strategyType must be one of Spot, Curve, BidAsk");
+	}
+	const normalized = value.trim().toLowerCase();
+	if (normalized === "spot") return "Spot";
+	if (normalized === "curve") return "Curve";
+	if (
+		normalized === "bidask" ||
+		normalized === "bid-ask" ||
+		normalized === "bid_ask"
+	) {
+		return "BidAsk";
+	}
+	throw new Error("strategyType must be one of Spot, Curve, BidAsk");
+}
+
 async function normalizeIntent(
 	params: Record<string, unknown>,
 	signerPublicKey: string,
@@ -3022,6 +3577,77 @@ async function normalizeIntent(
 			limitMarkets,
 		};
 	}
+	if (intentType === "solana.lp.orca.open") {
+		const ownerAddress = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.ownerAddress === "string"
+					? normalizedParams.ownerAddress
+					: signerPublicKey,
+			),
+		).toBase58();
+		if (ownerAddress !== signerPublicKey) {
+			throw new Error(
+				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
+			);
+		}
+		const poolAddress = new PublicKey(
+			normalizeAtPath(
+				ensureString(normalizedParams.poolAddress, "poolAddress"),
+			),
+		).toBase58();
+		const liquidityAction = parseOrcaLiquidityActionInput(normalizedParams);
+		const fullRange = normalizedParams.fullRange === true;
+		let lowerPrice: number | undefined;
+		let upperPrice: number | undefined;
+		if (!fullRange) {
+			lowerPrice = parsePositiveNumberField(
+				normalizedParams.lowerPrice,
+				"lowerPrice",
+			);
+			upperPrice = parsePositiveNumberField(
+				normalizedParams.upperPrice,
+				"upperPrice",
+			);
+			if (upperPrice <= lowerPrice) {
+				throw new Error("upperPrice must be greater than lowerPrice");
+			}
+		}
+		return {
+			type: intentType,
+			ownerAddress,
+			poolAddress,
+			...liquidityAction,
+			fullRange,
+			...(lowerPrice !== undefined ? { lowerPrice } : {}),
+			...(upperPrice !== undefined ? { upperPrice } : {}),
+			slippageBps: parseOptionalOrcaSlippageBps(normalizedParams.slippageBps),
+		};
+	}
+	if (intentType === "solana.lp.orca.close") {
+		const ownerAddress = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.ownerAddress === "string"
+					? normalizedParams.ownerAddress
+					: signerPublicKey,
+			),
+		).toBase58();
+		if (ownerAddress !== signerPublicKey) {
+			throw new Error(
+				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
+			);
+		}
+		const positionMint = new PublicKey(
+			normalizeAtPath(
+				ensureString(normalizedParams.positionMint, "positionMint"),
+			),
+		).toBase58();
+		return {
+			type: intentType,
+			ownerAddress,
+			positionMint,
+			slippageBps: parseOptionalOrcaSlippageBps(normalizedParams.slippageBps),
+		};
+	}
 	if (
 		intentType === "solana.lp.orca.increase" ||
 		intentType === "solana.lp.orca.decrease"
@@ -3050,6 +3676,125 @@ async function normalizeIntent(
 			positionMint,
 			...liquidityAction,
 			slippageBps: parseOptionalOrcaSlippageBps(normalizedParams.slippageBps),
+		};
+	}
+	if (intentType === "solana.lp.meteora.add") {
+		const ownerAddress = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.ownerAddress === "string"
+					? normalizedParams.ownerAddress
+					: signerPublicKey,
+			),
+		).toBase58();
+		if (ownerAddress !== signerPublicKey) {
+			throw new Error(
+				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
+			);
+		}
+		const poolAddress = new PublicKey(
+			normalizeAtPath(
+				ensureString(normalizedParams.poolAddress, "poolAddress"),
+			),
+		).toBase58();
+		const positionAddress = new PublicKey(
+			normalizeAtPath(
+				ensureString(normalizedParams.positionAddress, "positionAddress"),
+			),
+		).toBase58();
+		const totalXAmountRaw = parseNonNegativeRawAmount(
+			normalizedParams.totalXAmountRaw,
+			"totalXAmountRaw",
+		);
+		const totalYAmountRaw = parseNonNegativeRawAmount(
+			normalizedParams.totalYAmountRaw,
+			"totalYAmountRaw",
+		);
+		if (totalXAmountRaw === "0" && totalYAmountRaw === "0") {
+			throw new Error(
+				"At least one of totalXAmountRaw/totalYAmountRaw must be > 0",
+			);
+		}
+		const minBinId = parseOptionalIntegerField(
+			normalizedParams.minBinId,
+			"minBinId",
+		);
+		const maxBinId = parseOptionalIntegerField(
+			normalizedParams.maxBinId,
+			"maxBinId",
+		);
+		if (
+			minBinId !== undefined &&
+			maxBinId !== undefined &&
+			minBinId > maxBinId
+		) {
+			throw new Error("minBinId must be <= maxBinId");
+		}
+		const strategyType = parseOptionalMeteoraStrategyType(
+			normalizedParams.strategyType,
+		);
+		return {
+			type: intentType,
+			ownerAddress,
+			poolAddress,
+			positionAddress,
+			totalXAmountRaw,
+			totalYAmountRaw,
+			...(minBinId !== undefined ? { minBinId } : {}),
+			...(maxBinId !== undefined ? { maxBinId } : {}),
+			...(strategyType ? { strategyType } : {}),
+			singleSidedX: normalizedParams.singleSidedX === true,
+			slippageBps: parseOptionalOrcaSlippageBps(normalizedParams.slippageBps),
+		};
+	}
+	if (intentType === "solana.lp.meteora.remove") {
+		const ownerAddress = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.ownerAddress === "string"
+					? normalizedParams.ownerAddress
+					: signerPublicKey,
+			),
+		).toBase58();
+		if (ownerAddress !== signerPublicKey) {
+			throw new Error(
+				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
+			);
+		}
+		const poolAddress = new PublicKey(
+			normalizeAtPath(
+				ensureString(normalizedParams.poolAddress, "poolAddress"),
+			),
+		).toBase58();
+		const positionAddress = new PublicKey(
+			normalizeAtPath(
+				ensureString(normalizedParams.positionAddress, "positionAddress"),
+			),
+		).toBase58();
+		const fromBinId = parseOptionalIntegerField(
+			normalizedParams.fromBinId,
+			"fromBinId",
+		);
+		const toBinId = parseOptionalIntegerField(
+			normalizedParams.toBinId,
+			"toBinId",
+		);
+		if (
+			fromBinId !== undefined &&
+			toBinId !== undefined &&
+			fromBinId > toBinId
+		) {
+			throw new Error("fromBinId must be <= toBinId");
+		}
+		const bps = parseOptionalMeteoraBps(normalizedParams.bps);
+		return {
+			type: intentType,
+			ownerAddress,
+			poolAddress,
+			positionAddress,
+			...(fromBinId !== undefined ? { fromBinId } : {}),
+			...(toBinId !== undefined ? { toBinId } : {}),
+			...(bps !== undefined ? { bps } : {}),
+			shouldClaimAndClose: normalizedParams.shouldClaimAndClose === true,
+			skipUnwrapSol: normalizedParams.skipUnwrapSol === true,
 		};
 	}
 	if (intentType === "solana.lend.kamino.depositAndBorrow") {
@@ -4736,6 +5481,225 @@ async function prepareOrcaDecreaseLiquiditySimulation(
 	};
 }
 
+async function prepareOrcaOpenPositionSimulation(
+	network: string,
+	signer: Keypair,
+	intent: OrcaOpenPositionIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.ownerAddress !== signerAddress) {
+		throw new Error(
+			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const build = await buildOrcaOpenPositionInstructions({
+		ownerAddress: intent.ownerAddress,
+		poolAddress: intent.poolAddress,
+		liquidityAmountRaw: intent.liquidityAmountRaw,
+		tokenAAmountRaw: intent.tokenAAmountRaw,
+		tokenBAmountRaw: intent.tokenBAmountRaw,
+		lowerPrice: intent.lowerPrice,
+		upperPrice: intent.upperPrice,
+		fullRange: intent.fullRange,
+		slippageBps: intent.slippageBps,
+		network,
+	});
+	const tx = new Transaction().add(...build.instructions);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			latestBlockhash,
+			ownerAddress: build.ownerAddress,
+			poolAddress: build.poolAddress,
+			positionMint: build.positionMint,
+			quoteParamKind: build.quoteParamKind,
+			quoteParamAmountRaw: build.quoteParamAmountRaw,
+			fullRange: build.fullRange,
+			lowerPrice: build.lowerPrice,
+			upperPrice: build.upperPrice,
+			initializationCostLamports: build.initializationCostLamports,
+			slippageBps: build.slippageBps,
+			instructionCount: build.instructionCount,
+			quote: build.quote,
+		},
+	};
+}
+
+async function prepareOrcaClosePositionSimulation(
+	network: string,
+	signer: Keypair,
+	intent: OrcaClosePositionIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.ownerAddress !== signerAddress) {
+		throw new Error(
+			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const build = await buildOrcaClosePositionInstructions({
+		ownerAddress: intent.ownerAddress,
+		positionMint: intent.positionMint,
+		slippageBps: intent.slippageBps,
+		network,
+	});
+	const tx = new Transaction().add(...build.instructions);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			latestBlockhash,
+			ownerAddress: build.ownerAddress,
+			positionMint: build.positionMint,
+			slippageBps: build.slippageBps,
+			instructionCount: build.instructionCount,
+			quote: build.quote,
+			feesQuote: build.feesQuote,
+			rewardsQuote: build.rewardsQuote,
+		},
+	};
+}
+
+async function prepareMeteoraAddLiquiditySimulation(
+	network: string,
+	signer: Keypair,
+	intent: MeteoraAddLiquidityIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.ownerAddress !== signerAddress) {
+		throw new Error(
+			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const build = await buildMeteoraAddLiquidityInstructions({
+		ownerAddress: intent.ownerAddress,
+		poolAddress: intent.poolAddress,
+		positionAddress: intent.positionAddress,
+		totalXAmountRaw: intent.totalXAmountRaw,
+		totalYAmountRaw: intent.totalYAmountRaw,
+		minBinId: intent.minBinId,
+		maxBinId: intent.maxBinId,
+		strategyType: intent.strategyType,
+		singleSidedX: intent.singleSidedX,
+		slippageBps: intent.slippageBps,
+		network,
+	});
+	const tx = new Transaction().add(...build.instructions);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			latestBlockhash,
+			ownerAddress: build.ownerAddress,
+			poolAddress: build.poolAddress,
+			positionAddress: build.positionAddress,
+			totalXAmountRaw: build.totalXAmountRaw,
+			totalYAmountRaw: build.totalYAmountRaw,
+			minBinId: build.minBinId,
+			maxBinId: build.maxBinId,
+			strategyType: build.strategyType,
+			singleSidedX: build.singleSidedX,
+			slippageBps: build.slippageBps,
+			activeBinId: build.activeBinId,
+			instructionCount: build.instructionCount,
+			sourceTransactionCount: build.transactionCount,
+		},
+	};
+}
+
+async function prepareMeteoraRemoveLiquiditySimulation(
+	network: string,
+	signer: Keypair,
+	intent: MeteoraRemoveLiquidityIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.ownerAddress !== signerAddress) {
+		throw new Error(
+			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const build = await buildMeteoraRemoveLiquidityInstructions({
+		ownerAddress: intent.ownerAddress,
+		poolAddress: intent.poolAddress,
+		positionAddress: intent.positionAddress,
+		fromBinId: intent.fromBinId,
+		toBinId: intent.toBinId,
+		bps: intent.bps,
+		shouldClaimAndClose: intent.shouldClaimAndClose,
+		skipUnwrapSol: intent.skipUnwrapSol,
+		network,
+	});
+	const tx = new Transaction().add(...build.instructions);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			latestBlockhash,
+			ownerAddress: build.ownerAddress,
+			poolAddress: build.poolAddress,
+			positionAddress: build.positionAddress,
+			fromBinId: build.fromBinId,
+			toBinId: build.toBinId,
+			bps: build.bps,
+			shouldClaimAndClose: build.shouldClaimAndClose,
+			skipUnwrapSol: build.skipUnwrapSol,
+			positionLowerBinId: build.positionLowerBinId,
+			positionUpperBinId: build.positionUpperBinId,
+			activeBinId: build.activeBinId,
+			instructionCount: build.instructionCount,
+			sourceTransactionCount: build.transactionCount,
+		},
+	};
+}
+
 async function prepareStakeCreateAndDelegateSimulation(
 	network: string,
 	signer: Keypair,
@@ -5292,11 +6256,23 @@ async function prepareSimulation(
 	if (intent.type === "solana.lend.kamino.withdraw") {
 		return prepareKaminoWithdrawSimulation(network, signer, intent);
 	}
+	if (intent.type === "solana.lp.orca.open") {
+		return prepareOrcaOpenPositionSimulation(network, signer, intent);
+	}
+	if (intent.type === "solana.lp.orca.close") {
+		return prepareOrcaClosePositionSimulation(network, signer, intent);
+	}
 	if (intent.type === "solana.lp.orca.increase") {
 		return prepareOrcaIncreaseLiquiditySimulation(network, signer, intent);
 	}
 	if (intent.type === "solana.lp.orca.decrease") {
 		return prepareOrcaDecreaseLiquiditySimulation(network, signer, intent);
+	}
+	if (intent.type === "solana.lp.meteora.add") {
+		return prepareMeteoraAddLiquiditySimulation(network, signer, intent);
+	}
+	if (intent.type === "solana.lp.meteora.remove") {
+		return prepareMeteoraRemoveLiquiditySimulation(network, signer, intent);
 	}
 	if (intent.type === "solana.stake.createAndDelegate") {
 		return prepareStakeCreateAndDelegateSimulation(network, signer, intent);
@@ -5404,8 +6380,12 @@ export function createSolanaWorkflowTools() {
 						Type.Literal("solana.stake.authorizeWithdrawer"),
 						Type.Literal("solana.stake.deactivate"),
 						Type.Literal("solana.stake.withdraw"),
+						Type.Literal("solana.lp.orca.open"),
+						Type.Literal("solana.lp.orca.close"),
 						Type.Literal("solana.lp.orca.increase"),
 						Type.Literal("solana.lp.orca.decrease"),
+						Type.Literal("solana.lp.meteora.add"),
+						Type.Literal("solana.lp.meteora.remove"),
 						Type.Literal("solana.swap.jupiter"),
 						Type.Literal("solana.swap.orca"),
 						Type.Literal("solana.swap.meteora"),
@@ -5524,13 +6504,25 @@ export function createSolanaWorkflowTools() {
 				ownerAddress: Type.Optional(
 					Type.String({
 						description:
-							"Optional owner assertion for Kamino lending intents. Must match signer address.",
+							"Optional owner assertion for writable intents (Kamino/Orca/Meteora). Must match signer address.",
 					}),
 				),
 				positionMint: Type.Optional(
 					Type.String({
 						description:
-							"Orca position mint for intentType=solana.lp.orca.increase / solana.lp.orca.decrease",
+							"Orca position mint for intentType=solana.lp.orca.close / solana.lp.orca.increase / solana.lp.orca.decrease",
+					}),
+				),
+				poolAddress: Type.Optional(
+					Type.String({
+						description:
+							"Pool address for intentType=solana.lp.orca.open / solana.lp.meteora.add / solana.lp.meteora.remove",
+					}),
+				),
+				positionAddress: Type.Optional(
+					Type.String({
+						description:
+							"Meteora position address for intentType=solana.lp.meteora.add / solana.lp.meteora.remove",
 					}),
 				),
 				reserveMint: Type.Optional(
@@ -5590,19 +6582,113 @@ export function createSolanaWorkflowTools() {
 				liquidityAmountRaw: Type.Optional(
 					Type.String({
 						description:
-							"Liquidity amount (raw integer) for intentType=solana.lp.orca.increase / solana.lp.orca.decrease. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+							"Liquidity amount (raw integer) for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
 					}),
 				),
 				tokenAAmountRaw: Type.Optional(
 					Type.String({
 						description:
-							"Token A amount (raw integer) for intentType=solana.lp.orca.increase / solana.lp.orca.decrease. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+							"Token A amount (raw integer) for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
 					}),
 				),
 				tokenBAmountRaw: Type.Optional(
 					Type.String({
 						description:
-							"Token B amount (raw integer) for intentType=solana.lp.orca.increase / solana.lp.orca.decrease. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+							"Token B amount (raw integer) for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				lowerPrice: Type.Optional(
+					Type.Number({
+						exclusiveMinimum: 0,
+						description:
+							"Lower price bound for intentType=solana.lp.orca.open when fullRange=false",
+					}),
+				),
+				upperPrice: Type.Optional(
+					Type.Number({
+						exclusiveMinimum: 0,
+						description:
+							"Upper price bound for intentType=solana.lp.orca.open when fullRange=false",
+					}),
+				),
+				fullRange: Type.Optional(
+					Type.Boolean({
+						description:
+							"Use full-range Orca position when intentType=solana.lp.orca.open",
+					}),
+				),
+				totalXAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token X amount (raw integer) for intentType=solana.lp.meteora.add",
+					}),
+				),
+				totalYAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token Y amount (raw integer) for intentType=solana.lp.meteora.add",
+					}),
+				),
+				minBinId: Type.Optional(
+					Type.Integer({
+						description:
+							"Optional minimum bin id for intentType=solana.lp.meteora.add",
+					}),
+				),
+				maxBinId: Type.Optional(
+					Type.Integer({
+						description:
+							"Optional maximum bin id for intentType=solana.lp.meteora.add",
+					}),
+				),
+				fromBinId: Type.Optional(
+					Type.Integer({
+						description:
+							"Optional start bin id for intentType=solana.lp.meteora.remove",
+					}),
+				),
+				toBinId: Type.Optional(
+					Type.Integer({
+						description:
+							"Optional end bin id for intentType=solana.lp.meteora.remove",
+					}),
+				),
+				bps: Type.Optional(
+					Type.Integer({
+						minimum: 1,
+						maximum: 10_000,
+						description:
+							"Removal ratio in bps for intentType=solana.lp.meteora.remove (default 10000)",
+					}),
+				),
+				strategyType: Type.Optional(
+					Type.Union(
+						[
+							Type.Literal("Spot"),
+							Type.Literal("Curve"),
+							Type.Literal("BidAsk"),
+						],
+						{
+							description: "Strategy type for intentType=solana.lp.meteora.add",
+						},
+					),
+				),
+				singleSidedX: Type.Optional(
+					Type.Boolean({
+						description:
+							"Optional one-sided-X hint for intentType=solana.lp.meteora.add",
+					}),
+				),
+				shouldClaimAndClose: Type.Optional(
+					Type.Boolean({
+						description:
+							"Claim fees/rewards and close if empty for intentType=solana.lp.meteora.remove",
+					}),
+				),
+				skipUnwrapSol: Type.Optional(
+					Type.Boolean({
+						description:
+							"Skip SOL unwrap helper instructions for intentType=solana.lp.meteora.remove",
 					}),
 				),
 				depositAmountRaw: Type.Optional(
@@ -5734,7 +6820,7 @@ export function createSolanaWorkflowTools() {
 						minimum: 0,
 						maximum: 10_000,
 						description:
-							"Slippage in bps for swap intents and Orca liquidity intents",
+							"Slippage in bps for swap intents, Orca LP intents, and Meteora add-liquidity intent",
 					}),
 				),
 				swapMode: jupiterSwapModeSchema(),

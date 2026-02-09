@@ -31,8 +31,12 @@ import {
 	buildKaminoRepayAndWithdrawInstructions,
 	buildKaminoRepayInstructions,
 	buildKaminoWithdrawInstructions,
+	buildMeteoraAddLiquidityInstructions,
+	buildMeteoraRemoveLiquidityInstructions,
+	buildOrcaClosePositionInstructions,
 	buildOrcaDecreaseLiquidityInstructions,
 	buildOrcaIncreaseLiquidityInstructions,
+	buildOrcaOpenPositionInstructions,
 	buildRaydiumSwapTransactions,
 	commitmentSchema,
 	getConnection,
@@ -1925,6 +1929,923 @@ export function createSolanaExecuteTools() {
 						signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
 						positionMintExplorer: getExplorerAddressUrl(
 							build.positionMint,
+							network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}orcaOpenPosition`,
+			label: "Solana Orca Open Position",
+			description:
+				"Execute an Orca Whirlpool open-position action with local/private key signer",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				ownerAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional signer pubkey assertion. If set, must match derived key from fromSecretKey.",
+					}),
+				),
+				poolAddress: Type.String({
+					description: "Orca Whirlpool pool address",
+				}),
+				liquidityAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Liquidity amount as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				tokenAAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token A amount as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				tokenBAmountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token B amount as raw integer. Provide exactly one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw.",
+					}),
+				),
+				lowerPrice: Type.Optional(
+					Type.Number({
+						exclusiveMinimum: 0,
+						description:
+							"Lower price bound for concentrated position. Required when fullRange=false.",
+					}),
+				),
+				upperPrice: Type.Optional(
+					Type.Number({
+						exclusiveMinimum: 0,
+						description:
+							"Upper price bound for concentrated position. Required when fullRange=false.",
+					}),
+				),
+				fullRange: Type.Optional(
+					Type.Boolean({
+						description:
+							"Use full-range position when true. When false, lowerPrice/upperPrice are required.",
+					}),
+				),
+				slippageBps: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 10_000,
+						description: "Slippage tolerance in basis points (default 100)",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Use legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, sign and simulate only (no broadcast)",
+					}),
+				),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet Orca open-position requires confirmMainnet=true",
+					);
+				}
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const signerPublicKey = signer.publicKey.toBase58();
+				if (params.ownerAddress) {
+					const asserted = new PublicKey(
+						normalizeAtPath(params.ownerAddress),
+					).toBase58();
+					if (asserted !== signerPublicKey) {
+						throw new Error(
+							`ownerAddress mismatch: expected ${signerPublicKey}, got ${asserted}`,
+						);
+					}
+				}
+				const poolAddress = new PublicKey(
+					normalizeAtPath(params.poolAddress),
+				).toBase58();
+				const build = await buildOrcaOpenPositionInstructions({
+					ownerAddress: signerPublicKey,
+					poolAddress,
+					liquidityAmountRaw: params.liquidityAmountRaw,
+					tokenAAmountRaw: params.tokenAAmountRaw,
+					tokenBAmountRaw: params.tokenBAmountRaw,
+					lowerPrice: params.lowerPrice,
+					upperPrice: params.upperPrice,
+					fullRange: params.fullRange,
+					slippageBps: params.slippageBps,
+					network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? new Transaction().add(...build.instructions)
+					: new VersionedTransaction(
+							new TransactionMessage({
+								payerKey: signer.publicKey,
+								recentBlockhash: latestBlockhash.blockhash,
+								instructions: build.instructions,
+							}).compileToV0Message(),
+						);
+
+				let version: "legacy" | "v0" = "legacy";
+				if (tx instanceof VersionedTransaction) {
+					tx.sign([signer]);
+					version = "v0";
+				} else {
+					tx.feePayer = signer.publicKey;
+					tx.recentBlockhash = latestBlockhash.blockhash;
+					tx.partialSign(signer);
+				}
+
+				const commitment = parseFinality(params.commitment);
+				if (params.simulate === true) {
+					const simulation =
+						tx instanceof VersionedTransaction
+							? await connection.simulateTransaction(tx, {
+									sigVerify: true,
+									replaceRecentBlockhash: false,
+									commitment,
+								})
+							: await connection.simulateTransaction(tx);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Orca open-position simulation ${simulation.value.err ? "failed" : "succeeded"}`,
+							},
+						],
+						details: {
+							simulated: true,
+							version,
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+							network,
+							signer: signerPublicKey,
+							ownerAddress: build.ownerAddress,
+							poolAddress: build.poolAddress,
+							positionMint: build.positionMint,
+							quoteParamKind: build.quoteParamKind,
+							quoteParamAmountRaw: build.quoteParamAmountRaw,
+							fullRange: build.fullRange,
+							lowerPrice: build.lowerPrice,
+							upperPrice: build.upperPrice,
+							initializationCostLamports: build.initializationCostLamports,
+							slippageBps: build.slippageBps,
+							instructionCount: build.instructionCount,
+							quote: build.quote,
+							signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+							poolExplorer: getExplorerAddressUrl(build.poolAddress, network),
+							positionMintExplorer: getExplorerAddressUrl(
+								build.positionMint,
+								network,
+							),
+						},
+					};
+				}
+
+				const signature = await connection.sendRawTransaction(tx.serialize(), {
+					skipPreflight: params.skipPreflight === true,
+					maxRetries: params.maxRetries,
+				});
+				let confirmationErr: unknown = null;
+				if (params.confirm !== false) {
+					const confirmation = await connection.confirmTransaction(
+						signature,
+						commitment,
+					);
+					confirmationErr = confirmation.value.err;
+				}
+				if (confirmationErr) {
+					throw new Error(
+						`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+					);
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Orca open-position sent: ${signature}`,
+						},
+					],
+					details: {
+						simulated: false,
+						signature,
+						confirmed: params.confirm !== false,
+						version,
+						network,
+						signer: signerPublicKey,
+						ownerAddress: build.ownerAddress,
+						poolAddress: build.poolAddress,
+						positionMint: build.positionMint,
+						quoteParamKind: build.quoteParamKind,
+						quoteParamAmountRaw: build.quoteParamAmountRaw,
+						fullRange: build.fullRange,
+						lowerPrice: build.lowerPrice,
+						upperPrice: build.upperPrice,
+						initializationCostLamports: build.initializationCostLamports,
+						slippageBps: build.slippageBps,
+						instructionCount: build.instructionCount,
+						quote: build.quote,
+						explorer: getExplorerTransactionUrl(signature, network),
+						signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+						poolExplorer: getExplorerAddressUrl(build.poolAddress, network),
+						positionMintExplorer: getExplorerAddressUrl(
+							build.positionMint,
+							network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}orcaClosePosition`,
+			label: "Solana Orca Close Position",
+			description:
+				"Execute an Orca Whirlpool close-position action with local/private key signer",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				ownerAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional signer pubkey assertion. If set, must match derived key from fromSecretKey.",
+					}),
+				),
+				positionMint: Type.String({
+					description: "Orca position mint address",
+				}),
+				slippageBps: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 10_000,
+						description: "Slippage tolerance in basis points (default 100)",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Use legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, sign and simulate only (no broadcast)",
+					}),
+				),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet Orca close-position requires confirmMainnet=true",
+					);
+				}
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const signerPublicKey = signer.publicKey.toBase58();
+				if (params.ownerAddress) {
+					const asserted = new PublicKey(
+						normalizeAtPath(params.ownerAddress),
+					).toBase58();
+					if (asserted !== signerPublicKey) {
+						throw new Error(
+							`ownerAddress mismatch: expected ${signerPublicKey}, got ${asserted}`,
+						);
+					}
+				}
+				const positionMint = new PublicKey(
+					normalizeAtPath(params.positionMint),
+				).toBase58();
+				const build = await buildOrcaClosePositionInstructions({
+					ownerAddress: signerPublicKey,
+					positionMint,
+					slippageBps: params.slippageBps,
+					network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? new Transaction().add(...build.instructions)
+					: new VersionedTransaction(
+							new TransactionMessage({
+								payerKey: signer.publicKey,
+								recentBlockhash: latestBlockhash.blockhash,
+								instructions: build.instructions,
+							}).compileToV0Message(),
+						);
+
+				let version: "legacy" | "v0" = "legacy";
+				if (tx instanceof VersionedTransaction) {
+					tx.sign([signer]);
+					version = "v0";
+				} else {
+					tx.feePayer = signer.publicKey;
+					tx.recentBlockhash = latestBlockhash.blockhash;
+					tx.partialSign(signer);
+				}
+
+				const commitment = parseFinality(params.commitment);
+				if (params.simulate === true) {
+					const simulation =
+						tx instanceof VersionedTransaction
+							? await connection.simulateTransaction(tx, {
+									sigVerify: true,
+									replaceRecentBlockhash: false,
+									commitment,
+								})
+							: await connection.simulateTransaction(tx);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Orca close-position simulation ${simulation.value.err ? "failed" : "succeeded"}`,
+							},
+						],
+						details: {
+							simulated: true,
+							version,
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+							network,
+							signer: signerPublicKey,
+							ownerAddress: build.ownerAddress,
+							positionMint: build.positionMint,
+							slippageBps: build.slippageBps,
+							instructionCount: build.instructionCount,
+							quote: build.quote,
+							feesQuote: build.feesQuote,
+							rewardsQuote: build.rewardsQuote,
+							signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+							positionMintExplorer: getExplorerAddressUrl(
+								build.positionMint,
+								network,
+							),
+						},
+					};
+				}
+
+				const signature = await connection.sendRawTransaction(tx.serialize(), {
+					skipPreflight: params.skipPreflight === true,
+					maxRetries: params.maxRetries,
+				});
+				let confirmationErr: unknown = null;
+				if (params.confirm !== false) {
+					const confirmation = await connection.confirmTransaction(
+						signature,
+						commitment,
+					);
+					confirmationErr = confirmation.value.err;
+				}
+				if (confirmationErr) {
+					throw new Error(
+						`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+					);
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Orca close-position sent: ${signature}`,
+						},
+					],
+					details: {
+						simulated: false,
+						signature,
+						confirmed: params.confirm !== false,
+						version,
+						network,
+						signer: signerPublicKey,
+						ownerAddress: build.ownerAddress,
+						positionMint: build.positionMint,
+						slippageBps: build.slippageBps,
+						instructionCount: build.instructionCount,
+						quote: build.quote,
+						feesQuote: build.feesQuote,
+						rewardsQuote: build.rewardsQuote,
+						explorer: getExplorerTransactionUrl(signature, network),
+						signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+						positionMintExplorer: getExplorerAddressUrl(
+							build.positionMint,
+							network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}meteoraAddLiquidity`,
+			label: "Solana Meteora Add Liquidity",
+			description:
+				"Execute a Meteora DLMM add-liquidity action with local/private key signer",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				ownerAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional signer pubkey assertion. If set, must match derived key from fromSecretKey.",
+					}),
+				),
+				poolAddress: Type.String({
+					description: "Meteora DLMM pool address",
+				}),
+				positionAddress: Type.String({
+					description: "Meteora position address",
+				}),
+				totalXAmountRaw: Type.String({
+					description: "Token X amount in raw integer base units",
+				}),
+				totalYAmountRaw: Type.String({
+					description: "Token Y amount in raw integer base units",
+				}),
+				minBinId: Type.Optional(
+					Type.Integer({
+						description: "Optional lower bin id override for strategy range",
+					}),
+				),
+				maxBinId: Type.Optional(
+					Type.Integer({
+						description: "Optional upper bin id override for strategy range",
+					}),
+				),
+				strategyType: Type.Optional(
+					Type.Union([
+						Type.Literal("Spot"),
+						Type.Literal("Curve"),
+						Type.Literal("BidAsk"),
+					]),
+				),
+				singleSidedX: Type.Optional(Type.Boolean()),
+				slippageBps: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 10_000,
+						description: "Slippage tolerance in basis points (default 100)",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Use legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, sign and simulate only (no broadcast)",
+					}),
+				),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet Meteora add-liquidity requires confirmMainnet=true",
+					);
+				}
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const signerPublicKey = signer.publicKey.toBase58();
+				if (params.ownerAddress) {
+					const asserted = new PublicKey(
+						normalizeAtPath(params.ownerAddress),
+					).toBase58();
+					if (asserted !== signerPublicKey) {
+						throw new Error(
+							`ownerAddress mismatch: expected ${signerPublicKey}, got ${asserted}`,
+						);
+					}
+				}
+				const poolAddress = new PublicKey(
+					normalizeAtPath(params.poolAddress),
+				).toBase58();
+				const positionAddress = new PublicKey(
+					normalizeAtPath(params.positionAddress),
+				).toBase58();
+				const build = await buildMeteoraAddLiquidityInstructions({
+					ownerAddress: signerPublicKey,
+					poolAddress,
+					positionAddress,
+					totalXAmountRaw: params.totalXAmountRaw,
+					totalYAmountRaw: params.totalYAmountRaw,
+					minBinId: params.minBinId,
+					maxBinId: params.maxBinId,
+					strategyType: params.strategyType,
+					singleSidedX: params.singleSidedX,
+					slippageBps: params.slippageBps,
+					network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? new Transaction().add(...build.instructions)
+					: new VersionedTransaction(
+							new TransactionMessage({
+								payerKey: signer.publicKey,
+								recentBlockhash: latestBlockhash.blockhash,
+								instructions: build.instructions,
+							}).compileToV0Message(),
+						);
+
+				let version: "legacy" | "v0" = "legacy";
+				if (tx instanceof VersionedTransaction) {
+					tx.sign([signer]);
+					version = "v0";
+				} else {
+					tx.feePayer = signer.publicKey;
+					tx.recentBlockhash = latestBlockhash.blockhash;
+					tx.partialSign(signer);
+				}
+
+				const commitment = parseFinality(params.commitment);
+				if (params.simulate === true) {
+					const simulation =
+						tx instanceof VersionedTransaction
+							? await connection.simulateTransaction(tx, {
+									sigVerify: true,
+									replaceRecentBlockhash: false,
+									commitment,
+								})
+							: await connection.simulateTransaction(tx);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Meteora add-liquidity simulation ${simulation.value.err ? "failed" : "succeeded"}`,
+							},
+						],
+						details: {
+							simulated: true,
+							version,
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+							network,
+							signer: signerPublicKey,
+							ownerAddress: build.ownerAddress,
+							poolAddress: build.poolAddress,
+							positionAddress: build.positionAddress,
+							totalXAmountRaw: build.totalXAmountRaw,
+							totalYAmountRaw: build.totalYAmountRaw,
+							minBinId: build.minBinId,
+							maxBinId: build.maxBinId,
+							strategyType: build.strategyType,
+							singleSidedX: build.singleSidedX,
+							slippageBps: build.slippageBps,
+							activeBinId: build.activeBinId,
+							instructionCount: build.instructionCount,
+							sourceTransactionCount: build.transactionCount,
+							signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+							poolExplorer: getExplorerAddressUrl(build.poolAddress, network),
+							positionExplorer: getExplorerAddressUrl(
+								build.positionAddress,
+								network,
+							),
+						},
+					};
+				}
+
+				const signature = await connection.sendRawTransaction(tx.serialize(), {
+					skipPreflight: params.skipPreflight === true,
+					maxRetries: params.maxRetries,
+				});
+				let confirmationErr: unknown = null;
+				if (params.confirm !== false) {
+					const confirmation = await connection.confirmTransaction(
+						signature,
+						commitment,
+					);
+					confirmationErr = confirmation.value.err;
+				}
+				if (confirmationErr) {
+					throw new Error(
+						`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+					);
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Meteora add-liquidity sent: ${signature}`,
+						},
+					],
+					details: {
+						simulated: false,
+						signature,
+						confirmed: params.confirm !== false,
+						version,
+						network,
+						signer: signerPublicKey,
+						ownerAddress: build.ownerAddress,
+						poolAddress: build.poolAddress,
+						positionAddress: build.positionAddress,
+						totalXAmountRaw: build.totalXAmountRaw,
+						totalYAmountRaw: build.totalYAmountRaw,
+						minBinId: build.minBinId,
+						maxBinId: build.maxBinId,
+						strategyType: build.strategyType,
+						singleSidedX: build.singleSidedX,
+						slippageBps: build.slippageBps,
+						activeBinId: build.activeBinId,
+						instructionCount: build.instructionCount,
+						sourceTransactionCount: build.transactionCount,
+						explorer: getExplorerTransactionUrl(signature, network),
+						signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+						poolExplorer: getExplorerAddressUrl(build.poolAddress, network),
+						positionExplorer: getExplorerAddressUrl(
+							build.positionAddress,
+							network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}meteoraRemoveLiquidity`,
+			label: "Solana Meteora Remove Liquidity",
+			description:
+				"Execute a Meteora DLMM remove-liquidity action with local/private key signer",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				ownerAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional signer pubkey assertion. If set, must match derived key from fromSecretKey.",
+					}),
+				),
+				poolAddress: Type.String({
+					description: "Meteora DLMM pool address",
+				}),
+				positionAddress: Type.String({
+					description: "Meteora position address",
+				}),
+				fromBinId: Type.Optional(
+					Type.Integer({
+						description:
+							"Optional start bin id. Defaults to position lower bin.",
+					}),
+				),
+				toBinId: Type.Optional(
+					Type.Integer({
+						description: "Optional end bin id. Defaults to position upper bin.",
+					}),
+				),
+				bps: Type.Optional(
+					Type.Integer({
+						minimum: 1,
+						maximum: 10_000,
+						description: "Removal ratio in bps (default 10000 = full range)",
+					}),
+				),
+				shouldClaimAndClose: Type.Optional(Type.Boolean()),
+				skipUnwrapSol: Type.Optional(Type.Boolean()),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Use legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, sign and simulate only (no broadcast)",
+					}),
+				),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet Meteora remove-liquidity requires confirmMainnet=true",
+					);
+				}
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const signerPublicKey = signer.publicKey.toBase58();
+				if (params.ownerAddress) {
+					const asserted = new PublicKey(
+						normalizeAtPath(params.ownerAddress),
+					).toBase58();
+					if (asserted !== signerPublicKey) {
+						throw new Error(
+							`ownerAddress mismatch: expected ${signerPublicKey}, got ${asserted}`,
+						);
+					}
+				}
+				const poolAddress = new PublicKey(
+					normalizeAtPath(params.poolAddress),
+				).toBase58();
+				const positionAddress = new PublicKey(
+					normalizeAtPath(params.positionAddress),
+				).toBase58();
+				const build = await buildMeteoraRemoveLiquidityInstructions({
+					ownerAddress: signerPublicKey,
+					poolAddress,
+					positionAddress,
+					fromBinId: params.fromBinId,
+					toBinId: params.toBinId,
+					bps: params.bps,
+					shouldClaimAndClose: params.shouldClaimAndClose,
+					skipUnwrapSol: params.skipUnwrapSol,
+					network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? new Transaction().add(...build.instructions)
+					: new VersionedTransaction(
+							new TransactionMessage({
+								payerKey: signer.publicKey,
+								recentBlockhash: latestBlockhash.blockhash,
+								instructions: build.instructions,
+							}).compileToV0Message(),
+						);
+
+				let version: "legacy" | "v0" = "legacy";
+				if (tx instanceof VersionedTransaction) {
+					tx.sign([signer]);
+					version = "v0";
+				} else {
+					tx.feePayer = signer.publicKey;
+					tx.recentBlockhash = latestBlockhash.blockhash;
+					tx.partialSign(signer);
+				}
+
+				const commitment = parseFinality(params.commitment);
+				if (params.simulate === true) {
+					const simulation =
+						tx instanceof VersionedTransaction
+							? await connection.simulateTransaction(tx, {
+									sigVerify: true,
+									replaceRecentBlockhash: false,
+									commitment,
+								})
+							: await connection.simulateTransaction(tx);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Meteora remove-liquidity simulation ${simulation.value.err ? "failed" : "succeeded"}`,
+							},
+						],
+						details: {
+							simulated: true,
+							version,
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+							network,
+							signer: signerPublicKey,
+							ownerAddress: build.ownerAddress,
+							poolAddress: build.poolAddress,
+							positionAddress: build.positionAddress,
+							fromBinId: build.fromBinId,
+							toBinId: build.toBinId,
+							bps: build.bps,
+							shouldClaimAndClose: build.shouldClaimAndClose,
+							skipUnwrapSol: build.skipUnwrapSol,
+							positionLowerBinId: build.positionLowerBinId,
+							positionUpperBinId: build.positionUpperBinId,
+							activeBinId: build.activeBinId,
+							instructionCount: build.instructionCount,
+							sourceTransactionCount: build.transactionCount,
+							signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+							poolExplorer: getExplorerAddressUrl(build.poolAddress, network),
+							positionExplorer: getExplorerAddressUrl(
+								build.positionAddress,
+								network,
+							),
+						},
+					};
+				}
+
+				const signature = await connection.sendRawTransaction(tx.serialize(), {
+					skipPreflight: params.skipPreflight === true,
+					maxRetries: params.maxRetries,
+				});
+				let confirmationErr: unknown = null;
+				if (params.confirm !== false) {
+					const confirmation = await connection.confirmTransaction(
+						signature,
+						commitment,
+					);
+					confirmationErr = confirmation.value.err;
+				}
+				if (confirmationErr) {
+					throw new Error(
+						`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+					);
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Meteora remove-liquidity sent: ${signature}`,
+						},
+					],
+					details: {
+						simulated: false,
+						signature,
+						confirmed: params.confirm !== false,
+						version,
+						network,
+						signer: signerPublicKey,
+						ownerAddress: build.ownerAddress,
+						poolAddress: build.poolAddress,
+						positionAddress: build.positionAddress,
+						fromBinId: build.fromBinId,
+						toBinId: build.toBinId,
+						bps: build.bps,
+						shouldClaimAndClose: build.shouldClaimAndClose,
+						skipUnwrapSol: build.skipUnwrapSol,
+						positionLowerBinId: build.positionLowerBinId,
+						positionUpperBinId: build.positionUpperBinId,
+						activeBinId: build.activeBinId,
+						instructionCount: build.instructionCount,
+						sourceTransactionCount: build.transactionCount,
+						explorer: getExplorerTransactionUrl(signature, network),
+						signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+						poolExplorer: getExplorerAddressUrl(build.poolAddress, network),
+						positionExplorer: getExplorerAddressUrl(
+							build.positionAddress,
 							network,
 						),
 					},

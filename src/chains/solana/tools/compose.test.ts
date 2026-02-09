@@ -15,8 +15,12 @@ const runtimeMocks = vi.hoisted(() => ({
 	buildKaminoRepayAndWithdrawInstructions: vi.fn(),
 	buildKaminoRepayInstructions: vi.fn(),
 	buildKaminoWithdrawInstructions: vi.fn(),
+	buildMeteoraAddLiquidityInstructions: vi.fn(),
+	buildMeteoraRemoveLiquidityInstructions: vi.fn(),
+	buildOrcaClosePositionInstructions: vi.fn(),
 	buildOrcaDecreaseLiquidityInstructions: vi.fn(),
 	buildOrcaIncreaseLiquidityInstructions: vi.fn(),
+	buildOrcaOpenPositionInstructions: vi.fn(),
 	buildJupiterSwapInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
 	buildRaydiumSwapTransactions: vi.fn(),
@@ -62,10 +66,18 @@ vi.mock("../runtime.js", async () => {
 		buildKaminoRepayInstructions: runtimeMocks.buildKaminoRepayInstructions,
 		buildKaminoWithdrawInstructions:
 			runtimeMocks.buildKaminoWithdrawInstructions,
+		buildMeteoraAddLiquidityInstructions:
+			runtimeMocks.buildMeteoraAddLiquidityInstructions,
+		buildMeteoraRemoveLiquidityInstructions:
+			runtimeMocks.buildMeteoraRemoveLiquidityInstructions,
+		buildOrcaClosePositionInstructions:
+			runtimeMocks.buildOrcaClosePositionInstructions,
 		buildOrcaDecreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
 		buildOrcaIncreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaIncreaseLiquidityInstructions,
+		buildOrcaOpenPositionInstructions:
+			runtimeMocks.buildOrcaOpenPositionInstructions,
 		buildJupiterSwapInstructions: runtimeMocks.buildJupiterSwapInstructions,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
 		buildRaydiumSwapTransactions: runtimeMocks.buildRaydiumSwapTransactions,
@@ -1159,6 +1171,271 @@ describe("compose tools", () => {
 			positionMint,
 			quoteParamKind: "tokenA",
 			quoteParamAmountRaw: "42",
+		});
+	});
+
+	it("builds Orca open-position transaction", async () => {
+		const ownerAddress = Keypair.generate().publicKey.toBase58();
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 57,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 7000 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		runtimeMocks.buildOrcaOpenPositionInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress,
+			poolAddress,
+			positionMint,
+			quoteParamKind: "tokenA",
+			quoteParamAmountRaw: "12",
+			slippageBps: 90,
+			fullRange: false,
+			lowerPrice: 90,
+			upperPrice: 110,
+			initializationCostLamports: "12345",
+			instructionCount: 1,
+			quote: { tokenMaxA: "1", tokenMaxB: "2" },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([3]),
+				}),
+			],
+		});
+
+		const tool = getTool("solana_buildOrcaOpenPositionTransaction");
+		const result = await tool.execute("compose-orca-open", {
+			ownerAddress,
+			poolAddress,
+			tokenAAmountRaw: "12",
+			lowerPrice: 90,
+			upperPrice: 110,
+			network: "devnet",
+		});
+
+		expect(runtimeMocks.buildOrcaOpenPositionInstructions).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress,
+				poolAddress,
+				tokenAAmountRaw: "12",
+				lowerPrice: 90,
+				upperPrice: 110,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			version: "legacy",
+			ownerAddress,
+			poolAddress,
+			positionMint,
+			quoteParamKind: "tokenA",
+			quoteParamAmountRaw: "12",
+		});
+	});
+
+	it("builds Orca close-position transaction", async () => {
+		const ownerAddress = Keypair.generate().publicKey.toBase58();
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 58,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 6000 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		runtimeMocks.buildOrcaClosePositionInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress,
+			positionMint,
+			slippageBps: 80,
+			instructionCount: 1,
+			quote: { tokenMinA: "1", tokenMinB: "1" },
+			feesQuote: { feeOwedA: "10", feeOwedB: "20" },
+			rewardsQuote: { rewards: [] },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([4]),
+				}),
+			],
+		});
+
+		const tool = getTool("solana_buildOrcaClosePositionTransaction");
+		const result = await tool.execute("compose-orca-close", {
+			ownerAddress,
+			positionMint,
+			slippageBps: 80,
+			asLegacyTransaction: false,
+			network: "devnet",
+		});
+
+		expect(
+			runtimeMocks.buildOrcaClosePositionInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress,
+				positionMint,
+				slippageBps: 80,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			version: "v0",
+			ownerAddress,
+			positionMint,
+			slippageBps: 80,
+		});
+	});
+
+	it("builds Meteora add-liquidity transaction", async () => {
+		const ownerAddress = Keypair.generate().publicKey.toBase58();
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 59,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 5500 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		runtimeMocks.buildMeteoraAddLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress,
+			poolAddress,
+			positionAddress,
+			totalXAmountRaw: "100",
+			totalYAmountRaw: "200",
+			minBinId: -10,
+			maxBinId: 10,
+			strategyType: "Spot",
+			singleSidedX: false,
+			slippageBps: 100,
+			activeBinId: 0,
+			instructionCount: 2,
+			transactionCount: 2,
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([5]),
+				}),
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([6]),
+				}),
+			],
+		});
+
+		const tool = getTool("solana_buildMeteoraAddLiquidityTransaction");
+		const result = await tool.execute("compose-meteora-add", {
+			ownerAddress,
+			poolAddress,
+			positionAddress,
+			totalXAmountRaw: "100",
+			totalYAmountRaw: "200",
+			network: "devnet",
+		});
+
+		expect(
+			runtimeMocks.buildMeteoraAddLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress,
+				poolAddress,
+				positionAddress,
+				totalXAmountRaw: "100",
+				totalYAmountRaw: "200",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			version: "legacy",
+			ownerAddress,
+			poolAddress,
+			positionAddress,
+			sourceTransactionCount: 2,
+		});
+	});
+
+	it("builds Meteora remove-liquidity transaction", async () => {
+		const ownerAddress = Keypair.generate().publicKey.toBase58();
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 60,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 5300 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		runtimeMocks.buildMeteoraRemoveLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress,
+			poolAddress,
+			positionAddress,
+			fromBinId: -5,
+			toBinId: 5,
+			bps: 5000,
+			shouldClaimAndClose: false,
+			skipUnwrapSol: true,
+			positionLowerBinId: -8,
+			positionUpperBinId: 8,
+			activeBinId: 1,
+			instructionCount: 2,
+			transactionCount: 1,
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([7]),
+				}),
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([8]),
+				}),
+			],
+		});
+
+		const tool = getTool("solana_buildMeteoraRemoveLiquidityTransaction");
+		const result = await tool.execute("compose-meteora-remove", {
+			ownerAddress,
+			poolAddress,
+			positionAddress,
+			fromBinId: -5,
+			toBinId: 5,
+			bps: 5000,
+			skipUnwrapSol: true,
+			network: "devnet",
+		});
+
+		expect(
+			runtimeMocks.buildMeteoraRemoveLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress,
+				poolAddress,
+				positionAddress,
+				fromBinId: -5,
+				toBinId: 5,
+				bps: 5000,
+				skipUnwrapSol: true,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			version: "legacy",
+			ownerAddress,
+			poolAddress,
+			positionAddress,
+			bps: 5000,
 		});
 	});
 });
