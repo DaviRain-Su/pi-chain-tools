@@ -43,6 +43,7 @@ import {
 	getJupiterQuote,
 	getKaminoLendingMarkets,
 	getKaminoLendingPositions,
+	getOrcaWhirlpoolPositions,
 	getRaydiumApiBaseUrl,
 	getRaydiumPriorityFee,
 	getRaydiumPriorityFeeMicroLamports,
@@ -91,6 +92,7 @@ type WorkflowIntentType =
 	| "solana.swap.orca"
 	| "solana.swap.meteora"
 	| "solana.read.balance"
+	| "solana.read.orcaPositions"
 	| "solana.read.tokenBalance"
 	| "solana.read.portfolio"
 	| "solana.read.defiPositions"
@@ -348,6 +350,10 @@ type WorkflowIntent =
 			address: string;
 	  }
 	| {
+			type: "solana.read.orcaPositions";
+			address: string;
+	  }
+	| {
 			type: "solana.read.tokenBalance";
 			address: string;
 			tokenMint: string;
@@ -484,6 +490,8 @@ const LENDING_POSITIONS_KEYWORD_REGEX =
 	/(lending|lend\s+positions?|loan\s+positions?|借贷|借款|贷款|kamino)/i;
 const DEFI_POSITIONS_KEYWORD_REGEX =
 	/(defi|de-fi|protocol\s+positions?|协议仓位|staking|stake|质押|farm|yield|收益)/i;
+const ORCA_POSITIONS_KEYWORD_REGEX =
+	/(orca.*(whirlpool|lp|liquidity|position|positions|仓位|流动性)|(whirlpool|lp|liquidity|position|positions|仓位|流动性).*orca)/i;
 const KAMINO_DEPOSIT_KEYWORD_REGEX =
 	/(kamino.*(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出)|(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出).*kamino)/i;
 const KAMINO_BORROW_KEYWORD_REGEX =
@@ -651,6 +659,7 @@ function createConfirmToken(
 function isReadIntentType(intentType: WorkflowIntentType): boolean {
 	return (
 		intentType === "solana.read.balance" ||
+		intentType === "solana.read.orcaPositions" ||
 		intentType === "solana.read.tokenBalance" ||
 		intentType === "solana.read.portfolio" ||
 		intentType === "solana.read.defiPositions" ||
@@ -1859,6 +1868,10 @@ function parseReadIntentText(intentText: string): ParsedIntentTextFields {
 		}
 		return parsed;
 	}
+	if (ORCA_POSITIONS_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.read.orcaPositions";
+		return parsed;
+	}
 	if (DEFI_POSITIONS_KEYWORD_REGEX.test(intentText)) {
 		parsed.intentType = "solana.read.defiPositions";
 		return parsed;
@@ -2048,6 +2061,12 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 		return {
 			...parseReadIntentText(trimmed),
 			intentType: "solana.read.balance",
+		};
+	}
+	if (lower.includes("solana.read.orcapositions")) {
+		return {
+			...parseReadIntentText(trimmed),
+			intentType: "solana.read.orcaPositions",
 		};
 	}
 	if (lower.includes("solana.read.tokenbalance")) {
@@ -2289,6 +2308,7 @@ function resolveIntentType(
 		params.intentType === "solana.swap.orca" ||
 		params.intentType === "solana.swap.meteora" ||
 		params.intentType === "solana.read.balance" ||
+		params.intentType === "solana.read.orcaPositions" ||
 		params.intentType === "solana.read.tokenBalance" ||
 		params.intentType === "solana.read.portfolio" ||
 		params.intentType === "solana.read.defiPositions" ||
@@ -2305,6 +2325,12 @@ function resolveIntentType(
 		typeof params.amountSol !== "number" &&
 		typeof params.amountRaw !== "string"
 	) {
+		if (
+			typeof params.protocol === "string" &&
+			params.protocol.trim().toLowerCase() === "orca"
+		) {
+			return "solana.read.orcaPositions";
+		}
 		if (typeof params.tokenMint === "string") {
 			return "solana.read.tokenBalance";
 		}
@@ -2501,6 +2527,19 @@ function resolveIntentType(
 	}
 	if (
 		typeof params.intentText === "string" &&
+		ORCA_POSITIONS_KEYWORD_REGEX.test(params.intentText)
+	) {
+		return "solana.read.orcaPositions";
+	}
+	if (
+		typeof params.protocol === "string" &&
+		params.protocol.trim().toLowerCase() === "orca" &&
+		typeof params.address === "string"
+	) {
+		return "solana.read.orcaPositions";
+	}
+	if (
+		typeof params.intentText === "string" &&
 		LENDING_MARKETS_KEYWORD_REGEX.test(params.intentText)
 	) {
 		return "solana.read.lendingMarkets";
@@ -2626,6 +2665,19 @@ async function normalizeIntent(
 	const normalizedParams = mergeIntentParams(params);
 	const intentType = resolveIntentType(normalizedParams);
 	if (intentType === "solana.read.balance") {
+		const address = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.address === "string"
+					? normalizedParams.address
+					: signerPublicKey,
+			),
+		).toBase58();
+		return {
+			type: intentType,
+			address,
+		};
+	}
+	if (intentType === "solana.read.orcaPositions") {
 		const address = new PublicKey(
 			normalizeAtPath(
 				typeof normalizedParams.address === "string"
@@ -3513,6 +3565,21 @@ async function executeReadIntent(
 				sol,
 				network,
 				addressExplorer: getExplorerAddressUrl(address, network),
+			},
+		};
+	}
+
+	if (intent.type === "solana.read.orcaPositions") {
+		const positions = await getOrcaWhirlpoolPositions({
+			address: intent.address,
+			network,
+		});
+		return {
+			summary: `Orca Whirlpool positions: ${positions.positionCount} position(s) across ${positions.poolCount} pool(s)`,
+			details: {
+				intentType: intent.type,
+				...positions,
+				addressExplorer: getExplorerAddressUrl(intent.address, network),
 			},
 		};
 	}
@@ -5001,6 +5068,7 @@ export function createSolanaWorkflowTools() {
 						Type.Literal("solana.swap.meteora"),
 						Type.Literal("solana.swap.raydium"),
 						Type.Literal("solana.read.balance"),
+						Type.Literal("solana.read.orcaPositions"),
 						Type.Literal("solana.read.tokenBalance"),
 						Type.Literal("solana.read.portfolio"),
 						Type.Literal("solana.read.defiPositions"),
@@ -5277,7 +5345,7 @@ export function createSolanaWorkflowTools() {
 				protocol: Type.Optional(
 					Type.String({
 						description:
-							"Protocol hint for read intents. For lending markets/positions, currently supports only 'kamino'.",
+							"Protocol hint for read intents. Supports 'kamino' for lending intents and 'orca' for liquidity position reads.",
 					}),
 				),
 				programId: Type.Optional(

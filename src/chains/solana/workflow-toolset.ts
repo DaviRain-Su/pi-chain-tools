@@ -40,6 +40,12 @@ function getDefiPositionsTool() {
 	);
 }
 
+function getOrcaWhirlpoolPositionsTool() {
+	return createSolanaReadTools().find(
+		(tool) => tool.name === `${TOOL_PREFIX}getOrcaWhirlpoolPositions`,
+	);
+}
+
 function getOrcaQuoteTool() {
 	return createSolanaReadTools().find(
 		(tool) => tool.name === `${TOOL_PREFIX}getOrcaQuote`,
@@ -89,6 +95,7 @@ export function createSolanaWorkflowToolset(): ChainToolset {
 	const tokenBalanceTool = getTokenBalanceTool();
 	const portfolioTool = getPortfolioTool();
 	const defiPositionsTool = getDefiPositionsTool();
+	const orcaWhirlpoolPositionsTool = getOrcaWhirlpoolPositionsTool();
 	const orcaQuoteTool = getOrcaQuoteTool();
 	const meteoraQuoteTool = getMeteoraQuoteTool();
 	const orcaSwapTool = getOrcaSwapTool();
@@ -107,6 +114,7 @@ export function createSolanaWorkflowToolset(): ChainToolset {
 					...(tokenBalanceTool ? [tokenBalanceTool] : []),
 					...(portfolioTool ? [portfolioTool] : []),
 					...(defiPositionsTool ? [defiPositionsTool] : []),
+					...(orcaWhirlpoolPositionsTool ? [orcaWhirlpoolPositionsTool] : []),
 					...(orcaQuoteTool ? [orcaQuoteTool] : []),
 					...(meteoraQuoteTool ? [meteoraQuoteTool] : []),
 				],

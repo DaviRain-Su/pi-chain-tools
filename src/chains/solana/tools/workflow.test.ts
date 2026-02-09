@@ -26,6 +26,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	getJupiterQuote: vi.fn(),
 	getKaminoLendingMarkets: vi.fn(),
 	getKaminoLendingPositions: vi.fn(),
+	getOrcaWhirlpoolPositions: vi.fn(),
 	getRaydiumApiBaseUrl: vi.fn(() => "https://raydium.api"),
 	getRaydiumPriorityFee: vi.fn(),
 	getRaydiumPriorityFeeMicroLamports: vi.fn(() => "1000"),
@@ -79,6 +80,7 @@ vi.mock("../runtime.js", async () => {
 		getJupiterQuote: runtimeMocks.getJupiterQuote,
 		getKaminoLendingMarkets: runtimeMocks.getKaminoLendingMarkets,
 		getKaminoLendingPositions: runtimeMocks.getKaminoLendingPositions,
+		getOrcaWhirlpoolPositions: runtimeMocks.getOrcaWhirlpoolPositions,
 		getRaydiumApiBaseUrl: runtimeMocks.getRaydiumApiBaseUrl,
 		getRaydiumPriorityFee: runtimeMocks.getRaydiumPriorityFee,
 		getRaydiumPriorityFeeMicroLamports:
@@ -701,6 +703,106 @@ describe("w3rt_run_workflow_v0", () => {
 						marketCount: 4,
 						marketCountQueried: 2,
 						marketQueryLimit: 2,
+					},
+				},
+			},
+		});
+	});
+
+	it("parses Orca positions intentText and defaults to read.orcaPositions", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-read-orca-analysis", {
+			runId: "run-read-orca-analysis",
+			runMode: "analysis",
+			intentText: "query current wallet orca whirlpool positions",
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-read-orca-analysis",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.read.orcaPositions",
+						address: signer.publicKey.toBase58(),
+					},
+				},
+			},
+		});
+	});
+
+	it("executes read Orca positions workflow without mainnet approval gate", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const address = Keypair.generate().publicKey.toBase58();
+		const whirlpoolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address,
+			network: "mainnet-beta",
+			positionCount: 1,
+			bundleCount: 0,
+			poolCount: 1,
+			whirlpoolAddresses: [whirlpoolAddress],
+			positions: [
+				{
+					positionAddress,
+					positionMint,
+					positionBundleAddress: null,
+					isBundledPosition: false,
+					bundlePositionCount: null,
+					tokenProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+					whirlpoolAddress,
+					tokenMintA: SOL_MINT,
+					tokenMintB: USDC_MINT,
+					tickSpacing: 64,
+					feeRate: 3000,
+					currentTickIndex: 1234,
+					liquidity: "100",
+					tickLowerIndex: 1200,
+					tickUpperIndex: 1264,
+					feeOwedA: "0",
+					feeOwedB: "10",
+					rewards: [],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-read-orca-exec", {
+			runId: "run-read-orca-exec",
+			runMode: "execute",
+			intentType: "solana.read.orcaPositions",
+			address,
+			network: "mainnet-beta",
+		});
+
+		expect(runtimeMocks.getOrcaWhirlpoolPositions).toHaveBeenCalledWith({
+			address,
+			network: "mainnet-beta",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-read-orca-exec",
+			status: "executed",
+			artifacts: {
+				approval: {
+					required: false,
+					approved: true,
+				},
+				execute: {
+					read: true,
+					result: {
+						intentType: "solana.read.orcaPositions",
+						address,
+						positionCount: 1,
+						poolCount: 1,
 					},
 				},
 			},

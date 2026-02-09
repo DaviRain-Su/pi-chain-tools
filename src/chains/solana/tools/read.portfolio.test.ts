@@ -18,6 +18,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	getJupiterQuote: vi.fn(),
 	getKaminoLendingMarkets: vi.fn(),
 	getKaminoLendingPositions: vi.fn(),
+	getOrcaWhirlpoolPositions: vi.fn(),
 	getRaydiumApiBaseUrl: vi.fn(),
 	getRaydiumPriorityFee: vi.fn(),
 	getRaydiumPriorityFeeApiBaseUrl: vi.fn(),
@@ -92,6 +93,7 @@ vi.mock("../runtime.js", async () => {
 		getJupiterQuote: runtimeMocks.getJupiterQuote,
 		getKaminoLendingMarkets: runtimeMocks.getKaminoLendingMarkets,
 		getKaminoLendingPositions: runtimeMocks.getKaminoLendingPositions,
+		getOrcaWhirlpoolPositions: runtimeMocks.getOrcaWhirlpoolPositions,
 		getRaydiumApiBaseUrl: runtimeMocks.getRaydiumApiBaseUrl,
 		getRaydiumPriorityFee: runtimeMocks.getRaydiumPriorityFee,
 		getRaydiumPriorityFeeApiBaseUrl:
@@ -647,6 +649,73 @@ describe("solana_getLendingMarkets", () => {
 			}),
 		).rejects.toThrow("Unsupported lending protocol");
 		expect(runtimeMocks.getKaminoLendingMarkets).not.toHaveBeenCalled();
+	});
+});
+
+describe("solana_getOrcaWhirlpoolPositions", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		runtimeMocks.getExplorerAddressUrl.mockImplementation(
+			(value: string) => `https://explorer/${value}`,
+		);
+	});
+
+	it("returns Orca Whirlpool positions summary", async () => {
+		const owner = Keypair.generate().publicKey.toBase58();
+		const whirlpoolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: owner,
+			network: "mainnet-beta",
+			positionCount: 1,
+			bundleCount: 0,
+			poolCount: 1,
+			whirlpoolAddresses: [whirlpoolAddress],
+			positions: [
+				{
+					positionAddress,
+					positionMint,
+					positionBundleAddress: null,
+					isBundledPosition: false,
+					bundlePositionCount: null,
+					tokenProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+					whirlpoolAddress,
+					tokenMintA: "So11111111111111111111111111111111111111112",
+					tokenMintB: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+					tickSpacing: 64,
+					feeRate: 3000,
+					currentTickIndex: 1234,
+					liquidity: "100",
+					tickLowerIndex: 1200,
+					tickUpperIndex: 1264,
+					feeOwedA: "0",
+					feeOwedB: "10",
+					rewards: [],
+				},
+			],
+			queryErrors: [],
+		});
+
+		const tool = getReadTool("solana_getOrcaWhirlpoolPositions");
+		const result = await tool.execute("orca-positions-1", {
+			address: owner,
+			network: "mainnet-beta",
+		});
+
+		expect(runtimeMocks.getOrcaWhirlpoolPositions).toHaveBeenCalledWith({
+			address: owner,
+			network: "mainnet-beta",
+		});
+		expect(result.details).toMatchObject({
+			protocol: "orca-whirlpool",
+			address: owner,
+			positionCount: 1,
+			poolCount: 1,
+			addressExplorer: `https://explorer/${owner}`,
+		});
 	});
 });
 

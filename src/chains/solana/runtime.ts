@@ -12,6 +12,8 @@ import {
 	KaminoMarket,
 	VanillaObligation,
 } from "@kamino-finance/klend-sdk";
+import { fetchPositionsForOwner } from "@orca-so/whirlpools";
+import { fetchAllMaybeWhirlpool } from "@orca-so/whirlpools-client";
 import {
 	API_URLS as RAYDIUM_API_URLS,
 	Api as RaydiumApiClient,
@@ -1451,6 +1453,50 @@ export type KaminoLendingMarketsResult = {
 	markets: KaminoLendingMarketSummary[];
 };
 
+export type OrcaWhirlpoolPositionReward = {
+	index: number;
+	mint: string | null;
+	amountOwedRaw: string;
+};
+
+export type OrcaWhirlpoolOwnerPosition = {
+	positionAddress: string;
+	positionMint: string;
+	positionBundleAddress: string | null;
+	isBundledPosition: boolean;
+	bundlePositionCount: number | null;
+	tokenProgram: string | null;
+	whirlpoolAddress: string;
+	tokenMintA: string | null;
+	tokenMintB: string | null;
+	tickSpacing: number | null;
+	feeRate: number | null;
+	currentTickIndex: number | null;
+	liquidity: string;
+	tickLowerIndex: number;
+	tickUpperIndex: number;
+	feeOwedA: string;
+	feeOwedB: string;
+	rewards: OrcaWhirlpoolPositionReward[];
+};
+
+export type OrcaWhirlpoolPositionsRequest = {
+	address: string;
+	network?: string;
+};
+
+export type OrcaWhirlpoolPositionsResult = {
+	protocol: "orca-whirlpool";
+	address: string;
+	network: SolanaNetwork;
+	positionCount: number;
+	bundleCount: number;
+	poolCount: number;
+	whirlpoolAddresses: string[];
+	positions: OrcaWhirlpoolOwnerPosition[];
+	queryErrors: string[];
+};
+
 function omitUndefined<T extends Record<string, unknown>>(
 	value: T,
 ): Partial<T> {
@@ -2568,6 +2614,236 @@ export async function getKaminoLendingPositions(
 		marketAddressesQueried,
 		marketAddressesWithPositions: marketsWithPositions,
 		obligations,
+		queryErrors,
+	};
+}
+
+export async function getOrcaWhirlpoolPositions(
+	request: OrcaWhirlpoolPositionsRequest,
+): Promise<OrcaWhirlpoolPositionsResult> {
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.address),
+	).toBase58();
+	const network = parseNetwork(request.network);
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+	const owner = address(ownerAddress);
+	const rawPositions = (await fetchPositionsForOwner(
+		rpc as never,
+		owner as never,
+	)) as unknown[];
+
+	const toBigIntString = (value: unknown): string | null => {
+		if (typeof value === "bigint") {
+			return value.toString();
+		}
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return Math.trunc(value).toString();
+		}
+		if (typeof value === "string" && /^-?\d+$/.test(value.trim())) {
+			return value.trim();
+		}
+		return null;
+	};
+	const toNumber = (value: unknown): number | null => {
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return value;
+		}
+		if (typeof value === "bigint") {
+			return Number(value);
+		}
+		if (typeof value === "string" && /^-?\d+$/.test(value.trim())) {
+			const parsed = Number.parseInt(value.trim(), 10);
+			if (Number.isFinite(parsed)) return parsed;
+		}
+		return null;
+	};
+	const toAddress = (value: unknown): string | null =>
+		typeof value === "string" ? normalizePublicKey(value) : null;
+
+	const queryErrors: string[] = [];
+	const positions: OrcaWhirlpoolOwnerPosition[] = [];
+	const whirlpoolAddressSet = new Set<string>();
+	const pushPosition = (
+		record: unknown,
+		context: {
+			positionBundleAddress: string | null;
+			isBundledPosition: boolean;
+			bundlePositionCount: number | null;
+			tokenProgram: string | null;
+		},
+	): void => {
+		const account = asObjectRecord(record);
+		const data = asObjectRecord(account?.data);
+		if (!account || !data) {
+			return;
+		}
+		const positionAddress = toAddress(account.address);
+		const positionMint = toAddress(data.positionMint);
+		const whirlpoolAddress = toAddress(data.whirlpool);
+		const liquidity = toBigIntString(data.liquidity);
+		const tickLowerIndex = toNumber(data.tickLowerIndex);
+		const tickUpperIndex = toNumber(data.tickUpperIndex);
+		const feeOwedA = toBigIntString(data.feeOwedA);
+		const feeOwedB = toBigIntString(data.feeOwedB);
+		if (
+			!positionAddress ||
+			!positionMint ||
+			!whirlpoolAddress ||
+			liquidity == null ||
+			tickLowerIndex == null ||
+			tickUpperIndex == null ||
+			feeOwedA == null ||
+			feeOwedB == null
+		) {
+			return;
+		}
+		whirlpoolAddressSet.add(whirlpoolAddress);
+		const rewards = (
+			Array.isArray(data.rewardInfos) ? data.rewardInfos : []
+		).map((rewardInfo, index) => {
+			const reward = asObjectRecord(rewardInfo);
+			return {
+				index,
+				mint: null,
+				amountOwedRaw: toBigIntString(reward?.amountOwed) ?? "0",
+			} satisfies OrcaWhirlpoolPositionReward;
+		});
+		positions.push({
+			positionAddress,
+			positionMint,
+			positionBundleAddress: context.positionBundleAddress,
+			isBundledPosition: context.isBundledPosition,
+			bundlePositionCount: context.bundlePositionCount,
+			tokenProgram: context.tokenProgram,
+			whirlpoolAddress,
+			tokenMintA: null,
+			tokenMintB: null,
+			tickSpacing: null,
+			feeRate: null,
+			currentTickIndex: null,
+			liquidity,
+			tickLowerIndex,
+			tickUpperIndex,
+			feeOwedA,
+			feeOwedB,
+			rewards,
+		});
+	};
+
+	for (const rawEntry of rawPositions) {
+		const entry = asObjectRecord(rawEntry);
+		if (!entry) {
+			continue;
+		}
+		const tokenProgram = toAddress(entry.tokenProgram);
+		if (entry.isPositionBundle === true) {
+			const positionBundleAddress = toAddress(entry.address);
+			const bundledPositions = Array.isArray(entry.positions)
+				? entry.positions
+				: [];
+			for (const bundledPosition of bundledPositions) {
+				pushPosition(bundledPosition, {
+					positionBundleAddress,
+					isBundledPosition: true,
+					bundlePositionCount: bundledPositions.length,
+					tokenProgram,
+				});
+			}
+			continue;
+		}
+		pushPosition(rawEntry, {
+			positionBundleAddress: null,
+			isBundledPosition: false,
+			bundlePositionCount: null,
+			tokenProgram,
+		});
+	}
+
+	const whirlpoolAddresses = [...whirlpoolAddressSet].sort((a, b) =>
+		a.localeCompare(b),
+	);
+	type WhirlpoolSnapshot = {
+		tokenMintA: string | null;
+		tokenMintB: string | null;
+		tickSpacing: number | null;
+		feeRate: number | null;
+		currentTickIndex: number | null;
+		rewardMints: Array<string | null>;
+	};
+	const whirlpoolByAddress = new Map<string, WhirlpoolSnapshot>();
+	if (whirlpoolAddresses.length > 0) {
+		const maybeWhirlpools = await fetchAllMaybeWhirlpool(
+			rpc as never,
+			whirlpoolAddresses.map((value) => address(value)),
+		);
+		for (const [index, maybeWhirlpool] of maybeWhirlpools.entries()) {
+			const expectedAddress = whirlpoolAddresses[index];
+			if (!expectedAddress) continue;
+			const account = asObjectRecord(maybeWhirlpool);
+			if (!account || account.exists !== true) {
+				queryErrors.push(`${expectedAddress}: whirlpool account not found`);
+				continue;
+			}
+			const data = asObjectRecord(account.data);
+			if (!data) {
+				queryErrors.push(`${expectedAddress}: invalid whirlpool account data`);
+				continue;
+			}
+			const rewardMints = (
+				Array.isArray(data.rewardInfos) ? data.rewardInfos : []
+			).map((rewardInfo) => {
+				const reward = asObjectRecord(rewardInfo);
+				return toAddress(reward?.mint);
+			});
+			whirlpoolByAddress.set(expectedAddress, {
+				tokenMintA: toAddress(data.tokenMintA),
+				tokenMintB: toAddress(data.tokenMintB),
+				tickSpacing: toNumber(data.tickSpacing),
+				feeRate: toNumber(data.feeRate),
+				currentTickIndex: toNumber(data.tickCurrentIndex),
+				rewardMints,
+			});
+		}
+	}
+
+	for (const position of positions) {
+		const whirlpool = whirlpoolByAddress.get(position.whirlpoolAddress);
+		if (!whirlpool) continue;
+		position.tokenMintA = whirlpool.tokenMintA;
+		position.tokenMintB = whirlpool.tokenMintB;
+		position.tickSpacing = whirlpool.tickSpacing;
+		position.feeRate = whirlpool.feeRate;
+		position.currentTickIndex = whirlpool.currentTickIndex;
+		position.rewards = position.rewards.map((reward) => ({
+			...reward,
+			mint: whirlpool.rewardMints[reward.index] ?? null,
+		}));
+	}
+
+	positions.sort((a, b) => {
+		const poolCmp = a.whirlpoolAddress.localeCompare(b.whirlpoolAddress);
+		if (poolCmp !== 0) {
+			return poolCmp;
+		}
+		return a.positionAddress.localeCompare(b.positionAddress);
+	});
+	queryErrors.sort((a, b) => a.localeCompare(b));
+
+	const bundleAddresses = new Set(
+		positions
+			.map((position) => position.positionBundleAddress)
+			.filter((value): value is string => typeof value === "string"),
+	);
+	return {
+		protocol: "orca-whirlpool",
+		address: ownerAddress,
+		network,
+		positionCount: positions.length,
+		bundleCount: bundleAddresses.size,
+		poolCount: new Set(positions.map((position) => position.whirlpoolAddress))
+			.size,
+		whirlpoolAddresses,
+		positions,
 		queryErrors,
 	};
 }

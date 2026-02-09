@@ -18,6 +18,7 @@ describe("solanaWorkflowExtension", () => {
 			"solana_getDefiPositions",
 			"solana_getMeteoraQuote",
 			"solana_getOrcaQuote",
+			"solana_getOrcaWhirlpoolPositions",
 			"solana_getPortfolio",
 			"solana_getTokenAccounts",
 			"solana_getTokenBalance",
