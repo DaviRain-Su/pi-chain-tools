@@ -16,7 +16,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 
 ## Solana Tool Groups
 
-- `read`: balance, account info, multiple accounts, blockhash, rent exemption minimum, transaction, signatures, token accounts, token balance, portfolio, DeFi positions (token protocol tags + native stake scan), Kamino lending positions + market catalog, Jupiter/Raydium quote + meta APIs
+- `read`: balance, account info, multiple accounts, blockhash, rent exemption minimum, transaction, signatures, token accounts, token balance, portfolio, DeFi positions (token protocol tags + native stake scan + Orca/Meteora LP), Kamino lending positions + market catalog, Orca Whirlpool positions, Meteora DLMM positions, Jupiter/Raydium quote + meta APIs
 - `compose`: unsigned transfer transaction builders (SOL/SPL, legacy + v0), native staking builders (create+delegate/delegate/authorize/deactivate/withdraw), Jupiter & Raydium swap builders
 - `execute`: simulate, send, sign+send, confirm, airdrop, SOL transfer, SPL transfer, native stake actions (create+delegate/delegate/authorize/deactivate/withdraw), one-shot Jupiter & Raydium swap
 - `rpc`: raw Solana JSON-RPC with safety guard for dangerous methods
@@ -28,6 +28,8 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 - Priority fee / Jito tip / dynamic CU options in Jupiter swap compose & execute
 - Orca/Meteora scoped swap workflow support (via Jupiter dex filters)
 - Orca/Meteora scoped compose/execute tools (`build*SwapTransaction` / `*Swap`)
+- Orca LP lifecycle compose/execute/workflow support (open/close/increase/decrease)
+- Meteora DLMM LP lifecycle compose/execute/workflow support (add/remove)
 - Native stake operation tools: create+delegate/delegate/authorize/deactivate/withdraw
 - Workflow/read support for `solana.read.defiPositions` + `solana_getDefiPositions`
 - Workflow/read support for `solana.read.lendingMarkets` / `solana.read.lendingPositions`

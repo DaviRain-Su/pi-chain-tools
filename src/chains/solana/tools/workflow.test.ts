@@ -220,6 +220,27 @@ describe("w3rt_run_workflow_v0", () => {
 		runtimeMocks.getExplorerTransactionUrl.mockReturnValue(
 			"https://explorer/tx",
 		);
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: "",
+			network: "devnet",
+			positionCount: 0,
+			bundleCount: 0,
+			poolCount: 0,
+			whirlpoolAddresses: [],
+			positions: [],
+			queryErrors: [],
+		});
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: "",
+			network: "devnet",
+			positionCount: 0,
+			poolCount: 0,
+			poolAddresses: [],
+			pools: [],
+			queryErrors: [],
+		});
 	});
 
 	it("returns analysis artifacts without touching RPC in analysis mode", async () => {
@@ -408,6 +429,27 @@ describe("w3rt_run_workflow_v0", () => {
 				}),
 		};
 		runtimeMocks.getConnection.mockReturnValue(connection);
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address,
+			network: "mainnet-beta",
+			positionCount: 1,
+			bundleCount: 0,
+			poolCount: 1,
+			whirlpoolAddresses: [Keypair.generate().publicKey.toBase58()],
+			positions: [],
+			queryErrors: [],
+		});
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address,
+			network: "mainnet-beta",
+			positionCount: 2,
+			poolCount: 1,
+			poolAddresses: [Keypair.generate().publicKey.toBase58()],
+			pools: [],
+			queryErrors: [],
+		});
 		const tool = getWorkflowTool();
 
 		const result = await tool.execute("wf-read-portfolio-exec", {
@@ -512,6 +554,14 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 
 		expect(connection.getParsedProgramAccounts).toHaveBeenCalledTimes(2);
+		expect(runtimeMocks.getOrcaWhirlpoolPositions).toHaveBeenCalledWith({
+			address,
+			network: "mainnet-beta",
+		});
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address,
+			network: "mainnet-beta",
+		});
 		expect(result.details).toMatchObject({
 			runId: "run-read-defi-exec",
 			status: "executed",
@@ -522,6 +572,7 @@ describe("w3rt_run_workflow_v0", () => {
 						intentType: "solana.read.defiPositions",
 						address,
 						defiTokenPositionCount: 2,
+						liquidityPositionCount: 0,
 						stakeAccountCount: 2,
 						totalDelegatedStakeLamports: "1250000000",
 					},

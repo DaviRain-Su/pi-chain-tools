@@ -779,6 +779,18 @@ export function createSolanaReadTools() {
 							"Include native stake account discovery using StakeProgram parsed account scans",
 					}),
 				),
+				includeOrcaPositions: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include Orca Whirlpool LP position discovery in DeFi summary",
+					}),
+				),
+				includeMeteoraPositions: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include Meteora DLMM LP position discovery in DeFi summary",
+					}),
+				),
 				network: solanaNetworkSchema(),
 			}),
 			async execute(_toolCallId, params) {
@@ -786,6 +798,9 @@ export function createSolanaReadTools() {
 				const owner = new PublicKey(normalizeAtPath(params.address));
 				const includeToken2022 = params.includeToken2022 !== false;
 				const includeStakeAccounts = params.includeStakeAccounts !== false;
+				const includeOrcaPositions = params.includeOrcaPositions !== false;
+				const includeMeteoraPositions =
+					params.includeMeteoraPositions !== false;
 
 				const [lamports, tokenProgramResponse, token2022Response] =
 					await Promise.all([
@@ -929,13 +944,64 @@ export function createSolanaReadTools() {
 					acc[position.protocol] = (acc[position.protocol] ?? 0) + 1;
 					return acc;
 				}, {});
+				const lpQueryErrors: string[] = [];
+				const [orcaWhirlpoolPositions, meteoraDlmmPositions] =
+					await Promise.all([
+						includeOrcaPositions
+							? getOrcaWhirlpoolPositions({
+									address: owner.toBase58(),
+									network: params.network,
+								}).catch((error: unknown) => {
+									lpQueryErrors.push(`orca: ${String(error)}`);
+									return {
+										protocol: "orca-whirlpool" as const,
+										address: owner.toBase58(),
+										network: parseNetwork(params.network),
+										positionCount: 0,
+										bundleCount: 0,
+										poolCount: 0,
+										whirlpoolAddresses: [],
+										positions: [],
+										queryErrors: [],
+									};
+								})
+							: Promise.resolve(null),
+						includeMeteoraPositions
+							? getMeteoraDlmmPositions({
+									address: owner.toBase58(),
+									network: params.network,
+								}).catch((error: unknown) => {
+									lpQueryErrors.push(`meteora: ${String(error)}`);
+									return {
+										protocol: "meteora-dlmm" as const,
+										address: owner.toBase58(),
+										network: parseNetwork(params.network),
+										positionCount: 0,
+										poolCount: 0,
+										poolAddresses: [],
+										pools: [],
+										queryErrors: [],
+									};
+								})
+							: Promise.resolve(null),
+					]);
+				const orcaPositionCount = orcaWhirlpoolPositions?.positionCount ?? 0;
+				const meteoraPositionCount = meteoraDlmmPositions?.positionCount ?? 0;
+				const liquidityProtocolPositionCounts = {
+					orca: orcaPositionCount,
+					meteora: meteoraPositionCount,
+				};
+				const liquidityPositionCount = orcaPositionCount + meteoraPositionCount;
+				const liquidityPoolCount =
+					(orcaWhirlpoolPositions?.poolCount ?? 0) +
+					(meteoraDlmmPositions?.poolCount ?? 0);
 
 				const sol = lamports / LAMPORTS_PER_SOL;
 				return {
 					content: [
 						{
 							type: "text",
-							text: `DeFi positions: ${defiTokenPositions.length} token exposure(s), ${stakeAccounts.length} stake account(s)`,
+							text: `DeFi positions: ${defiTokenPositions.length} token exposure(s), ${liquidityPositionCount} LP position(s), ${stakeAccounts.length} stake account(s)`,
 						},
 					],
 					details: {
@@ -958,6 +1024,12 @@ export function createSolanaReadTools() {
 						defiTokenPositions,
 						categoryExposureCounts,
 						protocolExposureCounts,
+						liquidityPositionCount,
+						liquidityPoolCount,
+						liquidityProtocolPositionCounts,
+						orcaWhirlpoolPositions,
+						meteoraDlmmPositions,
+						lpQueryErrors,
 						stakeAccountCount: stakeAccounts.length,
 						stakeAccounts,
 						stakeQueryErrors,

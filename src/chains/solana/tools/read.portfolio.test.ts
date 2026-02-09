@@ -427,12 +427,54 @@ describe("solana_getDefiPositions", () => {
 		runtimeMocks.getExplorerAddressUrl.mockImplementation(
 			(value: string) => `https://explorer/${value}`,
 		);
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: "",
+			network: "mainnet-beta",
+			positionCount: 0,
+			bundleCount: 0,
+			poolCount: 0,
+			whirlpoolAddresses: [],
+			positions: [],
+			queryErrors: [],
+		});
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: "",
+			network: "mainnet-beta",
+			positionCount: 0,
+			poolCount: 0,
+			poolAddresses: [],
+			pools: [],
+			queryErrors: [],
+		});
 	});
 
 	it("returns protocol-tagged token exposures and stake accounts", async () => {
 		const owner = Keypair.generate().publicKey.toBase58();
 		const stakeAccountOne = Keypair.generate().publicKey.toBase58();
 		const stakeAccountTwo = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: owner,
+			network: "mainnet-beta",
+			positionCount: 1,
+			bundleCount: 0,
+			poolCount: 1,
+			whirlpoolAddresses: [Keypair.generate().publicKey.toBase58()],
+			positions: [],
+			queryErrors: [],
+		});
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: owner,
+			network: "mainnet-beta",
+			positionCount: 2,
+			poolCount: 1,
+			poolAddresses: [Keypair.generate().publicKey.toBase58()],
+			pools: [],
+			queryErrors: [],
+		});
 		const connection = {
 			getBalance: vi.fn().mockResolvedValue(3_000_000_000),
 			getParsedTokenAccountsByOwner: vi
@@ -470,9 +512,22 @@ describe("solana_getDefiPositions", () => {
 		});
 
 		expect(connection.getParsedProgramAccounts).toHaveBeenCalledTimes(2);
+		expect(runtimeMocks.getOrcaWhirlpoolPositions).toHaveBeenCalledWith({
+			address: owner,
+			network: "mainnet-beta",
+		});
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address: owner,
+			network: "mainnet-beta",
+		});
 		expect(result.details).toMatchObject({
 			address: owner,
 			defiTokenPositionCount: 2,
+			liquidityPositionCount: 3,
+			liquidityProtocolPositionCounts: {
+				orca: 1,
+				meteora: 2,
+			},
 			stakeAccountCount: 2,
 			totalDelegatedStakeLamports: "1250000000",
 			totalDelegatedStakeUiAmount: "1.25",
@@ -509,8 +564,17 @@ describe("solana_getDefiPositions", () => {
 		});
 
 		expect(connection.getParsedProgramAccounts).not.toHaveBeenCalled();
+		expect(runtimeMocks.getOrcaWhirlpoolPositions).toHaveBeenCalledWith({
+			address: owner,
+			network: "mainnet-beta",
+		});
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address: owner,
+			network: "mainnet-beta",
+		});
 		expect(result.details).toMatchObject({
 			defiTokenPositionCount: 1,
+			liquidityPositionCount: 0,
 			stakeAccountCount: 0,
 			totalDelegatedStakeLamports: "0",
 			totalDelegatedStakeUiAmount: "0",

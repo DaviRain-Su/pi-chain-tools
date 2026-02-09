@@ -174,6 +174,8 @@ type ParsedIntentTextFields = Partial<{
 	dexes: string[];
 	excludeDexes: string[];
 	includeStakeAccounts: boolean;
+	includeOrcaPositions: boolean;
+	includeMeteoraPositions: boolean;
 	protocol: string;
 	programId: string;
 	limitMarkets: number;
@@ -478,6 +480,8 @@ type WorkflowIntent =
 			includeZero: boolean;
 			includeToken2022: boolean;
 			includeStakeAccounts: boolean;
+			includeOrcaPositions: boolean;
+			includeMeteoraPositions: boolean;
 	  }
 	| {
 			type: "solana.read.lendingMarkets";
@@ -2986,7 +2990,11 @@ function resolveIntentType(
 		if (typeof params.tokenMint === "string") {
 			return "solana.read.tokenBalance";
 		}
-		if (typeof params.includeStakeAccounts === "boolean") {
+		if (
+			typeof params.includeStakeAccounts === "boolean" ||
+			typeof params.includeOrcaPositions === "boolean" ||
+			typeof params.includeMeteoraPositions === "boolean"
+		) {
 			return "solana.read.defiPositions";
 		}
 		if (
@@ -3171,11 +3179,15 @@ function resolveIntentType(
 	) {
 		return "solana.read.tokenBalance";
 	}
+	if (
+		typeof params.includeStakeAccounts === "boolean" ||
+		typeof params.includeOrcaPositions === "boolean" ||
+		typeof params.includeMeteoraPositions === "boolean"
+	) {
+		return "solana.read.defiPositions";
+	}
 	if (typeof params.includeZero === "boolean") {
 		return "solana.read.portfolio";
-	}
-	if (typeof params.includeStakeAccounts === "boolean") {
-		return "solana.read.defiPositions";
 	}
 	if (
 		typeof params.intentText === "string" &&
@@ -3551,6 +3563,9 @@ async function normalizeIntent(
 			includeZero: normalizedParams.includeZero === true,
 			includeToken2022: normalizedParams.includeToken2022 !== false,
 			includeStakeAccounts: normalizedParams.includeStakeAccounts !== false,
+			includeOrcaPositions: normalizedParams.includeOrcaPositions !== false,
+			includeMeteoraPositions:
+				normalizedParams.includeMeteoraPositions !== false,
 		};
 	}
 	if (intentType === "solana.read.lendingMarkets") {
@@ -4804,6 +4819,56 @@ async function executeReadIntent(
 			acc[position.protocol] = (acc[position.protocol] ?? 0) + 1;
 			return acc;
 		}, {});
+		const lpQueryErrors: string[] = [];
+		const [orcaWhirlpoolPositions, meteoraDlmmPositions] = await Promise.all([
+			intent.includeOrcaPositions
+				? getOrcaWhirlpoolPositions({
+						address: owner.toBase58(),
+						network,
+					}).catch((error: unknown) => {
+						lpQueryErrors.push(`orca: ${String(error)}`);
+						return {
+							protocol: "orca-whirlpool" as const,
+							address: owner.toBase58(),
+							network: parseNetwork(network),
+							positionCount: 0,
+							bundleCount: 0,
+							poolCount: 0,
+							whirlpoolAddresses: [],
+							positions: [],
+							queryErrors: [],
+						};
+					})
+				: Promise.resolve(null),
+			intent.includeMeteoraPositions
+				? getMeteoraDlmmPositions({
+						address: owner.toBase58(),
+						network,
+					}).catch((error: unknown) => {
+						lpQueryErrors.push(`meteora: ${String(error)}`);
+						return {
+							protocol: "meteora-dlmm" as const,
+							address: owner.toBase58(),
+							network: parseNetwork(network),
+							positionCount: 0,
+							poolCount: 0,
+							poolAddresses: [],
+							pools: [],
+							queryErrors: [],
+						};
+					})
+				: Promise.resolve(null),
+		]);
+		const orcaPositionCount = orcaWhirlpoolPositions?.positionCount ?? 0;
+		const meteoraPositionCount = meteoraDlmmPositions?.positionCount ?? 0;
+		const liquidityProtocolPositionCounts = {
+			orca: orcaPositionCount,
+			meteora: meteoraPositionCount,
+		};
+		const liquidityPositionCount = orcaPositionCount + meteoraPositionCount;
+		const liquidityPoolCount =
+			(orcaWhirlpoolPositions?.poolCount ?? 0) +
+			(meteoraDlmmPositions?.poolCount ?? 0);
 
 		let rawStakeAccounts: Array<{
 			pubkey: PublicKey;
@@ -4855,7 +4920,7 @@ async function executeReadIntent(
 		);
 		const sol = lamports / 1_000_000_000;
 		return {
-			summary: `DeFi positions: ${defiTokenPositions.length} token exposure(s), ${stakeAccounts.length} stake account(s)`,
+			summary: `DeFi positions: ${defiTokenPositions.length} token exposure(s), ${liquidityPositionCount} LP position(s), ${stakeAccounts.length} stake account(s)`,
 			details: {
 				intentType: intent.type,
 				address: owner.toBase58(),
@@ -4874,6 +4939,12 @@ async function executeReadIntent(
 				defiTokenPositions,
 				categoryExposureCounts,
 				protocolExposureCounts,
+				liquidityPositionCount,
+				liquidityPoolCount,
+				liquidityProtocolPositionCounts,
+				orcaWhirlpoolPositions,
+				meteoraDlmmPositions,
+				lpQueryErrors,
 				stakeAccountCount: stakeAccounts.length,
 				stakeAccounts,
 				stakeQueryErrors,
@@ -6863,6 +6934,18 @@ export function createSolanaWorkflowTools() {
 					Type.Boolean({
 						description:
 							"Include native stake account discovery for intentType=solana.read.defiPositions",
+					}),
+				),
+				includeOrcaPositions: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include Orca Whirlpool LP position discovery for intentType=solana.read.defiPositions",
+					}),
+				),
+				includeMeteoraPositions: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include Meteora DLMM LP position discovery for intentType=solana.read.defiPositions",
 					}),
 				),
 				protocol: Type.Optional(
