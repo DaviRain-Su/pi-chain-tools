@@ -1,4 +1,4 @@
-import { Keypair } from "@solana/web3.js";
+import { Keypair, PublicKey, StakeProgram } from "@solana/web3.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -507,6 +507,119 @@ describe("w3rt_run_workflow_v0", () => {
 						stakeAuthorityAddress: signer.publicKey.toBase58(),
 						stakeAccountAddress,
 						voteAccountAddress,
+					},
+				},
+			},
+		});
+	});
+
+	it("parses stake create-and-delegate intentText", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const voteAccountAddress = Keypair.generate().publicKey.toBase58();
+		const runId = "run-stake-create";
+		const expectedStakeSeed = "w3rt-run-stake-create";
+		const expectedStakeAccount = (
+			await PublicKey.createWithSeed(
+				signer.publicKey,
+				expectedStakeSeed,
+				StakeProgram.programId,
+			)
+		).toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-stake-create", {
+			runId,
+			runMode: "analysis",
+			intentText: `stake 0.000001 SOL to ${voteAccountAddress}`,
+		});
+
+		expect(runtimeMocks.toLamports).toHaveBeenCalledWith(0.000001);
+		expect(result.details).toMatchObject({
+			runId,
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.stake.createAndDelegate",
+						stakeAuthorityAddress: signer.publicKey.toBase58(),
+						withdrawAuthorityAddress: signer.publicKey.toBase58(),
+						voteAccountAddress,
+						stakeSeed: expectedStakeSeed,
+						stakeAccountAddress: expectedStakeAccount,
+						amountSol: 0.000001,
+						lamports: 1000,
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates stake create-and-delegate workflow intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const voteAccountAddress = Keypair.generate().publicKey.toBase58();
+		const runId = "run-stake-create-sim";
+		const expectedStakeSeed = "w3rt-run-stake-create-sim";
+		const expectedStakeAccount = (
+			await PublicKey.createWithSeed(
+				signer.publicKey,
+				expectedStakeSeed,
+				StakeProgram.programId,
+			)
+		).toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 1,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 78,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-stake-create-sim", {
+			runId,
+			intentType: "solana.stake.createAndDelegate",
+			runMode: "simulate",
+			voteAccountAddress,
+			amountSol: 0.000001,
+		});
+
+		expect(connection.simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			runId,
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.stake.createAndDelegate",
+						stakeAuthorityAddress: signer.publicKey.toBase58(),
+						withdrawAuthorityAddress: signer.publicKey.toBase58(),
+						stakeSeed: expectedStakeSeed,
+						stakeAccountAddress: expectedStakeAccount,
+						voteAccountAddress,
+						amountSol: 0.000001,
+						lamports: 1000,
+					},
+				},
+				simulate: {
+					ok: true,
+					context: {
+						action: "createAndDelegate",
+						stakeAuthorityAddress: signer.publicKey.toBase58(),
+						withdrawAuthorityAddress: signer.publicKey.toBase58(),
+						stakeSeed: expectedStakeSeed,
+						stakeAccountAddress: expectedStakeAccount,
+						voteAccountAddress,
+						amountSol: 0.000001,
+						lamports: 1000,
 					},
 				},
 			},
