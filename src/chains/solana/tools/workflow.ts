@@ -4419,7 +4419,17 @@ async function normalizeIntent(
 				? { tokenBAmountRaw: tokenBAmountRawFromGeneric }
 				: {}),
 		});
-		const fullRange = normalizedParams.fullRange === true;
+		const hasLowerPrice =
+			typeof normalizedParams.lowerPrice === "number" &&
+			Number.isFinite(normalizedParams.lowerPrice);
+		const hasUpperPrice =
+			typeof normalizedParams.upperPrice === "number" &&
+			Number.isFinite(normalizedParams.upperPrice);
+		const fullRange =
+			normalizedParams.fullRange === true ||
+			(normalizedParams.fullRange !== false &&
+				!hasLowerPrice &&
+				!hasUpperPrice);
 		let lowerPrice: number | undefined;
 		let upperPrice: number | undefined;
 		if (!fullRange) {

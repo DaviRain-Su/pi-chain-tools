@@ -3487,7 +3487,7 @@ describe("w3rt_run_workflow_v0", () => {
 		const result = await tool.execute("wf-orca-open-generic-intent", {
 			runId: "run-orca-open-generic-intent",
 			runMode: "analysis",
-			intentText: `open orca position pool ${poolAddress} amount 1.25 USDC full range`,
+			intentText: `open orca position pool ${poolAddress} amount 1.25 USDC`,
 		});
 
 		expect(runtimeMocks.getOrcaWhirlpoolPool).toHaveBeenCalledWith({
@@ -3508,6 +3508,71 @@ describe("w3rt_run_workflow_v0", () => {
 				},
 			},
 		});
+	});
+
+	it("defaults Orca open structured generic amountUi to fullRange when range is omitted", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPool.mockResolvedValueOnce({
+			protocol: "orca-whirlpool",
+			poolAddress,
+			network: "devnet",
+			tokenMintA: USDC_MINT,
+			tokenMintB: SOL_MINT,
+			tickSpacing: null,
+			feeRate: null,
+			currentTickIndex: null,
+			rewardMints: [],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-open-generic-default-range", {
+			runId: "run-orca-open-generic-default-range",
+			intentType: "solana.lp.orca.open",
+			runMode: "analysis",
+			poolAddress,
+			amountUi: "1",
+			tokenMint: "USDC",
+		});
+
+		expect(runtimeMocks.getOrcaWhirlpoolPool).toHaveBeenCalledWith({
+			poolAddress,
+			network: "devnet",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-orca-open-generic-default-range",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.open",
+						poolAddress,
+						tokenAAmountRaw: "1000000",
+						fullRange: true,
+					},
+				},
+			},
+		});
+	});
+
+	it("requires explicit range prices when Orca open fullRange is false", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-orca-open-no-range-explicit-false", {
+				runId: "run-orca-open-no-range-explicit-false",
+				intentType: "solana.lp.orca.open",
+				runMode: "analysis",
+				poolAddress,
+				tokenAAmountRaw: "1000",
+				fullRange: false,
+			}),
+		).rejects.toThrow("lowerPrice must be a positive number");
 	});
 
 	it("rejects Orca open when raw and UI amount are both provided for tokenA", async () => {
