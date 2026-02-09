@@ -12,6 +12,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	assertJupiterNetworkSupported: vi.fn(),
 	assertRaydiumNetworkSupported: vi.fn(),
 	buildKaminoDepositInstructions: vi.fn(),
+	buildKaminoWithdrawInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
 	buildRaydiumSwapTransactions: vi.fn(),
 	getJupiterApiBaseUrl: vi.fn(() => "https://lite-api.jup.ag"),
@@ -54,6 +55,8 @@ vi.mock("../runtime.js", async () => {
 		assertJupiterNetworkSupported: runtimeMocks.assertJupiterNetworkSupported,
 		assertRaydiumNetworkSupported: runtimeMocks.assertRaydiumNetworkSupported,
 		buildKaminoDepositInstructions: runtimeMocks.buildKaminoDepositInstructions,
+		buildKaminoWithdrawInstructions:
+			runtimeMocks.buildKaminoWithdrawInstructions,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
 		buildRaydiumSwapTransactions: runtimeMocks.buildRaydiumSwapTransactions,
 		getJupiterApiBaseUrl: runtimeMocks.getJupiterApiBaseUrl,
@@ -493,6 +496,163 @@ describe("solana_kaminoDeposit", () => {
 		expect(result.details).toMatchObject({
 			simulated: false,
 			signature: "kamino-sig",
+			confirmed: true,
+		});
+	});
+});
+
+describe("solana_kaminoWithdraw", () => {
+	it("blocks mainnet Kamino withdraw unless confirmMainnet=true", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const tool = getTool("solana_kaminoWithdraw");
+
+		await expect(
+			tool.execute("kamino-withdraw-mainnet-block", {
+				reserveMint: Keypair.generate().publicKey.toBase58(),
+				amountRaw: "1000",
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+		expect(runtimeMocks.buildKaminoWithdrawInstructions).not.toHaveBeenCalled();
+	});
+
+	it("simulates Kamino withdraw without broadcasting", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("devnet");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const reserveMint = Keypair.generate().publicKey.toBase58();
+		const marketAddress = Keypair.generate().publicKey.toBase58();
+		const programId = Keypair.generate().publicKey.toBase58();
+		const reserveAddress = Keypair.generate().publicKey.toBase58();
+		const obligationAddress = Keypair.generate().publicKey.toBase58();
+		const instruction = new TransactionInstruction({
+			programId: Keypair.generate().publicKey,
+			keys: [],
+			data: Buffer.from([8]),
+		});
+		runtimeMocks.buildKaminoWithdrawInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			marketAddress,
+			programId,
+			reserveMint,
+			reserveAddress,
+			reserveSymbol: "USDC",
+			amountRaw: "1000",
+			useV2Ixs: true,
+			includeAtaIxs: true,
+			extraComputeUnits: 1_000_000,
+			requestElevationGroup: false,
+			obligationAddress,
+			instructionCount: 1,
+			setupInstructionCount: 0,
+			lendingInstructionCount: 1,
+			cleanupInstructionCount: 0,
+			setupInstructionLabels: [],
+			lendingInstructionLabels: ["withdraw"],
+			cleanupInstructionLabels: [],
+			instructions: [instruction],
+		});
+		const sendRawTransaction = vi.fn();
+		const simulateTransaction = vi.fn().mockResolvedValue({
+			value: {
+				err: null,
+				logs: ["ok"],
+				unitsConsumed: 124,
+			},
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 9,
+			}),
+			sendRawTransaction,
+			simulateTransaction,
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_kaminoWithdraw");
+		const result = await tool.execute("kamino-withdraw-sim", {
+			fromSecretKey: "mock",
+			reserveMint,
+			amountRaw: "1000",
+			network: "devnet",
+			simulate: true,
+		});
+
+		expect(sendRawTransaction).not.toHaveBeenCalled();
+		expect(simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			simulated: true,
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			reserveMint,
+			obligationAddress,
+		});
+	});
+
+	it("sends Kamino withdraw transaction and confirms by default", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("devnet");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const reserveMint = Keypair.generate().publicKey.toBase58();
+		const instruction = new TransactionInstruction({
+			programId: Keypair.generate().publicKey,
+			keys: [],
+			data: Buffer.from([10]),
+		});
+		runtimeMocks.buildKaminoWithdrawInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			marketAddress: Keypair.generate().publicKey.toBase58(),
+			programId: Keypair.generate().publicKey.toBase58(),
+			reserveMint,
+			reserveAddress: Keypair.generate().publicKey.toBase58(),
+			reserveSymbol: "USDC",
+			amountRaw: "1000",
+			useV2Ixs: true,
+			includeAtaIxs: true,
+			extraComputeUnits: 1_000_000,
+			requestElevationGroup: false,
+			obligationAddress: Keypair.generate().publicKey.toBase58(),
+			instructionCount: 1,
+			setupInstructionCount: 0,
+			lendingInstructionCount: 1,
+			cleanupInstructionCount: 0,
+			setupInstructionLabels: [],
+			lendingInstructionLabels: ["withdraw"],
+			cleanupInstructionLabels: [],
+			instructions: [instruction],
+		});
+		const sendRawTransaction = vi.fn().mockResolvedValue("kamino-withdraw-sig");
+		const confirmTransaction = vi.fn().mockResolvedValue({
+			value: {
+				err: null,
+			},
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 10,
+			}),
+			sendRawTransaction,
+			confirmTransaction,
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_kaminoWithdraw");
+		const result = await tool.execute("kamino-withdraw-exec", {
+			fromSecretKey: "mock",
+			reserveMint,
+			amountRaw: "1000",
+			network: "devnet",
+		});
+
+		expect(sendRawTransaction).toHaveBeenCalledTimes(1);
+		expect(confirmTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			simulated: false,
+			signature: "kamino-withdraw-sig",
 			confirmed: true,
 		});
 	});

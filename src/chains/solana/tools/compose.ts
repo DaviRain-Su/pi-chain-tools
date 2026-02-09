@@ -26,6 +26,7 @@ import {
 	buildJupiterSwapInstructions,
 	buildJupiterSwapTransaction,
 	buildKaminoDepositInstructions,
+	buildKaminoWithdrawInstructions,
 	buildRaydiumSwapTransactions,
 	getConnection,
 	getExplorerAddressUrl,
@@ -1784,6 +1785,159 @@ export function createSolanaComposeTools() {
 						{
 							type: "text",
 							text: "Unsigned Kamino deposit transaction built",
+						},
+					],
+					details: {
+						txBase64,
+						version: asLegacyTransaction ? "legacy" : "v0",
+						network: build.network,
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						ownerAddress: build.ownerAddress,
+						marketAddress: build.marketAddress,
+						programId: build.programId,
+						reserveMint: build.reserveMint,
+						reserveAddress: build.reserveAddress,
+						reserveSymbol: build.reserveSymbol,
+						amountRaw: build.amountRaw,
+						obligationAddress: build.obligationAddress,
+						instructionCount: build.instructionCount,
+						setupInstructionCount: build.setupInstructionCount,
+						lendingInstructionCount: build.lendingInstructionCount,
+						cleanupInstructionCount: build.cleanupInstructionCount,
+						setupInstructionLabels: build.setupInstructionLabels,
+						lendingInstructionLabels: build.lendingInstructionLabels,
+						cleanupInstructionLabels: build.cleanupInstructionLabels,
+						ownerExplorer: getExplorerAddressUrl(
+							build.ownerAddress,
+							params.network,
+						),
+						marketExplorer: getExplorerAddressUrl(
+							build.marketAddress,
+							params.network,
+						),
+						reserveMintExplorer: getExplorerAddressUrl(
+							build.reserveMint,
+							params.network,
+						),
+						obligationExplorer: getExplorerAddressUrl(
+							build.obligationAddress,
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildKaminoWithdrawTransaction`,
+			label: "Solana Build Kamino Withdraw Transaction",
+			description:
+				"Build an unsigned Kamino lending withdraw transaction (legacy or v0, base64)",
+			parameters: Type.Object({
+				ownerAddress: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				reserveMint: Type.String({
+					description: "Liquidity mint to withdraw from Kamino reserve",
+				}),
+				amountRaw: Type.String({
+					description: "Withdraw amount in raw integer base units",
+				}),
+				marketAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional Kamino market address. Defaults to main market on mainnet-beta.",
+					}),
+				),
+				programId: Type.Optional(
+					Type.String({
+						description:
+							"Optional Kamino lending program id. Defaults to official KLend program.",
+					}),
+				),
+				useV2Ixs: Type.Optional(
+					Type.Boolean({
+						description: "Use V2 lending instructions (default true)",
+					}),
+				),
+				includeAtaIxs: Type.Optional(
+					Type.Boolean({
+						description: "Include token ATA setup instructions (default true)",
+					}),
+				),
+				extraComputeUnits: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 2_000_000,
+						description:
+							"Optional compute unit limit for Kamino action (default 1000000)",
+					}),
+				),
+				requestElevationGroup: Type.Optional(
+					Type.Boolean({
+						description:
+							"Request elevation group after withdraw (default false)",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Build legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const ownerAddress = new PublicKey(
+					normalizeAtPath(params.ownerAddress),
+				).toBase58();
+				const reserveMint = new PublicKey(
+					normalizeAtPath(params.reserveMint),
+				).toBase58();
+				const connection = getConnection(params.network);
+				const build = await buildKaminoWithdrawInstructions({
+					ownerAddress,
+					reserveMint,
+					amountRaw: params.amountRaw,
+					marketAddress: params.marketAddress,
+					programId: params.programId,
+					useV2Ixs: params.useV2Ixs,
+					includeAtaIxs: params.includeAtaIxs,
+					extraComputeUnits: params.extraComputeUnits,
+					requestElevationGroup: params.requestElevationGroup,
+					network: params.network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? createLegacyTransaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						)
+					: createV0Transaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						);
+				const feeResult = await connection.getFeeForMessage(
+					tx instanceof VersionedTransaction ? tx.message : tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 =
+					tx instanceof VersionedTransaction
+						? Buffer.from(tx.serialize()).toString("base64")
+						: tx
+								.serialize({
+									requireAllSignatures: false,
+									verifySignatures: false,
+								})
+								.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned Kamino withdraw transaction built",
 						},
 					],
 					details: {

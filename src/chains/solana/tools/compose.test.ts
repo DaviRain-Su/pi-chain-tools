@@ -10,6 +10,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	assertJupiterNetworkSupported: vi.fn(),
 	assertRaydiumNetworkSupported: vi.fn(),
 	buildKaminoDepositInstructions: vi.fn(),
+	buildKaminoWithdrawInstructions: vi.fn(),
 	buildJupiterSwapInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
 	buildRaydiumSwapTransactions: vi.fn(),
@@ -47,6 +48,8 @@ vi.mock("../runtime.js", async () => {
 		assertJupiterNetworkSupported: runtimeMocks.assertJupiterNetworkSupported,
 		assertRaydiumNetworkSupported: runtimeMocks.assertRaydiumNetworkSupported,
 		buildKaminoDepositInstructions: runtimeMocks.buildKaminoDepositInstructions,
+		buildKaminoWithdrawInstructions:
+			runtimeMocks.buildKaminoWithdrawInstructions,
 		buildJupiterSwapInstructions: runtimeMocks.buildJupiterSwapInstructions,
 		buildJupiterSwapTransaction: runtimeMocks.buildJupiterSwapTransaction,
 		buildRaydiumSwapTransactions: runtimeMocks.buildRaydiumSwapTransactions,
@@ -424,6 +427,80 @@ describe("compose tools", () => {
 			obligationAddress,
 			instructionCount: 1,
 			feeLamports: 7777,
+		});
+	});
+
+	it("builds Kamino withdraw transaction and returns instruction metadata", async () => {
+		const ownerAddress = Keypair.generate().publicKey.toBase58();
+		const reserveMint = Keypair.generate().publicKey.toBase58();
+		const marketAddress = Keypair.generate().publicKey.toBase58();
+		const programId = Keypair.generate().publicKey.toBase58();
+		const reserveAddress = Keypair.generate().publicKey.toBase58();
+		const obligationAddress = Keypair.generate().publicKey.toBase58();
+		const instruction = new TransactionInstruction({
+			programId: Keypair.generate().publicKey,
+			keys: [],
+			data: Buffer.from([4, 5, 6]),
+		});
+		runtimeMocks.buildKaminoWithdrawInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress,
+			marketAddress,
+			programId,
+			reserveMint,
+			reserveAddress,
+			reserveSymbol: "USDC",
+			amountRaw: "2000",
+			useV2Ixs: true,
+			includeAtaIxs: true,
+			extraComputeUnits: 1_000_000,
+			requestElevationGroup: false,
+			obligationAddress,
+			instructionCount: 1,
+			setupInstructionCount: 0,
+			lendingInstructionCount: 1,
+			cleanupInstructionCount: 0,
+			setupInstructionLabels: [],
+			lendingInstructionLabels: ["withdraw"],
+			cleanupInstructionLabels: [],
+			instructions: [instruction],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 34,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 8888 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_buildKaminoWithdrawTransaction");
+		const result = await tool.execute("compose-kamino-withdraw", {
+			ownerAddress,
+			reserveMint,
+			amountRaw: "2000",
+			network: "devnet",
+			asLegacyTransaction: true,
+		});
+
+		expect(runtimeMocks.buildKaminoWithdrawInstructions).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress,
+				reserveMint,
+				amountRaw: "2000",
+				network: "devnet",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			version: "legacy",
+			ownerAddress,
+			marketAddress,
+			programId,
+			reserveMint,
+			reserveAddress,
+			obligationAddress,
+			instructionCount: 1,
+			feeLamports: 8888,
 		});
 	});
 
