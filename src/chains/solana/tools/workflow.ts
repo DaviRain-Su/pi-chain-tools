@@ -2186,6 +2186,43 @@ function parseMeteoraLiquidityIntentText(
 		parsed.totalYAmountUi = parsed.totalYAmountUi ?? yAmountWithTokenMatch[1];
 		parsed.tokenYMint = parsed.tokenYMint ?? yAmountWithTokenMint;
 	}
+	const genericTokenMintMatch = intentText.match(
+		/\btokenMint\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
+	);
+	if (genericTokenMintMatch?.[1]) {
+		const tokenMint = parseMintOrSymbolCandidate(genericTokenMintMatch[1]);
+		if (tokenMint) {
+			parsed.tokenMint = tokenMint;
+		}
+	}
+	const hasMeteoraSideAmountInput =
+		parsed.totalXAmountRaw !== undefined ||
+		parsed.totalYAmountRaw !== undefined ||
+		parsed.totalXAmountUi !== undefined ||
+		parsed.totalYAmountUi !== undefined;
+	if (
+		parsed.intentType === "solana.lp.meteora.add" &&
+		!hasMeteoraSideAmountInput
+	) {
+		const genericAmountWithTokenMatch = intentText.match(
+			/\b(?:amountUi|amount)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9._-]{1,15}|[1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+		);
+		const genericAmountWithTokenMint = genericAmountWithTokenMatch?.[2]
+			? parseMintOrKnownSymbolCandidate(genericAmountWithTokenMatch[2])
+			: undefined;
+		if (genericAmountWithTokenMatch?.[1]) {
+			parsed.amountUi = parsed.amountUi ?? genericAmountWithTokenMatch[1];
+			if (genericAmountWithTokenMint) {
+				parsed.tokenMint = parsed.tokenMint ?? genericAmountWithTokenMint;
+			}
+		}
+		const genericAmountUiMatch = intentText.match(
+			/\b(?:amountUi|amount)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+		);
+		if (genericAmountUiMatch?.[1]) {
+			parsed.amountUi = parsed.amountUi ?? genericAmountUiMatch[1];
+		}
+	}
 	const minBinIdMatch = intentText.match(/\bminBinId\s*[=:]?\s*(-?[0-9]+)\b/i);
 	if (minBinIdMatch?.[1]) {
 		const minBinId = Number.parseInt(minBinIdMatch[1], 10);
@@ -3172,6 +3209,8 @@ function resolveIntentType(
 			typeof params.totalYAmountRaw === "string" ||
 			typeof params.totalXAmountUi === "string" ||
 			typeof params.totalYAmountUi === "string" ||
+			typeof params.amountUi === "string" ||
+			typeof params.amountRaw === "string" ||
 			METEORA_ADD_LIQUIDITY_KEYWORD_REGEX.test(intentText)
 		) {
 			return "solana.lp.meteora.add";
@@ -4696,7 +4735,7 @@ async function normalizeIntent(
 		});
 		const poolAddress = resolvedMeteoraPosition.poolAddress;
 		const positionAddress = resolvedMeteoraPosition.positionAddress;
-		const totalXAmountRawInput =
+		let totalXAmountRawInput =
 			typeof normalizedParams.totalXAmountRaw === "string" &&
 			normalizedParams.totalXAmountRaw.trim().length > 0
 				? parseNonNegativeRawAmount(
@@ -4704,7 +4743,7 @@ async function normalizeIntent(
 						"totalXAmountRaw",
 					)
 				: undefined;
-		const totalYAmountRawInput =
+		let totalYAmountRawInput =
 			typeof normalizedParams.totalYAmountRaw === "string" &&
 			normalizedParams.totalYAmountRaw.trim().length > 0
 				? parseNonNegativeRawAmount(
@@ -4712,16 +4751,28 @@ async function normalizeIntent(
 						"totalYAmountRaw",
 					)
 				: undefined;
-		const totalXAmountUi =
+		let totalXAmountUi =
 			typeof normalizedParams.totalXAmountUi === "string" &&
 			normalizedParams.totalXAmountUi.trim().length > 0
 				? normalizedParams.totalXAmountUi.trim()
 				: undefined;
-		const totalYAmountUi =
+		let totalYAmountUi =
 			typeof normalizedParams.totalYAmountUi === "string" &&
 			normalizedParams.totalYAmountUi.trim().length > 0
 				? normalizedParams.totalYAmountUi.trim()
 				: undefined;
+		const genericAmountRawInput =
+			typeof normalizedParams.amountRaw === "string" &&
+			normalizedParams.amountRaw.trim().length > 0
+				? parseNonNegativeRawAmount(normalizedParams.amountRaw, "amountRaw")
+				: undefined;
+		const genericAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.amountUi,
+			"amountUi",
+		);
+		if (genericAmountRawInput !== undefined && genericAmountUi !== undefined) {
+			throw new Error("Provide either amountRaw or amountUi, not both");
+		}
 		if (totalXAmountRawInput !== undefined && totalXAmountUi !== undefined) {
 			throw new Error(
 				"Provide either totalXAmountRaw or totalXAmountUi, not both",
@@ -4730,6 +4781,29 @@ async function normalizeIntent(
 		if (totalYAmountRawInput !== undefined && totalYAmountUi !== undefined) {
 			throw new Error(
 				"Provide either totalYAmountRaw or totalYAmountUi, not both",
+			);
+		}
+		const hasSideAmountInput =
+			totalXAmountRawInput !== undefined ||
+			totalYAmountRawInput !== undefined ||
+			totalXAmountUi !== undefined ||
+			totalYAmountUi !== undefined;
+		const hasGenericAmountInput =
+			genericAmountRawInput !== undefined || genericAmountUi !== undefined;
+		if (hasGenericAmountInput && hasSideAmountInput) {
+			throw new Error(
+				"Provide either amountUi/tokenMint (or amountRaw/tokenMint) or side-specific totalX/totalY amount fields, not both",
+			);
+		}
+		const genericTokenMint =
+			hasGenericAmountInput &&
+			typeof normalizedParams.tokenMint === "string" &&
+			normalizedParams.tokenMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenMint, "tokenMint")
+				: undefined;
+		if (hasGenericAmountInput && !genericTokenMint) {
+			throw new Error(
+				"tokenMint is required when amountUi or amountRaw is provided for intentType=solana.lp.meteora.add",
 			);
 		}
 		let tokenXMint =
@@ -4743,8 +4817,13 @@ async function normalizeIntent(
 				? await ensureMint(normalizedParams.tokenYMint, "tokenYMint")
 				: resolvedMeteoraPosition.tokenYMint;
 		const hasUiAmounts =
-			totalXAmountUi !== undefined || totalYAmountUi !== undefined;
-		if (hasUiAmounts && (!tokenXMint || !tokenYMint)) {
+			totalXAmountUi !== undefined ||
+			totalYAmountUi !== undefined ||
+			genericAmountUi !== undefined;
+		if (
+			(hasUiAmounts || hasGenericAmountInput) &&
+			(!tokenXMint || !tokenYMint)
+		) {
 			const resolvedPoolMints = await resolveMeteoraPoolTokenMintsForAdd({
 				network,
 				ownerAddress,
@@ -4753,9 +4832,44 @@ async function normalizeIntent(
 			tokenXMint = tokenXMint ?? resolvedPoolMints.tokenXMint;
 			tokenYMint = tokenYMint ?? resolvedPoolMints.tokenYMint;
 		}
+		if (hasGenericAmountInput) {
+			const resolvedTokenXMint = ensureString(tokenXMint, "tokenXMint");
+			const resolvedTokenYMint = ensureString(tokenYMint, "tokenYMint");
+			if (genericTokenMint === resolvedTokenXMint) {
+				if (genericAmountUi !== undefined) {
+					totalXAmountUi = genericAmountUi;
+				} else {
+					totalXAmountRawInput = genericAmountRawInput;
+					if (
+						totalYAmountRawInput === undefined &&
+						totalYAmountUi === undefined
+					) {
+						totalYAmountRawInput = "0";
+					}
+				}
+			} else if (genericTokenMint === resolvedTokenYMint) {
+				if (genericAmountUi !== undefined) {
+					totalYAmountUi = genericAmountUi;
+				} else {
+					totalYAmountRawInput = genericAmountRawInput;
+					if (
+						totalXAmountRawInput === undefined &&
+						totalXAmountUi === undefined
+					) {
+						totalXAmountRawInput = "0";
+					}
+				}
+			} else {
+				throw new Error(
+					`tokenMint mismatch for poolAddress=${poolAddress}: expected ${resolvedTokenXMint} or ${resolvedTokenYMint}, got ${genericTokenMint}`,
+				);
+			}
+		}
+		const hasUiAmountsAfterMapping =
+			totalXAmountUi !== undefined || totalYAmountUi !== undefined;
 		let totalXAmountRaw: string;
 		let totalYAmountRaw: string;
-		if (hasUiAmounts) {
+		if (hasUiAmountsAfterMapping) {
 			totalXAmountRaw =
 				totalXAmountRawInput ??
 				(totalXAmountUi !== undefined
@@ -4781,14 +4895,18 @@ async function normalizeIntent(
 						)
 					: "0");
 		} else {
-			totalXAmountRaw = parseNonNegativeRawAmount(
-				normalizedParams.totalXAmountRaw,
-				"totalXAmountRaw",
-			);
-			totalYAmountRaw = parseNonNegativeRawAmount(
-				normalizedParams.totalYAmountRaw,
-				"totalYAmountRaw",
-			);
+			totalXAmountRaw =
+				totalXAmountRawInput ??
+				parseNonNegativeRawAmount(
+					normalizedParams.totalXAmountRaw,
+					"totalXAmountRaw",
+				);
+			totalYAmountRaw =
+				totalYAmountRawInput ??
+				parseNonNegativeRawAmount(
+					normalizedParams.totalYAmountRaw,
+					"totalYAmountRaw",
+				);
 		}
 		if (totalXAmountRaw === "0" && totalYAmountRaw === "0") {
 			throw new Error(
@@ -7762,7 +7880,7 @@ export function createSolanaWorkflowTools() {
 				tokenMint: Type.Optional(
 					Type.String({
 						description:
-							"Token mint for intentType=solana.transfer.spl, and optional side selector for intentType=solana.lp.orca.increase / solana.lp.orca.decrease when using amountUi.",
+							"Token mint for intentType=solana.transfer.spl, and optional side selector for intentType=solana.lp.orca.increase / solana.lp.orca.decrease / solana.lp.meteora.add when using amountUi.",
 					}),
 				),
 				tokenAMint: Type.Optional(
@@ -8038,7 +8156,7 @@ export function createSolanaWorkflowTools() {
 				amountUi: Type.Optional(
 					Type.String({
 						description:
-							"Optional human-readable token amount for swaps, SPL transfers, Kamino lending actions, and Orca increase/decrease with tokenMint side selection (for known mints like SOL/USDC/USDT).",
+							"Optional human-readable token amount for swaps, SPL transfers, Kamino lending actions, and Orca/Meteora LP side-selected inputs via tokenMint (for known mints like SOL/USDC/USDT).",
 					}),
 				),
 				depositAmountUi: Type.Optional(

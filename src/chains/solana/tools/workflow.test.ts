@@ -4232,6 +4232,74 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Meteora add intentText with generic amount token shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -10,
+							upperBinId: 20,
+							totalXAmountRaw: "0",
+							totalYAmountRaw: "0",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-add-generic-intent", {
+			runId: "run-meteora-add-generic-intent",
+			runMode: "analysis",
+			intentText: "meteora add liquidity amount 1.5 USDC",
+		});
+
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-add-generic-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.add",
+						poolAddress,
+						positionAddress,
+						totalXAmountRaw: "1500000",
+						totalYAmountRaw: "0",
+					},
+				},
+			},
+		});
+	});
+
 	it("simulates Meteora add-liquidity workflow intent", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -4443,6 +4511,129 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("resolves Meteora add generic amountUi/tokenMint via pool token mints", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -10,
+							upperBinId: 20,
+							totalXAmountRaw: "0",
+							totalYAmountRaw: "0",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		runtimeMocks.buildMeteoraAddLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			poolAddress,
+			positionAddress,
+			totalXAmountRaw: "0",
+			totalYAmountRaw: "10000000",
+			minBinId: -10,
+			maxBinId: 20,
+			strategyType: "Spot",
+			singleSidedX: false,
+			slippageBps: 100,
+			activeBinId: 0,
+			instructionCount: 1,
+			transactionCount: 1,
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([17]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 93,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 338,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-add-generic-ui-sim", {
+			runId: "run-meteora-add-generic-ui-sim",
+			intentType: "solana.lp.meteora.add",
+			runMode: "simulate",
+			poolAddress,
+			positionAddress,
+			amountUi: "0.01",
+			tokenMint: "SOL",
+		});
+
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+		});
+		expect(
+			runtimeMocks.buildMeteoraAddLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				poolAddress,
+				positionAddress,
+				totalXAmountRaw: "0",
+				totalYAmountRaw: "10000000",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-add-generic-ui-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.add",
+						poolAddress,
+						positionAddress,
+						totalXAmountRaw: "0",
+						totalYAmountRaw: "10000000",
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
+		});
+	});
+
 	it("rejects Meteora add when raw and UI amount are both provided for the same side", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -4463,6 +4654,51 @@ describe("w3rt_run_workflow_v0", () => {
 			}),
 		).rejects.toThrow(
 			"Provide either totalXAmountRaw or totalXAmountUi, not both",
+		);
+	});
+
+	it("rejects Meteora add generic amountUi when tokenMint is missing", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-meteora-add-generic-missing-mint", {
+				runId: "run-meteora-add-generic-missing-mint",
+				intentType: "solana.lp.meteora.add",
+				runMode: "analysis",
+				poolAddress,
+				positionAddress,
+				amountUi: "1",
+			}),
+		).rejects.toThrow(
+			"tokenMint is required when amountUi or amountRaw is provided for intentType=solana.lp.meteora.add",
+		);
+	});
+
+	it("rejects Meteora add when generic and side-specific amount fields are mixed", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		await expect(
+			tool.execute("wf-meteora-add-generic-conflict", {
+				runId: "run-meteora-add-generic-conflict",
+				intentType: "solana.lp.meteora.add",
+				runMode: "analysis",
+				poolAddress,
+				positionAddress,
+				tokenMint: "USDC",
+				amountUi: "1",
+				totalXAmountRaw: "1000000",
+				totalYAmountRaw: "0",
+			}),
+		).rejects.toThrow(
+			"Provide either amountUi/tokenMint (or amountRaw/tokenMint) or side-specific totalX/totalY amount fields, not both",
 		);
 	});
 
