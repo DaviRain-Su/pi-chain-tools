@@ -3466,6 +3466,34 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Orca open intentText with integer token amount shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-open-int-ui-intent", {
+			runId: "run-orca-open-int-ui-intent",
+			runMode: "analysis",
+			intentText: `open orca position pool ${poolAddress} tokenA 1 USDC full range`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-orca-open-int-ui-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.open",
+						poolAddress,
+						tokenAAmountRaw: "1000000",
+						fullRange: true,
+					},
+				},
+			},
+		});
+	});
+
 	it("parses Orca open intentText with generic amount token shorthand", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -3951,6 +3979,50 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Orca increase intentText with integer token amount shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			bundleCount: 0,
+			poolCount: 1,
+			whirlpoolAddresses: [Keypair.generate().publicKey.toBase58()],
+			positions: [
+				{
+					positionMint,
+					tokenMintA: USDC_MINT,
+					tokenMintB: SOL_MINT,
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-increase-int-ui-intent", {
+			runId: "run-orca-increase-int-ui-intent",
+			runMode: "analysis",
+			intentText: `orca increase liquidity position ${positionMint} tokenB 1 SOL`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-orca-increase-int-ui-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.increase",
+						positionMint,
+						tokenBAmountRaw: "1000000000",
+					},
+				},
+			},
+		});
+	});
+
 	it("rejects Orca increase generic amountUi when tokenMint is missing", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -4105,6 +4177,50 @@ describe("w3rt_run_workflow_v0", () => {
 						type: "solana.lp.orca.decrease",
 						positionMint,
 						tokenBAmountRaw: "10000000",
+					},
+				},
+			},
+		});
+	});
+
+	it("parses Orca decrease intentText with integer token amount shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			bundleCount: 0,
+			poolCount: 1,
+			whirlpoolAddresses: [Keypair.generate().publicKey.toBase58()],
+			positions: [
+				{
+					positionMint,
+					tokenMintA: USDC_MINT,
+					tokenMintB: SOL_MINT,
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-decrease-int-ui-intent", {
+			runId: "run-orca-decrease-int-ui-intent",
+			runMode: "analysis",
+			intentText: `orca decrease liquidity position ${positionMint} tokenA 1 USDC`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-orca-decrease-int-ui-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.decrease",
+						positionMint,
+						tokenAAmountRaw: "1000000",
 					},
 				},
 			},

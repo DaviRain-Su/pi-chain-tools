@@ -1940,6 +1940,9 @@ function parseOrcaLiquidityIntentText(
 		parsed.tokenAAmountUi =
 			parsed.tokenAAmountUi ?? tokenAAmountWithTokenMatch[1];
 		parsed.tokenAMint = parsed.tokenAMint ?? tokenAAmountWithTokenMint;
+		if (parsed.tokenAAmountRaw === tokenAAmountWithTokenMatch[1]) {
+			parsed.tokenAAmountRaw = undefined;
+		}
 	}
 	const tokenBAmountWithTokenMatch = intentText.match(
 		/\b(?:tokenB|amountB|bAmount|b)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9._-]{1,15}|[1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
@@ -1951,6 +1954,9 @@ function parseOrcaLiquidityIntentText(
 		parsed.tokenBAmountUi =
 			parsed.tokenBAmountUi ?? tokenBAmountWithTokenMatch[1];
 		parsed.tokenBMint = parsed.tokenBMint ?? tokenBAmountWithTokenMint;
+		if (parsed.tokenBAmountRaw === tokenBAmountWithTokenMatch[1]) {
+			parsed.tokenBAmountRaw = undefined;
+		}
 	}
 	const genericTokenMintMatch = intentText.match(
 		/\btokenMint\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
