@@ -19,6 +19,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	buildMeteoraRemoveLiquidityInstructions: vi.fn(),
 	buildOrcaClosePositionInstructions: vi.fn(),
 	buildOrcaDecreaseLiquidityInstructions: vi.fn(),
+	buildOrcaHarvestPositionInstructions: vi.fn(),
 	buildOrcaIncreaseLiquidityInstructions: vi.fn(),
 	buildOrcaOpenPositionInstructions: vi.fn(),
 	buildJupiterSwapInstructions: vi.fn(),
@@ -74,6 +75,8 @@ vi.mock("../runtime.js", async () => {
 			runtimeMocks.buildOrcaClosePositionInstructions,
 		buildOrcaDecreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
+		buildOrcaHarvestPositionInstructions:
+			runtimeMocks.buildOrcaHarvestPositionInstructions,
 		buildOrcaIncreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaIncreaseLiquidityInstructions,
 		buildOrcaOpenPositionInstructions:
@@ -1290,6 +1293,58 @@ describe("compose tools", () => {
 			ownerAddress,
 			positionMint,
 			slippageBps: 80,
+		});
+	});
+
+	it("builds Orca harvest-position transaction", async () => {
+		const ownerAddress = Keypair.generate().publicKey.toBase58();
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 59,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 5000 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		runtimeMocks.buildOrcaHarvestPositionInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress,
+			positionMint,
+			instructionCount: 1,
+			feesQuote: { feeOwedA: "1", feeOwedB: "2" },
+			rewardsQuote: { rewards: [{ index: 0, amount: "3" }] },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([14]),
+				}),
+			],
+		});
+
+		const tool = getTool("solana_buildOrcaHarvestPositionTransaction");
+		const result = await tool.execute("compose-orca-harvest", {
+			ownerAddress,
+			positionMint,
+			asLegacyTransaction: false,
+			network: "devnet",
+		});
+
+		expect(
+			runtimeMocks.buildOrcaHarvestPositionInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress,
+				positionMint,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			version: "v0",
+			ownerAddress,
+			positionMint,
+			instructionCount: 1,
+			feesQuote: { feeOwedA: "1", feeOwedB: "2" },
 		});
 	});
 

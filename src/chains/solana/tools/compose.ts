@@ -35,6 +35,7 @@ import {
 	buildMeteoraRemoveLiquidityInstructions,
 	buildOrcaClosePositionInstructions,
 	buildOrcaDecreaseLiquidityInstructions,
+	buildOrcaHarvestPositionInstructions,
 	buildOrcaIncreaseLiquidityInstructions,
 	buildOrcaOpenPositionInstructions,
 	buildRaydiumSwapTransactions,
@@ -2163,6 +2164,95 @@ export function createSolanaComposeTools() {
 						slippageBps: build.slippageBps,
 						instructionCount: build.instructionCount,
 						quote: build.quote,
+						feesQuote: build.feesQuote,
+						rewardsQuote: build.rewardsQuote,
+						ownerExplorer: getExplorerAddressUrl(
+							build.ownerAddress,
+							params.network,
+						),
+						positionMintExplorer: getExplorerAddressUrl(
+							build.positionMint,
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildOrcaHarvestPositionTransaction`,
+			label: "Solana Build Orca Harvest Position Transaction",
+			description:
+				"Build an unsigned Orca Whirlpool harvest-position transaction (legacy or v0, base64)",
+			parameters: Type.Object({
+				ownerAddress: Type.String({
+					description: "Wallet public key (fee payer / signer)",
+				}),
+				positionMint: Type.String({
+					description: "Orca position mint address",
+				}),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Build legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const ownerAddress = new PublicKey(
+					normalizeAtPath(params.ownerAddress),
+				).toBase58();
+				const positionMint = new PublicKey(
+					normalizeAtPath(params.positionMint),
+				).toBase58();
+				const connection = getConnection(params.network);
+				const build = await buildOrcaHarvestPositionInstructions({
+					ownerAddress,
+					positionMint,
+					network: params.network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? createLegacyTransaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						)
+					: createV0Transaction(
+							new PublicKey(ownerAddress),
+							build.instructions,
+							latestBlockhash,
+						);
+				const feeResult = await connection.getFeeForMessage(
+					tx instanceof VersionedTransaction ? tx.message : tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 =
+					tx instanceof VersionedTransaction
+						? Buffer.from(tx.serialize()).toString("base64")
+						: tx
+								.serialize({
+									requireAllSignatures: false,
+									verifySignatures: false,
+								})
+								.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned Orca harvest-position transaction built",
+						},
+					],
+					details: {
+						txBase64,
+						version: asLegacyTransaction ? "legacy" : "v0",
+						network: build.network,
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						ownerAddress: build.ownerAddress,
+						positionMint: build.positionMint,
+						instructionCount: build.instructionCount,
 						feesQuote: build.feesQuote,
 						rewardsQuote: build.rewardsQuote,
 						ownerExplorer: getExplorerAddressUrl(

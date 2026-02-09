@@ -35,6 +35,7 @@ import {
 	buildMeteoraRemoveLiquidityInstructions,
 	buildOrcaClosePositionInstructions,
 	buildOrcaDecreaseLiquidityInstructions,
+	buildOrcaHarvestPositionInstructions,
 	buildOrcaIncreaseLiquidityInstructions,
 	buildOrcaOpenPositionInstructions,
 	buildRaydiumSwapTransactions,
@@ -2365,6 +2366,187 @@ export function createSolanaExecuteTools() {
 						slippageBps: build.slippageBps,
 						instructionCount: build.instructionCount,
 						quote: build.quote,
+						feesQuote: build.feesQuote,
+						rewardsQuote: build.rewardsQuote,
+						explorer: getExplorerTransactionUrl(signature, network),
+						signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+						positionMintExplorer: getExplorerAddressUrl(
+							build.positionMint,
+							network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}orcaHarvestPosition`,
+			label: "Solana Orca Harvest Position",
+			description:
+				"Execute an Orca Whirlpool harvest-position action with local/private key signer",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				ownerAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional signer pubkey assertion. If set, must match derived key from fromSecretKey.",
+					}),
+				),
+				positionMint: Type.String({
+					description: "Orca position mint address",
+				}),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Use legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, sign and simulate only (no broadcast)",
+					}),
+				),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet Orca harvest-position requires confirmMainnet=true",
+					);
+				}
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const signerPublicKey = signer.publicKey.toBase58();
+				if (params.ownerAddress) {
+					const asserted = new PublicKey(
+						normalizeAtPath(params.ownerAddress),
+					).toBase58();
+					if (asserted !== signerPublicKey) {
+						throw new Error(
+							`ownerAddress mismatch: expected ${signerPublicKey}, got ${asserted}`,
+						);
+					}
+				}
+				const positionMint = new PublicKey(
+					normalizeAtPath(params.positionMint),
+				).toBase58();
+				const build = await buildOrcaHarvestPositionInstructions({
+					ownerAddress: signerPublicKey,
+					positionMint,
+					network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? new Transaction().add(...build.instructions)
+					: new VersionedTransaction(
+							new TransactionMessage({
+								payerKey: signer.publicKey,
+								recentBlockhash: latestBlockhash.blockhash,
+								instructions: build.instructions,
+							}).compileToV0Message(),
+						);
+
+				let version: "legacy" | "v0" = "legacy";
+				if (tx instanceof VersionedTransaction) {
+					tx.sign([signer]);
+					version = "v0";
+				} else {
+					tx.feePayer = signer.publicKey;
+					tx.recentBlockhash = latestBlockhash.blockhash;
+					tx.partialSign(signer);
+				}
+
+				const commitment = parseFinality(params.commitment);
+				if (params.simulate === true) {
+					const simulation =
+						tx instanceof VersionedTransaction
+							? await connection.simulateTransaction(tx, {
+									sigVerify: true,
+									replaceRecentBlockhash: false,
+									commitment,
+								})
+							: await connection.simulateTransaction(tx);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Orca harvest-position simulation ${simulation.value.err ? "failed" : "succeeded"}`,
+							},
+						],
+						details: {
+							simulated: true,
+							version,
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+							network,
+							signer: signerPublicKey,
+							ownerAddress: build.ownerAddress,
+							positionMint: build.positionMint,
+							instructionCount: build.instructionCount,
+							feesQuote: build.feesQuote,
+							rewardsQuote: build.rewardsQuote,
+							signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+							positionMintExplorer: getExplorerAddressUrl(
+								build.positionMint,
+								network,
+							),
+						},
+					};
+				}
+
+				const signature = await connection.sendRawTransaction(tx.serialize(), {
+					skipPreflight: params.skipPreflight === true,
+					maxRetries: params.maxRetries,
+				});
+				let confirmationErr: unknown = null;
+				if (params.confirm !== false) {
+					const confirmation = await connection.confirmTransaction(
+						signature,
+						commitment,
+					);
+					confirmationErr = confirmation.value.err;
+				}
+				if (confirmationErr) {
+					throw new Error(
+						`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+					);
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Orca harvest-position sent: ${signature}`,
+						},
+					],
+					details: {
+						simulated: false,
+						signature,
+						confirmed: params.confirm !== false,
+						version,
+						network,
+						signer: signerPublicKey,
+						ownerAddress: build.ownerAddress,
+						positionMint: build.positionMint,
+						instructionCount: build.instructionCount,
 						feesQuote: build.feesQuote,
 						rewardsQuote: build.rewardsQuote,
 						explorer: getExplorerTransactionUrl(signature, network),

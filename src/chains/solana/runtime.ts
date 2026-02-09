@@ -17,6 +17,7 @@ import {
 	closePositionInstructions,
 	decreaseLiquidityInstructions,
 	fetchPositionsForOwner,
+	harvestPositionInstructions,
 	increaseLiquidityInstructions,
 	openFullRangePositionInstructions,
 	openPositionInstructions,
@@ -1664,6 +1665,42 @@ export async function buildOrcaClosePositionInstructions(
 	};
 }
 
+export async function buildOrcaHarvestPositionInstructions(
+	request: OrcaHarvestPositionInstructionsRequest,
+): Promise<OrcaHarvestPositionInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const positionMint = new PublicKey(
+		normalizeAtPath(request.positionMint),
+	).toBase58();
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+	const result = await harvestPositionInstructions(
+		rpc as never,
+		address(positionMint),
+		createNoopSigner(address(ownerAddress)),
+	);
+	const instructions = result.instructions.map(convertKitInstructionToLegacy);
+	const normalizedFeesQuote = normalizeBigIntFields(result.feesQuote);
+	const normalizedRewardsQuote = normalizeBigIntFields(result.rewardsQuote);
+	return {
+		network,
+		ownerAddress,
+		positionMint,
+		instructionCount: instructions.length,
+		feesQuote:
+			normalizedFeesQuote && typeof normalizedFeesQuote === "object"
+				? (normalizedFeesQuote as Record<string, unknown>)
+				: {},
+		rewardsQuote:
+			normalizedRewardsQuote && typeof normalizedRewardsQuote === "object"
+				? (normalizedRewardsQuote as Record<string, unknown>)
+				: {},
+		instructions,
+	};
+}
+
 export async function buildMeteoraAddLiquidityInstructions(
 	request: MeteoraAddLiquidityInstructionsRequest,
 ): Promise<MeteoraAddLiquidityInstructionsResult> {
@@ -2195,6 +2232,22 @@ export type OrcaClosePositionInstructionsResult = {
 	slippageBps: number;
 	instructionCount: number;
 	quote: Record<string, unknown>;
+	feesQuote: Record<string, unknown>;
+	rewardsQuote: Record<string, unknown>;
+	instructions: TransactionInstruction[];
+};
+
+export type OrcaHarvestPositionInstructionsRequest = {
+	ownerAddress: string;
+	positionMint: string;
+	network?: string;
+};
+
+export type OrcaHarvestPositionInstructionsResult = {
+	network: SolanaNetwork;
+	ownerAddress: string;
+	positionMint: string;
+	instructionCount: number;
 	feesQuote: Record<string, unknown>;
 	rewardsQuote: Record<string, unknown>;
 	instructions: TransactionInstruction[];

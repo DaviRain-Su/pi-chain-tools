@@ -21,6 +21,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	buildMeteoraRemoveLiquidityInstructions: vi.fn(),
 	buildOrcaClosePositionInstructions: vi.fn(),
 	buildOrcaDecreaseLiquidityInstructions: vi.fn(),
+	buildOrcaHarvestPositionInstructions: vi.fn(),
 	buildOrcaIncreaseLiquidityInstructions: vi.fn(),
 	buildOrcaOpenPositionInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
@@ -81,6 +82,8 @@ vi.mock("../runtime.js", async () => {
 			runtimeMocks.buildOrcaClosePositionInstructions,
 		buildOrcaDecreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
+		buildOrcaHarvestPositionInstructions:
+			runtimeMocks.buildOrcaHarvestPositionInstructions,
 		buildOrcaIncreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaIncreaseLiquidityInstructions,
 		buildOrcaOpenPositionInstructions:
@@ -2220,6 +2223,68 @@ describe("native stake execute tools", () => {
 			positionMint,
 			quoteParamKind: "liquidity",
 			quoteParamAmountRaw: "10",
+		});
+	});
+
+	it("simulates Orca harvest-position transaction", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("devnet");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.buildOrcaHarvestPositionInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			positionMint,
+			instructionCount: 1,
+			feesQuote: { feeOwedA: "4", feeOwedB: "5" },
+			rewardsQuote: { rewards: [{ index: 0, amount: "6" }] },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([15]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 996,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 336,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_orcaHarvestPosition");
+		const result = await tool.execute("orca-harvest-sim", {
+			fromSecretKey: "mock",
+			positionMint,
+			simulate: true,
+			network: "devnet",
+		});
+
+		expect(
+			runtimeMocks.buildOrcaHarvestPositionInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				positionMint,
+			}),
+		);
+		expect(connection.simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			simulated: true,
+			version: "legacy",
+			ownerAddress: signer.publicKey.toBase58(),
+			positionMint,
+			instructionCount: 1,
+			feesQuote: { feeOwedA: "4", feeOwedB: "5" },
 		});
 	});
 

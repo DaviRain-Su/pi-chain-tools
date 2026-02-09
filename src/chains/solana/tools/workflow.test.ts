@@ -19,6 +19,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	buildMeteoraRemoveLiquidityInstructions: vi.fn(),
 	buildOrcaClosePositionInstructions: vi.fn(),
 	buildOrcaDecreaseLiquidityInstructions: vi.fn(),
+	buildOrcaHarvestPositionInstructions: vi.fn(),
 	buildOrcaIncreaseLiquidityInstructions: vi.fn(),
 	buildOrcaOpenPositionInstructions: vi.fn(),
 	buildJupiterSwapTransaction: vi.fn(),
@@ -84,6 +85,8 @@ vi.mock("../runtime.js", async () => {
 			runtimeMocks.buildOrcaClosePositionInstructions,
 		buildOrcaDecreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaDecreaseLiquidityInstructions,
+		buildOrcaHarvestPositionInstructions:
+			runtimeMocks.buildOrcaHarvestPositionInstructions,
 		buildOrcaIncreaseLiquidityInstructions:
 			runtimeMocks.buildOrcaIncreaseLiquidityInstructions,
 		buildOrcaOpenPositionInstructions:
@@ -3558,6 +3561,99 @@ describe("w3rt_run_workflow_v0", () => {
 				analysis: {
 					intent: {
 						type: "solana.lp.orca.close",
+						positionMint,
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
+		});
+	});
+
+	it("parses Orca harvest intentText with position shorthand", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-harvest-intent", {
+			runId: "run-orca-harvest-intent",
+			runMode: "analysis",
+			intentText: `orca harvest fees rewards position ${positionMint}`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-orca-harvest-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.harvest",
+						positionMint,
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates Orca harvest-position workflow intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.buildOrcaHarvestPositionInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			positionMint,
+			instructionCount: 1,
+			feesQuote: { feeOwedA: "2", feeOwedB: "3" },
+			rewardsQuote: { rewards: [{ index: 0, amount: "4" }] },
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([12]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 90,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 335,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-harvest-sim", {
+			runId: "run-orca-harvest-sim",
+			intentType: "solana.lp.orca.harvest",
+			runMode: "simulate",
+			positionMint,
+		});
+
+		expect(
+			runtimeMocks.buildOrcaHarvestPositionInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				positionMint,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-orca-harvest-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.harvest",
 						positionMint,
 					},
 				},

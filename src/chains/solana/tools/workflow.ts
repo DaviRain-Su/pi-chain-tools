@@ -37,6 +37,7 @@ import {
 	buildMeteoraRemoveLiquidityInstructions,
 	buildOrcaClosePositionInstructions,
 	buildOrcaDecreaseLiquidityInstructions,
+	buildOrcaHarvestPositionInstructions,
 	buildOrcaIncreaseLiquidityInstructions,
 	buildOrcaOpenPositionInstructions,
 	buildRaydiumSwapTransactions,
@@ -96,6 +97,7 @@ type WorkflowIntentType =
 	| "solana.stake.withdraw"
 	| "solana.lp.orca.open"
 	| "solana.lp.orca.close"
+	| "solana.lp.orca.harvest"
 	| "solana.lp.orca.increase"
 	| "solana.lp.orca.decrease"
 	| "solana.lp.meteora.add"
@@ -375,6 +377,12 @@ type OrcaClosePositionIntent = {
 	slippageBps?: number;
 };
 
+type OrcaHarvestPositionIntent = {
+	type: "solana.lp.orca.harvest";
+	ownerAddress: string;
+	positionMint: string;
+};
+
 type MeteoraAddLiquidityIntent = {
 	type: "solana.lp.meteora.add";
 	ownerAddress: string;
@@ -452,6 +460,7 @@ type WorkflowIntent =
 	| KaminoWithdrawIntent
 	| OrcaOpenPositionIntent
 	| OrcaClosePositionIntent
+	| OrcaHarvestPositionIntent
 	| OrcaIncreaseLiquidityIntent
 	| OrcaDecreaseLiquidityIntent
 	| MeteoraAddLiquidityIntent
@@ -617,6 +626,8 @@ const ORCA_OPEN_POSITION_KEYWORD_REGEX =
 	/(orca.*(\bopen\b|\bcreate\b|\bnew\b|开仓|创建).*(position|仓位)|(position|仓位).*(orca).*(\bopen\b|\bcreate\b|\bnew\b|开仓|创建))/i;
 const ORCA_CLOSE_POSITION_KEYWORD_REGEX =
 	/(orca.*(\bclose\b|\bexit\b|\bcloseout\b|平仓|关闭).*(position|仓位)|(position|仓位).*(orca).*(\bclose\b|\bexit\b|\bcloseout\b|平仓|关闭))/i;
+const ORCA_HARVEST_POSITION_KEYWORD_REGEX =
+	/(orca.*(\bharvest\b|\bclaim\b|\bcollect\b|领取|收取).*(fees?|rewards?|fee|reward|手续费|奖励|收益|position|仓位)|(fees?|rewards?|fee|reward|手续费|奖励|收益).*(orca).*(\bharvest\b|\bclaim\b|\bcollect\b|领取|收取))/i;
 const ORCA_INCREASE_LIQUIDITY_KEYWORD_REGEX =
 	/(orca.*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入).*(liquidity|lp|流动性)|(liquidity|lp|流动性).*(orca).*(\badd\b|\bincrease\b|\bprovide\b|\bdeposit\b|增加|添加|注入))/i;
 const ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX =
@@ -1741,12 +1752,16 @@ function parseOrcaLiquidityIntentText(
 		parsed.intentType = "solana.lp.orca.open";
 	} else if (lower.includes("solana.lp.orca.close")) {
 		parsed.intentType = "solana.lp.orca.close";
+	} else if (lower.includes("solana.lp.orca.harvest")) {
+		parsed.intentType = "solana.lp.orca.harvest";
 	} else if (lower.includes("solana.lp.orca.increase")) {
 		parsed.intentType = "solana.lp.orca.increase";
 	} else if (lower.includes("solana.lp.orca.decrease")) {
 		parsed.intentType = "solana.lp.orca.decrease";
 	} else if (ORCA_CLOSE_POSITION_KEYWORD_REGEX.test(intentText)) {
 		parsed.intentType = "solana.lp.orca.close";
+	} else if (ORCA_HARVEST_POSITION_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.lp.orca.harvest";
 	} else if (ORCA_OPEN_POSITION_KEYWORD_REGEX.test(intentText)) {
 		parsed.intentType = "solana.lp.orca.open";
 	} else if (ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX.test(intentText)) {
@@ -1792,6 +1807,7 @@ function parseOrcaLiquidityIntentText(
 	}
 	if (
 		(parsed.intentType === "solana.lp.orca.close" ||
+			parsed.intentType === "solana.lp.orca.harvest" ||
 			parsed.intentType === "solana.lp.orca.increase" ||
 			parsed.intentType === "solana.lp.orca.decrease") &&
 		!parsed.positionMint
@@ -2787,6 +2803,12 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 			intentType: "solana.lp.orca.close",
 		};
 	}
+	if (lower.includes("solana.lp.orca.harvest")) {
+		return {
+			...parseOrcaLiquidityIntentText(trimmed),
+			intentType: "solana.lp.orca.harvest",
+		};
+	}
 	if (lower.includes("solana.lp.meteora.add")) {
 		return {
 			...parseMeteoraLiquidityIntentText(trimmed),
@@ -2882,6 +2904,7 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 		return parseKaminoDepositIntentText(trimmed);
 	}
 	if (
+		ORCA_HARVEST_POSITION_KEYWORD_REGEX.test(trimmed) ||
 		ORCA_INCREASE_LIQUIDITY_KEYWORD_REGEX.test(trimmed) ||
 		ORCA_DECREASE_LIQUIDITY_KEYWORD_REGEX.test(trimmed)
 	) {
@@ -3000,6 +3023,7 @@ function resolveIntentType(
 		params.intentType === "solana.stake.withdraw" ||
 		params.intentType === "solana.lp.orca.open" ||
 		params.intentType === "solana.lp.orca.close" ||
+		params.intentType === "solana.lp.orca.harvest" ||
 		params.intentType === "solana.lp.orca.increase" ||
 		params.intentType === "solana.lp.orca.decrease" ||
 		params.intentType === "solana.lp.meteora.add" ||
@@ -3074,6 +3098,15 @@ function resolveIntentType(
 	}
 	if (ORCA_CLOSE_POSITION_KEYWORD_REGEX.test(intentText)) {
 		return "solana.lp.orca.close";
+	}
+	if (
+		typeof params.positionMint === "string" &&
+		ORCA_HARVEST_POSITION_KEYWORD_REGEX.test(intentText)
+	) {
+		return "solana.lp.orca.harvest";
+	}
+	if (ORCA_HARVEST_POSITION_KEYWORD_REGEX.test(intentText)) {
+		return "solana.lp.orca.harvest";
 	}
 	if (ORCA_OPEN_POSITION_KEYWORD_REGEX.test(intentText)) {
 		return "solana.lp.orca.open";
@@ -3922,6 +3955,30 @@ async function normalizeIntent(
 			ownerAddress,
 			positionMint,
 			slippageBps: parseOptionalOrcaSlippageBps(normalizedParams.slippageBps),
+		};
+	}
+	if (intentType === "solana.lp.orca.harvest") {
+		const ownerAddress = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.ownerAddress === "string"
+					? normalizedParams.ownerAddress
+					: signerPublicKey,
+			),
+		).toBase58();
+		if (ownerAddress !== signerPublicKey) {
+			throw new Error(
+				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
+			);
+		}
+		const positionMint = new PublicKey(
+			normalizeAtPath(
+				ensureString(normalizedParams.positionMint, "positionMint"),
+			),
+		).toBase58();
+		return {
+			type: intentType,
+			ownerAddress,
+			positionMint,
 		};
 	}
 	if (intentType === "solana.lp.orca.increase") {
@@ -6101,6 +6158,49 @@ async function prepareOrcaClosePositionSimulation(
 	};
 }
 
+async function prepareOrcaHarvestPositionSimulation(
+	network: string,
+	signer: Keypair,
+	intent: OrcaHarvestPositionIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.ownerAddress !== signerAddress) {
+		throw new Error(
+			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const build = await buildOrcaHarvestPositionInstructions({
+		ownerAddress: intent.ownerAddress,
+		positionMint: intent.positionMint,
+		network,
+	});
+	const tx = new Transaction().add(...build.instructions);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			latestBlockhash,
+			ownerAddress: build.ownerAddress,
+			positionMint: build.positionMint,
+			instructionCount: build.instructionCount,
+			feesQuote: build.feesQuote,
+			rewardsQuote: build.rewardsQuote,
+		},
+	};
+}
+
 async function prepareMeteoraAddLiquiditySimulation(
 	network: string,
 	signer: Keypair,
@@ -6779,6 +6879,9 @@ async function prepareSimulation(
 	if (intent.type === "solana.lp.orca.close") {
 		return prepareOrcaClosePositionSimulation(network, signer, intent);
 	}
+	if (intent.type === "solana.lp.orca.harvest") {
+		return prepareOrcaHarvestPositionSimulation(network, signer, intent);
+	}
 	if (intent.type === "solana.lp.orca.increase") {
 		return prepareOrcaIncreaseLiquiditySimulation(network, signer, intent);
 	}
@@ -6899,6 +7002,7 @@ export function createSolanaWorkflowTools() {
 						Type.Literal("solana.stake.withdraw"),
 						Type.Literal("solana.lp.orca.open"),
 						Type.Literal("solana.lp.orca.close"),
+						Type.Literal("solana.lp.orca.harvest"),
 						Type.Literal("solana.lp.orca.increase"),
 						Type.Literal("solana.lp.orca.decrease"),
 						Type.Literal("solana.lp.meteora.add"),
@@ -7040,7 +7144,7 @@ export function createSolanaWorkflowTools() {
 				positionMint: Type.Optional(
 					Type.String({
 						description:
-							"Orca position mint for intentType=solana.lp.orca.close / solana.lp.orca.increase / solana.lp.orca.decrease",
+							"Orca position mint for intentType=solana.lp.orca.close / solana.lp.orca.harvest / solana.lp.orca.increase / solana.lp.orca.decrease",
 					}),
 				),
 				poolAddress: Type.Optional(

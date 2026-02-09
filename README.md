@@ -28,7 +28,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 - Priority fee / Jito tip / dynamic CU options in Jupiter swap compose & execute
 - Orca/Meteora scoped swap workflow support (via Jupiter dex filters)
 - Orca/Meteora scoped compose/execute tools (`build*SwapTransaction` / `*Swap`)
-- Orca LP lifecycle compose/execute/workflow support (open/close/increase/decrease)
+- Orca LP lifecycle compose/execute/workflow support (open/close/harvest/increase/decrease)
 - Orca LP decrease supports ratio-based input (`liquidityBps`, intentText like `decrease 50%`)
 - Meteora DLMM LP lifecycle compose/execute/workflow support (add/remove)
 - Meteora add-liquidity supports UI amount inputs (`totalXAmountUi`/`totalYAmountUi`) and natural-language x/y token amounts
