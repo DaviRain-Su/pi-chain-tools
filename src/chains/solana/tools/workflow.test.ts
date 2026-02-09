@@ -5268,6 +5268,12 @@ describe("w3rt_run_workflow_v0", () => {
 						poolAddress,
 						positionAddress,
 						bps: 3750,
+						bpsDerivation: {
+							sourceField: "amountUi",
+							tokenMint: USDC_MINT,
+							requestedAmountRaw: "1500000",
+							positionAmountRaw: "4000000",
+						},
 					},
 				},
 			},
@@ -5339,6 +5345,12 @@ describe("w3rt_run_workflow_v0", () => {
 						poolAddress,
 						positionAddress,
 						bps: 5000,
+						bpsDerivation: {
+							sourceField: "amountUi",
+							tokenMint: SOL_MINT,
+							requestedAmountRaw: "5000000",
+							positionAmountRaw: "10000000",
+						},
 					},
 				},
 			},
@@ -5402,6 +5414,143 @@ describe("w3rt_run_workflow_v0", () => {
 						poolAddress,
 						positionAddress,
 						bps: 2500,
+						bpsDerivation: {
+							sourceField: "totalXAmountUi",
+							tokenMint: USDC_MINT,
+							requestedAmountRaw: "1000000",
+							positionAmountRaw: "4000000",
+						},
+					},
+				},
+			},
+		});
+	});
+
+	it("includes Meteora remove bps derivation in simulate context", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: USDC_MINT,
+					tokenYMint: SOL_MINT,
+					activeBinId: 0,
+					binStep: 1,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: signer.publicKey.toBase58(),
+							lowerBinId: -5,
+							upperBinId: 7,
+							totalXAmountRaw: "4000000",
+							totalYAmountRaw: "10000000",
+							feeXAmountRaw: "0",
+							feeYAmountRaw: "0",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		runtimeMocks.buildMeteoraRemoveLiquidityInstructions.mockResolvedValue({
+			network: "devnet",
+			ownerAddress: signer.publicKey.toBase58(),
+			poolAddress,
+			positionAddress,
+			fromBinId: -5,
+			toBinId: 7,
+			bps: 3750,
+			shouldClaimAndClose: false,
+			skipUnwrapSol: false,
+			positionLowerBinId: -8,
+			positionUpperBinId: 8,
+			activeBinId: 0,
+			instructionCount: 1,
+			transactionCount: 1,
+			instructions: [
+				new TransactionInstruction({
+					programId: Keypair.generate().publicKey,
+					keys: [],
+					data: Buffer.from([18]),
+				}),
+			],
+		});
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 96,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: ["ok"],
+					unitsConsumed: 340,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-meteora-remove-derived-sim", {
+			runId: "run-meteora-remove-derived-sim",
+			intentType: "solana.lp.meteora.remove",
+			runMode: "simulate",
+			poolAddress,
+			positionAddress,
+			amountUi: "1.5",
+			tokenMint: "USDC",
+		});
+
+		expect(
+			runtimeMocks.buildMeteoraRemoveLiquidityInstructions,
+		).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ownerAddress: signer.publicKey.toBase58(),
+				poolAddress,
+				positionAddress,
+				bps: 3750,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-meteora-remove-derived-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.meteora.remove",
+						poolAddress,
+						positionAddress,
+						bps: 3750,
+						bpsDerivation: {
+							sourceField: "amountUi",
+							tokenMint: USDC_MINT,
+							requestedAmountRaw: "1500000",
+							positionAmountRaw: "4000000",
+						},
+					},
+				},
+				simulate: {
+					ok: true,
+					context: {
+						bpsDerivation: {
+							sourceField: "amountUi",
+							tokenMint: USDC_MINT,
+							requestedAmountRaw: "1500000",
+							positionAmountRaw: "4000000",
+						},
 					},
 				},
 			},

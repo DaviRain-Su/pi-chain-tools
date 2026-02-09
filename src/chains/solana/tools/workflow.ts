@@ -412,6 +412,18 @@ type MeteoraRemoveLiquidityIntent = {
 	fromBinId?: number;
 	toBinId?: number;
 	bps?: number;
+	bpsDerivation?: {
+		sourceField:
+			| "amountRaw"
+			| "amountUi"
+			| "totalXAmountRaw"
+			| "totalXAmountUi"
+			| "totalYAmountRaw"
+			| "totalYAmountUi";
+		tokenMint: string;
+		requestedAmountRaw: string;
+		positionAmountRaw: string;
+	};
 	shouldClaimAndClose?: boolean;
 	skipUnwrapSol?: boolean;
 };
@@ -5347,6 +5359,7 @@ async function normalizeIntent(
 				? await ensureMint(normalizedParams.tokenYMint, "tokenYMint")
 				: undefined;
 		let bps = parseOptionalMeteoraBps(normalizedParams.bps);
+		let bpsDerivation: MeteoraRemoveLiquidityIntent["bpsDerivation"];
 		if (bps !== undefined && (hasGenericAmountInput || hasSideAmountInput)) {
 			throw new Error(
 				"Provide either bps or amount fields (generic or side-specific), not both",
@@ -5378,7 +5391,9 @@ async function normalizeIntent(
 			let requestedAmountRaw: string;
 			let positionAmountRaw: string;
 			let requestedTokenMint: string;
-			let requestedField: string;
+			let requestedField: NonNullable<
+				MeteoraRemoveLiquidityIntent["bpsDerivation"]
+			>["sourceField"];
 			if (hasGenericAmountInput && genericTokenMint) {
 				requestedAmountRaw =
 					genericAmountRawInput ??
@@ -5452,6 +5467,12 @@ async function normalizeIntent(
 				poolAddress,
 				positionAddress,
 			});
+			bpsDerivation = {
+				sourceField: requestedField,
+				tokenMint: requestedTokenMint,
+				requestedAmountRaw,
+				positionAmountRaw,
+			};
 		}
 		return {
 			type: intentType,
@@ -5461,6 +5482,7 @@ async function normalizeIntent(
 			...(fromBinId !== undefined ? { fromBinId } : {}),
 			...(toBinId !== undefined ? { toBinId } : {}),
 			...(bps !== undefined ? { bps } : {}),
+			...(bpsDerivation ? { bpsDerivation } : {}),
 			shouldClaimAndClose: normalizedParams.shouldClaimAndClose === true,
 			skipUnwrapSol: normalizedParams.skipUnwrapSol === true,
 		};
@@ -7535,6 +7557,7 @@ async function prepareMeteoraRemoveLiquiditySimulation(
 			activeBinId: build.activeBinId,
 			instructionCount: build.instructionCount,
 			sourceTransactionCount: build.transactionCount,
+			...(intent.bpsDerivation ? { bpsDerivation: intent.bpsDerivation } : {}),
 		},
 	};
 }
