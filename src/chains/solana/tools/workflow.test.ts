@@ -3979,6 +3979,54 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Orca increase intentText with generic amountRaw/tokenMint fields", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			bundleCount: 0,
+			poolCount: 1,
+			whirlpoolAddresses: [Keypair.generate().publicKey.toBase58()],
+			positions: [
+				{
+					positionMint,
+					tokenMintA: USDC_MINT,
+					tokenMintB: SOL_MINT,
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-increase-generic-raw-intent", {
+			runId: "run-orca-increase-generic-raw-intent",
+			runMode: "analysis",
+			intentText: `orca increase liquidity position ${positionMint} amountRaw 1500000 tokenMint USDC`,
+		});
+
+		expect(runtimeMocks.getOrcaWhirlpoolPositions).toHaveBeenCalledWith({
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-orca-increase-generic-raw-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.increase",
+						positionMint,
+						tokenAAmountRaw: "1500000",
+					},
+				},
+			},
+		});
+	});
+
 	it("parses Orca increase intentText with integer token amount shorthand", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -4038,7 +4086,7 @@ describe("w3rt_run_workflow_v0", () => {
 				amountUi: "1.5",
 			}),
 		).rejects.toThrow(
-			"tokenMint is required when amountUi is provided for intentType=solana.lp.orca.increase",
+			"tokenMint is required when amountUi or amountRaw is provided for intentType=solana.lp.orca.increase",
 		);
 	});
 
@@ -4170,6 +4218,54 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 		expect(result.details).toMatchObject({
 			runId: "run-orca-decrease-generic-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.lp.orca.decrease",
+						positionMint,
+						tokenBAmountRaw: "10000000",
+					},
+				},
+			},
+		});
+	});
+
+	it("parses Orca decrease intentText with generic amountRaw/tokenMint fields", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const positionMint = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getOrcaWhirlpoolPositions.mockResolvedValue({
+			protocol: "orca-whirlpool",
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+			positionCount: 1,
+			bundleCount: 0,
+			poolCount: 1,
+			whirlpoolAddresses: [Keypair.generate().publicKey.toBase58()],
+			positions: [
+				{
+					positionMint,
+					tokenMintA: USDC_MINT,
+					tokenMintB: SOL_MINT,
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-orca-decrease-generic-raw-intent", {
+			runId: "run-orca-decrease-generic-raw-intent",
+			runMode: "analysis",
+			intentText: `orca decrease liquidity position ${positionMint} amountRaw 10000000 tokenMint SOL`,
+		});
+
+		expect(runtimeMocks.getOrcaWhirlpoolPositions).toHaveBeenCalledWith({
+			address: signer.publicKey.toBase58(),
+			network: "devnet",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-orca-decrease-generic-raw-intent",
 			status: "analysis",
 			artifacts: {
 				analysis: {

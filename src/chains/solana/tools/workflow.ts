@@ -1984,6 +1984,12 @@ function parseOrcaLiquidityIntentText(
 		parsed.intentType === "solana.lp.orca.increase" ||
 		parsed.intentType === "solana.lp.orca.decrease" ||
 		ORCA_POSITIONS_KEYWORD_REGEX.test(intentText);
+	const genericAmountRawMatch =
+		intentText.match(/\bamountRaw\s*[=:]?\s*([0-9]+)\b/i) ??
+		intentText.match(/\b([0-9]+)\s*raw\b/i);
+	if (genericAmountRawMatch?.[1]) {
+		parsed.amountRaw = parsed.amountRaw ?? genericAmountRawMatch[1];
+	}
 	const hasOrcaSideAmountInput =
 		parsed.liquidityAmountRaw !== undefined ||
 		parsed.tokenAAmountRaw !== undefined ||
@@ -4681,10 +4687,18 @@ async function normalizeIntent(
 			normalizedParams.tokenBAmountUi,
 			"tokenBAmountUi",
 		);
+		const genericAmountRawInput =
+			typeof normalizedParams.amountRaw === "string" &&
+			normalizedParams.amountRaw.trim().length > 0
+				? parseNonNegativeRawAmount(normalizedParams.amountRaw, "amountRaw")
+				: undefined;
 		const genericAmountUi = parseOptionalPositiveUiAmountField(
 			normalizedParams.amountUi,
 			"amountUi",
 		);
+		if (genericAmountRawInput !== undefined && genericAmountUi !== undefined) {
+			throw new Error("Provide either amountRaw or amountUi, not both");
+		}
 		if (
 			tokenAAmountUi &&
 			typeof normalizedParams.tokenAAmountRaw === "string" &&
@@ -4712,20 +4726,22 @@ async function normalizeIntent(
 				normalizedParams.tokenBAmountRaw.trim().length > 0) ||
 			tokenAAmountUi !== undefined ||
 			tokenBAmountUi !== undefined;
-		if (genericAmountUi !== undefined && hasSideAmountInput) {
+		const hasGenericAmountInput =
+			genericAmountRawInput !== undefined || genericAmountUi !== undefined;
+		if (hasGenericAmountInput && hasSideAmountInput) {
 			throw new Error(
-				"Provide either amountUi/tokenMint or one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw/tokenAAmountUi/tokenBAmountUi for Orca LP intents",
+				"Provide either amountUi/tokenMint (or amountRaw/tokenMint) or one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw/tokenAAmountUi/tokenBAmountUi for Orca LP intents",
 			);
 		}
 		const genericTokenMint =
-			genericAmountUi !== undefined &&
+			hasGenericAmountInput &&
 			typeof normalizedParams.tokenMint === "string" &&
 			normalizedParams.tokenMint.trim().length > 0
 				? await ensureMint(normalizedParams.tokenMint, "tokenMint")
 				: undefined;
-		if (genericAmountUi !== undefined && !genericTokenMint) {
+		if (hasGenericAmountInput && !genericTokenMint) {
 			throw new Error(
-				"tokenMint is required when amountUi is provided for intentType=solana.lp.orca.increase",
+				"tokenMint is required when amountUi or amountRaw is provided for intentType=solana.lp.orca.increase",
 			);
 		}
 		const hasUiAmountInput =
@@ -4736,23 +4752,33 @@ async function normalizeIntent(
 			typeof normalizedParams.tokenAMint === "string" ||
 			typeof normalizedParams.tokenBMint === "string";
 		const positionMints =
-			hasUiAmountInput || hasTokenMintHint
+			hasUiAmountInput || hasTokenMintHint || hasGenericAmountInput
 				? await resolveOrcaPositionTokenMintsForIntent({
 						network,
 						ownerAddress,
 						positionMint,
 					})
 				: undefined;
-		if (genericAmountUi !== undefined) {
+		let tokenAAmountRawFromGeneric: string | undefined;
+		let tokenBAmountRawFromGeneric: string | undefined;
+		if (hasGenericAmountInput) {
 			if (!positionMints) {
 				throw new Error(
 					`Orca position token mints unavailable for positionMint=${positionMint}`,
 				);
 			}
 			if (genericTokenMint === positionMints.tokenMintA) {
-				tokenAAmountUi = genericAmountUi;
+				if (genericAmountUi !== undefined) {
+					tokenAAmountUi = genericAmountUi;
+				} else {
+					tokenAAmountRawFromGeneric = genericAmountRawInput;
+				}
 			} else if (genericTokenMint === positionMints.tokenMintB) {
-				tokenBAmountUi = genericAmountUi;
+				if (genericAmountUi !== undefined) {
+					tokenBAmountUi = genericAmountUi;
+				} else {
+					tokenBAmountRawFromGeneric = genericAmountRawInput;
+				}
 			} else {
 				throw new Error(
 					`tokenMint mismatch for positionMint=${positionMint}: expected ${positionMints.tokenMintA} or ${positionMints.tokenMintB}, got ${genericTokenMint}`,
@@ -4811,6 +4837,12 @@ async function normalizeIntent(
 		}
 		const liquidityAction = parseOrcaLiquidityActionInput({
 			...normalizedParams,
+			...(tokenAAmountRawFromGeneric !== undefined
+				? { tokenAAmountRaw: tokenAAmountRawFromGeneric }
+				: {}),
+			...(tokenBAmountRawFromGeneric !== undefined
+				? { tokenBAmountRaw: tokenBAmountRawFromGeneric }
+				: {}),
 			...(tokenAAmountRawFromUi !== undefined
 				? { tokenAAmountRaw: tokenAAmountRawFromUi }
 				: {}),
@@ -4856,10 +4888,18 @@ async function normalizeIntent(
 			normalizedParams.tokenBAmountUi,
 			"tokenBAmountUi",
 		);
+		const genericAmountRawInput =
+			typeof normalizedParams.amountRaw === "string" &&
+			normalizedParams.amountRaw.trim().length > 0
+				? parseNonNegativeRawAmount(normalizedParams.amountRaw, "amountRaw")
+				: undefined;
 		const genericAmountUi = parseOptionalPositiveUiAmountField(
 			normalizedParams.amountUi,
 			"amountUi",
 		);
+		if (genericAmountRawInput !== undefined && genericAmountUi !== undefined) {
+			throw new Error("Provide either amountRaw or amountUi, not both");
+		}
 		if (
 			tokenAAmountUi &&
 			typeof normalizedParams.tokenAAmountRaw === "string" &&
@@ -4887,20 +4927,22 @@ async function normalizeIntent(
 				normalizedParams.tokenBAmountRaw.trim().length > 0) ||
 			tokenAAmountUi !== undefined ||
 			tokenBAmountUi !== undefined;
-		if (genericAmountUi !== undefined && hasSideAmountInput) {
+		const hasGenericAmountInput =
+			genericAmountRawInput !== undefined || genericAmountUi !== undefined;
+		if (hasGenericAmountInput && hasSideAmountInput) {
 			throw new Error(
-				"Provide either amountUi/tokenMint or one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw/tokenAAmountUi/tokenBAmountUi for Orca LP intents",
+				"Provide either amountUi/tokenMint (or amountRaw/tokenMint) or one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw/tokenAAmountUi/tokenBAmountUi for Orca LP intents",
 			);
 		}
 		const genericTokenMint =
-			genericAmountUi !== undefined &&
+			hasGenericAmountInput &&
 			typeof normalizedParams.tokenMint === "string" &&
 			normalizedParams.tokenMint.trim().length > 0
 				? await ensureMint(normalizedParams.tokenMint, "tokenMint")
 				: undefined;
-		if (genericAmountUi !== undefined && !genericTokenMint) {
+		if (hasGenericAmountInput && !genericTokenMint) {
 			throw new Error(
-				"tokenMint is required when amountUi is provided for intentType=solana.lp.orca.decrease",
+				"tokenMint is required when amountUi or amountRaw is provided for intentType=solana.lp.orca.decrease",
 			);
 		}
 		const hasUiAmountInput =
@@ -4910,7 +4952,10 @@ async function normalizeIntent(
 		const liquidityBps = parseOptionalOrcaLiquidityBps(
 			normalizedParams.liquidityBps,
 		);
-		if (liquidityBps !== undefined && hasUiAmountInput) {
+		if (
+			liquidityBps !== undefined &&
+			(hasUiAmountInput || hasGenericAmountInput)
+		) {
 			throw new Error(
 				"Provide either liquidityBps or one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw/tokenAAmountUi/tokenBAmountUi",
 			);
@@ -4985,6 +5030,32 @@ async function normalizeIntent(
 					: {}),
 				...(tokenBAmountRawFromUi !== undefined
 					? { tokenBAmountRaw: tokenBAmountRawFromUi }
+					: {}),
+			});
+		} else if (hasGenericAmountInput) {
+			const positionMints = await resolveOrcaPositionTokenMintsForIntent({
+				network,
+				ownerAddress,
+				positionMint,
+			});
+			let tokenAAmountRawFromGeneric: string | undefined;
+			let tokenBAmountRawFromGeneric: string | undefined;
+			if (genericTokenMint === positionMints.tokenMintA) {
+				tokenAAmountRawFromGeneric = genericAmountRawInput;
+			} else if (genericTokenMint === positionMints.tokenMintB) {
+				tokenBAmountRawFromGeneric = genericAmountRawInput;
+			} else {
+				throw new Error(
+					`tokenMint mismatch for positionMint=${positionMint}: expected ${positionMints.tokenMintA} or ${positionMints.tokenMintB}, got ${genericTokenMint}`,
+				);
+			}
+			liquidityAction = parseOrcaDecreaseLiquidityActionInput({
+				...normalizedParams,
+				...(tokenAAmountRawFromGeneric !== undefined
+					? { tokenAAmountRaw: tokenAAmountRawFromGeneric }
+					: {}),
+				...(tokenBAmountRawFromGeneric !== undefined
+					? { tokenBAmountRaw: tokenBAmountRawFromGeneric }
 					: {}),
 			});
 		} else {
@@ -8468,7 +8539,7 @@ export function createSolanaWorkflowTools() {
 				amountRaw: Type.Optional(
 					Type.String({
 						description:
-							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl / solana.lend.kamino.borrow / solana.lend.kamino.deposit / solana.lend.kamino.repay / solana.lend.kamino.withdraw. Also supports side-selected LP input with tokenMint for intentType=solana.lp.orca.open / solana.lp.meteora.add / solana.lp.meteora.remove.",
+							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl / solana.lend.kamino.borrow / solana.lend.kamino.deposit / solana.lend.kamino.repay / solana.lend.kamino.withdraw. Also supports side-selected LP input with tokenMint for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease / solana.lp.meteora.add / solana.lp.meteora.remove.",
 					}),
 				),
 				liquidityAmountRaw: Type.Optional(
