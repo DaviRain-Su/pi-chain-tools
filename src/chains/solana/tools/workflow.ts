@@ -1951,6 +1951,36 @@ function parseOrcaLiquidityIntentText(
 			parsed.tokenBAmountUi ?? tokenBAmountWithTokenMatch[1];
 		parsed.tokenBMint = parsed.tokenBMint ?? tokenBAmountWithTokenMint;
 	}
+	const genericTokenMintMatch = intentText.match(
+		/\btokenMint\s*[=:]?\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
+	);
+	if (genericTokenMintMatch?.[1]) {
+		const tokenMint = parseMintOrSymbolCandidate(genericTokenMintMatch[1]);
+		if (tokenMint) {
+			parsed.tokenMint = tokenMint;
+		}
+	}
+	const supportsGenericTokenAmount =
+		parsed.intentType === "solana.lp.orca.increase" ||
+		parsed.intentType === "solana.lp.orca.decrease";
+	const hasOrcaSideAmountInput =
+		parsed.liquidityAmountRaw !== undefined ||
+		parsed.tokenAAmountRaw !== undefined ||
+		parsed.tokenBAmountRaw !== undefined ||
+		parsed.tokenAAmountUi !== undefined ||
+		parsed.tokenBAmountUi !== undefined;
+	if (supportsGenericTokenAmount && !hasOrcaSideAmountInput) {
+		const genericAmountWithTokenMatch = intentText.match(
+			/\b(?:amountUi|amount)\s*[=:]?\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9._-]{1,15}|[1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+		);
+		const genericAmountWithTokenMint = genericAmountWithTokenMatch?.[2]
+			? parseMintOrKnownSymbolCandidate(genericAmountWithTokenMatch[2])
+			: undefined;
+		if (genericAmountWithTokenMatch?.[1] && genericAmountWithTokenMint) {
+			parsed.amountUi = parsed.amountUi ?? genericAmountWithTokenMatch[1];
+			parsed.tokenMint = parsed.tokenMint ?? genericAmountWithTokenMint;
+		}
+	}
 	const liquidityBpsMatch = intentText.match(
 		/\b(?:liquidityBps|decreaseBps|removeBps|withdrawBps|positionBps)\s*[=:]?\s*([0-9]+)\b/i,
 	);
@@ -4314,13 +4344,17 @@ async function normalizeIntent(
 					: undefined,
 			fieldName: "positionMint",
 		});
-		const tokenAAmountUi = parseOptionalPositiveUiAmountField(
+		let tokenAAmountUi = parseOptionalPositiveUiAmountField(
 			normalizedParams.tokenAAmountUi,
 			"tokenAAmountUi",
 		);
-		const tokenBAmountUi = parseOptionalPositiveUiAmountField(
+		let tokenBAmountUi = parseOptionalPositiveUiAmountField(
 			normalizedParams.tokenBAmountUi,
 			"tokenBAmountUi",
+		);
+		const genericAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.amountUi,
+			"amountUi",
 		);
 		if (
 			tokenAAmountUi &&
@@ -4340,8 +4374,35 @@ async function normalizeIntent(
 				"Provide either tokenBAmountRaw or tokenBAmountUi for Orca LP intents, not both",
 			);
 		}
+		const hasSideAmountInput =
+			(typeof normalizedParams.liquidityAmountRaw === "string" &&
+				normalizedParams.liquidityAmountRaw.trim().length > 0) ||
+			(typeof normalizedParams.tokenAAmountRaw === "string" &&
+				normalizedParams.tokenAAmountRaw.trim().length > 0) ||
+			(typeof normalizedParams.tokenBAmountRaw === "string" &&
+				normalizedParams.tokenBAmountRaw.trim().length > 0) ||
+			tokenAAmountUi !== undefined ||
+			tokenBAmountUi !== undefined;
+		if (genericAmountUi !== undefined && hasSideAmountInput) {
+			throw new Error(
+				"Provide either amountUi/tokenMint or one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw/tokenAAmountUi/tokenBAmountUi for Orca LP intents",
+			);
+		}
+		const genericTokenMint =
+			genericAmountUi !== undefined &&
+			typeof normalizedParams.tokenMint === "string" &&
+			normalizedParams.tokenMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenMint, "tokenMint")
+				: undefined;
+		if (genericAmountUi !== undefined && !genericTokenMint) {
+			throw new Error(
+				"tokenMint is required when amountUi is provided for intentType=solana.lp.orca.increase",
+			);
+		}
 		const hasUiAmountInput =
-			tokenAAmountUi !== undefined || tokenBAmountUi !== undefined;
+			tokenAAmountUi !== undefined ||
+			tokenBAmountUi !== undefined ||
+			genericAmountUi !== undefined;
 		const hasTokenMintHint =
 			typeof normalizedParams.tokenAMint === "string" ||
 			typeof normalizedParams.tokenBMint === "string";
@@ -4353,6 +4414,22 @@ async function normalizeIntent(
 						positionMint,
 					})
 				: undefined;
+		if (genericAmountUi !== undefined) {
+			if (!positionMints) {
+				throw new Error(
+					`Orca position token mints unavailable for positionMint=${positionMint}`,
+				);
+			}
+			if (genericTokenMint === positionMints.tokenMintA) {
+				tokenAAmountUi = genericAmountUi;
+			} else if (genericTokenMint === positionMints.tokenMintB) {
+				tokenBAmountUi = genericAmountUi;
+			} else {
+				throw new Error(
+					`tokenMint mismatch for positionMint=${positionMint}: expected ${positionMints.tokenMintA} or ${positionMints.tokenMintB}, got ${genericTokenMint}`,
+				);
+			}
+		}
 		if (positionMints && typeof normalizedParams.tokenAMint === "string") {
 			const expectedTokenAMint = await ensureMint(
 				normalizedParams.tokenAMint,
@@ -4442,13 +4519,17 @@ async function normalizeIntent(
 					: undefined,
 			fieldName: "positionMint",
 		});
-		const tokenAAmountUi = parseOptionalPositiveUiAmountField(
+		let tokenAAmountUi = parseOptionalPositiveUiAmountField(
 			normalizedParams.tokenAAmountUi,
 			"tokenAAmountUi",
 		);
-		const tokenBAmountUi = parseOptionalPositiveUiAmountField(
+		let tokenBAmountUi = parseOptionalPositiveUiAmountField(
 			normalizedParams.tokenBAmountUi,
 			"tokenBAmountUi",
+		);
+		const genericAmountUi = parseOptionalPositiveUiAmountField(
+			normalizedParams.amountUi,
+			"amountUi",
 		);
 		if (
 			tokenAAmountUi &&
@@ -4468,8 +4549,35 @@ async function normalizeIntent(
 				"Provide either tokenBAmountRaw or tokenBAmountUi for Orca LP intents, not both",
 			);
 		}
+		const hasSideAmountInput =
+			(typeof normalizedParams.liquidityAmountRaw === "string" &&
+				normalizedParams.liquidityAmountRaw.trim().length > 0) ||
+			(typeof normalizedParams.tokenAAmountRaw === "string" &&
+				normalizedParams.tokenAAmountRaw.trim().length > 0) ||
+			(typeof normalizedParams.tokenBAmountRaw === "string" &&
+				normalizedParams.tokenBAmountRaw.trim().length > 0) ||
+			tokenAAmountUi !== undefined ||
+			tokenBAmountUi !== undefined;
+		if (genericAmountUi !== undefined && hasSideAmountInput) {
+			throw new Error(
+				"Provide either amountUi/tokenMint or one of liquidityAmountRaw/tokenAAmountRaw/tokenBAmountRaw/tokenAAmountUi/tokenBAmountUi for Orca LP intents",
+			);
+		}
+		const genericTokenMint =
+			genericAmountUi !== undefined &&
+			typeof normalizedParams.tokenMint === "string" &&
+			normalizedParams.tokenMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenMint, "tokenMint")
+				: undefined;
+		if (genericAmountUi !== undefined && !genericTokenMint) {
+			throw new Error(
+				"tokenMint is required when amountUi is provided for intentType=solana.lp.orca.decrease",
+			);
+		}
 		const hasUiAmountInput =
-			tokenAAmountUi !== undefined || tokenBAmountUi !== undefined;
+			tokenAAmountUi !== undefined ||
+			tokenBAmountUi !== undefined ||
+			genericAmountUi !== undefined;
 		const liquidityBps = parseOptionalOrcaLiquidityBps(
 			normalizedParams.liquidityBps,
 		);
@@ -4492,6 +4600,17 @@ async function normalizeIntent(
 				ownerAddress,
 				positionMint,
 			});
+			if (genericAmountUi !== undefined) {
+				if (genericTokenMint === positionMints.tokenMintA) {
+					tokenAAmountUi = genericAmountUi;
+				} else if (genericTokenMint === positionMints.tokenMintB) {
+					tokenBAmountUi = genericAmountUi;
+				} else {
+					throw new Error(
+						`tokenMint mismatch for positionMint=${positionMint}: expected ${positionMints.tokenMintA} or ${positionMints.tokenMintB}, got ${genericTokenMint}`,
+					);
+				}
+			}
 			if (typeof normalizedParams.tokenAMint === "string") {
 				const expectedTokenAMint = await ensureMint(
 					normalizedParams.tokenAMint,
@@ -7642,7 +7761,8 @@ export function createSolanaWorkflowTools() {
 				),
 				tokenMint: Type.Optional(
 					Type.String({
-						description: "Token mint for intentType=solana.transfer.spl",
+						description:
+							"Token mint for intentType=solana.transfer.spl, and optional side selector for intentType=solana.lp.orca.increase / solana.lp.orca.decrease when using amountUi.",
 					}),
 				),
 				tokenAMint: Type.Optional(
@@ -7918,7 +8038,7 @@ export function createSolanaWorkflowTools() {
 				amountUi: Type.Optional(
 					Type.String({
 						description:
-							"Optional human-readable token amount for swaps, SPL transfers, and Kamino lending actions (for known mints like SOL/USDC/USDT).",
+							"Optional human-readable token amount for swaps, SPL transfers, Kamino lending actions, and Orca increase/decrease with tokenMint side selection (for known mints like SOL/USDC/USDT).",
 					}),
 				),
 				depositAmountUi: Type.Optional(
