@@ -10,6 +10,7 @@ import {
 	type Connection,
 	Keypair,
 	PublicKey,
+	StakeAuthorizationLayout,
 	StakeProgram,
 	SystemProgram,
 	Transaction,
@@ -126,6 +127,14 @@ function normalizeStakeSeed(value: string | undefined): string {
 		);
 	}
 	return sanitized;
+}
+
+function parseStakeAuthorizationType(
+	value: string | undefined,
+): "staker" | "withdrawer" {
+	if (!value || value === "staker") return "staker";
+	if (value === "withdrawer") return "withdrawer";
+	throw new Error("authorizationType must be 'staker' or 'withdrawer'");
 }
 
 async function buildSplTransferInstructions(
@@ -2035,6 +2044,204 @@ export function createSolanaExecuteTools() {
 							voteAccount.toBase58(),
 							network,
 						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}stakeAuthorize`,
+			label: "Solana Stake Authorize",
+			description:
+				"Rotate staker/withdrawer authority for an existing native stake account",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Current stake authority private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				stakeAuthorityAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional current authority assertion. Must match the public key derived from fromSecretKey.",
+					}),
+				),
+				stakeAccountAddress: Type.String({
+					description: "Stake account public key",
+				}),
+				newAuthorityAddress: Type.String({
+					description: "New authority wallet address",
+				}),
+				authorizationType: Type.Optional(
+					Type.Union([Type.Literal("staker"), Type.Literal("withdrawer")], {
+						description:
+							"Authority type to rotate. Defaults to staker when omitted.",
+					}),
+				),
+				custodianAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional lockup custodian public key. Required by chain rules for some lockup-constrained updates.",
+					}),
+				),
+				network: solanaNetworkSchema(),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, sign and simulate only (no broadcast)",
+					}),
+				),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet stake authorize requires confirmMainnet=true",
+					);
+				}
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const signerPublicKey = signer.publicKey.toBase58();
+				if (params.stakeAuthorityAddress) {
+					const asserted = new PublicKey(
+						normalizeAtPath(params.stakeAuthorityAddress),
+					).toBase58();
+					if (asserted !== signerPublicKey) {
+						throw new Error(
+							`stakeAuthorityAddress mismatch: expected ${signerPublicKey}, got ${asserted}`,
+						);
+					}
+				}
+				const stakeAccount = new PublicKey(
+					normalizeAtPath(params.stakeAccountAddress),
+				);
+				const newAuthority = new PublicKey(
+					normalizeAtPath(params.newAuthorityAddress),
+				);
+				const authorizationType = parseStakeAuthorizationType(
+					params.authorizationType,
+				);
+				const custodian =
+					typeof params.custodianAddress === "string"
+						? new PublicKey(normalizeAtPath(params.custodianAddress))
+						: undefined;
+				const tx = new Transaction().add(
+					StakeProgram.authorize({
+						stakePubkey: stakeAccount,
+						authorizedPubkey: signer.publicKey,
+						newAuthorizedPubkey: newAuthority,
+						stakeAuthorizationType:
+							authorizationType === "withdrawer"
+								? StakeAuthorizationLayout.Withdrawer
+								: StakeAuthorizationLayout.Staker,
+						custodianPubkey: custodian,
+					}),
+				);
+				tx.feePayer = signer.publicKey;
+				const latestBlockhash = await connection.getLatestBlockhash();
+				tx.recentBlockhash = latestBlockhash.blockhash;
+				tx.sign(signer);
+				const commitment = parseFinality(params.commitment);
+
+				if (params.simulate === true) {
+					const simulation = await connection.simulateTransaction(tx);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Stake authorize simulation ${simulation.value.err ? "failed" : "succeeded"}`,
+							},
+						],
+						details: {
+							action: "authorize",
+							authorizationType,
+							simulated: true,
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+							stakeAuthority: signerPublicKey,
+							stakeAccount: stakeAccount.toBase58(),
+							newAuthority: newAuthority.toBase58(),
+							custodian: custodian?.toBase58() ?? null,
+							network,
+							stakeAuthorityExplorer: getExplorerAddressUrl(
+								signerPublicKey,
+								network,
+							),
+							stakeAccountExplorer: getExplorerAddressUrl(
+								stakeAccount.toBase58(),
+								network,
+							),
+							newAuthorityExplorer: getExplorerAddressUrl(
+								newAuthority.toBase58(),
+								network,
+							),
+							custodianExplorer: custodian
+								? getExplorerAddressUrl(custodian.toBase58(), network)
+								: null,
+						},
+					};
+				}
+
+				const signature = await connection.sendRawTransaction(tx.serialize(), {
+					skipPreflight: params.skipPreflight === true,
+					maxRetries: params.maxRetries,
+				});
+				let confirmationErr: unknown = null;
+				if (params.confirm !== false) {
+					const confirmation = await connection.confirmTransaction(
+						signature,
+						commitment,
+					);
+					confirmationErr = confirmation.value.err;
+				}
+				if (confirmationErr) {
+					throw new Error(
+						`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+					);
+				}
+
+				return {
+					content: [{ type: "text", text: `Stake authorized: ${signature}` }],
+					details: {
+						action: "authorize",
+						authorizationType,
+						simulated: false,
+						signature,
+						confirmed: params.confirm !== false,
+						stakeAuthority: signerPublicKey,
+						stakeAccount: stakeAccount.toBase58(),
+						newAuthority: newAuthority.toBase58(),
+						custodian: custodian?.toBase58() ?? null,
+						network,
+						explorer: getExplorerTransactionUrl(signature, network),
+						stakeAuthorityExplorer: getExplorerAddressUrl(
+							signerPublicKey,
+							network,
+						),
+						stakeAccountExplorer: getExplorerAddressUrl(
+							stakeAccount.toBase58(),
+							network,
+						),
+						newAuthorityExplorer: getExplorerAddressUrl(
+							newAuthority.toBase58(),
+							network,
+						),
+						custodianExplorer: custodian
+							? getExplorerAddressUrl(custodian.toBase58(), network)
+							: null,
 					},
 				};
 			},

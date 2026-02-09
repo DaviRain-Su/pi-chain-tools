@@ -896,6 +896,65 @@ describe("native stake execute tools", () => {
 		expect(runtimeMocks.getConnection).not.toHaveBeenCalled();
 	});
 
+	it("simulates stake authorize", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 444,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 75,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_stakeAuthorize");
+		const stakeAccountAddress = Keypair.generate().publicKey.toBase58();
+		const newAuthorityAddress = Keypair.generate().publicKey.toBase58();
+		const result = await tool.execute("stake-authorize-sim", {
+			fromSecretKey: "mock",
+			stakeAccountAddress,
+			newAuthorityAddress,
+			authorizationType: "withdrawer",
+			network: "mainnet-beta",
+			simulate: true,
+			confirmMainnet: true,
+		});
+
+		expect(connection.simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			action: "authorize",
+			authorizationType: "withdrawer",
+			simulated: true,
+			stakeAuthority: signer.publicKey.toBase58(),
+			stakeAccount: stakeAccountAddress,
+			newAuthority: newAuthorityAddress,
+			network: "mainnet-beta",
+		});
+	});
+
+	it("blocks mainnet stake authorize unless confirmMainnet=true", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const tool = getTool("solana_stakeAuthorize");
+
+		await expect(
+			tool.execute("stake-authorize-mainnet", {
+				fromSecretKey: "mock",
+				stakeAccountAddress: Keypair.generate().publicKey.toBase58(),
+				newAuthorityAddress: Keypair.generate().publicKey.toBase58(),
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+		expect(runtimeMocks.getConnection).not.toHaveBeenCalled();
+	});
+
 	it("simulates stake delegation", async () => {
 		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
 		const signer = Keypair.generate();

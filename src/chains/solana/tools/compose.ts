@@ -10,6 +10,7 @@ import {
 	type BlockhashWithExpiryBlockHeight,
 	type Connection,
 	PublicKey,
+	StakeAuthorizationLayout,
 	StakeProgram,
 	SystemProgram,
 	Transaction,
@@ -121,6 +122,14 @@ function normalizeStakeSeed(value: string | undefined): string {
 		);
 	}
 	return sanitized;
+}
+
+function parseStakeAuthorizationType(
+	value: string | undefined,
+): "staker" | "withdrawer" {
+	if (!value || value === "staker") return "staker";
+	if (value === "withdrawer") return "withdrawer";
+	throw new Error("authorizationType must be 'staker' or 'withdrawer'");
 }
 
 function createTransferTransaction(
@@ -985,6 +994,124 @@ export function createSolanaComposeTools() {
 							voteAccount.toBase58(),
 							params.network,
 						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildStakeAuthorizeTransaction`,
+			label: "Solana Build Stake Authorize Transaction",
+			description:
+				"Build an unsigned native staking authorize transaction (legacy, base64) to rotate staker/withdrawer authority",
+			parameters: Type.Object({
+				stakeAuthorityAddress: Type.String({
+					description:
+						"Current stake authority wallet address (also fee payer)",
+				}),
+				stakeAccountAddress: Type.String({
+					description: "Stake account public key",
+				}),
+				newAuthorityAddress: Type.String({
+					description: "New authority wallet address",
+				}),
+				authorizationType: Type.Optional(
+					Type.Union([Type.Literal("staker"), Type.Literal("withdrawer")], {
+						description:
+							"Authority type to rotate. Defaults to staker when omitted.",
+					}),
+				),
+				custodianAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional lockup custodian public key. Required by chain rules for some lockup-constrained updates.",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const connection = getConnection(params.network);
+				const stakeAuthority = new PublicKey(
+					normalizeAtPath(params.stakeAuthorityAddress),
+				);
+				const stakeAccount = new PublicKey(
+					normalizeAtPath(params.stakeAccountAddress),
+				);
+				const newAuthority = new PublicKey(
+					normalizeAtPath(params.newAuthorityAddress),
+				);
+				const authorizationType = parseStakeAuthorizationType(
+					params.authorizationType,
+				);
+				const custodian =
+					typeof params.custodianAddress === "string"
+						? new PublicKey(normalizeAtPath(params.custodianAddress))
+						: undefined;
+				const authorizeTx = StakeProgram.authorize({
+					stakePubkey: stakeAccount,
+					authorizedPubkey: stakeAuthority,
+					newAuthorizedPubkey: newAuthority,
+					stakeAuthorizationType:
+						authorizationType === "withdrawer"
+							? StakeAuthorizationLayout.Withdrawer
+							: StakeAuthorizationLayout.Staker,
+					custodianPubkey: custodian,
+				});
+				const instruction =
+					authorizeTx.instructions[authorizeTx.instructions.length - 1];
+				if (!instruction) {
+					throw new Error("Failed to build stake authorize instruction");
+				}
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const tx = createLegacyTransaction(
+					stakeAuthority,
+					[instruction],
+					latestBlockhash,
+				);
+				const feeResult = await connection.getFeeForMessage(
+					tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 = tx
+					.serialize({
+						requireAllSignatures: false,
+						verifySignatures: false,
+					})
+					.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned stake authorize transaction built (legacy)",
+						},
+					],
+					details: {
+						txBase64,
+						version: "legacy",
+						action: "authorize",
+						authorizationType,
+						stakeAuthority: stakeAuthority.toBase58(),
+						stakeAccount: stakeAccount.toBase58(),
+						newAuthority: newAuthority.toBase58(),
+						custodian: custodian?.toBase58() ?? null,
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						network: parseNetwork(params.network),
+						stakeAuthorityExplorer: getExplorerAddressUrl(
+							stakeAuthority.toBase58(),
+							params.network,
+						),
+						stakeAccountExplorer: getExplorerAddressUrl(
+							stakeAccount.toBase58(),
+							params.network,
+						),
+						newAuthorityExplorer: getExplorerAddressUrl(
+							newAuthority.toBase58(),
+							params.network,
+						),
+						custodianExplorer: custodian
+							? getExplorerAddressUrl(custodian.toBase58(), params.network)
+							: null,
 					},
 				};
 			},

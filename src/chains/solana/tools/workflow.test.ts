@@ -513,6 +513,35 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses stake authorize withdrawer intentText", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const stakeAccountAddress = Keypair.generate().publicKey.toBase58();
+		const newAuthorityAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-stake-authorize", {
+			runId: "run-intent-stake-authorize",
+			runMode: "analysis",
+			intentText: `authorize withdrawer stakeAccountAddress=${stakeAccountAddress} newAuthorityAddress=${newAuthorityAddress}`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-intent-stake-authorize",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.stake.authorizeWithdrawer",
+						stakeAuthorityAddress: signer.publicKey.toBase58(),
+						stakeAccountAddress,
+						newAuthorityAddress,
+					},
+				},
+			},
+		});
+	});
+
 	it("parses stake create-and-delegate intentText", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
@@ -620,6 +649,62 @@ describe("w3rt_run_workflow_v0", () => {
 						voteAccountAddress,
 						amountSol: 0.000001,
 						lamports: 1000,
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates stake authorize workflow intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const stakeAccountAddress = Keypair.generate().publicKey.toBase58();
+		const newAuthorityAddress = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 1,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 70,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-stake-authorize-sim", {
+			runId: "run-stake-authorize-sim",
+			intentType: "solana.stake.authorizeWithdrawer",
+			runMode: "simulate",
+			stakeAccountAddress,
+			newAuthorityAddress,
+		});
+
+		expect(connection.simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			runId: "run-stake-authorize-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.stake.authorizeWithdrawer",
+						stakeAuthorityAddress: signer.publicKey.toBase58(),
+						stakeAccountAddress,
+						newAuthorityAddress,
+					},
+				},
+				simulate: {
+					ok: true,
+					context: {
+						action: "authorize",
+						authorizationType: "withdrawer",
+						stakeAuthorityAddress: signer.publicKey.toBase58(),
+						stakeAccountAddress,
+						newAuthorityAddress,
 					},
 				},
 			},

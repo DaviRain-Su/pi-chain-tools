@@ -227,6 +227,40 @@ describe("compose tools", () => {
 		});
 	});
 
+	it("builds native stake authorize transaction", async () => {
+		const stakeAuthorityAddress = Keypair.generate().publicKey.toBase58();
+		const stakeAccountAddress = Keypair.generate().publicKey.toBase58();
+		const newAuthorityAddress = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 77,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 6100 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_buildStakeAuthorizeTransaction");
+		const result = await tool.execute("compose-stake-authorize", {
+			stakeAuthorityAddress,
+			stakeAccountAddress,
+			newAuthorityAddress,
+			authorizationType: "withdrawer",
+			network: "devnet",
+		});
+
+		expect(result.details).toMatchObject({
+			version: "legacy",
+			action: "authorize",
+			authorizationType: "withdrawer",
+			stakeAuthority: stakeAuthorityAddress,
+			stakeAccount: stakeAccountAddress,
+			newAuthority: newAuthorityAddress,
+			feeLamports: 6100,
+			network: "devnet",
+		});
+	});
+
 	it("builds native stake create+delegate transaction and derives stake account from seed", async () => {
 		const stakeAuthorityAddress = Keypair.generate().publicKey.toBase58();
 		const withdrawAuthorityAddress = Keypair.generate().publicKey.toBase58();
