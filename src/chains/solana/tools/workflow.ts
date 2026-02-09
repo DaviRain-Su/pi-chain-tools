@@ -49,6 +49,7 @@ import {
 	getJupiterQuote,
 	getKaminoLendingMarkets,
 	getKaminoLendingPositions,
+	getMeteoraDlmmPositions,
 	getOrcaWhirlpoolPositions,
 	getRaydiumApiBaseUrl,
 	getRaydiumPriorityFee,
@@ -105,6 +106,7 @@ type WorkflowIntentType =
 	| "solana.swap.meteora"
 	| "solana.read.balance"
 	| "solana.read.orcaPositions"
+	| "solana.read.meteoraPositions"
 	| "solana.read.tokenBalance"
 	| "solana.read.portfolio"
 	| "solana.read.defiPositions"
@@ -455,6 +457,10 @@ type WorkflowIntent =
 			address: string;
 	  }
 	| {
+			type: "solana.read.meteoraPositions";
+			address: string;
+	  }
+	| {
 			type: "solana.read.tokenBalance";
 			address: string;
 			tokenMint: string;
@@ -593,6 +599,8 @@ const DEFI_POSITIONS_KEYWORD_REGEX =
 	/(defi|de-fi|protocol\s+positions?|协议仓位|staking|stake|质押|farm|yield|收益)/i;
 const ORCA_POSITIONS_KEYWORD_REGEX =
 	/(orca.*(whirlpool|lp|liquidity|position|positions|仓位|流动性)|(whirlpool|lp|liquidity|position|positions|仓位|流动性).*orca)/i;
+const METEORA_POSITIONS_KEYWORD_REGEX =
+	/((meteora|dlmm).*(lp|liquidity|position|positions|仓位|流动性)|(lp|liquidity|position|positions|仓位|流动性).*(meteora|dlmm))/i;
 const ORCA_OPEN_POSITION_KEYWORD_REGEX =
 	/(orca.*(\bopen\b|\bcreate\b|\bnew\b|开仓|创建).*(position|仓位)|(position|仓位).*(orca).*(\bopen\b|\bcreate\b|\bnew\b|开仓|创建))/i;
 const ORCA_CLOSE_POSITION_KEYWORD_REGEX =
@@ -773,6 +781,7 @@ function isReadIntentType(intentType: WorkflowIntentType): boolean {
 	return (
 		intentType === "solana.read.balance" ||
 		intentType === "solana.read.orcaPositions" ||
+		intentType === "solana.read.meteoraPositions" ||
 		intentType === "solana.read.tokenBalance" ||
 		intentType === "solana.read.portfolio" ||
 		intentType === "solana.read.defiPositions" ||
@@ -2355,6 +2364,10 @@ function parseReadIntentText(intentText: string): ParsedIntentTextFields {
 		parsed.intentType = "solana.read.orcaPositions";
 		return parsed;
 	}
+	if (METEORA_POSITIONS_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.read.meteoraPositions";
+		return parsed;
+	}
 	if (DEFI_POSITIONS_KEYWORD_REGEX.test(intentText)) {
 		parsed.intentType = "solana.read.defiPositions";
 		return parsed;
@@ -2550,6 +2563,12 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 		return {
 			...parseReadIntentText(trimmed),
 			intentType: "solana.read.orcaPositions",
+		};
+	}
+	if (lower.includes("solana.read.meteorapositions")) {
+		return {
+			...parseReadIntentText(trimmed),
+			intentType: "solana.read.meteoraPositions",
 		};
 	}
 	if (lower.includes("solana.read.tokenbalance")) {
@@ -2869,6 +2888,7 @@ function resolveIntentType(
 		params.intentType === "solana.swap.meteora" ||
 		params.intentType === "solana.read.balance" ||
 		params.intentType === "solana.read.orcaPositions" ||
+		params.intentType === "solana.read.meteoraPositions" ||
 		params.intentType === "solana.read.tokenBalance" ||
 		params.intentType === "solana.read.portfolio" ||
 		params.intentType === "solana.read.defiPositions" ||
@@ -2955,6 +2975,13 @@ function resolveIntentType(
 			params.protocol.trim().toLowerCase() === "orca"
 		) {
 			return "solana.read.orcaPositions";
+		}
+		if (
+			typeof params.protocol === "string" &&
+			(params.protocol.trim().toLowerCase() === "meteora" ||
+				params.protocol.trim().toLowerCase() === "dlmm")
+		) {
+			return "solana.read.meteoraPositions";
 		}
 		if (typeof params.tokenMint === "string") {
 			return "solana.read.tokenBalance";
@@ -3157,11 +3184,25 @@ function resolveIntentType(
 		return "solana.read.orcaPositions";
 	}
 	if (
+		typeof params.intentText === "string" &&
+		METEORA_POSITIONS_KEYWORD_REGEX.test(params.intentText)
+	) {
+		return "solana.read.meteoraPositions";
+	}
+	if (
 		typeof params.protocol === "string" &&
 		params.protocol.trim().toLowerCase() === "orca" &&
 		typeof params.address === "string"
 	) {
 		return "solana.read.orcaPositions";
+	}
+	if (
+		typeof params.protocol === "string" &&
+		(params.protocol.trim().toLowerCase() === "meteora" ||
+			params.protocol.trim().toLowerCase() === "dlmm") &&
+		typeof params.address === "string"
+	) {
+		return "solana.read.meteoraPositions";
 	}
 	if (
 		typeof params.intentText === "string" &&
@@ -3440,6 +3481,19 @@ async function normalizeIntent(
 		};
 	}
 	if (intentType === "solana.read.orcaPositions") {
+		const address = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.address === "string"
+					? normalizedParams.address
+					: signerPublicKey,
+			),
+		).toBase58();
+		return {
+			type: intentType,
+			address,
+		};
+	}
+	if (intentType === "solana.read.meteoraPositions") {
 		const address = new PublicKey(
 			normalizeAtPath(
 				typeof normalizedParams.address === "string"
@@ -4558,6 +4612,21 @@ async function executeReadIntent(
 		});
 		return {
 			summary: `Orca Whirlpool positions: ${positions.positionCount} position(s) across ${positions.poolCount} pool(s)`,
+			details: {
+				intentType: intent.type,
+				...positions,
+				addressExplorer: getExplorerAddressUrl(intent.address, network),
+			},
+		};
+	}
+
+	if (intent.type === "solana.read.meteoraPositions") {
+		const positions = await getMeteoraDlmmPositions({
+			address: intent.address,
+			network,
+		});
+		return {
+			summary: `Meteora DLMM positions: ${positions.positionCount} position(s) across ${positions.poolCount} pool(s)`,
 			details: {
 				intentType: intent.type,
 				...positions,
@@ -6392,6 +6461,7 @@ export function createSolanaWorkflowTools() {
 						Type.Literal("solana.swap.raydium"),
 						Type.Literal("solana.read.balance"),
 						Type.Literal("solana.read.orcaPositions"),
+						Type.Literal("solana.read.meteoraPositions"),
 						Type.Literal("solana.read.tokenBalance"),
 						Type.Literal("solana.read.portfolio"),
 						Type.Literal("solana.read.defiPositions"),
@@ -6798,7 +6868,7 @@ export function createSolanaWorkflowTools() {
 				protocol: Type.Optional(
 					Type.String({
 						description:
-							"Protocol hint for read intents. Supports 'kamino' for lending intents and 'orca' for liquidity position reads.",
+							"Protocol hint for read intents. Supports 'kamino' for lending intents and 'orca'/'meteora' for liquidity position reads.",
 					}),
 				),
 				programId: Type.Optional(

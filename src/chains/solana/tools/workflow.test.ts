@@ -32,6 +32,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	getJupiterQuote: vi.fn(),
 	getKaminoLendingMarkets: vi.fn(),
 	getKaminoLendingPositions: vi.fn(),
+	getMeteoraDlmmPositions: vi.fn(),
 	getOrcaWhirlpoolPositions: vi.fn(),
 	getRaydiumApiBaseUrl: vi.fn(() => "https://raydium.api"),
 	getRaydiumPriorityFee: vi.fn(),
@@ -98,6 +99,7 @@ vi.mock("../runtime.js", async () => {
 		getJupiterQuote: runtimeMocks.getJupiterQuote,
 		getKaminoLendingMarkets: runtimeMocks.getKaminoLendingMarkets,
 		getKaminoLendingPositions: runtimeMocks.getKaminoLendingPositions,
+		getMeteoraDlmmPositions: runtimeMocks.getMeteoraDlmmPositions,
 		getOrcaWhirlpoolPositions: runtimeMocks.getOrcaWhirlpoolPositions,
 		getRaydiumApiBaseUrl: runtimeMocks.getRaydiumApiBaseUrl,
 		getRaydiumPriorityFee: runtimeMocks.getRaydiumPriorityFee,
@@ -818,6 +820,112 @@ describe("w3rt_run_workflow_v0", () => {
 					read: true,
 					result: {
 						intentType: "solana.read.orcaPositions",
+						address,
+						positionCount: 1,
+						poolCount: 1,
+					},
+				},
+			},
+		});
+	});
+
+	it("parses Meteora positions intentText and defaults to read.meteoraPositions", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-read-meteora-analysis", {
+			runId: "run-read-meteora-analysis",
+			runMode: "analysis",
+			intentText: "query current wallet meteora dlmm lp positions",
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-read-meteora-analysis",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.read.meteoraPositions",
+						address: signer.publicKey.toBase58(),
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates read Meteora positions workflow without mainnet approval gate", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const address = Keypair.generate().publicKey.toBase58();
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address,
+			network: "mainnet-beta",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: SOL_MINT,
+					tokenYMint: USDC_MINT,
+					activeBinId: 123,
+					binStep: 25,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: address,
+							lowerBinId: 120,
+							upperBinId: 130,
+							totalXAmountRaw: "1000",
+							totalYAmountRaw: "2000",
+							feeXAmountRaw: "1",
+							feeYAmountRaw: "2",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-read-meteora-sim", {
+			runId: "run-read-meteora-sim",
+			runMode: "simulate",
+			intentType: "solana.read.meteoraPositions",
+			address,
+			network: "mainnet-beta",
+		});
+
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address,
+			network: "mainnet-beta",
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-read-meteora-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.read.meteoraPositions",
+						address,
+					},
+				},
+				approval: {
+					required: false,
+				},
+				simulate: {
+					ok: true,
+					context: {
+						intentType: "solana.read.meteoraPositions",
 						address,
 						positionCount: 1,
 						poolCount: 1,

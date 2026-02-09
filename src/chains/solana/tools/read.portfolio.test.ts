@@ -18,6 +18,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	getJupiterQuote: vi.fn(),
 	getKaminoLendingMarkets: vi.fn(),
 	getKaminoLendingPositions: vi.fn(),
+	getMeteoraDlmmPositions: vi.fn(),
 	getOrcaWhirlpoolPositions: vi.fn(),
 	getRaydiumApiBaseUrl: vi.fn(),
 	getRaydiumPriorityFee: vi.fn(),
@@ -93,6 +94,7 @@ vi.mock("../runtime.js", async () => {
 		getJupiterQuote: runtimeMocks.getJupiterQuote,
 		getKaminoLendingMarkets: runtimeMocks.getKaminoLendingMarkets,
 		getKaminoLendingPositions: runtimeMocks.getKaminoLendingPositions,
+		getMeteoraDlmmPositions: runtimeMocks.getMeteoraDlmmPositions,
 		getOrcaWhirlpoolPositions: runtimeMocks.getOrcaWhirlpoolPositions,
 		getRaydiumApiBaseUrl: runtimeMocks.getRaydiumApiBaseUrl,
 		getRaydiumPriorityFee: runtimeMocks.getRaydiumPriorityFee,
@@ -711,6 +713,74 @@ describe("solana_getOrcaWhirlpoolPositions", () => {
 		});
 		expect(result.details).toMatchObject({
 			protocol: "orca-whirlpool",
+			address: owner,
+			positionCount: 1,
+			poolCount: 1,
+			addressExplorer: `https://explorer/${owner}`,
+		});
+	});
+});
+
+describe("solana_getMeteoraPositions", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		runtimeMocks.getExplorerAddressUrl.mockImplementation(
+			(value: string) => `https://explorer/${value}`,
+		);
+	});
+
+	it("returns Meteora DLMM positions summary", async () => {
+		const owner = Keypair.generate().publicKey.toBase58();
+		const poolAddress = Keypair.generate().publicKey.toBase58();
+		const positionAddress = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getMeteoraDlmmPositions.mockResolvedValue({
+			protocol: "meteora-dlmm",
+			address: owner,
+			network: "mainnet-beta",
+			positionCount: 1,
+			poolCount: 1,
+			poolAddresses: [poolAddress],
+			pools: [
+				{
+					poolAddress,
+					tokenXMint: "So11111111111111111111111111111111111111112",
+					tokenYMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+					activeBinId: 123,
+					binStep: 25,
+					positionCount: 1,
+					positions: [
+						{
+							positionAddress,
+							poolAddress,
+							ownerAddress: owner,
+							lowerBinId: 120,
+							upperBinId: 130,
+							totalXAmountRaw: "1000",
+							totalYAmountRaw: "2000",
+							feeXAmountRaw: "1",
+							feeYAmountRaw: "2",
+							rewardOneAmountRaw: "0",
+							rewardTwoAmountRaw: "0",
+						},
+					],
+				},
+			],
+			queryErrors: [],
+		});
+
+		const tool = getReadTool("solana_getMeteoraPositions");
+		const result = await tool.execute("meteora-positions-1", {
+			address: owner,
+			network: "mainnet-beta",
+		});
+
+		expect(runtimeMocks.getMeteoraDlmmPositions).toHaveBeenCalledWith({
+			address: owner,
+			network: "mainnet-beta",
+		});
+		expect(result.details).toMatchObject({
+			protocol: "meteora-dlmm",
 			address: owner,
 			positionCount: 1,
 			poolCount: 1,

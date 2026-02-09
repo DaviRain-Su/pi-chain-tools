@@ -121,6 +121,12 @@ type MeteoraDlmmModule = {
 			dlmm: PublicKey,
 			opt?: unknown,
 		): Promise<MeteoraDlmmClient>;
+		getAllLbPairPositionsByUser?(
+			connection: Connection,
+			userPubKey: PublicKey,
+			opt?: unknown,
+			getPositionsOpt?: unknown,
+		): Promise<Map<string, unknown>>;
 	};
 	StrategyType: {
 		Spot: number;
@@ -2302,6 +2308,46 @@ export type OrcaWhirlpoolPositionsResult = {
 	queryErrors: string[];
 };
 
+export type MeteoraDlmmOwnerPosition = {
+	positionAddress: string;
+	poolAddress: string;
+	ownerAddress: string | null;
+	lowerBinId: number | null;
+	upperBinId: number | null;
+	totalXAmountRaw: string | null;
+	totalYAmountRaw: string | null;
+	feeXAmountRaw: string | null;
+	feeYAmountRaw: string | null;
+	rewardOneAmountRaw: string | null;
+	rewardTwoAmountRaw: string | null;
+};
+
+export type MeteoraDlmmPoolSnapshot = {
+	poolAddress: string;
+	tokenXMint: string | null;
+	tokenYMint: string | null;
+	activeBinId: number | null;
+	binStep: number | null;
+	positionCount: number;
+	positions: MeteoraDlmmOwnerPosition[];
+};
+
+export type MeteoraDlmmPositionsRequest = {
+	address: string;
+	network?: string;
+};
+
+export type MeteoraDlmmPositionsResult = {
+	protocol: "meteora-dlmm";
+	address: string;
+	network: SolanaNetwork;
+	positionCount: number;
+	poolCount: number;
+	poolAddresses: string[];
+	pools: MeteoraDlmmPoolSnapshot[];
+	queryErrors: string[];
+};
+
 function omitUndefined<T extends Record<string, unknown>>(
 	value: T,
 ): Partial<T> {
@@ -3649,6 +3695,205 @@ export async function getOrcaWhirlpoolPositions(
 			.size,
 		whirlpoolAddresses,
 		positions,
+		queryErrors,
+	};
+}
+
+export async function getMeteoraDlmmPositions(
+	request: MeteoraDlmmPositionsRequest,
+): Promise<MeteoraDlmmPositionsResult> {
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.address),
+	).toBase58();
+	const network = parseNetwork(request.network);
+	const connection = getConnection(network);
+	const module = getMeteoraDlmmModule();
+	const getAllLbPairPositionsByUser =
+		module.default?.getAllLbPairPositionsByUser;
+	if (typeof getAllLbPairPositionsByUser !== "function") {
+		throw new Error(
+			"Meteora DLMM SDK does not expose getAllLbPairPositionsByUser",
+		);
+	}
+
+	const toAddress = (value: unknown, depth = 0): string | null => {
+		if (depth > 3) {
+			return null;
+		}
+		if (typeof value === "string") {
+			return normalizePublicKey(value);
+		}
+		if (value instanceof PublicKey) {
+			return value.toBase58();
+		}
+		const record = asObjectRecord(value);
+		if (!record) {
+			return null;
+		}
+		const toBase58 = record.toBase58;
+		if (typeof toBase58 === "function") {
+			try {
+				const output = toBase58.call(value);
+				if (typeof output === "string") {
+					const normalized = normalizePublicKey(output);
+					if (normalized) {
+						return normalized;
+					}
+				}
+			} catch {
+				// ignore toBase58 failures and continue probing
+			}
+		}
+		return (
+			toAddress(record.publicKey, depth + 1) ??
+			toAddress(record.address, depth + 1) ??
+			toAddress(record.mint, depth + 1) ??
+			toAddress(record.reserve, depth + 1) ??
+			toAddress(record.key, depth + 1)
+		);
+	};
+
+	const toInteger = (value: unknown): number | null => {
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return Math.trunc(value);
+		}
+		if (typeof value === "bigint") {
+			return Number(value);
+		}
+		if (typeof value === "string" && /^-?\d+$/.test(value.trim())) {
+			const parsed = Number.parseInt(value.trim(), 10);
+			if (Number.isFinite(parsed)) {
+				return parsed;
+			}
+		}
+		if (value && typeof value === "object") {
+			const maybeToString = (value as { toString?: unknown }).toString;
+			if (typeof maybeToString === "function") {
+				try {
+					const stringified = maybeToString.call(value, 10);
+					if (typeof stringified === "string" && /^-?\d+$/.test(stringified)) {
+						const parsed = Number.parseInt(stringified, 10);
+						if (Number.isFinite(parsed)) {
+							return parsed;
+						}
+					}
+				} catch {
+					// ignore toString failures
+				}
+			}
+		}
+		return null;
+	};
+
+	const toIntegerString = (value: unknown): string | null => {
+		if (typeof value === "bigint") {
+			return value.toString();
+		}
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return Math.trunc(value).toString();
+		}
+		if (typeof value === "string" && /^-?\d+$/.test(value.trim())) {
+			return value.trim();
+		}
+		if (value && typeof value === "object") {
+			const maybeToString = (value as { toString?: unknown }).toString;
+			if (typeof maybeToString === "function") {
+				try {
+					const stringified = maybeToString.call(value, 10);
+					if (typeof stringified === "string" && /^-?\d+$/.test(stringified)) {
+						return stringified;
+					}
+				} catch {
+					// ignore toString failures
+				}
+			}
+		}
+		return null;
+	};
+
+	const queryErrors: string[] = [];
+	const pools: MeteoraDlmmPoolSnapshot[] = [];
+	const rawMap = await getAllLbPairPositionsByUser(
+		connection,
+		new PublicKey(ownerAddress),
+	);
+	const entries = rawMap instanceof Map ? [...rawMap.entries()] : [];
+	for (const [entryKey, rawEntry] of entries) {
+		const entry = asObjectRecord(rawEntry);
+		if (!entry) {
+			queryErrors.push(`${entryKey}: invalid Meteora position payload`);
+			continue;
+		}
+		const lbPair = asObjectRecord(entry.lbPair);
+		const tokenX = asObjectRecord(entry.tokenX);
+		const tokenY = asObjectRecord(entry.tokenY);
+		const poolAddress =
+			normalizePublicKey(entryKey) ??
+			toAddress(entry.publicKey) ??
+			toAddress(lbPair?.publicKey) ??
+			null;
+		if (!poolAddress) {
+			queryErrors.push(`${entryKey}: invalid Meteora pool address`);
+			continue;
+		}
+
+		const rawPositions = Array.isArray(entry.lbPairPositionsData)
+			? entry.lbPairPositionsData
+			: [];
+		const positions: MeteoraDlmmOwnerPosition[] = [];
+		for (const [index, rawPosition] of rawPositions.entries()) {
+			const positionRecord = asObjectRecord(rawPosition);
+			const positionData = asObjectRecord(positionRecord?.positionData);
+			const positionAddress =
+				toAddress(positionRecord?.publicKey) ??
+				toAddress(positionRecord?.positionAddress) ??
+				toAddress(positionRecord?.address);
+			if (!positionAddress || !positionData) {
+				queryErrors.push(
+					`${poolAddress}: invalid Meteora position at index=${index}`,
+				);
+				continue;
+			}
+			positions.push({
+				positionAddress,
+				poolAddress,
+				ownerAddress: toAddress(positionData.owner),
+				lowerBinId: toInteger(positionData.lowerBinId),
+				upperBinId: toInteger(positionData.upperBinId),
+				totalXAmountRaw: toIntegerString(positionData.totalXAmount),
+				totalYAmountRaw: toIntegerString(positionData.totalYAmount),
+				feeXAmountRaw: toIntegerString(positionData.feeX),
+				feeYAmountRaw: toIntegerString(positionData.feeY),
+				rewardOneAmountRaw: toIntegerString(positionData.rewardOne),
+				rewardTwoAmountRaw: toIntegerString(positionData.rewardTwo),
+			});
+		}
+
+		positions.sort((a, b) =>
+			a.positionAddress.localeCompare(b.positionAddress),
+		);
+		pools.push({
+			poolAddress,
+			tokenXMint: toAddress(tokenX?.mint) ?? toAddress(lbPair?.tokenXMint),
+			tokenYMint: toAddress(tokenY?.mint) ?? toAddress(lbPair?.tokenYMint),
+			activeBinId:
+				toInteger(lbPair?.activeId) ?? toInteger(lbPair?.activeBinId),
+			binStep: toInteger(lbPair?.binStep),
+			positionCount: positions.length,
+			positions,
+		});
+	}
+
+	pools.sort((a, b) => a.poolAddress.localeCompare(b.poolAddress));
+	queryErrors.sort((a, b) => a.localeCompare(b));
+	return {
+		protocol: "meteora-dlmm",
+		address: ownerAddress,
+		network,
+		positionCount: pools.reduce((total, item) => total + item.positionCount, 0),
+		poolCount: pools.length,
+		poolAddresses: pools.map((pool) => pool.poolAddress),
+		pools,
 		queryErrors,
 	};
 }

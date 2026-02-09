@@ -23,6 +23,7 @@ import {
 	getJupiterQuote,
 	getKaminoLendingMarkets,
 	getKaminoLendingPositions,
+	getMeteoraDlmmPositions,
 	getOrcaWhirlpoolPositions,
 	getRaydiumApiBaseUrl,
 	getRaydiumPriorityFee,
@@ -1103,6 +1104,36 @@ export function createSolanaReadTools() {
 						{
 							type: "text",
 							text: `Orca Whirlpool positions: ${positions.positionCount} position(s) across ${positions.poolCount} pool(s)`,
+						},
+					],
+					details: {
+						...positions,
+						addressExplorer: getExplorerAddressUrl(address, params.network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getMeteoraPositions`,
+			label: "Solana Get Meteora DLMM Positions",
+			description: "Get wallet Meteora DLMM LP positions",
+			parameters: Type.Object({
+				address: Type.String({ description: "Wallet address" }),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const address = new PublicKey(
+					normalizeAtPath(params.address),
+				).toBase58();
+				const positions = await getMeteoraDlmmPositions({
+					address,
+					network: params.network,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Meteora DLMM positions: ${positions.positionCount} position(s) across ${positions.poolCount} pool(s)`,
 						},
 					],
 					details: {
