@@ -90,6 +90,33 @@ const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const RAY_MINT = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R";
 
+function makeParsedTokenAccount(
+	owner: string,
+	mint: string,
+	amountRaw: string,
+	decimals: number,
+	uiAmount: number | null,
+) {
+	return {
+		pubkey: Keypair.generate().publicKey,
+		account: {
+			data: {
+				parsed: {
+					info: {
+						mint,
+						owner,
+						tokenAmount: {
+							amount: amountRaw,
+							decimals,
+							uiAmount,
+						},
+					},
+				},
+			},
+		},
+	};
+}
+
 function getWorkflowTool() {
 	const tool = createSolanaWorkflowTools().find(
 		(entry) => entry.name === "w3rt_run_workflow_v0",
@@ -195,6 +222,137 @@ describe("w3rt_run_workflow_v0", () => {
 					intent: {
 						toAddress: explicitDestination,
 						amountSol: 0.25,
+					},
+				},
+			},
+		});
+	});
+
+	it("parses read balance intentText and defaults address to signer", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-read-balance-intent", {
+			runId: "run-read-balance-intent",
+			runMode: "analysis",
+			intentText: "查询当前钱包 balance",
+		});
+
+		expect(runtimeMocks.getConnection).not.toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			runId: "run-read-balance-intent",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.read.balance",
+						address: signer.publicKey.toBase58(),
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates read token balance workflow without mainnet approval gate", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const address = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getParsedTokenAccountsByOwner: vi
+				.fn()
+				.mockResolvedValueOnce({
+					value: [makeParsedTokenAccount(address, USDC_MINT, "1000000", 6, 1)],
+				})
+				.mockResolvedValueOnce({
+					value: [makeParsedTokenAccount(address, USDC_MINT, "2000000", 6, 2)],
+				}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-read-token-sim", {
+			runId: "run-read-token-sim",
+			runMode: "simulate",
+			intentText: `查询 ${address} 的 USDC 余额`,
+			network: "mainnet-beta",
+		});
+
+		expect(connection.getParsedTokenAccountsByOwner).toHaveBeenCalledTimes(2);
+		expect(result.details).toMatchObject({
+			runId: "run-read-token-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.read.tokenBalance",
+						address,
+						tokenMint: USDC_MINT,
+					},
+				},
+				approval: {
+					required: false,
+				},
+				simulate: {
+					ok: true,
+					context: {
+						intentType: "solana.read.tokenBalance",
+						address,
+						tokenMint: USDC_MINT,
+						amount: "3000000",
+						uiAmount: "3",
+					},
+				},
+			},
+		});
+	});
+
+	it("executes read portfolio workflow on mainnet without confirmToken", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const address = Keypair.generate().publicKey.toBase58();
+		const bonkMint = "6dhTynDkYsVM7cbF7TKfC9DWB636TcEM935fq7JzL2ES";
+		const connection = {
+			getBalance: vi.fn().mockResolvedValue(2_000_000_000),
+			getParsedTokenAccountsByOwner: vi
+				.fn()
+				.mockResolvedValueOnce({
+					value: [
+						makeParsedTokenAccount(address, bonkMint, "1000", 9, 0.000001),
+					],
+				})
+				.mockResolvedValueOnce({
+					value: [],
+				}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-read-portfolio-exec", {
+			runId: "run-read-portfolio-exec",
+			runMode: "execute",
+			intentType: "solana.read.portfolio",
+			address,
+			network: "mainnet-beta",
+		});
+
+		expect(connection.getBalance).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			runId: "run-read-portfolio-exec",
+			status: "executed",
+			artifacts: {
+				approval: {
+					required: false,
+					approved: true,
+				},
+				execute: {
+					read: true,
+					result: {
+						intentType: "solana.read.portfolio",
+						address,
+						tokenCount: 1,
 					},
 				},
 			},
@@ -726,7 +884,7 @@ describe("w3rt_run_workflow_v0", () => {
 				toAddress: destination,
 				amountSol: 0.02,
 			}),
-		).rejects.toThrow("confirmMainnet=true");
+		).rejects.toThrow("runId=run-mainnet");
 
 		await expect(
 			tool.execute("wf4", {
@@ -738,7 +896,7 @@ describe("w3rt_run_workflow_v0", () => {
 				confirmMainnet: true,
 				confirmToken: "SOL-WRONGTOKEN",
 			}),
-		).rejects.toThrow("Invalid confirmToken");
+		).rejects.toThrow("provided=SOL-WRONGTOKEN");
 
 		const executed = await tool.execute("wf5", {
 			runId: "run-mainnet",

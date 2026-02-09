@@ -18,6 +18,8 @@ import {
 } from "@solana/web3.js";
 import { defineTool } from "../../../core/types.js";
 import {
+	TOKEN_2022_PROGRAM_ID,
+	TOKEN_PROGRAM_ID,
 	assertJupiterNetworkSupported,
 	assertRaydiumNetworkSupported,
 	buildJupiterSwapTransaction,
@@ -45,6 +47,7 @@ import {
 	parseRaydiumSwapType,
 	parseRaydiumTxVersion,
 	parseSplTokenProgram,
+	parseTokenAccountInfo,
 	parseTransactionFromBase64,
 	raydiumSwapTypeSchema,
 	raydiumTxVersionSchema,
@@ -60,9 +63,13 @@ type WorkflowIntentType =
 	| "solana.transfer.sol"
 	| "solana.transfer.spl"
 	| "solana.swap.jupiter"
-	| "solana.swap.raydium";
+	| "solana.swap.raydium"
+	| "solana.read.balance"
+	| "solana.read.tokenBalance"
+	| "solana.read.portfolio";
 type ParsedIntentTextFields = Partial<{
 	intentType: WorkflowIntentType;
+	address: string;
 	toAddress: string;
 	amountSol: number;
 	amountUi: string;
@@ -130,7 +137,28 @@ type WorkflowIntent =
 	| TransferSolIntent
 	| TransferSplIntent
 	| JupiterSwapIntent
-	| RaydiumSwapIntent;
+	| RaydiumSwapIntent
+	| {
+			type: "solana.read.balance";
+			address: string;
+	  }
+	| {
+			type: "solana.read.tokenBalance";
+			address: string;
+			tokenMint: string;
+			includeToken2022: boolean;
+	  }
+	| {
+			type: "solana.read.portfolio";
+			address: string;
+			includeZero: boolean;
+			includeToken2022: boolean;
+	  };
+type ReadWorkflowIntent = Extract<
+	WorkflowIntent,
+	{ type: `solana.read.${string}` }
+>;
+type TransactionWorkflowIntent = Exclude<WorkflowIntent, ReadWorkflowIntent>;
 
 type PreparedTransaction = {
 	tx: Transaction | VersionedTransaction;
@@ -220,6 +248,9 @@ const BASE58_PUBLIC_KEY_REGEX = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
 const TOKEN_SYMBOL_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{1,15}$/;
 const SWAP_KEYWORD_REGEX = /(swap|兑换|换成|换到|互换|兑成|兑为)/i;
 const TRANSFER_KEYWORD_REGEX = /(transfer|send|转账|转到|发送|打款)/i;
+const READ_KEYWORD_REGEX = /(balance|余额|portfolio|资产|持仓)/i;
+const PORTFOLIO_KEYWORD_REGEX =
+	/(portfolio|资产|持仓|all\s+balances?|全部余额|token\s+positions?)/i;
 
 function parseRunMode(value?: string): WorkflowRunMode {
 	if (value === "analysis" || value === "simulate" || value === "execute") {
@@ -260,7 +291,22 @@ function createConfirmToken(
 	return `SOL-${digest.slice(0, 12).toUpperCase()}`;
 }
 
+function isReadIntentType(intentType: WorkflowIntentType): boolean {
+	return (
+		intentType === "solana.read.balance" ||
+		intentType === "solana.read.tokenBalance" ||
+		intentType === "solana.read.portfolio"
+	);
+}
+
+function isReadIntent(intent: WorkflowIntent): intent is ReadWorkflowIntent {
+	return isReadIntentType(intent.type);
+}
+
 function createWorkflowPlan(intentType: WorkflowIntentType): string[] {
+	if (isReadIntentType(intentType)) {
+		return [`analysis:${intentType}`, "read:fetch", "respond:result"];
+	}
 	return [
 		`analysis:${intentType}`,
 		"simulate:transaction",
@@ -315,6 +361,35 @@ function parseMintOrSymbolCandidate(value: string): string | undefined {
 		return sanitized;
 	}
 	return undefined;
+}
+
+function parseMintOrKnownSymbolCandidate(value: string): string | undefined {
+	const sanitized = sanitizeTokenCandidate(value);
+	if (!sanitized) {
+		return undefined;
+	}
+	const symbolToken = TOKEN_ALIAS_MAP.get(sanitized.toUpperCase());
+	if (symbolToken) {
+		return symbolToken.mint;
+	}
+	return parseMintFromCandidate(sanitized);
+}
+
+function formatTokenUiAmount(amountRaw: bigint, decimals: number): string {
+	if (decimals <= 0) {
+		return amountRaw.toString();
+	}
+	const base = 10n ** BigInt(decimals);
+	const whole = amountRaw / base;
+	const fractionRaw = amountRaw % base;
+	if (fractionRaw === 0n) {
+		return whole.toString();
+	}
+	const fraction = fractionRaw
+		.toString()
+		.padStart(decimals, "0")
+		.replace(/0+$/, "");
+	return `${whole.toString()}.${fraction}`;
 }
 
 function registerResolvedTokenSymbol(
@@ -679,6 +754,61 @@ function parseTransferIntentText(intentText: string): ParsedIntentTextFields {
 	return parsed;
 }
 
+function parseReadIntentText(intentText: string): ParsedIntentTextFields {
+	const parsed: ParsedIntentTextFields = {};
+	const addressMatch = intentText.match(
+		/\baddress\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (addressMatch?.[1]) {
+		parsed.address = addressMatch[1];
+	}
+	if (!parsed.address) {
+		const addresses = intentText.match(BASE58_PUBLIC_KEY_REGEX);
+		if (addresses && addresses.length > 0) {
+			parsed.address = addresses[addresses.length - 1];
+		}
+	}
+
+	const tokenMintMatch = intentText.match(
+		/\btokenMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
+	);
+	if (tokenMintMatch?.[1]) {
+		const tokenMint = parseMintOrSymbolCandidate(tokenMintMatch[1]);
+		if (tokenMint) {
+			parsed.tokenMint = tokenMint;
+		}
+	}
+	if (!parsed.tokenMint) {
+		const tokenPatterns = [
+			/([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\s*(?:token\s*)?(?:balance|余额)/i,
+			/(?:balance|余额)\s*(?:of|for|查询)?\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})/i,
+		];
+		for (const pattern of tokenPatterns) {
+			const match = intentText.match(pattern);
+			const candidate = match?.[1];
+			if (!candidate) {
+				continue;
+			}
+			const tokenMint = parseMintOrKnownSymbolCandidate(candidate);
+			if (tokenMint && tokenMint !== SOL_MINT) {
+				parsed.tokenMint = tokenMint;
+				break;
+			}
+		}
+	}
+
+	if (PORTFOLIO_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.read.portfolio";
+		return parsed;
+	}
+	if (parsed.tokenMint) {
+		parsed.intentType = "solana.read.tokenBalance";
+		return parsed;
+	}
+	parsed.intentType = "solana.read.balance";
+	return parsed;
+}
+
 function parseSwapIntentText(intentText: string): ParsedIntentTextFields {
 	const lower = intentText.toLowerCase();
 	const parsed: ParsedIntentTextFields = {
@@ -794,6 +924,24 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	}
 	const trimmed = intentText.trim();
 	const lower = trimmed.toLowerCase();
+	if (lower.includes("solana.read.balance")) {
+		return {
+			...parseReadIntentText(trimmed),
+			intentType: "solana.read.balance",
+		};
+	}
+	if (lower.includes("solana.read.tokenbalance")) {
+		return {
+			...parseReadIntentText(trimmed),
+			intentType: "solana.read.tokenBalance",
+		};
+	}
+	if (lower.includes("solana.read.portfolio")) {
+		return {
+			...parseReadIntentText(trimmed),
+			intentType: "solana.read.portfolio",
+		};
+	}
 	if (lower.includes("solana.transfer.sol")) {
 		return parseTransferIntentText(trimmed);
 	}
@@ -814,11 +962,15 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	}
 	const hasSwapKeywords = SWAP_KEYWORD_REGEX.test(trimmed);
 	const hasTransferKeywords = TRANSFER_KEYWORD_REGEX.test(trimmed);
+	const hasReadKeywords = READ_KEYWORD_REGEX.test(trimmed);
 	if (hasSwapKeywords && !hasTransferKeywords) {
 		return parseSwapIntentText(trimmed);
 	}
 	if (hasTransferKeywords && !hasSwapKeywords) {
 		return parseTransferIntentText(trimmed);
+	}
+	if (hasReadKeywords && !hasSwapKeywords && !hasTransferKeywords) {
+		return parseReadIntentText(trimmed);
 	}
 	const swapFields = parseSwapIntentText(trimmed);
 	if (
@@ -833,6 +985,10 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	const transferFields = parseTransferIntentText(trimmed);
 	if (transferFields.toAddress || transferFields.amountSol) {
 		return transferFields;
+	}
+	const readFields = parseReadIntentText(trimmed);
+	if (readFields.intentType || readFields.address || readFields.tokenMint) {
+		return readFields;
 	}
 	return {};
 }
@@ -862,9 +1018,31 @@ function resolveIntentType(
 		params.intentType === "solana.transfer.sol" ||
 		params.intentType === "solana.transfer.spl" ||
 		params.intentType === "solana.swap.jupiter" ||
-		params.intentType === "solana.swap.raydium"
+		params.intentType === "solana.swap.raydium" ||
+		params.intentType === "solana.read.balance" ||
+		params.intentType === "solana.read.tokenBalance" ||
+		params.intentType === "solana.read.portfolio"
 	) {
 		return params.intentType;
+	}
+	if (
+		typeof params.address === "string" &&
+		typeof params.toAddress !== "string" &&
+		typeof params.inputMint !== "string" &&
+		typeof params.outputMint !== "string" &&
+		typeof params.amountSol !== "number" &&
+		typeof params.amountRaw !== "string"
+	) {
+		if (typeof params.tokenMint === "string") {
+			return "solana.read.tokenBalance";
+		}
+		if (
+			typeof params.includeZero === "boolean" ||
+			typeof params.includeToken2022 === "boolean"
+		) {
+			return "solana.read.portfolio";
+		}
+		return "solana.read.balance";
 	}
 	if (
 		typeof params.tokenMint === "string" &&
@@ -891,6 +1069,20 @@ function resolveIntentType(
 		typeof params.slippageBps === "number"
 	) {
 		return "solana.swap.jupiter";
+	}
+	if (
+		typeof params.tokenMint === "string" &&
+		typeof params.toAddress !== "string" &&
+		typeof params.amountRaw !== "string" &&
+		typeof params.amountUi !== "string"
+	) {
+		return "solana.read.tokenBalance";
+	}
+	if (typeof params.includeZero === "boolean") {
+		return "solana.read.portfolio";
+	}
+	if (typeof params.address === "string") {
+		return "solana.read.balance";
 	}
 	if (
 		typeof params.toAddress === "string" ||
@@ -926,6 +1118,50 @@ async function normalizeIntent(
 ): Promise<WorkflowIntent> {
 	const normalizedParams = mergeIntentParams(params);
 	const intentType = resolveIntentType(normalizedParams);
+	if (intentType === "solana.read.balance") {
+		const address = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.address === "string"
+					? normalizedParams.address
+					: signerPublicKey,
+			),
+		).toBase58();
+		return {
+			type: intentType,
+			address,
+		};
+	}
+	if (intentType === "solana.read.tokenBalance") {
+		const address = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.address === "string"
+					? normalizedParams.address
+					: signerPublicKey,
+			),
+		).toBase58();
+		const tokenMint = await ensureMint(normalizedParams.tokenMint, "tokenMint");
+		return {
+			type: intentType,
+			address,
+			tokenMint,
+			includeToken2022: normalizedParams.includeToken2022 !== false,
+		};
+	}
+	if (intentType === "solana.read.portfolio") {
+		const address = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.address === "string"
+					? normalizedParams.address
+					: signerPublicKey,
+			),
+		).toBase58();
+		return {
+			type: intentType,
+			address,
+			includeZero: normalizedParams.includeZero === true,
+			includeToken2022: normalizedParams.includeToken2022 !== false,
+		};
+	}
 	if (intentType === "solana.transfer.sol") {
 		const toAddress = new PublicKey(
 			normalizeAtPath(ensureString(normalizedParams.toAddress, "toAddress")),
@@ -1205,6 +1441,162 @@ function extractRaydiumTransactions(response: unknown): string[] {
 		return [payload.transaction];
 	}
 	return [];
+}
+
+async function executeReadIntent(
+	network: string,
+	intent: ReadWorkflowIntent,
+): Promise<{
+	summary: string;
+	details: Record<string, unknown>;
+}> {
+	const connection = getConnection(network);
+	if (intent.type === "solana.read.balance") {
+		const address = new PublicKey(intent.address).toBase58();
+		const lamports = await connection.getBalance(new PublicKey(address));
+		const sol = lamports / 1_000_000_000;
+		return {
+			summary: `Balance: ${sol} SOL (${lamports} lamports)`,
+			details: {
+				intentType: intent.type,
+				address,
+				lamports,
+				sol,
+				network,
+				addressExplorer: getExplorerAddressUrl(address, network),
+			},
+		};
+	}
+
+	if (intent.type === "solana.read.tokenBalance") {
+		const owner = new PublicKey(intent.address);
+		const mint = new PublicKey(intent.tokenMint);
+		const [tokenProgramResponse, token2022Response] = await Promise.all([
+			connection.getParsedTokenAccountsByOwner(owner, {
+				programId: TOKEN_PROGRAM_ID,
+			}),
+			intent.includeToken2022
+				? connection.getParsedTokenAccountsByOwner(owner, {
+						programId: TOKEN_2022_PROGRAM_ID,
+					})
+				: Promise.resolve(null),
+		]);
+		const accounts = [
+			...tokenProgramResponse.value,
+			...(token2022Response?.value ?? []),
+		];
+		let totalAmountRaw = 0n;
+		let decimals = 0;
+		let tokenAccountCount = 0;
+		for (const entry of accounts) {
+			const tokenInfo = parseTokenAccountInfo(entry.account.data);
+			if (!tokenInfo) continue;
+			if (tokenInfo.mint !== mint.toBase58()) continue;
+			totalAmountRaw += BigInt(tokenInfo.tokenAmount.amount);
+			decimals = tokenInfo.tokenAmount.decimals;
+			tokenAccountCount += 1;
+		}
+		const uiAmount = formatTokenUiAmount(totalAmountRaw, decimals);
+		return {
+			summary: `Token balance: ${uiAmount} (raw ${totalAmountRaw.toString()})`,
+			details: {
+				intentType: intent.type,
+				address: owner.toBase58(),
+				tokenMint: mint.toBase58(),
+				amount: totalAmountRaw.toString(),
+				uiAmount,
+				decimals,
+				tokenAccountCount,
+				tokenProgramAccountCount: tokenProgramResponse.value.length,
+				token2022AccountCount: token2022Response?.value.length ?? 0,
+				network,
+				addressExplorer: getExplorerAddressUrl(owner.toBase58(), network),
+				tokenMintExplorer: getExplorerAddressUrl(mint.toBase58(), network),
+			},
+		};
+	}
+
+	const owner = new PublicKey(intent.address);
+	const [lamports, tokenProgramResponse, token2022Response] = await Promise.all(
+		[
+			connection.getBalance(owner),
+			connection.getParsedTokenAccountsByOwner(owner, {
+				programId: TOKEN_PROGRAM_ID,
+			}),
+			intent.includeToken2022
+				? connection.getParsedTokenAccountsByOwner(owner, {
+						programId: TOKEN_2022_PROGRAM_ID,
+					})
+				: Promise.resolve(null),
+		],
+	);
+	const tokenAccounts = [
+		...tokenProgramResponse.value,
+		...(token2022Response?.value ?? []),
+	];
+	const positions = new Map<
+		string,
+		{
+			amountRaw: bigint;
+			decimals: number;
+			tokenAccountCount: number;
+		}
+	>();
+	for (const entry of tokenAccounts) {
+		const tokenInfo = parseTokenAccountInfo(entry.account.data);
+		if (!tokenInfo) continue;
+		const amountRaw = BigInt(tokenInfo.tokenAmount.amount);
+		const existing = positions.get(tokenInfo.mint);
+		if (!existing) {
+			positions.set(tokenInfo.mint, {
+				amountRaw,
+				decimals: tokenInfo.tokenAmount.decimals,
+				tokenAccountCount: 1,
+			});
+			continue;
+		}
+		existing.amountRaw += amountRaw;
+		existing.tokenAccountCount += 1;
+	}
+	const tokens = [...positions.entries()]
+		.map(([mint, position]) => ({
+			mint,
+			symbol: TOKEN_BY_MINT_MAP.get(mint)?.aliases[0] ?? null,
+			amount: position.amountRaw.toString(),
+			uiAmount: formatTokenUiAmount(position.amountRaw, position.decimals),
+			decimals: position.decimals,
+			tokenAccountCount: position.tokenAccountCount,
+			explorer: getExplorerAddressUrl(mint, network),
+		}))
+		.filter((position) =>
+			intent.includeZero ? true : BigInt(position.amount) > 0n,
+		)
+		.sort((a, b) => {
+			if (a.symbol && b.symbol) return a.symbol.localeCompare(b.symbol);
+			if (a.symbol) return -1;
+			if (b.symbol) return 1;
+			return a.mint.localeCompare(b.mint);
+		});
+
+	const sol = lamports / 1_000_000_000;
+	return {
+		summary: `Portfolio: ${sol} SOL + ${tokens.length} token position(s)`,
+		details: {
+			intentType: intent.type,
+			address: owner.toBase58(),
+			network,
+			addressExplorer: getExplorerAddressUrl(owner.toBase58(), network),
+			sol: {
+				lamports,
+				uiAmount: sol,
+			},
+			tokenCount: tokens.length,
+			tokenAccountCount: tokenAccounts.length,
+			tokenProgramAccountCount: tokenProgramResponse.value.length,
+			token2022AccountCount: token2022Response?.value.length ?? 0,
+			tokens,
+		},
+	};
 }
 
 async function prepareTransferSolSimulation(
@@ -1566,7 +1958,7 @@ async function prepareRaydiumSwapSimulation(
 async function prepareSimulation(
 	network: string,
 	signer: Keypair,
-	intent: WorkflowIntent,
+	intent: TransactionWorkflowIntent,
 	params: Record<string, unknown>,
 ): Promise<PreparedTransaction> {
 	if (intent.type === "solana.transfer.sol") {
@@ -1653,6 +2045,9 @@ export function createSolanaWorkflowTools() {
 						Type.Literal("solana.transfer.spl"),
 						Type.Literal("solana.swap.jupiter"),
 						Type.Literal("solana.swap.raydium"),
+						Type.Literal("solana.read.balance"),
+						Type.Literal("solana.read.tokenBalance"),
+						Type.Literal("solana.read.portfolio"),
 					]),
 				),
 				intentText: Type.Optional(
@@ -1692,6 +2087,12 @@ export function createSolanaWorkflowTools() {
 				confirm: Type.Optional(
 					Type.Boolean({ description: "Wait for confirmation (default true)" }),
 				),
+				address: Type.Optional(
+					Type.String({
+						description:
+							"Target wallet address for read intents. Defaults to signer address.",
+					}),
+				),
 				toAddress: Type.Optional(
 					Type.String({
 						description:
@@ -1730,6 +2131,18 @@ export function createSolanaWorkflowTools() {
 					Type.String({
 						description:
 							"Optional human-readable token amount for swaps and SPL transfers (for known mints like SOL/USDC/USDT).",
+					}),
+				),
+				includeZero: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include zero-balance token positions for intentType=solana.read.portfolio",
+					}),
+				),
+				includeToken2022: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include Token-2022 accounts for read intents and token/portfolio balance queries",
 					}),
 				),
 				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),
@@ -1793,7 +2206,8 @@ export function createSolanaWorkflowTools() {
 					network,
 				);
 				const confirmToken = createConfirmToken(runId, network, intent);
-				const approvalRequired = network === "mainnet-beta";
+				const approvalRequired =
+					network === "mainnet-beta" && !isReadIntent(intent);
 				const plan = createWorkflowPlan(intent.type);
 
 				const analysisArtifact = {
@@ -1831,12 +2245,95 @@ export function createSolanaWorkflowTools() {
 						],
 						details: {
 							runId,
+							intentType: intent.type,
+							runMode,
+							network,
 							status: "analysis",
 							artifacts: {
 								analysis: analysisArtifact,
 								simulate: null,
 								approval: approvalArtifact,
 								execute: null,
+								monitor: null,
+							},
+						},
+					};
+				}
+
+				if (isReadIntent(intent)) {
+					const readResult = await executeReadIntent(network, intent);
+					const simulationArtifact = {
+						stage: "simulate",
+						ok: true,
+						err: null,
+						logs: [],
+						unitsConsumed: null,
+						version: null,
+						context: readResult.details,
+					};
+					if (runMode === "simulate") {
+						return {
+							content: [
+								{
+									type: "text",
+									text: `Workflow read simulation: ${readResult.summary}`,
+								},
+								{
+									type: "text",
+									text: `runId=${runId} approvalRequired=false confirmToken=N/A`,
+								},
+							],
+							details: {
+								runId,
+								intentType: intent.type,
+								runMode,
+								network,
+								status: "simulated",
+								artifacts: {
+									analysis: analysisArtifact,
+									simulate: simulationArtifact,
+									approval: approvalArtifact,
+									execute: null,
+									monitor: null,
+								},
+							},
+						};
+					}
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Workflow read executed: ${readResult.summary}`,
+							},
+							{
+								type: "text",
+								text: `runId=${runId}`,
+							},
+						],
+						details: {
+							runId,
+							intentType: intent.type,
+							runMode,
+							network,
+							status: "executed",
+							artifacts: {
+								analysis: analysisArtifact,
+								simulate: simulationArtifact,
+								approval: {
+									...approvalArtifact,
+									approved: true,
+								},
+								execute: {
+									stage: "execute",
+									read: true,
+									guardChecks: {
+										readOnly: true,
+										approvalRequired: false,
+										confirmMainnetRequired: false,
+										confirmTokenRequired: false,
+									},
+									result: readResult.details,
+								},
 								monitor: null,
 							},
 						},
@@ -1877,6 +2374,9 @@ export function createSolanaWorkflowTools() {
 						],
 						details: {
 							runId,
+							intentType: intent.type,
+							runMode,
+							network,
 							status: "simulated",
 							artifacts: {
 								analysis: analysisArtifact,
@@ -1892,18 +2392,18 @@ export function createSolanaWorkflowTools() {
 				if (approvalRequired) {
 					if (params.confirmMainnet !== true) {
 						throw new Error(
-							"Mainnet execute requires confirmMainnet=true. Run analysis/simulate first to obtain confirmToken.",
+							`Mainnet execute requires confirmMainnet=true for runId=${runId}. Run analysis/simulate first to obtain confirmToken.`,
 						);
 					}
 					if (params.confirmToken !== confirmToken) {
 						throw new Error(
-							`Invalid confirmToken for runId=${runId}. Expected ${confirmToken}.`,
+							`Invalid confirmToken for runId=${runId}. expected=${confirmToken} provided=${params.confirmToken ?? "null"}.`,
 						);
 					}
 				}
 				if (!prepared.simulation.ok) {
 					throw new Error(
-						"Simulation failed; execution blocked by workflow policy",
+						`Simulation failed for runId=${runId}; execution blocked by workflow policy`,
 					);
 				}
 
@@ -1918,6 +2418,13 @@ export function createSolanaWorkflowTools() {
 					signatures: execution.signatures,
 					confirmed: execution.confirmed,
 					version: prepared.version,
+					guardChecks: {
+						approvalRequired,
+						confirmMainnetProvided: params.confirmMainnet === true,
+						confirmTokenMatched:
+							!approvalRequired || params.confirmToken === confirmToken,
+						simulationOk: prepared.simulation.ok,
+					},
 				};
 				const monitorArtifact = {
 					stage: "monitor",
@@ -1939,6 +2446,9 @@ export function createSolanaWorkflowTools() {
 					],
 					details: {
 						runId,
+						intentType: intent.type,
+						runMode,
+						network,
 						status: "executed",
 						artifacts: {
 							analysis: analysisArtifact,
