@@ -484,6 +484,186 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses stake delegate intentText and infers stake intent fields", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const stakeAccountAddress = Keypair.generate().publicKey.toBase58();
+		const voteAccountAddress = Keypair.generate().publicKey.toBase58();
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-stake-delegate", {
+			runId: "run-intent-stake-delegate",
+			runMode: "analysis",
+			intentText: `delegate stake stakeAccountAddress=${stakeAccountAddress} voteAccountAddress=${voteAccountAddress}`,
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-intent-stake-delegate",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.stake.delegate",
+						stakeAuthorityAddress: signer.publicKey.toBase58(),
+						stakeAccountAddress,
+						voteAccountAddress,
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates stake delegate workflow intent", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const stakeAccountAddress = Keypair.generate().publicKey.toBase58();
+		const voteAccountAddress = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 1,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 77,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-stake-delegate-sim", {
+			runId: "run-stake-delegate-sim",
+			intentType: "solana.stake.delegate",
+			runMode: "simulate",
+			stakeAccountAddress,
+			voteAccountAddress,
+		});
+
+		expect(connection.simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			runId: "run-stake-delegate-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.stake.delegate",
+						stakeAuthorityAddress: signer.publicKey.toBase58(),
+						stakeAccountAddress,
+						voteAccountAddress,
+					},
+				},
+				simulate: {
+					ok: true,
+					context: {
+						action: "delegate",
+						stakeAuthorityAddress: signer.publicKey.toBase58(),
+						stakeAccountAddress,
+						voteAccountAddress,
+					},
+				},
+			},
+		});
+	});
+
+	it("enforces mainnet confirm token for stake withdraw execute", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const stakeAccountAddress = Keypair.generate().publicKey.toBase58();
+		const toAddress = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 1,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 66,
+				},
+			}),
+			sendRawTransaction: vi.fn().mockResolvedValue("stake-withdraw-sig"),
+			confirmTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const simulated = await tool.execute("wf-stake-withdraw-sim", {
+			runId: "run-stake-withdraw",
+			intentType: "solana.stake.withdraw",
+			runMode: "simulate",
+			stakeAccountAddress,
+			toAddress,
+			amountSol: 0.000001,
+		});
+		expect(runtimeMocks.toLamports).toHaveBeenCalledWith(0.000001);
+		const confirmToken = (
+			simulated.details as {
+				artifacts?: { approval?: { confirmToken?: string | null } };
+			}
+		).artifacts?.approval?.confirmToken;
+		if (!confirmToken) throw new Error("confirmToken not returned");
+
+		await expect(
+			tool.execute("wf-stake-withdraw-exec-missing-confirm", {
+				runId: "run-stake-withdraw",
+				intentType: "solana.stake.withdraw",
+				runMode: "execute",
+				stakeAccountAddress,
+				toAddress,
+				amountSol: 0.000001,
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+
+		await expect(
+			tool.execute("wf-stake-withdraw-exec-invalid-token", {
+				runId: "run-stake-withdraw",
+				intentType: "solana.stake.withdraw",
+				runMode: "execute",
+				stakeAccountAddress,
+				toAddress,
+				amountSol: 0.000001,
+				confirmMainnet: true,
+				confirmToken: "SOL-WRONGTOKEN",
+			}),
+		).rejects.toThrow("provided=SOL-WRONGTOKEN");
+
+		const executed = await tool.execute("wf-stake-withdraw-exec", {
+			runId: "run-stake-withdraw",
+			intentType: "solana.stake.withdraw",
+			runMode: "execute",
+			stakeAccountAddress,
+			toAddress,
+			amountSol: 0.000001,
+			confirmMainnet: true,
+			confirmToken,
+		});
+		expect(connection.sendRawTransaction).toHaveBeenCalledTimes(1);
+		expect(executed.details).toMatchObject({
+			runId: "run-stake-withdraw",
+			status: "executed",
+			artifacts: {
+				execute: {
+					signature: "stake-withdraw-sig",
+					guardChecks: {
+						approvalRequired: true,
+						confirmMainnetProvided: true,
+						confirmTokenMatched: true,
+						simulationOk: true,
+					},
+				},
+			},
+		});
+	});
+
 	it("parses SPL transfer intentText and derives amountRaw from token ui amount", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);

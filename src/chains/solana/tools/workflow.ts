@@ -63,6 +63,9 @@ type WorkflowRunMode = "analysis" | "simulate" | "execute";
 type WorkflowIntentType =
 	| "solana.transfer.sol"
 	| "solana.transfer.spl"
+	| "solana.stake.delegate"
+	| "solana.stake.deactivate"
+	| "solana.stake.withdraw"
 	| "solana.swap.jupiter"
 	| "solana.swap.raydium"
 	| "solana.swap.orca"
@@ -81,6 +84,10 @@ type ParsedIntentTextFields = Partial<{
 	inputMint: string;
 	outputMint: string;
 	amountRaw: string;
+	stakeAuthorityAddress: string;
+	withdrawAuthorityAddress: string;
+	stakeAccountAddress: string;
+	voteAccountAddress: string;
 	slippageBps: number;
 	swapMode: "ExactIn" | "ExactOut";
 	dexes: string[];
@@ -106,6 +113,28 @@ type TransferSplIntent = {
 	sourceTokenAccount?: string;
 	destinationTokenAccount?: string;
 	createDestinationAtaIfMissing: boolean;
+};
+
+type StakeDelegateIntent = {
+	type: "solana.stake.delegate";
+	stakeAuthorityAddress: string;
+	stakeAccountAddress: string;
+	voteAccountAddress: string;
+};
+
+type StakeDeactivateIntent = {
+	type: "solana.stake.deactivate";
+	stakeAuthorityAddress: string;
+	stakeAccountAddress: string;
+};
+
+type StakeWithdrawIntent = {
+	type: "solana.stake.withdraw";
+	withdrawAuthorityAddress: string;
+	stakeAccountAddress: string;
+	toAddress: string;
+	amountSol: number;
+	lamports: number;
 };
 
 type JupiterSwapIntent = {
@@ -144,6 +173,9 @@ type RaydiumSwapIntent = {
 type WorkflowIntent =
 	| TransferSolIntent
 	| TransferSplIntent
+	| StakeDelegateIntent
+	| StakeDeactivateIntent
+	| StakeWithdrawIntent
 	| JupiterSwapIntent
 	| RaydiumSwapIntent
 	| {
@@ -263,6 +295,8 @@ const BASE58_PUBLIC_KEY_REGEX = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
 const TOKEN_SYMBOL_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{1,15}$/;
 const SWAP_KEYWORD_REGEX = /(swap|兑换|换成|换到|互换|兑成|兑为)/i;
 const TRANSFER_KEYWORD_REGEX = /(transfer|send|转账|转到|发送|打款)/i;
+const STAKE_OPERATION_KEYWORD_REGEX =
+	/(delegate|delegation|deactivate|unstake|withdraw|委托质押|解除质押|提取质押|提取.*质押|质押.*提取)/i;
 const READ_KEYWORD_REGEX = /(balance|余额|portfolio|资产|持仓)/i;
 const PORTFOLIO_KEYWORD_REGEX =
 	/(portfolio|资产|持仓|all\s+balances?|全部余额|token\s+positions?)/i;
@@ -1015,6 +1049,107 @@ function parseTransferIntentText(intentText: string): ParsedIntentTextFields {
 	return parsed;
 }
 
+function detectStakeIntentTypeFromText(
+	intentText: string,
+): Extract<WorkflowIntentType, `solana.stake.${string}`> | undefined {
+	const lower = intentText.toLowerCase();
+	if (lower.includes("solana.stake.delegate")) {
+		return "solana.stake.delegate";
+	}
+	if (lower.includes("solana.stake.deactivate")) {
+		return "solana.stake.deactivate";
+	}
+	if (lower.includes("solana.stake.withdraw")) {
+		return "solana.stake.withdraw";
+	}
+	if (
+		/\bwithdraw\b|\bwithdrawal\b|提取|提现/i.test(intentText) &&
+		/\bstake\b|质押/i.test(intentText)
+	) {
+		return "solana.stake.withdraw";
+	}
+	if (/\b(delegate|delegation)\b|委托质押|质押到|委托到/i.test(intentText)) {
+		return "solana.stake.delegate";
+	}
+	if (
+		/\bdeactivate\b|\bunstake\b|解除质押|取消质押|停止质押/i.test(intentText)
+	) {
+		return "solana.stake.deactivate";
+	}
+	return undefined;
+}
+
+function parseStakeIntentText(intentText: string): ParsedIntentTextFields {
+	const intentType = detectStakeIntentTypeFromText(intentText);
+	if (!intentType) {
+		return {};
+	}
+	const parsed: ParsedIntentTextFields = {
+		intentType,
+	};
+	const stakeAuthorityMatch = intentText.match(
+		/\bstakeAuthority(?:Address)?\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (stakeAuthorityMatch?.[1]) {
+		parsed.stakeAuthorityAddress = stakeAuthorityMatch[1];
+	}
+	const withdrawAuthorityMatch = intentText.match(
+		/\bwithdrawAuthority(?:Address)?\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (withdrawAuthorityMatch?.[1]) {
+		parsed.withdrawAuthorityAddress = withdrawAuthorityMatch[1];
+	}
+	const stakeAccountMatch = intentText.match(
+		/\bstakeAccount(?:Address)?\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (stakeAccountMatch?.[1]) {
+		parsed.stakeAccountAddress = stakeAccountMatch[1];
+	}
+	const voteAccountMatch = intentText.match(
+		/\bvoteAccount(?:Address)?\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (voteAccountMatch?.[1]) {
+		parsed.voteAccountAddress = voteAccountMatch[1];
+	}
+	const toMatch = intentText.match(
+		/(?:\bto\b|->|=>|到|给)\s*([1-9A-HJ-NP-Za-km-z]{32,44})/i,
+	);
+	if (toMatch?.[1]) {
+		parsed.toAddress = toMatch[1];
+	}
+	const amountSolMatch =
+		intentText.match(/\bamountSol\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\b/i) ??
+		intentText.match(/([0-9]+(?:\.[0-9]+)?)\s*sol\b/i);
+	if (amountSolMatch?.[1]) {
+		const amountSol = parsePositiveNumber(amountSolMatch[1]);
+		if (amountSol != null) {
+			parsed.amountSol = amountSol;
+		}
+	}
+
+	const addresses = intentText.match(BASE58_PUBLIC_KEY_REGEX) ?? [];
+	if (!parsed.stakeAccountAddress && addresses.length > 0) {
+		parsed.stakeAccountAddress = addresses[0];
+	}
+	if (intentType === "solana.stake.delegate" && !parsed.voteAccountAddress) {
+		const candidates = addresses.filter(
+			(address) => address !== parsed.stakeAccountAddress,
+		);
+		if (candidates.length > 0) {
+			parsed.voteAccountAddress = candidates[0];
+		}
+	}
+	if (intentType === "solana.stake.withdraw" && !parsed.toAddress) {
+		const candidates = addresses.filter(
+			(address) => address !== parsed.stakeAccountAddress,
+		);
+		if (candidates.length > 0) {
+			parsed.toAddress = candidates[candidates.length - 1];
+		}
+	}
+	return parsed;
+}
+
 function parseReadIntentText(intentText: string): ParsedIntentTextFields {
 	const parsed: ParsedIntentTextFields = {};
 	const addressMatch = intentText.match(
@@ -1276,6 +1411,24 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 			intentType: "solana.transfer.spl",
 		};
 	}
+	if (lower.includes("solana.stake.delegate")) {
+		return {
+			...parseStakeIntentText(trimmed),
+			intentType: "solana.stake.delegate",
+		};
+	}
+	if (lower.includes("solana.stake.deactivate")) {
+		return {
+			...parseStakeIntentText(trimmed),
+			intentType: "solana.stake.deactivate",
+		};
+	}
+	if (lower.includes("solana.stake.withdraw")) {
+		return {
+			...parseStakeIntentText(trimmed),
+			intentType: "solana.stake.withdraw",
+		};
+	}
 	if (lower.includes("solana.swap.jupiter")) {
 		return parseSwapIntentText(trimmed);
 	}
@@ -1299,9 +1452,13 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	}
 	const hasSwapKeywords = SWAP_KEYWORD_REGEX.test(trimmed);
 	const hasTransferKeywords = TRANSFER_KEYWORD_REGEX.test(trimmed);
+	const hasStakeOperationKeywords = STAKE_OPERATION_KEYWORD_REGEX.test(trimmed);
 	const hasReadKeywords = READ_KEYWORD_REGEX.test(trimmed);
 	if (hasSwapKeywords && !hasTransferKeywords) {
 		return parseSwapIntentText(trimmed);
+	}
+	if (hasStakeOperationKeywords && !hasSwapKeywords && !hasTransferKeywords) {
+		return parseStakeIntentText(trimmed);
 	}
 	if (hasTransferKeywords && !hasSwapKeywords) {
 		return parseTransferIntentText(trimmed);
@@ -1322,6 +1479,14 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	const transferFields = parseTransferIntentText(trimmed);
 	if (transferFields.toAddress || transferFields.amountSol) {
 		return transferFields;
+	}
+	const stakeFields = parseStakeIntentText(trimmed);
+	if (
+		stakeFields.intentType ||
+		stakeFields.stakeAccountAddress ||
+		stakeFields.voteAccountAddress
+	) {
+		return stakeFields;
 	}
 	const readFields = parseReadIntentText(trimmed);
 	if (readFields.intentType || readFields.address || readFields.tokenMint) {
@@ -1354,6 +1519,9 @@ function resolveIntentType(
 	if (
 		params.intentType === "solana.transfer.sol" ||
 		params.intentType === "solana.transfer.spl" ||
+		params.intentType === "solana.stake.delegate" ||
+		params.intentType === "solana.stake.deactivate" ||
+		params.intentType === "solana.stake.withdraw" ||
 		params.intentType === "solana.swap.jupiter" ||
 		params.intentType === "solana.swap.raydium" ||
 		params.intentType === "solana.swap.orca" ||
@@ -1394,6 +1562,34 @@ function resolveIntentType(
 			typeof params.destinationTokenAccount === "string")
 	) {
 		return "solana.transfer.spl";
+	}
+	if (
+		typeof params.voteAccountAddress === "string" ||
+		(typeof params.intentText === "string" &&
+			detectStakeIntentTypeFromText(params.intentText) ===
+				"solana.stake.delegate")
+	) {
+		return "solana.stake.delegate";
+	}
+	if (
+		(typeof params.stakeAccountAddress === "string" &&
+			typeof params.toAddress === "string" &&
+			typeof params.amountSol === "number") ||
+		typeof params.withdrawAuthorityAddress === "string" ||
+		(typeof params.intentText === "string" &&
+			detectStakeIntentTypeFromText(params.intentText) ===
+				"solana.stake.withdraw")
+	) {
+		return "solana.stake.withdraw";
+	}
+	if (
+		typeof params.stakeAccountAddress === "string" ||
+		typeof params.stakeAuthorityAddress === "string" ||
+		(typeof params.intentText === "string" &&
+			detectStakeIntentTypeFromText(params.intentText) ===
+				"solana.stake.deactivate")
+	) {
+		return "solana.stake.deactivate";
 	}
 	if (
 		typeof params.txVersion === "string" ||
@@ -1600,6 +1796,101 @@ async function normalizeIntent(
 			destinationTokenAccount,
 			createDestinationAtaIfMissing:
 				normalizedParams.createDestinationAtaIfMissing !== false,
+		};
+	}
+	if (intentType === "solana.stake.delegate") {
+		const stakeAccountAddress = new PublicKey(
+			normalizeAtPath(
+				ensureString(
+					normalizedParams.stakeAccountAddress,
+					"stakeAccountAddress",
+				),
+			),
+		).toBase58();
+		const voteAccountAddress = new PublicKey(
+			normalizeAtPath(
+				ensureString(normalizedParams.voteAccountAddress, "voteAccountAddress"),
+			),
+		).toBase58();
+		const stakeAuthorityAddress = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.stakeAuthorityAddress === "string"
+					? normalizedParams.stakeAuthorityAddress
+					: signerPublicKey,
+			),
+		).toBase58();
+		if (stakeAuthorityAddress !== signerPublicKey) {
+			throw new Error(
+				`stakeAuthorityAddress mismatch: expected ${signerPublicKey}, got ${stakeAuthorityAddress}`,
+			);
+		}
+		return {
+			type: intentType,
+			stakeAuthorityAddress,
+			stakeAccountAddress,
+			voteAccountAddress,
+		};
+	}
+	if (intentType === "solana.stake.deactivate") {
+		const stakeAccountAddress = new PublicKey(
+			normalizeAtPath(
+				ensureString(
+					normalizedParams.stakeAccountAddress,
+					"stakeAccountAddress",
+				),
+			),
+		).toBase58();
+		const stakeAuthorityAddress = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.stakeAuthorityAddress === "string"
+					? normalizedParams.stakeAuthorityAddress
+					: signerPublicKey,
+			),
+		).toBase58();
+		if (stakeAuthorityAddress !== signerPublicKey) {
+			throw new Error(
+				`stakeAuthorityAddress mismatch: expected ${signerPublicKey}, got ${stakeAuthorityAddress}`,
+			);
+		}
+		return {
+			type: intentType,
+			stakeAuthorityAddress,
+			stakeAccountAddress,
+		};
+	}
+	if (intentType === "solana.stake.withdraw") {
+		const stakeAccountAddress = new PublicKey(
+			normalizeAtPath(
+				ensureString(
+					normalizedParams.stakeAccountAddress,
+					"stakeAccountAddress",
+				),
+			),
+		).toBase58();
+		const toAddress = new PublicKey(
+			normalizeAtPath(ensureString(normalizedParams.toAddress, "toAddress")),
+		).toBase58();
+		const amountSol = ensureNumber(normalizedParams.amountSol, "amountSol");
+		const lamports = toLamports(amountSol);
+		const withdrawAuthorityAddress = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.withdrawAuthorityAddress === "string"
+					? normalizedParams.withdrawAuthorityAddress
+					: signerPublicKey,
+			),
+		).toBase58();
+		if (withdrawAuthorityAddress !== signerPublicKey) {
+			throw new Error(
+				`withdrawAuthorityAddress mismatch: expected ${signerPublicKey}, got ${withdrawAuthorityAddress}`,
+			);
+		}
+		return {
+			type: intentType,
+			withdrawAuthorityAddress,
+			stakeAccountAddress,
+			toAddress,
+			amountSol,
+			lamports,
 		};
 	}
 
@@ -2258,6 +2549,136 @@ async function prepareTransferSplSimulation(
 	};
 }
 
+async function prepareStakeDelegateSimulation(
+	network: string,
+	signer: Keypair,
+	intent: StakeDelegateIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.stakeAuthorityAddress !== signerAddress) {
+		throw new Error(
+			`stakeAuthorityAddress mismatch: expected ${signerAddress}, got ${intent.stakeAuthorityAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const tx = new Transaction().add(
+		StakeProgram.delegate({
+			stakePubkey: new PublicKey(intent.stakeAccountAddress),
+			authorizedPubkey: signer.publicKey,
+			votePubkey: new PublicKey(intent.voteAccountAddress),
+		}),
+	);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			action: "delegate",
+			latestBlockhash,
+			stakeAuthorityAddress: intent.stakeAuthorityAddress,
+			stakeAccountAddress: intent.stakeAccountAddress,
+			voteAccountAddress: intent.voteAccountAddress,
+		},
+	};
+}
+
+async function prepareStakeDeactivateSimulation(
+	network: string,
+	signer: Keypair,
+	intent: StakeDeactivateIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.stakeAuthorityAddress !== signerAddress) {
+		throw new Error(
+			`stakeAuthorityAddress mismatch: expected ${signerAddress}, got ${intent.stakeAuthorityAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const tx = new Transaction().add(
+		StakeProgram.deactivate({
+			stakePubkey: new PublicKey(intent.stakeAccountAddress),
+			authorizedPubkey: signer.publicKey,
+		}),
+	);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			action: "deactivate",
+			latestBlockhash,
+			stakeAuthorityAddress: intent.stakeAuthorityAddress,
+			stakeAccountAddress: intent.stakeAccountAddress,
+		},
+	};
+}
+
+async function prepareStakeWithdrawSimulation(
+	network: string,
+	signer: Keypair,
+	intent: StakeWithdrawIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.withdrawAuthorityAddress !== signerAddress) {
+		throw new Error(
+			`withdrawAuthorityAddress mismatch: expected ${signerAddress}, got ${intent.withdrawAuthorityAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const tx = new Transaction().add(
+		StakeProgram.withdraw({
+			stakePubkey: new PublicKey(intent.stakeAccountAddress),
+			authorizedPubkey: signer.publicKey,
+			toPubkey: new PublicKey(intent.toAddress),
+			lamports: intent.lamports,
+		}),
+	);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			action: "withdraw",
+			latestBlockhash,
+			withdrawAuthorityAddress: intent.withdrawAuthorityAddress,
+			stakeAccountAddress: intent.stakeAccountAddress,
+			toAddress: intent.toAddress,
+			amountSol: intent.amountSol,
+			lamports: intent.lamports,
+		},
+	};
+}
+
 async function prepareJupiterSwapSimulation(
 	network: string,
 	signer: Keypair,
@@ -2551,6 +2972,15 @@ async function prepareSimulation(
 	if (intent.type === "solana.transfer.spl") {
 		return prepareTransferSplSimulation(network, signer, intent);
 	}
+	if (intent.type === "solana.stake.delegate") {
+		return prepareStakeDelegateSimulation(network, signer, intent);
+	}
+	if (intent.type === "solana.stake.deactivate") {
+		return prepareStakeDeactivateSimulation(network, signer, intent);
+	}
+	if (intent.type === "solana.stake.withdraw") {
+		return prepareStakeWithdrawSimulation(network, signer, intent);
+	}
 	if (intent.type === "solana.swap.raydium") {
 		return prepareRaydiumSwapSimulation(network, signer, intent, params);
 	}
@@ -2627,6 +3057,9 @@ export function createSolanaWorkflowTools() {
 					Type.Union([
 						Type.Literal("solana.transfer.sol"),
 						Type.Literal("solana.transfer.spl"),
+						Type.Literal("solana.stake.delegate"),
+						Type.Literal("solana.stake.deactivate"),
+						Type.Literal("solana.stake.withdraw"),
 						Type.Literal("solana.swap.jupiter"),
 						Type.Literal("solana.swap.orca"),
 						Type.Literal("solana.swap.meteora"),
@@ -2683,12 +3116,37 @@ export function createSolanaWorkflowTools() {
 				toAddress: Type.Optional(
 					Type.String({
 						description:
-							"Destination address for intentType=solana.transfer.sol or solana.transfer.spl",
+							"Destination address for intentType=solana.transfer.sol / solana.transfer.spl / solana.stake.withdraw",
 					}),
 				),
 				amountSol: Type.Optional(
 					Type.Number({
-						description: "Amount in SOL for intentType=solana.transfer.sol",
+						description:
+							"Amount in SOL for intentType=solana.transfer.sol or solana.stake.withdraw",
+					}),
+				),
+				stakeAccountAddress: Type.Optional(
+					Type.String({
+						description:
+							"Stake account for intentType=solana.stake.delegate / solana.stake.deactivate / solana.stake.withdraw",
+					}),
+				),
+				voteAccountAddress: Type.Optional(
+					Type.String({
+						description:
+							"Validator vote account for intentType=solana.stake.delegate",
+					}),
+				),
+				stakeAuthorityAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional authority assertion for intentType=solana.stake.delegate / solana.stake.deactivate",
+					}),
+				),
+				withdrawAuthorityAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional authority assertion for intentType=solana.stake.withdraw",
 					}),
 				),
 				tokenMint: Type.Optional(
