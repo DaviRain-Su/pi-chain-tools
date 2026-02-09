@@ -6,6 +6,7 @@ import {
 	getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import {
+	Authorized,
 	type BlockhashWithExpiryBlockHeight,
 	type Connection,
 	PublicKey,
@@ -109,6 +110,17 @@ function assertScopedRouteAvailability(
 	throw new Error(
 		`No ${label} route found under dex constraints [${dexes.join(", ")}]. Set fallbackToJupiterOnNoRoute=true, try solana_buildJupiterSwapTransaction, or adjust dexes.`,
 	);
+}
+
+function normalizeStakeSeed(value: string | undefined): string {
+	const rawSeed = value?.trim().length ? value.trim() : "w3rt-stake";
+	const sanitized = rawSeed.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 32);
+	if (!sanitized.length) {
+		throw new Error(
+			"stakeSeed is invalid. Use 1-32 chars with letters, numbers, _ or -.",
+		);
+	}
+	return sanitized;
 }
 
 function createTransferTransaction(
@@ -763,6 +775,126 @@ export function createSolanaComposeTools() {
 						),
 						destinationTokenAccountExplorer: getExplorerAddressUrl(
 							destinationTokenAccount.toBase58(),
+							params.network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}buildStakeCreateAndDelegateTransaction`,
+			label: "Solana Build Stake Create+Delegate Transaction",
+			description:
+				"Build an unsigned native staking create-and-delegate transaction (legacy, base64) that derives a stake account from seed",
+			parameters: Type.Object({
+				stakeAuthorityAddress: Type.String({
+					description: "Stake authority wallet address (also fee payer/base)",
+				}),
+				withdrawAuthorityAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional withdraw authority for the new stake account. Defaults to stakeAuthorityAddress.",
+					}),
+				),
+				voteAccountAddress: Type.String({
+					description: "Validator vote account public key",
+				}),
+				stakeSeed: Type.Optional(
+					Type.String({
+						description:
+							"Optional seed used with stakeAuthorityAddress to derive stake account (max 32 chars after sanitization).",
+					}),
+				),
+				amountSol: Type.Number({
+					description: "Stake amount in SOL",
+				}),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const connection = getConnection(params.network);
+				const stakeAuthority = new PublicKey(
+					normalizeAtPath(params.stakeAuthorityAddress),
+				);
+				const withdrawAuthority = new PublicKey(
+					normalizeAtPath(
+						params.withdrawAuthorityAddress ?? params.stakeAuthorityAddress,
+					),
+				);
+				const voteAccount = new PublicKey(
+					normalizeAtPath(params.voteAccountAddress),
+				);
+				const stakeSeed = normalizeStakeSeed(params.stakeSeed);
+				const stakeAccount = await PublicKey.createWithSeed(
+					stakeAuthority,
+					stakeSeed,
+					StakeProgram.programId,
+				);
+				const lamports = toLamports(params.amountSol);
+				const createStakeTx = StakeProgram.createAccountWithSeed({
+					fromPubkey: stakeAuthority,
+					stakePubkey: stakeAccount,
+					basePubkey: stakeAuthority,
+					seed: stakeSeed,
+					authorized: new Authorized(stakeAuthority, withdrawAuthority),
+					lamports,
+				});
+				const delegateTx = StakeProgram.delegate({
+					stakePubkey: stakeAccount,
+					authorizedPubkey: stakeAuthority,
+					votePubkey: voteAccount,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const tx = createLegacyTransaction(
+					stakeAuthority,
+					[...createStakeTx.instructions, ...delegateTx.instructions],
+					latestBlockhash,
+				);
+				const feeResult = await connection.getFeeForMessage(
+					tx.compileMessage(),
+				);
+				const feeLamports = feeResult.value ?? 0;
+				const txBase64 = tx
+					.serialize({
+						requireAllSignatures: false,
+						verifySignatures: false,
+					})
+					.toString("base64");
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Unsigned stake create+delegate transaction built (legacy)",
+						},
+					],
+					details: {
+						txBase64,
+						version: "legacy",
+						action: "createAndDelegate",
+						stakeAuthority: stakeAuthority.toBase58(),
+						withdrawAuthority: withdrawAuthority.toBase58(),
+						stakeAccount: stakeAccount.toBase58(),
+						stakeSeed,
+						voteAccount: voteAccount.toBase58(),
+						amountSol: params.amountSol,
+						lamports,
+						feeLamports,
+						blockhash: latestBlockhash.blockhash,
+						lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+						network: parseNetwork(params.network),
+						stakeAuthorityExplorer: getExplorerAddressUrl(
+							stakeAuthority.toBase58(),
+							params.network,
+						),
+						withdrawAuthorityExplorer: getExplorerAddressUrl(
+							withdrawAuthority.toBase58(),
+							params.network,
+						),
+						stakeAccountExplorer: getExplorerAddressUrl(
+							stakeAccount.toBase58(),
+							params.network,
+						),
+						voteAccountExplorer: getExplorerAddressUrl(
+							voteAccount.toBase58(),
 							params.network,
 						),
 					},

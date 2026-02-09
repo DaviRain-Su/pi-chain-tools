@@ -1,6 +1,7 @@
 import {
 	Keypair,
 	PublicKey,
+	StakeProgram,
 	TransactionMessage,
 	VersionedTransaction,
 } from "@solana/web3.js";
@@ -823,6 +824,78 @@ describe("solana_transferSplToken", () => {
 });
 
 describe("native stake execute tools", () => {
+	it("simulates stake create+delegate and derives seeded stake account", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		runtimeMocks.toLamports.mockReturnValue(123_000_000);
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const voteAccountAddress = Keypair.generate().publicKey.toBase58();
+		const withdrawAuthorityAddress = Keypair.generate().publicKey.toBase58();
+		const stakeSeed = "stake-seed-22";
+		const expectedStakeAccount = (
+			await PublicKey.createWithSeed(
+				signer.publicKey,
+				stakeSeed,
+				StakeProgram.programId,
+			)
+		).toBase58();
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 123,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 150,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_stakeCreateAndDelegate");
+		const result = await tool.execute("stake-create-delegate-sim", {
+			fromSecretKey: "mock",
+			withdrawAuthorityAddress,
+			voteAccountAddress,
+			stakeSeed,
+			amountSol: 0.123,
+			network: "mainnet-beta",
+			simulate: true,
+			confirmMainnet: true,
+		});
+
+		expect(runtimeMocks.toLamports).toHaveBeenCalledWith(0.123);
+		expect(connection.simulateTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			action: "createAndDelegate",
+			simulated: true,
+			stakeAuthority: signer.publicKey.toBase58(),
+			withdrawAuthority: withdrawAuthorityAddress,
+			stakeAccount: expectedStakeAccount,
+			stakeSeed,
+			voteAccount: voteAccountAddress,
+			lamports: 123_000_000,
+			network: "mainnet-beta",
+		});
+	});
+
+	it("blocks mainnet stake create+delegate unless confirmMainnet=true", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const tool = getTool("solana_stakeCreateAndDelegate");
+
+		await expect(
+			tool.execute("stake-create-delegate-mainnet", {
+				fromSecretKey: "mock",
+				voteAccountAddress: Keypair.generate().publicKey.toBase58(),
+				amountSol: 0.1,
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+		expect(runtimeMocks.getConnection).not.toHaveBeenCalled();
+	});
+
 	it("simulates stake delegation", async () => {
 		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
 		const signer = Keypair.generate();

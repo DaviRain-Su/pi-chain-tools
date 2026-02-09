@@ -6,6 +6,7 @@ import {
 	getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import {
+	Authorized,
 	type Connection,
 	Keypair,
 	PublicKey,
@@ -114,6 +115,17 @@ function assertScopedRouteAvailability(
 	throw new Error(
 		`No ${label} route found under dex constraints [${dexes.join(", ")}]. Set fallbackToJupiterOnNoRoute=true, try solana_jupiterSwap, or adjust dexes.`,
 	);
+}
+
+function normalizeStakeSeed(value: string | undefined): string {
+	const rawSeed = value?.trim().length ? value.trim() : "w3rt-stake";
+	const sanitized = rawSeed.replace(/[^A-Za-z0-9_-]/g, "-").slice(0, 32);
+	if (!sanitized.length) {
+		throw new Error(
+			"stakeSeed is invalid. Use 1-32 chars with letters, numbers, _ or -.",
+		);
+	}
+	return sanitized;
 }
 
 async function buildSplTransferInstructions(
@@ -1641,6 +1653,222 @@ export function createSolanaExecuteTools() {
 						),
 						destinationTokenAccountExplorer: getExplorerAddressUrl(
 							destinationTokenAccount.toBase58(),
+							network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}stakeCreateAndDelegate`,
+			label: "Solana Stake Create+Delegate",
+			description:
+				"Create a new native stake account from seed and delegate it to a validator vote account",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Stake authority private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				stakeAuthorityAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional authority assertion. Must match the public key derived from fromSecretKey.",
+					}),
+				),
+				withdrawAuthorityAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional withdraw authority for the new stake account. Defaults to signer public key.",
+					}),
+				),
+				voteAccountAddress: Type.String({
+					description: "Validator vote account public key",
+				}),
+				stakeSeed: Type.Optional(
+					Type.String({
+						description:
+							"Optional seed used with signer pubkey to derive stake account (max 32 chars after sanitization).",
+					}),
+				),
+				amountSol: Type.Number({
+					description: "Stake amount in SOL",
+				}),
+				network: solanaNetworkSchema(),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, sign and simulate only (no broadcast)",
+					}),
+				),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet stake create+delegate requires confirmMainnet=true",
+					);
+				}
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const signerPublicKey = signer.publicKey.toBase58();
+				if (params.stakeAuthorityAddress) {
+					const asserted = new PublicKey(
+						normalizeAtPath(params.stakeAuthorityAddress),
+					).toBase58();
+					if (asserted !== signerPublicKey) {
+						throw new Error(
+							`stakeAuthorityAddress mismatch: expected ${signerPublicKey}, got ${asserted}`,
+						);
+					}
+				}
+				const withdrawAuthority = new PublicKey(
+					normalizeAtPath(
+						params.withdrawAuthorityAddress ?? signer.publicKey.toBase58(),
+					),
+				);
+				const voteAccount = new PublicKey(
+					normalizeAtPath(params.voteAccountAddress),
+				);
+				const stakeSeed = normalizeStakeSeed(params.stakeSeed);
+				const stakeAccount = await PublicKey.createWithSeed(
+					signer.publicKey,
+					stakeSeed,
+					StakeProgram.programId,
+				);
+				const lamports = toLamports(params.amountSol);
+				const createStakeTx = StakeProgram.createAccountWithSeed({
+					fromPubkey: signer.publicKey,
+					stakePubkey: stakeAccount,
+					basePubkey: signer.publicKey,
+					seed: stakeSeed,
+					authorized: new Authorized(signer.publicKey, withdrawAuthority),
+					lamports,
+				});
+				const delegateTx = StakeProgram.delegate({
+					stakePubkey: stakeAccount,
+					authorizedPubkey: signer.publicKey,
+					votePubkey: voteAccount,
+				});
+				const tx = new Transaction().add(
+					...createStakeTx.instructions,
+					...delegateTx.instructions,
+				);
+				tx.feePayer = signer.publicKey;
+				const latestBlockhash = await connection.getLatestBlockhash();
+				tx.recentBlockhash = latestBlockhash.blockhash;
+				tx.sign(signer);
+				const commitment = parseFinality(params.commitment);
+
+				if (params.simulate === true) {
+					const simulation = await connection.simulateTransaction(tx);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Stake create+delegate simulation ${simulation.value.err ? "failed" : "succeeded"}`,
+							},
+						],
+						details: {
+							action: "createAndDelegate",
+							simulated: true,
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+							stakeAuthority: signerPublicKey,
+							withdrawAuthority: withdrawAuthority.toBase58(),
+							stakeAccount: stakeAccount.toBase58(),
+							stakeSeed,
+							voteAccount: voteAccount.toBase58(),
+							amountSol: params.amountSol,
+							lamports,
+							network,
+							stakeAuthorityExplorer: getExplorerAddressUrl(
+								signerPublicKey,
+								network,
+							),
+							withdrawAuthorityExplorer: getExplorerAddressUrl(
+								withdrawAuthority.toBase58(),
+								network,
+							),
+							stakeAccountExplorer: getExplorerAddressUrl(
+								stakeAccount.toBase58(),
+								network,
+							),
+							voteAccountExplorer: getExplorerAddressUrl(
+								voteAccount.toBase58(),
+								network,
+							),
+						},
+					};
+				}
+
+				const signature = await connection.sendRawTransaction(tx.serialize(), {
+					skipPreflight: params.skipPreflight === true,
+					maxRetries: params.maxRetries,
+				});
+				let confirmationErr: unknown = null;
+				if (params.confirm !== false) {
+					const confirmation = await connection.confirmTransaction(
+						signature,
+						commitment,
+					);
+					confirmationErr = confirmation.value.err;
+				}
+				if (confirmationErr) {
+					throw new Error(
+						`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+					);
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Stake created+delegated: ${signature}`,
+						},
+					],
+					details: {
+						action: "createAndDelegate",
+						simulated: false,
+						signature,
+						confirmed: params.confirm !== false,
+						stakeAuthority: signerPublicKey,
+						withdrawAuthority: withdrawAuthority.toBase58(),
+						stakeAccount: stakeAccount.toBase58(),
+						stakeSeed,
+						voteAccount: voteAccount.toBase58(),
+						amountSol: params.amountSol,
+						lamports,
+						network,
+						explorer: getExplorerTransactionUrl(signature, network),
+						stakeAuthorityExplorer: getExplorerAddressUrl(
+							signerPublicKey,
+							network,
+						),
+						withdrawAuthorityExplorer: getExplorerAddressUrl(
+							withdrawAuthority.toBase58(),
+							network,
+						),
+						stakeAccountExplorer: getExplorerAddressUrl(
+							stakeAccount.toBase58(),
+							network,
+						),
+						voteAccountExplorer: getExplorerAddressUrl(
+							voteAccount.toBase58(),
 							network,
 						),
 					},

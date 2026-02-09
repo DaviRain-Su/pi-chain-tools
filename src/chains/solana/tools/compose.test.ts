@@ -1,4 +1,4 @@
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey, StakeProgram } from "@solana/web3.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -223,6 +223,54 @@ describe("compose tools", () => {
 			stakeAccount: stakeAccountAddress,
 			voteAccount: voteAccountAddress,
 			feeLamports: 6000,
+			network: "devnet",
+		});
+	});
+
+	it("builds native stake create+delegate transaction and derives stake account from seed", async () => {
+		const stakeAuthorityAddress = Keypair.generate().publicKey.toBase58();
+		const withdrawAuthorityAddress = Keypair.generate().publicKey.toBase58();
+		const voteAccountAddress = Keypair.generate().publicKey.toBase58();
+		const stakeSeed = "stake-seed-01";
+		const expectedStakeAccount = (
+			await PublicKey.createWithSeed(
+				new PublicKey(stakeAuthorityAddress),
+				stakeSeed,
+				StakeProgram.programId,
+			)
+		).toBase58();
+		runtimeMocks.toLamports.mockReturnValue(250_000_000);
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 55,
+			}),
+			getFeeForMessage: vi.fn().mockResolvedValue({ value: 9000 }),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getTool("solana_buildStakeCreateAndDelegateTransaction");
+		const result = await tool.execute("compose-stake-create-delegate", {
+			stakeAuthorityAddress,
+			withdrawAuthorityAddress,
+			voteAccountAddress,
+			stakeSeed,
+			amountSol: 0.25,
+			network: "devnet",
+		});
+
+		expect(runtimeMocks.toLamports).toHaveBeenCalledWith(0.25);
+		expect(result.details).toMatchObject({
+			version: "legacy",
+			action: "createAndDelegate",
+			stakeAuthority: stakeAuthorityAddress,
+			withdrawAuthority: withdrawAuthorityAddress,
+			stakeAccount: expectedStakeAccount,
+			stakeSeed,
+			voteAccount: voteAccountAddress,
+			amountSol: 0.25,
+			lamports: 250_000_000,
+			feeLamports: 9000,
 			network: "devnet",
 		});
 	});
