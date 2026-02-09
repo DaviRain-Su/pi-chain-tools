@@ -117,6 +117,40 @@ function makeParsedTokenAccount(
 	};
 }
 
+function makeParsedStakeAccount(
+	stakeAccount: string,
+	withdrawer: string,
+	stakeLamports: string,
+) {
+	return {
+		pubkey: { toBase58: () => stakeAccount },
+		account: {
+			lamports: 2_000_000_000,
+			data: {
+				parsed: {
+					type: "delegated",
+					info: {
+						meta: {
+							authorized: {
+								staker: withdrawer,
+								withdrawer,
+							},
+						},
+						stake: {
+							delegation: {
+								stake: stakeLamports,
+								voter: Keypair.generate().publicKey.toBase58(),
+								activationEpoch: "1",
+								deactivationEpoch: "18446744073709551615",
+							},
+						},
+					},
+				},
+			},
+		},
+	};
+}
+
 function getWorkflowTool() {
 	const tool = createSolanaWorkflowTools().find(
 		(entry) => entry.name === "w3rt_run_workflow_v0",
@@ -353,6 +387,97 @@ describe("w3rt_run_workflow_v0", () => {
 						intentType: "solana.read.portfolio",
 						address,
 						tokenCount: 1,
+					},
+				},
+			},
+		});
+	});
+
+	it("parses defi positions intentText and defaults to read.defiPositions", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-read-defi-analysis", {
+			runId: "run-read-defi-analysis",
+			runMode: "analysis",
+			intentText: "query current wallet defi positions",
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-read-defi-analysis",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.read.defiPositions",
+						address: signer.publicKey.toBase58(),
+					},
+				},
+			},
+		});
+	});
+
+	it("executes read defi positions workflow with stake discovery", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const address = Keypair.generate().publicKey.toBase58();
+		const stakeAccountOne = Keypair.generate().publicKey.toBase58();
+		const stakeAccountTwo = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getBalance: vi.fn().mockResolvedValue(3_000_000_000),
+			getParsedTokenAccountsByOwner: vi
+				.fn()
+				.mockResolvedValueOnce({
+					value: [
+						makeParsedTokenAccount(address, USDC_MINT, "1000000", 6, 1),
+						makeParsedTokenAccount(
+							address,
+							"mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",
+							"500000000",
+							9,
+							0.5,
+						),
+					],
+				})
+				.mockResolvedValueOnce({
+					value: [],
+				}),
+			getParsedProgramAccounts: vi
+				.fn()
+				.mockResolvedValueOnce([
+					makeParsedStakeAccount(stakeAccountOne, address, "1000000000"),
+				])
+				.mockResolvedValueOnce([
+					makeParsedStakeAccount(stakeAccountOne, address, "1000000000"),
+					makeParsedStakeAccount(stakeAccountTwo, address, "250000000"),
+				]),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-read-defi-exec", {
+			runId: "run-read-defi-exec",
+			runMode: "execute",
+			intentType: "solana.read.defiPositions",
+			address,
+			network: "mainnet-beta",
+		});
+
+		expect(connection.getParsedProgramAccounts).toHaveBeenCalledTimes(2);
+		expect(result.details).toMatchObject({
+			runId: "run-read-defi-exec",
+			status: "executed",
+			artifacts: {
+				execute: {
+					read: true,
+					result: {
+						intentType: "solana.read.defiPositions",
+						address,
+						defiTokenPositionCount: 2,
+						stakeAccountCount: 2,
+						totalDelegatedStakeLamports: "1250000000",
 					},
 				},
 			},

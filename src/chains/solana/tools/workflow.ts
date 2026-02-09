@@ -11,6 +11,7 @@ import {
 	Keypair,
 	type ParsedAccountData,
 	PublicKey,
+	StakeProgram,
 	SystemProgram,
 	Transaction,
 	type TransactionInstruction,
@@ -68,7 +69,8 @@ type WorkflowIntentType =
 	| "solana.swap.meteora"
 	| "solana.read.balance"
 	| "solana.read.tokenBalance"
-	| "solana.read.portfolio";
+	| "solana.read.portfolio"
+	| "solana.read.defiPositions";
 type ParsedIntentTextFields = Partial<{
 	intentType: WorkflowIntentType;
 	address: string;
@@ -83,6 +85,7 @@ type ParsedIntentTextFields = Partial<{
 	swapMode: "ExactIn" | "ExactOut";
 	dexes: string[];
 	excludeDexes: string[];
+	includeStakeAccounts: boolean;
 }>;
 
 type TransferSolIntent = {
@@ -158,6 +161,13 @@ type WorkflowIntent =
 			address: string;
 			includeZero: boolean;
 			includeToken2022: boolean;
+	  }
+	| {
+			type: "solana.read.defiPositions";
+			address: string;
+			includeZero: boolean;
+			includeToken2022: boolean;
+			includeStakeAccounts: boolean;
 	  };
 type ReadWorkflowIntent = Extract<
 	WorkflowIntent,
@@ -256,9 +266,50 @@ const TRANSFER_KEYWORD_REGEX = /(transfer|send|转账|转到|发送|打款)/i;
 const READ_KEYWORD_REGEX = /(balance|余额|portfolio|资产|持仓)/i;
 const PORTFOLIO_KEYWORD_REGEX =
 	/(portfolio|资产|持仓|all\s+balances?|全部余额|token\s+positions?)/i;
+const DEFI_POSITIONS_KEYWORD_REGEX =
+	/(defi|de-fi|protocol\s+positions?|协议仓位|staking|stake|质押|farm|yield|收益)/i;
 const ORCA_DEFAULT_DEXES = ["Orca V2", "Orca Whirlpool"] as const;
 const METEORA_DEFAULT_DEXES = ["Meteora DLMM"] as const;
 const RAYDIUM_DEFAULT_DEXES = ["Raydium CLMM", "Raydium CPMM"] as const;
+const DEFI_TOKEN_PROFILES: Record<
+	string,
+	{
+		symbol: string;
+		protocol: string;
+		category: "liquid-staking" | "dex-token" | "stablecoin";
+	}
+> = {
+	[USDC_MINT]: {
+		symbol: "USDC",
+		protocol: "stablecoin",
+		category: "stablecoin",
+	},
+	[USDT_MINT]: {
+		symbol: "USDT",
+		protocol: "stablecoin",
+		category: "stablecoin",
+	},
+	[RAY_MINT]: {
+		symbol: "RAY",
+		protocol: "raydium",
+		category: "dex-token",
+	},
+	[ORCA_MINT]: {
+		symbol: "ORCA",
+		protocol: "orca",
+		category: "dex-token",
+	},
+	[MSOL_MINT]: {
+		symbol: "mSOL",
+		protocol: "marinade",
+		category: "liquid-staking",
+	},
+	[BSOL_MINT]: {
+		symbol: "bSOL",
+		protocol: "blaze",
+		category: "liquid-staking",
+	},
+};
 
 function uniqueStrings(values: string[]): string[] {
 	const seen = new Set<string>();
@@ -359,7 +410,8 @@ function isReadIntentType(intentType: WorkflowIntentType): boolean {
 	return (
 		intentType === "solana.read.balance" ||
 		intentType === "solana.read.tokenBalance" ||
-		intentType === "solana.read.portfolio"
+		intentType === "solana.read.portfolio" ||
+		intentType === "solana.read.defiPositions"
 	);
 }
 
@@ -532,6 +584,73 @@ function formatTokenUiAmount(amountRaw: bigint, decimals: number): string {
 		.padStart(decimals, "0")
 		.replace(/0+$/, "");
 	return `${whole.toString()}.${fraction}`;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+	if (!value || typeof value !== "object") {
+		return null;
+	}
+	return value as Record<string, unknown>;
+}
+
+function parseStakePositionFromAccount(entry: {
+	pubkey: PublicKey;
+	account: {
+		lamports: number;
+		data: unknown;
+	};
+}) {
+	const parsedData = entry.account.data as ParsedAccountData;
+	if (!parsedData || typeof parsedData !== "object") {
+		return null;
+	}
+	const parsed = asRecord(parsedData.parsed);
+	if (!parsed) {
+		return null;
+	}
+	const info = asRecord(parsed.info);
+	if (!info) {
+		return null;
+	}
+	const meta = asRecord(info.meta);
+	const authorized = asRecord(meta?.authorized);
+	const stake = asRecord(info.stake);
+	const delegation = asRecord(stake?.delegation);
+	const delegatedLamports =
+		typeof delegation?.stake === "string" && /^\d+$/.test(delegation.stake)
+			? delegation.stake
+			: null;
+	return {
+		stakeAccount: entry.pubkey.toBase58(),
+		state: typeof parsed.type === "string" ? parsed.type : "unknown",
+		lamports: entry.account.lamports,
+		lamportsUiAmount: formatTokenUiAmount(BigInt(entry.account.lamports), 9),
+		delegatedLamports,
+		delegatedUiAmount:
+			delegatedLamports == null
+				? null
+				: formatTokenUiAmount(BigInt(delegatedLamports), 9),
+		voter:
+			typeof delegation?.voter === "string"
+				? (delegation.voter as string)
+				: null,
+		activationEpoch:
+			typeof delegation?.activationEpoch === "string"
+				? (delegation.activationEpoch as string)
+				: null,
+		deactivationEpoch:
+			typeof delegation?.deactivationEpoch === "string"
+				? (delegation.deactivationEpoch as string)
+				: null,
+		staker:
+			typeof authorized?.staker === "string"
+				? (authorized.staker as string)
+				: null,
+		withdrawer:
+			typeof authorized?.withdrawer === "string"
+				? (authorized.withdrawer as string)
+				: null,
+	};
 }
 
 function registerResolvedTokenSymbol(
@@ -939,6 +1058,10 @@ function parseReadIntentText(intentText: string): ParsedIntentTextFields {
 		}
 	}
 
+	if (DEFI_POSITIONS_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.read.defiPositions";
+		return parsed;
+	}
 	if (PORTFOLIO_KEYWORD_REGEX.test(intentText)) {
 		parsed.intentType = "solana.read.portfolio";
 		return parsed;
@@ -1138,6 +1261,12 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 			intentType: "solana.read.portfolio",
 		};
 	}
+	if (lower.includes("solana.read.defipositions")) {
+		return {
+			...parseReadIntentText(trimmed),
+			intentType: "solana.read.defiPositions",
+		};
+	}
 	if (lower.includes("solana.transfer.sol")) {
 		return parseTransferIntentText(trimmed);
 	}
@@ -1231,7 +1360,8 @@ function resolveIntentType(
 		params.intentType === "solana.swap.meteora" ||
 		params.intentType === "solana.read.balance" ||
 		params.intentType === "solana.read.tokenBalance" ||
-		params.intentType === "solana.read.portfolio"
+		params.intentType === "solana.read.portfolio" ||
+		params.intentType === "solana.read.defiPositions"
 	) {
 		return params.intentType;
 	}
@@ -1245,6 +1375,9 @@ function resolveIntentType(
 	) {
 		if (typeof params.tokenMint === "string") {
 			return "solana.read.tokenBalance";
+		}
+		if (typeof params.includeStakeAccounts === "boolean") {
+			return "solana.read.defiPositions";
 		}
 		if (
 			typeof params.includeZero === "boolean" ||
@@ -1302,6 +1435,9 @@ function resolveIntentType(
 	}
 	if (typeof params.includeZero === "boolean") {
 		return "solana.read.portfolio";
+	}
+	if (typeof params.includeStakeAccounts === "boolean") {
+		return "solana.read.defiPositions";
 	}
 	if (typeof params.address === "string") {
 		return "solana.read.balance";
@@ -1382,6 +1518,22 @@ async function normalizeIntent(
 			address,
 			includeZero: normalizedParams.includeZero === true,
 			includeToken2022: normalizedParams.includeToken2022 !== false,
+		};
+	}
+	if (intentType === "solana.read.defiPositions") {
+		const address = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.address === "string"
+					? normalizedParams.address
+					: signerPublicKey,
+			),
+		).toBase58();
+		return {
+			type: intentType,
+			address,
+			includeZero: normalizedParams.includeZero === true,
+			includeToken2022: normalizedParams.includeToken2022 !== false,
+			includeStakeAccounts: normalizedParams.includeStakeAccounts !== false,
 		};
 	}
 	if (intentType === "solana.transfer.sol") {
@@ -1741,6 +1893,177 @@ async function executeReadIntent(
 				network,
 				addressExplorer: getExplorerAddressUrl(owner.toBase58(), network),
 				tokenMintExplorer: getExplorerAddressUrl(mint.toBase58(), network),
+			},
+		};
+	}
+
+	if (intent.type === "solana.read.defiPositions") {
+		const owner = new PublicKey(intent.address);
+		const [lamports, tokenProgramResponse, token2022Response] =
+			await Promise.all([
+				connection.getBalance(owner),
+				connection.getParsedTokenAccountsByOwner(owner, {
+					programId: TOKEN_PROGRAM_ID,
+				}),
+				intent.includeToken2022
+					? connection.getParsedTokenAccountsByOwner(owner, {
+							programId: TOKEN_2022_PROGRAM_ID,
+						})
+					: Promise.resolve(null),
+			]);
+
+		const tokenAccounts = [
+			...tokenProgramResponse.value,
+			...(token2022Response?.value ?? []),
+		];
+		const positions = new Map<
+			string,
+			{
+				amountRaw: bigint;
+				decimals: number;
+				tokenAccountCount: number;
+			}
+		>();
+		for (const entry of tokenAccounts) {
+			const tokenInfo = parseTokenAccountInfo(entry.account.data);
+			if (!tokenInfo) continue;
+			const amountRaw = BigInt(tokenInfo.tokenAmount.amount);
+			const existing = positions.get(tokenInfo.mint);
+			if (!existing) {
+				positions.set(tokenInfo.mint, {
+					amountRaw,
+					decimals: tokenInfo.tokenAmount.decimals,
+					tokenAccountCount: 1,
+				});
+				continue;
+			}
+			existing.amountRaw += amountRaw;
+			existing.tokenAccountCount += 1;
+		}
+		const tokens = [...positions.entries()]
+			.map(([mint, position]) => ({
+				mint,
+				symbol: TOKEN_BY_MINT_MAP.get(mint)?.aliases[0] ?? null,
+				amount: position.amountRaw.toString(),
+				uiAmount: formatTokenUiAmount(position.amountRaw, position.decimals),
+				decimals: position.decimals,
+				tokenAccountCount: position.tokenAccountCount,
+				explorer: getExplorerAddressUrl(mint, network),
+			}))
+			.filter((position) =>
+				intent.includeZero ? true : BigInt(position.amount) > 0n,
+			)
+			.sort((a, b) => {
+				if (a.symbol && b.symbol) return a.symbol.localeCompare(b.symbol);
+				if (a.symbol) return -1;
+				if (b.symbol) return 1;
+				return a.mint.localeCompare(b.mint);
+			});
+		const defiTokenPositions = tokens
+			.map((token) => {
+				const profile = DEFI_TOKEN_PROFILES[token.mint];
+				if (!profile) return null;
+				return {
+					...token,
+					symbol: profile.symbol,
+					protocol: profile.protocol,
+					category: profile.category,
+				};
+			})
+			.filter(
+				(position): position is NonNullable<typeof position> =>
+					position !== null,
+			);
+		const categoryExposureCounts = defiTokenPositions.reduce<
+			Record<string, number>
+		>((acc, position) => {
+			acc[position.category] = (acc[position.category] ?? 0) + 1;
+			return acc;
+		}, {});
+		const protocolExposureCounts = defiTokenPositions.reduce<
+			Record<string, number>
+		>((acc, position) => {
+			acc[position.protocol] = (acc[position.protocol] ?? 0) + 1;
+			return acc;
+		}, {});
+
+		let rawStakeAccounts: Array<{
+			pubkey: PublicKey;
+			account: {
+				lamports: number;
+				data: unknown;
+			};
+		}> = [];
+		const stakeQueryErrors: string[] = [];
+		if (intent.includeStakeAccounts) {
+			const ownerAddress = owner.toBase58();
+			const stakeFilters = [
+				{ memcmp: { offset: 12, bytes: ownerAddress } },
+				{ memcmp: { offset: 44, bytes: ownerAddress } },
+			];
+			const settled = await Promise.all(
+				stakeFilters.map((filter) =>
+					connection
+						.getParsedProgramAccounts(StakeProgram.programId, {
+							filters: [filter],
+						})
+						.catch((error: unknown) => {
+							stakeQueryErrors.push(String(error));
+							return [];
+						}),
+				),
+			);
+			const deduped = new Map<string, (typeof settled)[number][number]>();
+			for (const accounts of settled) {
+				for (const account of accounts) {
+					deduped.set(account.pubkey.toBase58(), account);
+				}
+			}
+			rawStakeAccounts = [...deduped.values()].map((entry) => ({
+				pubkey: entry.pubkey,
+				account: {
+					lamports: entry.account.lamports,
+					data: entry.account.data,
+				},
+			}));
+		}
+		const stakeAccounts = rawStakeAccounts
+			.map((entry) => parseStakePositionFromAccount(entry))
+			.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+			.sort((a, b) => a.stakeAccount.localeCompare(b.stakeAccount));
+		const totalDelegatedStakeLamports = stakeAccounts.reduce(
+			(total, entry) => total + BigInt(entry.delegatedLamports ?? "0"),
+			0n,
+		);
+		const sol = lamports / 1_000_000_000;
+		return {
+			summary: `DeFi positions: ${defiTokenPositions.length} token exposure(s), ${stakeAccounts.length} stake account(s)`,
+			details: {
+				intentType: intent.type,
+				address: owner.toBase58(),
+				network,
+				addressExplorer: getExplorerAddressUrl(owner.toBase58(), network),
+				sol: {
+					lamports,
+					uiAmount: sol,
+				},
+				tokenCount: tokens.length,
+				tokenAccountCount: tokenAccounts.length,
+				tokenProgramAccountCount: tokenProgramResponse.value.length,
+				token2022AccountCount: token2022Response?.value.length ?? 0,
+				tokens,
+				defiTokenPositionCount: defiTokenPositions.length,
+				defiTokenPositions,
+				categoryExposureCounts,
+				protocolExposureCounts,
+				stakeAccountCount: stakeAccounts.length,
+				stakeAccounts,
+				stakeQueryErrors,
+				totalDelegatedStakeLamports: totalDelegatedStakeLamports.toString(),
+				totalDelegatedStakeUiAmount: formatTokenUiAmount(
+					totalDelegatedStakeLamports,
+					9,
+				),
 			},
 		};
 	}
@@ -2311,6 +2634,7 @@ export function createSolanaWorkflowTools() {
 						Type.Literal("solana.read.balance"),
 						Type.Literal("solana.read.tokenBalance"),
 						Type.Literal("solana.read.portfolio"),
+						Type.Literal("solana.read.defiPositions"),
 					]),
 				),
 				intentText: Type.Optional(
@@ -2399,13 +2723,19 @@ export function createSolanaWorkflowTools() {
 				includeZero: Type.Optional(
 					Type.Boolean({
 						description:
-							"Include zero-balance token positions for intentType=solana.read.portfolio",
+							"Include zero-balance token positions for intentType=solana.read.portfolio or solana.read.defiPositions",
 					}),
 				),
 				includeToken2022: Type.Optional(
 					Type.Boolean({
 						description:
-							"Include Token-2022 accounts for read intents and token/portfolio balance queries",
+							"Include Token-2022 accounts for read intents and token/portfolio/defi balance queries",
+					}),
+				),
+				includeStakeAccounts: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include native stake account discovery for intentType=solana.read.defiPositions",
 					}),
 				),
 				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),

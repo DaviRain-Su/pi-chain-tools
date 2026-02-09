@@ -15,6 +15,7 @@ describe("solanaWorkflowExtension", () => {
 		expect(names.sort()).toEqual([
 			"solana_confirmTransaction",
 			"solana_getBalance",
+			"solana_getDefiPositions",
 			"solana_getMeteoraQuote",
 			"solana_getOrcaQuote",
 			"solana_getPortfolio",

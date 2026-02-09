@@ -173,6 +173,41 @@ function makeParsedTokenAccount(
 	};
 }
 
+function makeParsedStakeAccount(
+	stakeAccount: string,
+	withdrawer: string,
+	stakeLamports: string,
+	voter = Keypair.generate().publicKey.toBase58(),
+) {
+	return {
+		pubkey: { toBase58: () => stakeAccount },
+		account: {
+			lamports: 2_000_000_000,
+			data: {
+				parsed: {
+					type: "delegated",
+					info: {
+						meta: {
+							authorized: {
+								staker: withdrawer,
+								withdrawer,
+							},
+						},
+						stake: {
+							delegation: {
+								stake: stakeLamports,
+								voter,
+								activationEpoch: "1",
+								deactivationEpoch: "18446744073709551615",
+							},
+						},
+					},
+				},
+			},
+		},
+	};
+}
+
 describe("solana_getPortfolio", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -373,6 +408,104 @@ describe("solana_getTokenBalance", () => {
 			tokenAccountCount: 1,
 			tokenProgramAccountCount: 1,
 			token2022AccountCount: 0,
+		});
+	});
+});
+
+describe("solana_getDefiPositions", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		runtimeMocks.getExplorerAddressUrl.mockImplementation(
+			(value: string) => `https://explorer/${value}`,
+		);
+	});
+
+	it("returns protocol-tagged token exposures and stake accounts", async () => {
+		const owner = Keypair.generate().publicKey.toBase58();
+		const stakeAccountOne = Keypair.generate().publicKey.toBase58();
+		const stakeAccountTwo = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getBalance: vi.fn().mockResolvedValue(3_000_000_000),
+			getParsedTokenAccountsByOwner: vi
+				.fn()
+				.mockResolvedValueOnce({
+					value: [
+						makeParsedTokenAccount(owner, USDC_MINT, "2000000", 6, 2),
+						makeParsedTokenAccount(
+							owner,
+							"mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So",
+							"500000000",
+							9,
+							0.5,
+						),
+					],
+				})
+				.mockResolvedValueOnce({ value: [] }),
+			getParsedProgramAccounts: vi.fn(),
+		};
+		connection.getParsedProgramAccounts = vi
+			.fn()
+			.mockResolvedValueOnce([
+				makeParsedStakeAccount(stakeAccountOne, owner, "1000000000"),
+			])
+			.mockResolvedValueOnce([
+				makeParsedStakeAccount(stakeAccountOne, owner, "1000000000"),
+				makeParsedStakeAccount(stakeAccountTwo, owner, "250000000"),
+			]);
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getReadTool("solana_getDefiPositions");
+		const result = await tool.execute("defi-positions-1", {
+			address: owner,
+			network: "mainnet-beta",
+		});
+
+		expect(connection.getParsedProgramAccounts).toHaveBeenCalledTimes(2);
+		expect(result.details).toMatchObject({
+			address: owner,
+			defiTokenPositionCount: 2,
+			stakeAccountCount: 2,
+			totalDelegatedStakeLamports: "1250000000",
+			totalDelegatedStakeUiAmount: "1.25",
+			categoryExposureCounts: {
+				"liquid-staking": 1,
+				stablecoin: 1,
+			},
+			protocolExposureCounts: {
+				marinade: 1,
+				stablecoin: 1,
+			},
+		});
+	});
+
+	it("can skip stake account discovery", async () => {
+		const owner = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getBalance: vi.fn().mockResolvedValue(1_000_000_000),
+			getParsedTokenAccountsByOwner: vi
+				.fn()
+				.mockResolvedValueOnce({
+					value: [makeParsedTokenAccount(owner, USDC_MINT, "1000000", 6, 1)],
+				})
+				.mockResolvedValueOnce({ value: [] }),
+			getParsedProgramAccounts: vi.fn(),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getReadTool("solana_getDefiPositions");
+		const result = await tool.execute("defi-positions-2", {
+			address: owner,
+			includeStakeAccounts: false,
+			network: "mainnet-beta",
+		});
+
+		expect(connection.getParsedProgramAccounts).not.toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			defiTokenPositionCount: 1,
+			stakeAccountCount: 0,
+			totalDelegatedStakeLamports: "0",
+			totalDelegatedStakeUiAmount: "0",
 		});
 	});
 });
