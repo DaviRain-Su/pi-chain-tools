@@ -535,6 +535,61 @@ export type RaydiumSwapRequest = {
 	outputAccount?: string;
 };
 
+export type KaminoLendingProtocol = "kamino";
+export type KaminoLendingPositionSide = "deposit" | "borrow";
+
+export type KaminoLendingPosition = {
+	side: KaminoLendingPositionSide;
+	reserveAddress: string | null;
+	mint: string | null;
+	symbol: string | null;
+	amountRaw: string | null;
+	amountUi: number | null;
+	marketValueUsd: number | null;
+	rateApr: number | null;
+};
+
+export type KaminoLendingObligation = {
+	marketAddress: string;
+	obligationAddress: string | null;
+	ownerAddress: string | null;
+	deposits: KaminoLendingPosition[];
+	borrows: KaminoLendingPosition[];
+	depositValueUsd: number;
+	borrowValueUsd: number;
+	netValueUsd: number;
+	loanToValueRatio: number | null;
+	positionCount: number | null;
+};
+
+export type KaminoLendingPositionsRequest = {
+	address: string;
+	network?: string;
+	programId?: string;
+	limitMarkets?: number;
+};
+
+export type KaminoLendingPositionsResult = {
+	protocol: KaminoLendingProtocol;
+	address: string;
+	network: SolanaNetwork;
+	programId: string | null;
+	marketCount: number;
+	marketCountQueried: number;
+	marketQueryLimit: number;
+	marketCountWithPositions: number;
+	obligationCount: number;
+	depositPositionCount: number;
+	borrowPositionCount: number;
+	totalDepositValueUsd: number;
+	totalBorrowValueUsd: number;
+	netValueUsd: number;
+	marketAddressesQueried: string[];
+	marketAddressesWithPositions: string[];
+	obligations: KaminoLendingObligation[];
+	queryErrors: string[];
+};
+
 function omitUndefined<T extends Record<string, unknown>>(
 	value: T,
 ): Partial<T> {
@@ -934,6 +989,577 @@ export async function buildRaydiumSwapTransactions(
 		method: "POST",
 		body: buildRaydiumSwapBody(request),
 	});
+}
+
+type KaminoRequestOptions = {
+	method?: HttpMethod;
+	query?: Record<string, string | number | boolean | undefined>;
+	body?: unknown;
+	timeoutMs?: number;
+};
+
+function asObjectRecord(value: unknown): Record<string, unknown> | null {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		return null;
+	}
+	return value as Record<string, unknown>;
+}
+
+function toFiniteNumber(value: unknown): number | null {
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return value;
+	}
+	if (typeof value !== "string") {
+		return null;
+	}
+	const normalized = value.trim().replace(/,/g, "");
+	if (normalized.length === 0) {
+		return null;
+	}
+	const isPercent = normalized.endsWith("%");
+	const numeric = isPercent ? normalized.slice(0, -1).trim() : normalized;
+	if (!/^[-+]?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(numeric)) {
+		return null;
+	}
+	const parsed = Number(numeric);
+	if (!Number.isFinite(parsed)) {
+		return null;
+	}
+	return isPercent ? parsed / 100 : parsed;
+}
+
+function toPositiveIntegerString(value: unknown): string | null {
+	if (typeof value === "bigint") {
+		return value >= 0n ? value.toString() : null;
+	}
+	if (typeof value === "number") {
+		if (!Number.isFinite(value) || value < 0 || !Number.isInteger(value)) {
+			return null;
+		}
+		return value.toString();
+	}
+	if (typeof value !== "string") {
+		return null;
+	}
+	const normalized = value.trim();
+	if (!/^\d+$/.test(normalized)) {
+		return null;
+	}
+	return normalized;
+}
+
+function pickString(
+	record: Record<string, unknown>,
+	keys: string[],
+): string | null {
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "string" && value.trim().length > 0) {
+			return value.trim();
+		}
+	}
+	return null;
+}
+
+function pickNumber(
+	record: Record<string, unknown>,
+	keys: string[],
+): number | null {
+	for (const key of keys) {
+		const parsed = toFiniteNumber(record[key]);
+		if (parsed !== null) {
+			return parsed;
+		}
+	}
+	return null;
+}
+
+function pickIntegerString(
+	record: Record<string, unknown>,
+	keys: string[],
+): string | null {
+	for (const key of keys) {
+		const parsed = toPositiveIntegerString(record[key]);
+		if (parsed !== null) {
+			return parsed;
+		}
+	}
+	return null;
+}
+
+function pickNumberFromRecords(
+	records: Array<Record<string, unknown> | null>,
+	keys: string[],
+): number | null {
+	for (const record of records) {
+		if (!record) continue;
+		const value = pickNumber(record, keys);
+		if (value !== null) {
+			return value;
+		}
+	}
+	return null;
+}
+
+function normalizePublicKey(value: string | null): string | null {
+	if (!value) return null;
+	try {
+		return new PublicKey(normalizeAtPath(value)).toBase58();
+	} catch {
+		return null;
+	}
+}
+
+function resolveKaminoMarketAddress(
+	record: Record<string, unknown>,
+): string | null {
+	const direct = pickString(record, [
+		"lendingMarket",
+		"market",
+		"marketAddress",
+		"address",
+		"pubkey",
+		"id",
+	]);
+	const normalized = normalizePublicKey(direct);
+	if (normalized) {
+		return normalized;
+	}
+
+	const nestedMarket = asObjectRecord(record.market);
+	if (nestedMarket) {
+		const nested = resolveKaminoMarketAddress(nestedMarket);
+		if (nested) {
+			return nested;
+		}
+	}
+
+	const nestedLendingMarket = asObjectRecord(record.lendingMarket);
+	if (nestedLendingMarket) {
+		const nested = resolveKaminoMarketAddress(nestedLendingMarket);
+		if (nested) {
+			return nested;
+		}
+	}
+
+	return null;
+}
+
+function resolveKaminoObligationAddress(
+	record: Record<string, unknown>,
+): string | null {
+	const direct = pickString(record, [
+		"obligation",
+		"obligationAddress",
+		"address",
+		"pubkey",
+		"id",
+	]);
+	const normalized = normalizePublicKey(direct);
+	if (normalized) {
+		return normalized;
+	}
+
+	const nested = asObjectRecord(record.obligation);
+	if (nested) {
+		const nestedAddress = resolveKaminoObligationAddress(nested);
+		if (nestedAddress) {
+			return nestedAddress;
+		}
+	}
+
+	return null;
+}
+
+function normalizeKaminoRecordArray(value: unknown): Record<string, unknown>[] {
+	if (Array.isArray(value)) {
+		return value
+			.map((entry) => asObjectRecord(entry))
+			.filter((entry): entry is Record<string, unknown> => entry !== null);
+	}
+	const record = asObjectRecord(value);
+	if (!record) {
+		return [];
+	}
+	return Object.values(record)
+		.map((entry) => asObjectRecord(entry))
+		.filter((entry): entry is Record<string, unknown> => entry !== null);
+}
+
+function normalizeKaminoMarketEntries(
+	payload: unknown,
+): Record<string, unknown>[] {
+	if (Array.isArray(payload)) {
+		return normalizeKaminoRecordArray(payload);
+	}
+	const record = asObjectRecord(payload);
+	if (!record) {
+		return [];
+	}
+	for (const key of ["markets", "data", "result", "items"]) {
+		if (key in record) {
+			const entries = normalizeKaminoRecordArray(record[key]);
+			if (entries.length > 0) {
+				return entries;
+			}
+		}
+	}
+	return normalizeKaminoRecordArray(payload);
+}
+
+function normalizeKaminoObligationEntries(
+	payload: unknown,
+): Record<string, unknown>[] {
+	if (Array.isArray(payload)) {
+		return normalizeKaminoRecordArray(payload);
+	}
+	const record = asObjectRecord(payload);
+	if (!record) {
+		return [];
+	}
+	for (const key of ["obligations", "data", "result", "items"]) {
+		if (key in record) {
+			const entries = normalizeKaminoRecordArray(record[key]);
+			if (entries.length > 0) {
+				return entries;
+			}
+		}
+	}
+	return normalizeKaminoRecordArray(payload);
+}
+
+function normalizeKaminoLendingPosition(
+	value: unknown,
+	side: KaminoLendingPositionSide,
+): KaminoLendingPosition | null {
+	const record = asObjectRecord(value);
+	if (!record) {
+		return null;
+	}
+	return {
+		side,
+		reserveAddress: normalizePublicKey(
+			pickString(record, [
+				"reserveAddress",
+				"reserve",
+				"reservePubkey",
+				"reserveId",
+			]),
+		),
+		mint: normalizePublicKey(
+			pickString(record, [
+				"mint",
+				"mintAddress",
+				"liquidityMint",
+				"tokenMint",
+				"assetMint",
+			]),
+		),
+		symbol: pickString(record, [
+			"symbol",
+			"tokenSymbol",
+			"assetSymbol",
+			"liquiditySymbol",
+		]),
+		amountRaw: pickIntegerString(record, [
+			"amountRaw",
+			"amount",
+			"liquidityAmount",
+			"depositedAmount",
+			"borrowedAmount",
+			"tokenAmount",
+		]),
+		amountUi: pickNumber(record, [
+			"amountUi",
+			"uiAmount",
+			"depositedAmount",
+			"borrowedAmount",
+			"positionAmount",
+			"value",
+		]),
+		marketValueUsd: pickNumber(record, [
+			"marketValueRefreshed",
+			"marketValue",
+			"usdValue",
+			"valueUsd",
+			"amountUsd",
+			"usd",
+		]),
+		rateApr: pickNumber(record, [
+			"apr",
+			"apy",
+			"supplyApr",
+			"supplyApy",
+			"borrowApr",
+			"borrowApy",
+			"rate",
+		]),
+	};
+}
+
+function normalizeKaminoMarketLimit(value: number | undefined): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		return 20;
+	}
+	const integer = Math.floor(value);
+	if (integer < 1) return 1;
+	if (integer > 200) return 200;
+	return integer;
+}
+
+function roundUsd(value: number): number {
+	return Number(value.toFixed(6));
+}
+
+export function getKaminoApiBaseUrl(): string {
+	const configured = process.env.KAMINO_API_BASE_URL?.trim();
+	if (configured && configured.length > 0) {
+		return configured.replace(/\/+$/, "");
+	}
+	return "https://api.kamino.finance";
+}
+
+export async function callKaminoApi(
+	path: string,
+	options: KaminoRequestOptions = {},
+): Promise<unknown> {
+	const method = options.method ?? "GET";
+	const query = buildQueryString(options.query);
+	const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+	const url = `${getKaminoApiBaseUrl()}${normalizedPath}${query}`;
+	return callJsonApi(
+		url,
+		method,
+		{ "content-type": "application/json" },
+		options.body,
+		options.timeoutMs,
+	);
+}
+
+export async function getKaminoMarkets(
+	options: {
+		programId?: string;
+	} = {},
+): Promise<Record<string, unknown>[]> {
+	const programId = normalizePublicKey(
+		typeof options.programId === "string" ? options.programId : null,
+	);
+	const query = typeof programId === "string" ? { programId } : undefined;
+	try {
+		const payload = await callKaminoApi("/v2/kamino-market", {
+			method: "GET",
+			query,
+		});
+		return normalizeKaminoMarketEntries(payload);
+	} catch {
+		const payload = await callKaminoApi("/kamino-market", {
+			method: "GET",
+			query,
+		});
+		return normalizeKaminoMarketEntries(payload);
+	}
+}
+
+export async function getKaminoUserObligations(
+	walletAddress: string,
+	marketAddress: string,
+	network?: string,
+): Promise<Record<string, unknown>[]> {
+	const wallet = new PublicKey(normalizeAtPath(walletAddress)).toBase58();
+	const market = new PublicKey(normalizeAtPath(marketAddress)).toBase58();
+	const env = parseNetwork(network);
+	const paths = [
+		`/kamino-market/${encodeURIComponent(market)}/users/${encodeURIComponent(wallet)}/obligations`,
+		`/v2/kamino-market/${encodeURIComponent(market)}/users/${encodeURIComponent(wallet)}/obligations`,
+	];
+	let lastError: unknown = null;
+	for (const path of paths) {
+		try {
+			const payload = await callKaminoApi(path, {
+				method: "GET",
+				query: { env },
+			});
+			return normalizeKaminoObligationEntries(payload);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (message.includes("Could not get user obligations")) {
+				return [];
+			}
+			lastError = error;
+		}
+	}
+	if (lastError) {
+		throw lastError;
+	}
+	return [];
+}
+
+export async function getKaminoLendingPositions(
+	request: KaminoLendingPositionsRequest,
+): Promise<KaminoLendingPositionsResult> {
+	const address = new PublicKey(normalizeAtPath(request.address)).toBase58();
+	const network = parseNetwork(request.network);
+	const programId = normalizePublicKey(
+		typeof request.programId === "string" ? request.programId : null,
+	);
+	const marketQueryLimit = normalizeKaminoMarketLimit(request.limitMarkets);
+	const markets = await getKaminoMarkets({ programId: programId ?? undefined });
+	const allMarketAddresses = markets
+		.map((entry) => resolveKaminoMarketAddress(entry))
+		.filter((entry): entry is string => typeof entry === "string");
+	const uniqueMarketAddresses = [...new Set(allMarketAddresses)];
+	const marketAddressesQueried = uniqueMarketAddresses.slice(
+		0,
+		marketQueryLimit,
+	);
+	const queryErrors: string[] = [];
+	const obligations: KaminoLendingObligation[] = [];
+
+	await Promise.all(
+		marketAddressesQueried.map(async (marketAddress) => {
+			try {
+				const entries = await getKaminoUserObligations(
+					address,
+					marketAddress,
+					network,
+				);
+				for (const entry of entries) {
+					const stats =
+						asObjectRecord(entry.refreshedStats) ??
+						asObjectRecord(entry.stats) ??
+						asObjectRecord(entry.metrics);
+					const deposits = normalizeKaminoRecordArray(entry.deposits)
+						.map((position) =>
+							normalizeKaminoLendingPosition(position, "deposit"),
+						)
+						.filter(
+							(position): position is KaminoLendingPosition =>
+								position !== null,
+						);
+					const borrows = normalizeKaminoRecordArray(entry.borrows)
+						.map((position) =>
+							normalizeKaminoLendingPosition(position, "borrow"),
+						)
+						.filter(
+							(position): position is KaminoLendingPosition =>
+								position !== null,
+						);
+					const depositValueUsd =
+						pickNumberFromRecords(
+							[stats, entry],
+							[
+								"totalDepositValue",
+								"totalDepositValueUsd",
+								"depositedValueUsd",
+								"depositsValueUsd",
+							],
+						) ?? 0;
+					const borrowValueUsd =
+						pickNumberFromRecords(
+							[stats, entry],
+							[
+								"totalBorrowValue",
+								"totalBorrowValueUsd",
+								"borrowedValueUsd",
+								"borrowsValueUsd",
+							],
+						) ?? 0;
+					const positionCount =
+						pickNumberFromRecords(
+							[stats, entry],
+							["numberOfPositions", "positionCount"],
+						) ?? null;
+					obligations.push({
+						marketAddress,
+						obligationAddress: resolveKaminoObligationAddress(entry),
+						ownerAddress: normalizePublicKey(
+							pickString(entry, [
+								"owner",
+								"user",
+								"userAddress",
+								"userPubkey",
+								"authority",
+								"walletAddress",
+							]),
+						),
+						deposits,
+						borrows,
+						depositValueUsd: roundUsd(depositValueUsd),
+						borrowValueUsd: roundUsd(borrowValueUsd),
+						netValueUsd: roundUsd(depositValueUsd - borrowValueUsd),
+						loanToValueRatio: pickNumberFromRecords(
+							[stats, entry],
+							["loanToValue", "ltv", "userLtv"],
+						),
+						positionCount,
+					});
+				}
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				queryErrors.push(`${marketAddress}: ${message}`);
+			}
+		}),
+	);
+
+	obligations.sort((a, b) => {
+		const marketCmp = a.marketAddress.localeCompare(b.marketAddress);
+		if (marketCmp !== 0) {
+			return marketCmp;
+		}
+		return (a.obligationAddress ?? "").localeCompare(b.obligationAddress ?? "");
+	});
+	queryErrors.sort((a, b) => a.localeCompare(b));
+
+	const marketsWithPositions = [
+		...new Set(
+			obligations
+				.filter(
+					(entry) =>
+						entry.deposits.length > 0 ||
+						entry.borrows.length > 0 ||
+						entry.depositValueUsd > 0 ||
+						entry.borrowValueUsd > 0,
+				)
+				.map((entry) => entry.marketAddress),
+		),
+	];
+	const depositPositionCount = obligations.reduce(
+		(total, entry) => total + entry.deposits.length,
+		0,
+	);
+	const borrowPositionCount = obligations.reduce(
+		(total, entry) => total + entry.borrows.length,
+		0,
+	);
+	const totalDepositValueUsd = obligations.reduce(
+		(total, entry) => total + entry.depositValueUsd,
+		0,
+	);
+	const totalBorrowValueUsd = obligations.reduce(
+		(total, entry) => total + entry.borrowValueUsd,
+		0,
+	);
+
+	return {
+		protocol: "kamino",
+		address,
+		network,
+		programId,
+		marketCount: uniqueMarketAddresses.length,
+		marketCountQueried: marketAddressesQueried.length,
+		marketQueryLimit,
+		marketCountWithPositions: marketsWithPositions.length,
+		obligationCount: obligations.length,
+		depositPositionCount,
+		borrowPositionCount,
+		totalDepositValueUsd: roundUsd(totalDepositValueUsd),
+		totalBorrowValueUsd: roundUsd(totalBorrowValueUsd),
+		netValueUsd: roundUsd(totalDepositValueUsd - totalBorrowValueUsd),
+		marketAddressesQueried,
+		marketAddressesWithPositions: marketsWithPositions,
+		obligations,
+		queryErrors,
+	};
 }
 
 export async function callSolanaRpc(

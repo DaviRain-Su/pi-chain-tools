@@ -34,6 +34,7 @@ import {
 	getExplorerTransactionUrl,
 	getJupiterApiBaseUrl,
 	getJupiterQuote,
+	getKaminoLendingPositions,
 	getRaydiumApiBaseUrl,
 	getRaydiumPriorityFee,
 	getRaydiumPriorityFeeMicroLamports,
@@ -78,7 +79,8 @@ type WorkflowIntentType =
 	| "solana.read.balance"
 	| "solana.read.tokenBalance"
 	| "solana.read.portfolio"
-	| "solana.read.defiPositions";
+	| "solana.read.defiPositions"
+	| "solana.read.lendingPositions";
 type ParsedIntentTextFields = Partial<{
 	intentType: WorkflowIntentType;
 	address: string;
@@ -101,6 +103,9 @@ type ParsedIntentTextFields = Partial<{
 	dexes: string[];
 	excludeDexes: string[];
 	includeStakeAccounts: boolean;
+	protocol: string;
+	programId: string;
+	limitMarkets: number;
 }>;
 
 type TransferSolIntent = {
@@ -235,6 +240,13 @@ type WorkflowIntent =
 			includeZero: boolean;
 			includeToken2022: boolean;
 			includeStakeAccounts: boolean;
+	  }
+	| {
+			type: "solana.read.lendingPositions";
+			address: string;
+			protocol: "kamino";
+			programId?: string;
+			limitMarkets: number;
 	  };
 type ReadWorkflowIntent = Extract<
 	WorkflowIntent,
@@ -335,6 +347,8 @@ const STAKE_OPERATION_KEYWORD_REGEX =
 const READ_KEYWORD_REGEX = /(balance|余额|portfolio|资产|持仓)/i;
 const PORTFOLIO_KEYWORD_REGEX =
 	/(portfolio|资产|持仓|all\s+balances?|全部余额|token\s+positions?)/i;
+const LENDING_POSITIONS_KEYWORD_REGEX =
+	/(lending|lend\s+positions?|loan\s+positions?|借贷|借款|贷款|kamino)/i;
 const DEFI_POSITIONS_KEYWORD_REGEX =
 	/(defi|de-fi|protocol\s+positions?|协议仓位|staking|stake|质押|farm|yield|收益)/i;
 const ORCA_DEFAULT_DEXES = ["Orca V2", "Orca Whirlpool"] as const;
@@ -494,7 +508,8 @@ function isReadIntentType(intentType: WorkflowIntentType): boolean {
 		intentType === "solana.read.balance" ||
 		intentType === "solana.read.tokenBalance" ||
 		intentType === "solana.read.portfolio" ||
-		intentType === "solana.read.defiPositions"
+		intentType === "solana.read.defiPositions" ||
+		intentType === "solana.read.lendingPositions"
 	);
 }
 
@@ -1332,6 +1347,35 @@ function parseReadIntentText(intentText: string): ParsedIntentTextFields {
 		}
 	}
 
+	const protocolMatch = intentText.match(
+		/\bprotocol\s*[=:]\s*([A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
+	);
+	if (protocolMatch?.[1]) {
+		parsed.protocol = protocolMatch[1].toLowerCase();
+	}
+	const programIdMatch = intentText.match(
+		/\bprogramId\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (programIdMatch?.[1]) {
+		parsed.programId = programIdMatch[1];
+	}
+	const limitMarketsMatch = intentText.match(
+		/\blimitMarkets\s*[=:]\s*([0-9]{1,3})\b/i,
+	);
+	if (limitMarketsMatch?.[1]) {
+		const limitMarkets = Number.parseInt(limitMarketsMatch[1], 10);
+		if (Number.isInteger(limitMarkets) && limitMarkets > 0) {
+			parsed.limitMarkets = limitMarkets;
+		}
+	}
+
+	if (LENDING_POSITIONS_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.read.lendingPositions";
+		if (!parsed.protocol) {
+			parsed.protocol = "kamino";
+		}
+		return parsed;
+	}
 	if (DEFI_POSITIONS_KEYWORD_REGEX.test(intentText)) {
 		parsed.intentType = "solana.read.defiPositions";
 		return parsed;
@@ -1541,6 +1585,12 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 			intentType: "solana.read.defiPositions",
 		};
 	}
+	if (lower.includes("solana.read.lendingpositions")) {
+		return {
+			...parseReadIntentText(trimmed),
+			intentType: "solana.read.lendingPositions",
+		};
+	}
 	if (lower.includes("solana.transfer.sol")) {
 		return parseTransferIntentText(trimmed);
 	}
@@ -1692,7 +1742,8 @@ function resolveIntentType(
 		params.intentType === "solana.read.balance" ||
 		params.intentType === "solana.read.tokenBalance" ||
 		params.intentType === "solana.read.portfolio" ||
-		params.intentType === "solana.read.defiPositions"
+		params.intentType === "solana.read.defiPositions" ||
+		params.intentType === "solana.read.lendingPositions"
 	) {
 		return params.intentType;
 	}
@@ -1820,6 +1871,20 @@ function resolveIntentType(
 	if (typeof params.includeStakeAccounts === "boolean") {
 		return "solana.read.defiPositions";
 	}
+	if (
+		typeof params.programId === "string" ||
+		typeof params.limitMarkets === "number" ||
+		(typeof params.protocol === "string" &&
+			params.protocol.trim().toLowerCase() === "kamino")
+	) {
+		return "solana.read.lendingPositions";
+	}
+	if (
+		typeof params.intentText === "string" &&
+		LENDING_POSITIONS_KEYWORD_REGEX.test(params.intentText)
+	) {
+		return "solana.read.lendingPositions";
+	}
 	if (typeof params.address === "string") {
 		return "solana.read.balance";
 	}
@@ -1916,6 +1981,49 @@ async function normalizeIntent(
 			includeZero: normalizedParams.includeZero === true,
 			includeToken2022: normalizedParams.includeToken2022 !== false,
 			includeStakeAccounts: normalizedParams.includeStakeAccounts !== false,
+		};
+	}
+	if (intentType === "solana.read.lendingPositions") {
+		const address = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.address === "string"
+					? normalizedParams.address
+					: signerPublicKey,
+			),
+		).toBase58();
+		const protocolRaw =
+			typeof normalizedParams.protocol === "string"
+				? normalizedParams.protocol.trim().toLowerCase()
+				: "kamino";
+		if (protocolRaw !== "kamino") {
+			throw new Error(
+				`Unsupported lending protocol: ${protocolRaw}. Supported values: kamino`,
+			);
+		}
+		const programId =
+			typeof normalizedParams.programId === "string" &&
+			normalizedParams.programId.trim().length > 0
+				? new PublicKey(normalizeAtPath(normalizedParams.programId)).toBase58()
+				: undefined;
+		let limitMarkets = 20;
+		if (normalizedParams.limitMarkets !== undefined) {
+			if (
+				typeof normalizedParams.limitMarkets !== "number" ||
+				!Number.isFinite(normalizedParams.limitMarkets)
+			) {
+				throw new Error("limitMarkets must be a positive integer");
+			}
+			limitMarkets = Math.floor(normalizedParams.limitMarkets);
+			if (limitMarkets < 1 || limitMarkets > 200) {
+				throw new Error("limitMarkets must be between 1 and 200");
+			}
+		}
+		return {
+			type: intentType,
+			address,
+			protocol: "kamino",
+			programId,
+			limitMarkets,
 		};
 	}
 	if (intentType === "solana.transfer.sol") {
@@ -2460,6 +2568,23 @@ async function executeReadIntent(
 				network,
 				addressExplorer: getExplorerAddressUrl(owner.toBase58(), network),
 				tokenMintExplorer: getExplorerAddressUrl(mint.toBase58(), network),
+			},
+		};
+	}
+
+	if (intent.type === "solana.read.lendingPositions") {
+		const lending = await getKaminoLendingPositions({
+			address: intent.address,
+			network,
+			programId: intent.programId,
+			limitMarkets: intent.limitMarkets,
+		});
+		return {
+			summary: `Lending positions (${intent.protocol}): ${lending.obligationCount} obligation(s), ${lending.depositPositionCount} deposit(s), ${lending.borrowPositionCount} borrow(s)`,
+			details: {
+				intentType: intent.type,
+				...lending,
+				addressExplorer: getExplorerAddressUrl(intent.address, network),
 			},
 		};
 	}
@@ -3471,6 +3596,7 @@ export function createSolanaWorkflowTools() {
 						Type.Literal("solana.read.tokenBalance"),
 						Type.Literal("solana.read.portfolio"),
 						Type.Literal("solana.read.defiPositions"),
+						Type.Literal("solana.read.lendingPositions"),
 					]),
 				),
 				intentText: Type.Optional(
@@ -3615,6 +3741,26 @@ export function createSolanaWorkflowTools() {
 					Type.Boolean({
 						description:
 							"Include native stake account discovery for intentType=solana.read.defiPositions",
+					}),
+				),
+				protocol: Type.Optional(
+					Type.String({
+						description:
+							"Protocol hint for read intents. For lending positions, currently supports only 'kamino'.",
+					}),
+				),
+				programId: Type.Optional(
+					Type.String({
+						description:
+							"Optional Kamino lending program id filter for intentType=solana.read.lendingPositions",
+					}),
+				),
+				limitMarkets: Type.Optional(
+					Type.Integer({
+						minimum: 1,
+						maximum: 200,
+						description:
+							"Maximum markets to query for intentType=solana.read.lendingPositions",
 					}),
 				),
 				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),

@@ -16,6 +16,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	getJupiterApiBaseUrl: vi.fn(),
 	getJupiterDexLabels: vi.fn(),
 	getJupiterQuote: vi.fn(),
+	getKaminoLendingPositions: vi.fn(),
 	getRaydiumApiBaseUrl: vi.fn(),
 	getRaydiumPriorityFee: vi.fn(),
 	getRaydiumPriorityFeeApiBaseUrl: vi.fn(),
@@ -88,6 +89,7 @@ vi.mock("../runtime.js", async () => {
 		getJupiterApiBaseUrl: runtimeMocks.getJupiterApiBaseUrl,
 		getJupiterDexLabels: runtimeMocks.getJupiterDexLabels,
 		getJupiterQuote: runtimeMocks.getJupiterQuote,
+		getKaminoLendingPositions: runtimeMocks.getKaminoLendingPositions,
 		getRaydiumApiBaseUrl: runtimeMocks.getRaydiumApiBaseUrl,
 		getRaydiumPriorityFee: runtimeMocks.getRaydiumPriorityFee,
 		getRaydiumPriorityFeeApiBaseUrl:
@@ -507,6 +509,78 @@ describe("solana_getDefiPositions", () => {
 			totalDelegatedStakeLamports: "0",
 			totalDelegatedStakeUiAmount: "0",
 		});
+	});
+});
+
+describe("solana_getLendingPositions", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		runtimeMocks.getExplorerAddressUrl.mockImplementation(
+			(value: string) => `https://explorer/${value}`,
+		);
+	});
+
+	it("returns Kamino lending summary", async () => {
+		const owner = Keypair.generate().publicKey.toBase58();
+		runtimeMocks.getKaminoLendingPositions.mockResolvedValue({
+			protocol: "kamino",
+			address: owner,
+			network: "mainnet-beta",
+			programId: null,
+			marketCount: 4,
+			marketCountQueried: 4,
+			marketQueryLimit: 20,
+			marketCountWithPositions: 1,
+			obligationCount: 1,
+			depositPositionCount: 2,
+			borrowPositionCount: 1,
+			totalDepositValueUsd: 123.45,
+			totalBorrowValueUsd: 12.34,
+			netValueUsd: 111.11,
+			marketAddressesQueried: ["7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF"],
+			marketAddressesWithPositions: [
+				"7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
+			],
+			obligations: [],
+			queryErrors: [],
+		});
+
+		const tool = getReadTool("solana_getLendingPositions");
+		const result = await tool.execute("lending-positions-1", {
+			address: owner,
+			network: "mainnet-beta",
+		});
+
+		expect(runtimeMocks.getKaminoLendingPositions).toHaveBeenCalledWith({
+			address: owner,
+			network: "mainnet-beta",
+			programId: undefined,
+			limitMarkets: undefined,
+		});
+		expect(result.details).toMatchObject({
+			protocol: "kamino",
+			address: owner,
+			obligationCount: 1,
+			depositPositionCount: 2,
+			borrowPositionCount: 1,
+			totalDepositValueUsd: 123.45,
+			totalBorrowValueUsd: 12.34,
+			netValueUsd: 111.11,
+		});
+	});
+
+	it("rejects unsupported lending protocol", async () => {
+		const owner = Keypair.generate().publicKey.toBase58();
+		const tool = getReadTool("solana_getLendingPositions");
+		await expect(
+			tool.execute("lending-positions-2", {
+				address: owner,
+				protocol: "marginfi",
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("Unsupported lending protocol");
+		expect(runtimeMocks.getKaminoLendingPositions).not.toHaveBeenCalled();
 	});
 });
 

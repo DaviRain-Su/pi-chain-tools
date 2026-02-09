@@ -21,6 +21,7 @@ import {
 	getJupiterApiBaseUrl,
 	getJupiterDexLabels,
 	getJupiterQuote,
+	getKaminoLendingPositions,
 	getRaydiumApiBaseUrl,
 	getRaydiumPriorityFee,
 	getRaydiumPriorityFeeApiBaseUrl,
@@ -962,6 +963,65 @@ export function createSolanaReadTools() {
 							totalDelegatedStakeLamports,
 							9,
 						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getLendingPositions`,
+			label: "Solana Get Lending Positions",
+			description:
+				"Get wallet lending positions (deposits/borrows) from Kamino lending markets",
+			parameters: Type.Object({
+				address: Type.String({ description: "Wallet address" }),
+				protocol: Type.Optional(
+					Type.Union([Type.Literal("kamino")], {
+						description:
+							"Lending protocol identifier. Currently supports only kamino.",
+					}),
+				),
+				programId: Type.Optional(
+					Type.String({
+						description:
+							"Optional Kamino lending program id filter for market discovery",
+					}),
+				),
+				limitMarkets: Type.Optional(
+					Type.Integer({
+						minimum: 1,
+						maximum: 200,
+						description:
+							"Limit number of markets to query (default 20, max 200)",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const protocol = params.protocol ?? "kamino";
+				if (protocol !== "kamino") {
+					throw new Error(
+						`Unsupported lending protocol: ${protocol}. Supported values: kamino`,
+					);
+				}
+				const address = new PublicKey(
+					normalizeAtPath(params.address),
+				).toBase58();
+				const lending = await getKaminoLendingPositions({
+					address,
+					network: params.network,
+					programId: params.programId,
+					limitMarkets: params.limitMarkets,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Lending positions (${protocol}): ${lending.obligationCount} obligation(s), ${lending.depositPositionCount} deposit(s), ${lending.borrowPositionCount} borrow(s)`,
+						},
+					],
+					details: {
+						...lending,
+						addressExplorer: getExplorerAddressUrl(address, params.network),
 					},
 				};
 			},

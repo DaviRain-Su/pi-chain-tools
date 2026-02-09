@@ -45,6 +45,8 @@ vi.mock("@raydium-io/raydium-sdk-v2", () => {
 import {
 	callRaydiumApi,
 	getJupiterQuote,
+	getKaminoLendingPositions,
+	getKaminoMarkets,
 	getRaydiumPriorityFee,
 } from "./runtime.js";
 
@@ -166,6 +168,92 @@ describe("runtime SDK integration", () => {
 		expect(globalThis.fetch).toHaveBeenCalledTimes(1);
 		expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).toBe(
 			"https://api-v3.raydium.io/main/auto-fee",
+		);
+	});
+
+	it("fetches Kamino markets from v2 API", async () => {
+		vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+			jsonResponse([
+				{
+					lendingMarket: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
+					name: "Main Market",
+				},
+			]),
+		);
+		const markets = await getKaminoMarkets();
+		expect(markets).toHaveLength(1);
+		expect(markets[0]).toMatchObject({
+			lendingMarket: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
+			name: "Main Market",
+		});
+		expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).toBe(
+			"https://api.kamino.finance/v2/kamino-market",
+		);
+	});
+
+	it("aggregates Kamino lending positions across markets", async () => {
+		vi.mocked(globalThis.fetch)
+			.mockResolvedValueOnce(
+				jsonResponse([
+					{
+						lendingMarket: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
+						name: "Main Market",
+					},
+				]),
+			)
+			.mockResolvedValueOnce(
+				jsonResponse([
+					{
+						obligation: "7VhV9LhDdVZK4fhL4PA4FBNrEFhP7KAMsoNqd7qV3Cy8",
+						owner: "8uAPC2UxiBjKmUksVVwUA6q4RctiXkgSAsovBR39cd1i",
+						deposits: [
+							{
+								reserveAddress: "So11111111111111111111111111111111111111112",
+								mintAddress: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+								amountRaw: "1000000",
+								amountUi: 1,
+								marketValueRefreshed: 1.5,
+							},
+						],
+						borrows: [
+							{
+								reserveAddress: "So11111111111111111111111111111111111111112",
+								mintAddress: "So11111111111111111111111111111111111111112",
+								amountRaw: "100000",
+								amountUi: 0.1,
+								marketValueRefreshed: 0.5,
+							},
+						],
+						refreshedStats: {
+							totalDepositValue: 1.5,
+							totalBorrowValue: 0.5,
+							loanToValue: 0.3333,
+						},
+					},
+				]),
+			);
+
+		const result = await getKaminoLendingPositions({
+			address: "8uAPC2UxiBjKmUksVVwUA6q4RctiXkgSAsovBR39cd1i",
+			network: "mainnet-beta",
+			limitMarkets: 1,
+		});
+
+		expect(result).toMatchObject({
+			protocol: "kamino",
+			address: "8uAPC2UxiBjKmUksVVwUA6q4RctiXkgSAsovBR39cd1i",
+			marketCountQueried: 1,
+			obligationCount: 1,
+			depositPositionCount: 1,
+			borrowPositionCount: 1,
+			totalDepositValueUsd: 1.5,
+			totalBorrowValueUsd: 0.5,
+			netValueUsd: 1,
+			marketCountWithPositions: 1,
+		});
+		expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(globalThis.fetch).mock.calls[1]?.[0]).toContain(
+			"/kamino-market/7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF/users/8uAPC2UxiBjKmUksVVwUA6q4RctiXkgSAsovBR39cd1i/obligations?env=mainnet-beta",
 		);
 	});
 });
