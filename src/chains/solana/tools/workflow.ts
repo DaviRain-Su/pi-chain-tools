@@ -21,11 +21,13 @@ import {
 } from "@solana/web3.js";
 import { defineTool } from "../../../core/types.js";
 import {
+	KAMINO_MAINNET_MARKET_ADDRESS,
 	TOKEN_2022_PROGRAM_ID,
 	TOKEN_PROGRAM_ID,
 	assertJupiterNetworkSupported,
 	assertRaydiumNetworkSupported,
 	buildJupiterSwapTransaction,
+	buildKaminoDepositInstructions,
 	buildRaydiumSwapTransactions,
 	callJupiterApi,
 	commitmentSchema,
@@ -67,6 +69,7 @@ type WorkflowRunMode = "analysis" | "simulate" | "execute";
 type WorkflowIntentType =
 	| "solana.transfer.sol"
 	| "solana.transfer.spl"
+	| "solana.lend.kamino.deposit"
 	| "solana.stake.createAndDelegate"
 	| "solana.stake.delegate"
 	| "solana.stake.authorizeStaker"
@@ -90,9 +93,16 @@ type ParsedIntentTextFields = Partial<{
 	amountSol: number;
 	amountUi: string;
 	tokenMint: string;
+	reserveMint: string;
 	inputMint: string;
 	outputMint: string;
 	amountRaw: string;
+	marketAddress: string;
+	ownerAddress: string;
+	useV2Ixs: boolean;
+	includeAtaIxs: boolean;
+	extraComputeUnits: number;
+	requestElevationGroup: boolean;
 	stakeSeed: string;
 	stakeAuthorityAddress: string;
 	withdrawAuthorityAddress: string;
@@ -177,6 +187,19 @@ type StakeWithdrawIntent = {
 	lamports: number;
 };
 
+type KaminoDepositIntent = {
+	type: "solana.lend.kamino.deposit";
+	ownerAddress: string;
+	marketAddress: string;
+	programId?: string;
+	reserveMint: string;
+	amountRaw: string;
+	useV2Ixs: boolean;
+	includeAtaIxs: boolean;
+	extraComputeUnits?: number;
+	requestElevationGroup: boolean;
+};
+
 type JupiterSwapIntent = {
 	type: "solana.swap.jupiter" | "solana.swap.orca" | "solana.swap.meteora";
 	userPublicKey: string;
@@ -218,6 +241,7 @@ type WorkflowIntent =
 	| StakeAuthorizeIntent
 	| StakeDeactivateIntent
 	| StakeWithdrawIntent
+	| KaminoDepositIntent
 	| JupiterSwapIntent
 	| RaydiumSwapIntent
 	| {
@@ -361,6 +385,8 @@ const LENDING_POSITIONS_KEYWORD_REGEX =
 	/(lending|lend\s+positions?|loan\s+positions?|借贷|借款|贷款|kamino)/i;
 const DEFI_POSITIONS_KEYWORD_REGEX =
 	/(defi|de-fi|protocol\s+positions?|协议仓位|staking|stake|质押|farm|yield|收益)/i;
+const KAMINO_DEPOSIT_KEYWORD_REGEX =
+	/(kamino.*(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出)|(\bdeposit\b|\bsupply\b|\blend\b|存入|出借|借出).*kamino)/i;
 const ORCA_DEFAULT_DEXES = ["Orca V2", "Orca Whirlpool"] as const;
 const METEORA_DEFAULT_DEXES = ["Meteora DLMM"] as const;
 const RAYDIUM_DEFAULT_DEXES = ["Raydium CLMM", "Raydium CPMM"] as const;
@@ -1124,6 +1150,89 @@ function parseTransferIntentText(intentText: string): ParsedIntentTextFields {
 	return parsed;
 }
 
+function parseKaminoDepositIntentText(
+	intentText: string,
+): ParsedIntentTextFields {
+	const parsed: ParsedIntentTextFields = {
+		intentType: "solana.lend.kamino.deposit",
+		protocol: "kamino",
+	};
+	const ownerAddressMatch = intentText.match(
+		/\bownerAddress\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (ownerAddressMatch?.[1]) {
+		parsed.ownerAddress = ownerAddressMatch[1];
+	}
+	const marketAddressMatch = intentText.match(
+		/\bmarketAddress\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44})\b/i,
+	);
+	if (marketAddressMatch?.[1]) {
+		parsed.marketAddress = marketAddressMatch[1];
+	}
+	const reserveMintMatch = intentText.match(
+		/\b(?:reserveMint|tokenMint|mint)\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
+	);
+	if (reserveMintMatch?.[1]) {
+		const reserveMint = parseMintOrSymbolCandidate(reserveMintMatch[1]);
+		if (reserveMint) {
+			parsed.reserveMint = reserveMint;
+		}
+	}
+	const amountRawMatch =
+		intentText.match(/\bamountRaw\s*[=:]\s*([0-9]+)\b/i) ??
+		intentText.match(/\b([0-9]+)\s*raw\b/i);
+	if (amountRawMatch?.[1]) {
+		parsed.amountRaw = amountRawMatch[1];
+	}
+	const amountUiMatch = intentText.match(
+		/\b(?:amount|amountUi)\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\b/i,
+	);
+	if (amountUiMatch?.[1]) {
+		parsed.amountUi = amountUiMatch[1];
+	}
+	const amountSolMatch =
+		intentText.match(/\bamountSol\s*[=:]\s*([0-9]+(?:\.[0-9]+)?)\b/i) ??
+		intentText.match(/([0-9]+(?:\.[0-9]+)?)\s*sol\b/i);
+	if (amountSolMatch?.[1]) {
+		const amountSol = parsePositiveNumber(amountSolMatch[1]);
+		if (amountSol != null) {
+			parsed.amountSol = amountSol;
+		}
+	}
+	const uiAmountWithToken = parseUiAmountWithToken(intentText);
+	if (uiAmountWithToken.inputMint) {
+		parsed.reserveMint = parsed.reserveMint ?? uiAmountWithToken.inputMint;
+		if (uiAmountWithToken.amountUi) {
+			parsed.amountUi = parsed.amountUi ?? uiAmountWithToken.amountUi;
+		}
+		if (
+			parsed.amountSol === undefined &&
+			typeof uiAmountWithToken.amountSol === "number"
+		) {
+			parsed.amountSol = uiAmountWithToken.amountSol;
+		}
+	}
+	if (/\buseV2Ixs\s*[=:]\s*false\b/i.test(intentText)) {
+		parsed.useV2Ixs = false;
+	}
+	if (/\bincludeAtaIxs\s*[=:]\s*false\b/i.test(intentText)) {
+		parsed.includeAtaIxs = false;
+	}
+	const extraComputeUnitsMatch = intentText.match(
+		/\bextraComputeUnits\s*[=:]\s*([0-9]+)\b/i,
+	);
+	if (extraComputeUnitsMatch?.[1]) {
+		const extraComputeUnits = Number.parseInt(extraComputeUnitsMatch[1], 10);
+		if (Number.isInteger(extraComputeUnits) && extraComputeUnits >= 0) {
+			parsed.extraComputeUnits = extraComputeUnits;
+		}
+	}
+	if (/\brequestElevationGroup\s*[=:]\s*true\b/i.test(intentText)) {
+		parsed.requestElevationGroup = true;
+	}
+	return parsed;
+}
+
 function detectStakeIntentTypeFromText(
 	intentText: string,
 ): Extract<WorkflowIntentType, `solana.stake.${string}`> | undefined {
@@ -1624,6 +1733,12 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 			intentType: "solana.transfer.spl",
 		};
 	}
+	if (lower.includes("solana.lend.kamino.deposit")) {
+		return {
+			...parseKaminoDepositIntentText(trimmed),
+			intentType: "solana.lend.kamino.deposit",
+		};
+	}
 	if (lower.includes("solana.stake.createanddelegate")) {
 		return {
 			...parseStakeIntentText(trimmed),
@@ -1694,6 +1809,9 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	if (hasTransferKeywords && !hasSwapKeywords) {
 		return parseTransferIntentText(trimmed);
 	}
+	if (KAMINO_DEPOSIT_KEYWORD_REGEX.test(trimmed)) {
+		return parseKaminoDepositIntentText(trimmed);
+	}
 	if (hasReadKeywords && !hasSwapKeywords && !hasTransferKeywords) {
 		return parseReadIntentText(trimmed);
 	}
@@ -1753,6 +1871,7 @@ function resolveIntentType(
 	if (
 		params.intentType === "solana.transfer.sol" ||
 		params.intentType === "solana.transfer.spl" ||
+		params.intentType === "solana.lend.kamino.deposit" ||
 		params.intentType === "solana.stake.createAndDelegate" ||
 		params.intentType === "solana.stake.delegate" ||
 		params.intentType === "solana.stake.authorizeStaker" ||
@@ -1801,6 +1920,26 @@ function resolveIntentType(
 			typeof params.destinationTokenAccount === "string")
 	) {
 		return "solana.transfer.spl";
+	}
+	if (
+		typeof params.intentText === "string" &&
+		KAMINO_DEPOSIT_KEYWORD_REGEX.test(params.intentText)
+	) {
+		return "solana.lend.kamino.deposit";
+	}
+	const protocolHint =
+		typeof params.protocol === "string"
+			? params.protocol.trim().toLowerCase()
+			: null;
+	if (
+		protocolHint === "kamino" &&
+		(typeof params.reserveMint === "string" ||
+			typeof params.tokenMint === "string") &&
+		(typeof params.amountRaw === "string" ||
+			typeof params.amountUi === "string" ||
+			typeof params.amountSol === "number")
+	) {
+		return "solana.lend.kamino.deposit";
 	}
 	const stakeIntentFromText =
 		typeof params.intentText === "string"
@@ -2099,6 +2238,95 @@ async function normalizeIntent(
 			protocol: "kamino",
 			programId,
 			limitMarkets,
+		};
+	}
+	if (intentType === "solana.lend.kamino.deposit") {
+		const ownerAddress = new PublicKey(
+			normalizeAtPath(
+				typeof normalizedParams.ownerAddress === "string"
+					? normalizedParams.ownerAddress
+					: signerPublicKey,
+			),
+		).toBase58();
+		if (ownerAddress !== signerPublicKey) {
+			throw new Error(
+				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
+			);
+		}
+		const reserveMint = await ensureMint(
+			normalizedParams.reserveMint ?? normalizedParams.tokenMint,
+			"reserveMint",
+		);
+		let amountRawValue = normalizedParams.amountRaw;
+		if (
+			(typeof amountRawValue !== "string" ||
+				amountRawValue.trim().length === 0) &&
+			typeof normalizedParams.amountUi === "string"
+		) {
+			const decimals = await fetchTokenDecimals(network, reserveMint);
+			amountRawValue = decimalUiAmountToRaw(
+				normalizedParams.amountUi,
+				decimals,
+				"amountUi",
+			);
+		}
+		if (
+			(typeof amountRawValue !== "string" ||
+				amountRawValue.trim().length === 0) &&
+			reserveMint === SOL_MINT &&
+			typeof normalizedParams.amountSol === "number"
+		) {
+			amountRawValue = toLamports(
+				ensureNumber(normalizedParams.amountSol, "amountSol"),
+			).toString();
+		}
+		const amountRaw = parsePositiveBigInt(
+			ensureString(amountRawValue, "amountRaw"),
+			"amountRaw",
+		).toString();
+		const marketInput =
+			typeof normalizedParams.marketAddress === "string" &&
+			normalizedParams.marketAddress.trim().length > 0
+				? normalizedParams.marketAddress
+				: network === "mainnet-beta"
+					? KAMINO_MAINNET_MARKET_ADDRESS
+					: null;
+		if (!marketInput) {
+			throw new Error(
+				"marketAddress is required for solana.lend.kamino.deposit when network is not mainnet-beta",
+			);
+		}
+		const marketAddress = new PublicKey(
+			normalizeAtPath(marketInput),
+		).toBase58();
+		const programId =
+			typeof normalizedParams.programId === "string" &&
+			normalizedParams.programId.trim().length > 0
+				? new PublicKey(normalizeAtPath(normalizedParams.programId)).toBase58()
+				: undefined;
+		const extraComputeUnits =
+			typeof normalizedParams.extraComputeUnits === "number"
+				? Math.floor(normalizedParams.extraComputeUnits)
+				: undefined;
+		if (
+			extraComputeUnits !== undefined &&
+			(extraComputeUnits < 0 || extraComputeUnits > 2_000_000)
+		) {
+			throw new Error(
+				"extraComputeUnits must be an integer between 0 and 2000000",
+			);
+		}
+		return {
+			type: intentType,
+			ownerAddress,
+			marketAddress,
+			programId,
+			reserveMint,
+			amountRaw,
+			useV2Ixs: normalizedParams.useV2Ixs !== false,
+			includeAtaIxs: normalizedParams.includeAtaIxs !== false,
+			extraComputeUnits,
+			requestElevationGroup: normalizedParams.requestElevationGroup === true,
 		};
 	}
 	if (intentType === "solana.transfer.sol") {
@@ -3040,6 +3268,66 @@ async function prepareTransferSplSimulation(
 	};
 }
 
+async function prepareKaminoDepositSimulation(
+	network: string,
+	signer: Keypair,
+	intent: KaminoDepositIntent,
+): Promise<PreparedTransaction> {
+	const signerAddress = signer.publicKey.toBase58();
+	if (intent.ownerAddress !== signerAddress) {
+		throw new Error(
+			`ownerAddress mismatch: expected ${signerAddress}, got ${intent.ownerAddress}`,
+		);
+	}
+	const connection = getConnection(network);
+	const build = await buildKaminoDepositInstructions({
+		ownerAddress: intent.ownerAddress,
+		reserveMint: intent.reserveMint,
+		amountRaw: intent.amountRaw,
+		marketAddress: intent.marketAddress,
+		programId: intent.programId,
+		useV2Ixs: intent.useV2Ixs,
+		includeAtaIxs: intent.includeAtaIxs,
+		extraComputeUnits: intent.extraComputeUnits,
+		requestElevationGroup: intent.requestElevationGroup,
+		network,
+	});
+	const tx = new Transaction().add(...build.instructions);
+	tx.feePayer = signer.publicKey;
+	const latestBlockhash = await connection.getLatestBlockhash();
+	tx.recentBlockhash = latestBlockhash.blockhash;
+	tx.partialSign(signer);
+	const simulation = await connection.simulateTransaction(tx);
+	return {
+		tx,
+		version: "legacy",
+		simulation: {
+			ok: simulation.value.err == null,
+			err: simulation.value.err ?? null,
+			logs: simulation.value.logs ?? [],
+			unitsConsumed: simulation.value.unitsConsumed ?? null,
+		},
+		context: {
+			latestBlockhash,
+			ownerAddress: build.ownerAddress,
+			marketAddress: build.marketAddress,
+			programId: build.programId,
+			reserveMint: build.reserveMint,
+			reserveAddress: build.reserveAddress,
+			reserveSymbol: build.reserveSymbol,
+			amountRaw: build.amountRaw,
+			obligationAddress: build.obligationAddress,
+			instructionCount: build.instructionCount,
+			setupInstructionCount: build.setupInstructionCount,
+			lendingInstructionCount: build.lendingInstructionCount,
+			cleanupInstructionCount: build.cleanupInstructionCount,
+			setupInstructionLabels: build.setupInstructionLabels,
+			lendingInstructionLabels: build.lendingInstructionLabels,
+			cleanupInstructionLabels: build.cleanupInstructionLabels,
+		},
+	};
+}
+
 async function prepareStakeCreateAndDelegateSimulation(
 	network: string,
 	signer: Keypair,
@@ -3578,6 +3866,9 @@ async function prepareSimulation(
 	if (intent.type === "solana.transfer.spl") {
 		return prepareTransferSplSimulation(network, signer, intent);
 	}
+	if (intent.type === "solana.lend.kamino.deposit") {
+		return prepareKaminoDepositSimulation(network, signer, intent);
+	}
 	if (intent.type === "solana.stake.createAndDelegate") {
 		return prepareStakeCreateAndDelegateSimulation(network, signer, intent);
 	}
@@ -3672,6 +3963,7 @@ export function createSolanaWorkflowTools() {
 					Type.Union([
 						Type.Literal("solana.transfer.sol"),
 						Type.Literal("solana.transfer.spl"),
+						Type.Literal("solana.lend.kamino.deposit"),
 						Type.Literal("solana.stake.createAndDelegate"),
 						Type.Literal("solana.stake.delegate"),
 						Type.Literal("solana.stake.authorizeStaker"),
@@ -3742,7 +4034,7 @@ export function createSolanaWorkflowTools() {
 				amountSol: Type.Optional(
 					Type.Number({
 						description:
-							"Amount in SOL for intentType=solana.transfer.sol / solana.stake.createAndDelegate / solana.stake.withdraw",
+							"Amount in SOL for intentType=solana.transfer.sol / solana.stake.createAndDelegate / solana.stake.withdraw, or for solana.lend.kamino.deposit when reserveMint is SOL",
 					}),
 				),
 				stakeAccountAddress: Type.Optional(
@@ -3792,6 +4084,24 @@ export function createSolanaWorkflowTools() {
 						description: "Token mint for intentType=solana.transfer.spl",
 					}),
 				),
+				ownerAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional owner assertion for intentType=solana.lend.kamino.deposit. Must match signer address.",
+					}),
+				),
+				reserveMint: Type.Optional(
+					Type.String({
+						description:
+							"Reserve mint for intentType=solana.lend.kamino.deposit (supports known symbols like SOL/USDC/USDT)",
+					}),
+				),
+				marketAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional Kamino market address for intentType=solana.lend.kamino.deposit. Defaults to main market on mainnet-beta.",
+					}),
+				),
 				inputMint: Type.Optional(
 					Type.String({
 						description:
@@ -3807,13 +4117,39 @@ export function createSolanaWorkflowTools() {
 				amountRaw: Type.Optional(
 					Type.String({
 						description:
-							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl",
+							"Raw integer amount for intentType=solana.swap.jupiter / solana.swap.raydium / solana.transfer.spl / solana.lend.kamino.deposit",
 					}),
 				),
 				amountUi: Type.Optional(
 					Type.String({
 						description:
-							"Optional human-readable token amount for swaps and SPL transfers (for known mints like SOL/USDC/USDT).",
+							"Optional human-readable token amount for swaps, SPL transfers, and Kamino deposits (for known mints like SOL/USDC/USDT).",
+					}),
+				),
+				useV2Ixs: Type.Optional(
+					Type.Boolean({
+						description:
+							"Use Kamino V2 instructions for intentType=solana.lend.kamino.deposit (default true)",
+					}),
+				),
+				includeAtaIxs: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include ATA setup instructions for intentType=solana.lend.kamino.deposit (default true)",
+					}),
+				),
+				extraComputeUnits: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 2_000_000,
+						description:
+							"Optional compute unit limit for intentType=solana.lend.kamino.deposit",
+					}),
+				),
+				requestElevationGroup: Type.Optional(
+					Type.Boolean({
+						description:
+							"Request Kamino elevation group for intentType=solana.lend.kamino.deposit (default false)",
 					}),
 				),
 				includeZero: Type.Optional(
@@ -3843,7 +4179,7 @@ export function createSolanaWorkflowTools() {
 				programId: Type.Optional(
 					Type.String({
 						description:
-							"Optional Kamino lending program id filter for intentType=solana.read.lendingMarkets or solana.read.lendingPositions",
+							"Optional Kamino lending program id. For read intents it is a filter; for solana.lend.kamino.deposit it overrides the default program id.",
 					}),
 				),
 				limitMarkets: Type.Optional(

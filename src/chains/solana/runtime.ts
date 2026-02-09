@@ -6,16 +6,31 @@ import {
 	createJupiterApiClient,
 } from "@jup-ag/api";
 import {
+	DEFAULT_RECENT_SLOT_DURATION_MS,
+	PROGRAM_ID as KAMINO_PROGRAM_ID,
+	KaminoAction,
+	KaminoMarket,
+	VanillaObligation,
+} from "@kamino-finance/klend-sdk";
+import {
 	API_URLS as RAYDIUM_API_URLS,
 	Api as RaydiumApiClient,
 	type API_URL_CONFIG as RaydiumApiUrlConfig,
 } from "@raydium-io/raydium-sdk-v2";
 import { Type } from "@sinclair/typebox";
 import {
+	AccountRole,
+	type Instruction as KitInstruction,
+	address,
+	createNoopSigner,
+	createSolanaRpc,
+} from "@solana/kit";
+import {
 	Connection,
 	LAMPORTS_PER_SOL,
 	PublicKey,
 	Transaction,
+	TransactionInstruction,
 	VersionedTransaction,
 	clusterApiUrl,
 } from "@solana/web3.js";
@@ -39,6 +54,8 @@ export const TOKEN_PROGRAM_ID = new PublicKey(
 export const TOKEN_2022_PROGRAM_ID = new PublicKey(
 	"TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
 );
+export const KAMINO_MAINNET_MARKET_ADDRESS =
+	"7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF";
 export const DANGEROUS_RPC_METHODS = new Set([
 	"sendTransaction",
 	"requestAirdrop",
@@ -465,6 +482,137 @@ export function parseTransactionFromBase64(
 	}
 }
 
+function isSignerRole(role: AccountRole): boolean {
+	return (
+		role === AccountRole.READONLY_SIGNER || role === AccountRole.WRITABLE_SIGNER
+	);
+}
+
+function isWritableRole(role: AccountRole): boolean {
+	return role === AccountRole.WRITABLE || role === AccountRole.WRITABLE_SIGNER;
+}
+
+function convertKitInstructionToLegacy(
+	instruction: KitInstruction,
+): TransactionInstruction {
+	const keys = (instruction.accounts ?? []).map((account) => ({
+		pubkey: new PublicKey(account.address),
+		isSigner: isSignerRole(account.role),
+		isWritable: isWritableRole(account.role),
+	}));
+	return new TransactionInstruction({
+		programId: new PublicKey(instruction.programAddress),
+		keys,
+		data: instruction.data ? Buffer.from(instruction.data) : Buffer.alloc(0),
+	});
+}
+
+function parseKaminoExtraComputeUnits(value: number | undefined): number {
+	if (value === undefined) {
+		return 1_000_000;
+	}
+	if (!Number.isInteger(value) || value < 0 || value > 2_000_000) {
+		throw new Error(
+			"extraComputeUnits must be an integer between 0 and 2000000",
+		);
+	}
+	return value;
+}
+
+export async function buildKaminoDepositInstructions(
+	request: KaminoDepositInstructionsRequest,
+): Promise<KaminoDepositInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const reserveMint = new PublicKey(
+		normalizeAtPath(request.reserveMint),
+	).toBase58();
+	const marketInput =
+		typeof request.marketAddress === "string" &&
+		request.marketAddress.trim().length > 0
+			? request.marketAddress
+			: network === "mainnet-beta"
+				? KAMINO_MAINNET_MARKET_ADDRESS
+				: null;
+	if (!marketInput) {
+		throw new Error(
+			"marketAddress is required when network is not mainnet-beta",
+		);
+	}
+	const marketAddress = new PublicKey(normalizeAtPath(marketInput)).toBase58();
+	const programId = new PublicKey(
+		normalizeAtPath(request.programId ?? KAMINO_PROGRAM_ID),
+	).toBase58();
+	const amountRaw = parsePositiveBigInt(
+		request.amountRaw,
+		"amountRaw",
+	).toString();
+	const useV2Ixs = request.useV2Ixs !== false;
+	const includeAtaIxs = request.includeAtaIxs !== false;
+	const extraComputeUnits = parseKaminoExtraComputeUnits(
+		request.extraComputeUnits,
+	);
+	const requestElevationGroup = request.requestElevationGroup === true;
+
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+	const kaminoMarket = await KaminoMarket.load(
+		rpc,
+		address(marketAddress),
+		DEFAULT_RECENT_SLOT_DURATION_MS,
+		address(programId),
+	);
+	if (!kaminoMarket) {
+		throw new Error(`Kamino market not found: ${marketAddress}`);
+	}
+	const reserve = kaminoMarket.getReserveByMint(address(reserveMint));
+	if (!reserve) {
+		throw new Error(
+			`Kamino reserve not found in market: reserveMint=${reserveMint} marketAddress=${marketAddress}`,
+		);
+	}
+	const action = await KaminoAction.buildDepositTxns(
+		kaminoMarket,
+		amountRaw,
+		reserve.getLiquidityMint(),
+		createNoopSigner(address(ownerAddress)),
+		new VanillaObligation(address(programId)),
+		useV2Ixs,
+		undefined,
+		extraComputeUnits,
+		includeAtaIxs,
+		requestElevationGroup,
+	);
+	const instructions = KaminoAction.actionToIxs(action).map(
+		convertKitInstructionToLegacy,
+	);
+	const obligationAddress = await action.getObligationPda();
+	return {
+		network,
+		ownerAddress,
+		marketAddress,
+		programId,
+		reserveMint,
+		reserveAddress: reserve.address,
+		reserveSymbol: reserve.symbol ?? null,
+		amountRaw,
+		useV2Ixs,
+		includeAtaIxs,
+		extraComputeUnits,
+		requestElevationGroup,
+		obligationAddress,
+		instructionCount: instructions.length,
+		setupInstructionCount: action.setupIxs.length,
+		lendingInstructionCount: action.lendingIxs.length,
+		cleanupInstructionCount: action.cleanupIxs.length,
+		setupInstructionLabels: [...action.setupIxsLabels],
+		lendingInstructionLabels: [...action.lendingIxsLabels],
+		cleanupInstructionLabels: [...action.cleanupIxsLabels],
+		instructions,
+	};
+}
+
 function truncateText(value: string): string {
 	if (value.length <= 500) return value;
 	return `${value.slice(0, 500)}...`;
@@ -533,6 +681,43 @@ export type RaydiumSwapRequest = {
 	unwrapSol?: boolean;
 	inputAccount?: string;
 	outputAccount?: string;
+};
+
+export type KaminoDepositInstructionsRequest = {
+	ownerAddress: string;
+	reserveMint: string;
+	amountRaw: string;
+	marketAddress?: string;
+	programId?: string;
+	useV2Ixs?: boolean;
+	includeAtaIxs?: boolean;
+	extraComputeUnits?: number;
+	requestElevationGroup?: boolean;
+	network?: string;
+};
+
+export type KaminoDepositInstructionsResult = {
+	network: SolanaNetwork;
+	ownerAddress: string;
+	marketAddress: string;
+	programId: string;
+	reserveMint: string;
+	reserveAddress: string;
+	reserveSymbol: string | null;
+	amountRaw: string;
+	useV2Ixs: boolean;
+	includeAtaIxs: boolean;
+	extraComputeUnits: number;
+	requestElevationGroup: boolean;
+	obligationAddress: string;
+	instructionCount: number;
+	setupInstructionCount: number;
+	lendingInstructionCount: number;
+	cleanupInstructionCount: number;
+	setupInstructionLabels: string[];
+	lendingInstructionLabels: string[];
+	cleanupInstructionLabels: string[];
+	instructions: TransactionInstruction[];
 };
 
 export type KaminoLendingProtocol = "kamino";
