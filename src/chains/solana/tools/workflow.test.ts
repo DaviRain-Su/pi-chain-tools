@@ -493,6 +493,92 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("parses Orca swap intentText and applies Orca dex defaults", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-swap-orca", {
+			runId: "run-intent-swap-orca",
+			runMode: "analysis",
+			intentText: "swap on orca 0.1 SOL to USDC",
+		});
+
+		expect(runtimeMocks.toLamports).toHaveBeenCalledWith(0.1);
+		expect(result.details).toMatchObject({
+			runId: "run-intent-swap-orca",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.swap.orca",
+						inputMint: SOL_MINT,
+						outputMint: USDC_MINT,
+						amountRaw: "100000000",
+						dexes: ["Orca V2", "Orca Whirlpool"],
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates Meteora swap intent using Jupiter with dex filter", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		runtimeMocks.getJupiterQuote.mockResolvedValue({
+			outAmount: "42",
+			routePlan: [{ route: "mock" }],
+		});
+		runtimeMocks.buildJupiterSwapTransaction.mockResolvedValue({
+			swapTransaction: Buffer.from("swap-tx").toString("base64"),
+		});
+		runtimeMocks.parseTransactionFromBase64.mockReturnValue({
+			partialSign: vi.fn(),
+			serialize: vi.fn(() => Buffer.from("signed")),
+		});
+		const connection = {
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 123,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-intent-swap-meteora-sim", {
+			runId: "run-intent-swap-meteora-sim",
+			runMode: "simulate",
+			intentType: "solana.swap.meteora",
+			inputMint: SOL_MINT,
+			outputMint: USDC_MINT,
+			amountRaw: "1000000",
+		});
+
+		expect(runtimeMocks.getJupiterQuote).toHaveBeenCalledWith(
+			expect.objectContaining({
+				dexes: ["Meteora DLMM"],
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runId: "run-intent-swap-meteora-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.swap.meteora",
+						dexes: ["Meteora DLMM"],
+					},
+				},
+				simulate: {
+					ok: true,
+				},
+			},
+		});
+	});
+
 	it("parses USDC ui amount and slippage percent from intentText", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);

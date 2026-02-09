@@ -64,6 +64,8 @@ type WorkflowIntentType =
 	| "solana.transfer.spl"
 	| "solana.swap.jupiter"
 	| "solana.swap.raydium"
+	| "solana.swap.orca"
+	| "solana.swap.meteora"
 	| "solana.read.balance"
 	| "solana.read.tokenBalance"
 	| "solana.read.portfolio";
@@ -102,7 +104,7 @@ type TransferSplIntent = {
 };
 
 type JupiterSwapIntent = {
-	type: "solana.swap.jupiter";
+	type: "solana.swap.jupiter" | "solana.swap.orca" | "solana.swap.meteora";
 	userPublicKey: string;
 	inputMint: string;
 	outputMint: string;
@@ -251,6 +253,8 @@ const TRANSFER_KEYWORD_REGEX = /(transfer|send|转账|转到|发送|打款)/i;
 const READ_KEYWORD_REGEX = /(balance|余额|portfolio|资产|持仓)/i;
 const PORTFOLIO_KEYWORD_REGEX =
 	/(portfolio|资产|持仓|all\s+balances?|全部余额|token\s+positions?)/i;
+const ORCA_DEFAULT_DEXES = ["Orca V2", "Orca Whirlpool"] as const;
+const METEORA_DEFAULT_DEXES = ["Meteora DLMM"] as const;
 
 function parseRunMode(value?: string): WorkflowRunMode {
 	if (value === "analysis" || value === "simulate" || value === "execute") {
@@ -297,6 +301,18 @@ function isReadIntentType(intentType: WorkflowIntentType): boolean {
 		intentType === "solana.read.tokenBalance" ||
 		intentType === "solana.read.portfolio"
 	);
+}
+
+function getDefaultDexesForIntentType(
+	intentType: WorkflowIntentType,
+): string[] | undefined {
+	if (intentType === "solana.swap.orca") {
+		return [...ORCA_DEFAULT_DEXES];
+	}
+	if (intentType === "solana.swap.meteora") {
+		return [...METEORA_DEFAULT_DEXES];
+	}
+	return undefined;
 }
 
 function isReadIntent(intent: WorkflowIntent): intent is ReadWorkflowIntent {
@@ -811,10 +827,15 @@ function parseReadIntentText(intentText: string): ParsedIntentTextFields {
 
 function parseSwapIntentText(intentText: string): ParsedIntentTextFields {
 	const lower = intentText.toLowerCase();
+	const intentType: WorkflowIntentType = lower.includes("raydium")
+		? "solana.swap.raydium"
+		: lower.includes("meteora") || lower.includes("dlmm")
+			? "solana.swap.meteora"
+			: lower.includes("orca")
+				? "solana.swap.orca"
+				: "solana.swap.jupiter";
 	const parsed: ParsedIntentTextFields = {
-		intentType: lower.includes("raydium")
-			? "solana.swap.raydium"
-			: "solana.swap.jupiter",
+		intentType,
 	};
 	const inputMatch = intentText.match(
 		/\binputMint\s*[=:]\s*([1-9A-HJ-NP-Za-km-z]{32,44}|[A-Za-z][A-Za-z0-9._-]{1,15})\b/i,
@@ -954,6 +975,18 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 	if (lower.includes("solana.swap.jupiter")) {
 		return parseSwapIntentText(trimmed);
 	}
+	if (lower.includes("solana.swap.orca")) {
+		return {
+			...parseSwapIntentText(trimmed),
+			intentType: "solana.swap.orca",
+		};
+	}
+	if (lower.includes("solana.swap.meteora")) {
+		return {
+			...parseSwapIntentText(trimmed),
+			intentType: "solana.swap.meteora",
+		};
+	}
 	if (lower.includes("solana.swap.raydium")) {
 		return {
 			...parseSwapIntentText(trimmed),
@@ -1019,6 +1052,8 @@ function resolveIntentType(
 		params.intentType === "solana.transfer.spl" ||
 		params.intentType === "solana.swap.jupiter" ||
 		params.intentType === "solana.swap.raydium" ||
+		params.intentType === "solana.swap.orca" ||
+		params.intentType === "solana.swap.meteora" ||
 		params.intentType === "solana.read.balance" ||
 		params.intentType === "solana.read.tokenBalance" ||
 		params.intentType === "solana.read.portfolio"
@@ -1060,6 +1095,18 @@ function resolveIntentType(
 			params.intentText.toLowerCase().includes("raydium"))
 	) {
 		return "solana.swap.raydium";
+	}
+	if (Array.isArray(params.dexes)) {
+		const labels = params.dexes.filter(
+			(entry): entry is string => typeof entry === "string",
+		);
+		const lowerJoined = labels.join(" ").toLowerCase();
+		if (lowerJoined.includes("meteora") || lowerJoined.includes("dlmm")) {
+			return "solana.swap.meteora";
+		}
+		if (lowerJoined.includes("orca")) {
+			return "solana.swap.orca";
+		}
 	}
 	if (
 		typeof params.inputMint === "string" ||
@@ -1313,6 +1360,12 @@ async function normalizeIntent(
 			outputAccount,
 		};
 	}
+	const explicitDexes = Array.isArray(normalizedParams.dexes)
+		? normalizedParams.dexes.filter(
+				(entry): entry is string => typeof entry === "string",
+			)
+		: undefined;
+	const defaultDexes = getDefaultDexesForIntentType(intentType);
 	return {
 		type: intentType,
 		userPublicKey: signerPublicKey,
@@ -1340,11 +1393,8 @@ async function normalizeIntent(
 			typeof normalizedParams.maxAccounts === "number"
 				? normalizedParams.maxAccounts
 				: undefined,
-		dexes: Array.isArray(normalizedParams.dexes)
-			? normalizedParams.dexes.filter(
-					(entry): entry is string => typeof entry === "string",
-				)
-			: undefined,
+		dexes:
+			explicitDexes && explicitDexes.length > 0 ? explicitDexes : defaultDexes,
 		excludeDexes: Array.isArray(normalizedParams.excludeDexes)
 			? normalizedParams.excludeDexes.filter(
 					(entry): entry is string => typeof entry === "string",
@@ -2044,6 +2094,8 @@ export function createSolanaWorkflowTools() {
 						Type.Literal("solana.transfer.sol"),
 						Type.Literal("solana.transfer.spl"),
 						Type.Literal("solana.swap.jupiter"),
+						Type.Literal("solana.swap.orca"),
+						Type.Literal("solana.swap.meteora"),
 						Type.Literal("solana.swap.raydium"),
 						Type.Literal("solana.read.balance"),
 						Type.Literal("solana.read.tokenBalance"),
