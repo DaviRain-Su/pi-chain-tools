@@ -372,6 +372,12 @@ export function createSolanaReadTools() {
 				includeZero: Type.Optional(
 					Type.Boolean({ description: "Include zero-balance token accounts" }),
 				),
+				includeToken2022: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include Token-2022 accounts in addition to legacy SPL Token accounts (default true).",
+					}),
+				),
 				network: solanaNetworkSchema(),
 			}),
 			async execute(_toolCallId, params) {
@@ -380,18 +386,29 @@ export function createSolanaReadTools() {
 				const tokenMint = params.tokenMint
 					? new PublicKey(normalizeAtPath(params.tokenMint))
 					: null;
-				const response = tokenMint
-					? await connection.getParsedTokenAccountsByOwner(owner, {
-							mint: tokenMint,
-						})
-					: await connection.getParsedTokenAccountsByOwner(owner, {
-							programId: TOKEN_PROGRAM_ID,
-						});
+				const includeToken2022 = params.includeToken2022 !== false;
+				const [tokenProgramResponse, token2022Response] = await Promise.all([
+					connection.getParsedTokenAccountsByOwner(owner, {
+						programId: TOKEN_PROGRAM_ID,
+					}),
+					includeToken2022
+						? connection.getParsedTokenAccountsByOwner(owner, {
+								programId: TOKEN_2022_PROGRAM_ID,
+							})
+						: Promise.resolve(null),
+				]);
+				const rawAccounts = [
+					...tokenProgramResponse.value,
+					...(token2022Response?.value ?? []),
+				];
 
-				const parsed = response.value
+				const parsed = rawAccounts
 					.map((entry) => {
 						const tokenInfo = parseTokenAccountInfo(entry.account.data);
 						if (!tokenInfo) return null;
+						if (tokenMint && tokenInfo.mint !== tokenMint.toBase58()) {
+							return null;
+						}
 						return {
 							pubkey: entry.pubkey.toBase58(),
 							mint: tokenInfo.mint,
@@ -417,6 +434,9 @@ export function createSolanaReadTools() {
 						address: owner.toBase58(),
 						count: accounts.length,
 						accounts,
+						tokenProgramAccountCount: tokenProgramResponse.value.length,
+						token2022AccountCount: token2022Response?.value.length ?? 0,
+						tokenAccountCount: rawAccounts.length,
 						network: parseNetwork(params.network),
 						addressExplorer: getExplorerAddressUrl(
 							owner.toBase58(),
@@ -433,25 +453,46 @@ export function createSolanaReadTools() {
 			parameters: Type.Object({
 				address: Type.String({ description: "Wallet address" }),
 				tokenMint: Type.String({ description: "Token mint address" }),
+				includeToken2022: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include Token-2022 accounts in addition to legacy SPL Token accounts (default true).",
+					}),
+				),
 				network: solanaNetworkSchema(),
 			}),
 			async execute(_toolCallId, params) {
 				const connection = getConnection(params.network);
 				const owner = new PublicKey(normalizeAtPath(params.address));
 				const mint = new PublicKey(normalizeAtPath(params.tokenMint));
-				const response = await connection.getParsedTokenAccountsByOwner(owner, {
-					mint,
-				});
+				const includeToken2022 = params.includeToken2022 !== false;
+				const [tokenProgramResponse, token2022Response] = await Promise.all([
+					connection.getParsedTokenAccountsByOwner(owner, {
+						programId: TOKEN_PROGRAM_ID,
+					}),
+					includeToken2022
+						? connection.getParsedTokenAccountsByOwner(owner, {
+								programId: TOKEN_2022_PROGRAM_ID,
+							})
+						: Promise.resolve(null),
+				]);
+				const accounts = [
+					...tokenProgramResponse.value,
+					...(token2022Response?.value ?? []),
+				];
 
 				let totalAmountRaw = 0n;
 				let totalUiAmount = 0;
 				let decimals = 0;
-				for (const entry of response.value) {
+				let tokenAccountCount = 0;
+				for (const entry of accounts) {
 					const tokenInfo = parseTokenAccountInfo(entry.account.data);
 					if (!tokenInfo) continue;
+					if (tokenInfo.mint !== mint.toBase58()) continue;
 					totalAmountRaw += BigInt(tokenInfo.tokenAmount.amount);
 					totalUiAmount += tokenInfo.tokenAmount.uiAmount ?? 0;
 					decimals = tokenInfo.tokenAmount.decimals;
+					tokenAccountCount += 1;
 				}
 
 				return {
@@ -467,7 +508,9 @@ export function createSolanaReadTools() {
 						amount: totalAmountRaw.toString(),
 						uiAmount: totalUiAmount,
 						decimals,
-						tokenAccountCount: response.value.length,
+						tokenAccountCount,
+						tokenProgramAccountCount: tokenProgramResponse.value.length,
+						token2022AccountCount: token2022Response?.value.length ?? 0,
 						network: parseNetwork(params.network),
 						addressExplorer: getExplorerAddressUrl(
 							owner.toBase58(),

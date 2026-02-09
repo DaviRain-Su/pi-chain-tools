@@ -125,12 +125,25 @@ type PortfolioTool = {
 	): Promise<{ details?: unknown }>;
 };
 
+type ReadTool = {
+	execute(
+		toolCallId: string,
+		params: Record<string, unknown>,
+	): Promise<{ details?: unknown }>;
+};
+
 function getPortfolioTool(): PortfolioTool {
 	const tool = createSolanaReadTools().find(
 		(entry) => entry.name === "solana_getPortfolio",
 	);
 	if (!tool) throw new Error("solana_getPortfolio not found");
 	return tool as unknown as PortfolioTool;
+}
+
+function getReadTool(name: string): ReadTool {
+	const tool = createSolanaReadTools().find((entry) => entry.name === name);
+	if (!tool) throw new Error(`${name} not found`);
+	return tool as unknown as ReadTool;
 }
 
 function makeParsedTokenAccount(
@@ -250,6 +263,116 @@ describe("solana_getPortfolio", () => {
 			tokenProgramAccountCount: 1,
 			token2022AccountCount: 0,
 			tokenCount: 1,
+		});
+	});
+});
+
+describe("solana_getTokenAccounts", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		runtimeMocks.getExplorerAddressUrl.mockImplementation(
+			(value: string) => `https://explorer/${value}`,
+		);
+	});
+
+	it("includes token-2022 accounts by default", async () => {
+		const owner = Keypair.generate().publicKey.toBase58();
+		const token2022Mint = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getParsedTokenAccountsByOwner: vi
+				.fn()
+				.mockResolvedValueOnce({
+					value: [makeParsedTokenAccount(owner, USDC_MINT, "1000000", 6, 1)],
+				})
+				.mockResolvedValueOnce({
+					value: [makeParsedTokenAccount(owner, token2022Mint, "500", 2, 5)],
+				}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getReadTool("solana_getTokenAccounts");
+		const result = await tool.execute("token-accounts-1", {
+			address: owner,
+			network: "mainnet-beta",
+		});
+
+		expect(connection.getParsedTokenAccountsByOwner).toHaveBeenCalledTimes(2);
+		expect(result.details).toMatchObject({
+			address: owner,
+			count: 2,
+			tokenProgramAccountCount: 1,
+			token2022AccountCount: 1,
+			tokenAccountCount: 2,
+		});
+	});
+});
+
+describe("solana_getTokenBalance", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		runtimeMocks.getExplorerAddressUrl.mockImplementation(
+			(value: string) => `https://explorer/${value}`,
+		);
+	});
+
+	it("aggregates token balance across token and token-2022 programs", async () => {
+		const owner = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getParsedTokenAccountsByOwner: vi
+				.fn()
+				.mockResolvedValueOnce({
+					value: [makeParsedTokenAccount(owner, USDC_MINT, "1000000", 6, 1)],
+				})
+				.mockResolvedValueOnce({
+					value: [makeParsedTokenAccount(owner, USDC_MINT, "2000000", 6, 2)],
+				}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getReadTool("solana_getTokenBalance");
+		const result = await tool.execute("token-balance-1", {
+			address: owner,
+			tokenMint: USDC_MINT,
+			network: "mainnet-beta",
+		});
+
+		expect(connection.getParsedTokenAccountsByOwner).toHaveBeenCalledTimes(2);
+		expect(result.details).toMatchObject({
+			address: owner,
+			tokenMint: USDC_MINT,
+			amount: "3000000",
+			uiAmount: 3,
+			tokenAccountCount: 2,
+			tokenProgramAccountCount: 1,
+			token2022AccountCount: 1,
+		});
+	});
+
+	it("skips token-2022 for token balance when includeToken2022=false", async () => {
+		const owner = Keypair.generate().publicKey.toBase58();
+		const connection = {
+			getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({
+				value: [makeParsedTokenAccount(owner, USDC_MINT, "1000000", 6, 1)],
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const tool = getReadTool("solana_getTokenBalance");
+		const result = await tool.execute("token-balance-2", {
+			address: owner,
+			tokenMint: USDC_MINT,
+			includeToken2022: false,
+			network: "mainnet-beta",
+		});
+
+		expect(connection.getParsedTokenAccountsByOwner).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			amount: "1000000",
+			tokenAccountCount: 1,
+			tokenProgramAccountCount: 1,
+			token2022AccountCount: 0,
 		});
 	});
 });
