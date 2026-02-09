@@ -69,6 +69,17 @@ npm test
 - Local default package manager: Bun
 - CI package manager: npm (`npm ci` + lockfile)
 
+## PR Required Checks
+
+To enforce CI as merge-gate on `main`:
+
+1. Go to GitHub repository `Settings` -> `Branches`.
+2. Add/Edit branch protection rule for `main`.
+3. Enable `Require status checks to pass before merging`.
+4. Add required checks:
+   - `validate (Node 20)`
+   - `validate (Node 22)`
+
 ## Future Chains
 
 Add a new chain under `src/chains/<chain>/` and expose a `create<Chain>Toolset()` function.
