@@ -590,6 +590,29 @@ export type KaminoLendingPositionsResult = {
 	queryErrors: string[];
 };
 
+export type KaminoLendingMarketSummary = {
+	marketAddress: string;
+	name: string | null;
+	description: string | null;
+	lookupTableAddress: string | null;
+	isPrimary: boolean | null;
+	isCurated: boolean | null;
+};
+
+export type KaminoLendingMarketsRequest = {
+	programId?: string;
+	limitMarkets?: number;
+};
+
+export type KaminoLendingMarketsResult = {
+	protocol: KaminoLendingProtocol;
+	programId: string | null;
+	marketCount: number;
+	marketCountQueried: number;
+	marketQueryLimit: number;
+	markets: KaminoLendingMarketSummary[];
+};
+
 function omitUndefined<T extends Record<string, unknown>>(
 	value: T,
 ): Partial<T> {
@@ -1028,6 +1051,38 @@ function toFiniteNumber(value: unknown): number | null {
 	return isPercent ? parsed / 100 : parsed;
 }
 
+function toBoolean(value: unknown): boolean | null {
+	if (typeof value === "boolean") {
+		return value;
+	}
+	if (typeof value === "number") {
+		if (value === 1) return true;
+		if (value === 0) return false;
+		return null;
+	}
+	if (typeof value !== "string") {
+		return null;
+	}
+	const normalized = value.trim().toLowerCase();
+	if (
+		normalized === "true" ||
+		normalized === "1" ||
+		normalized === "yes" ||
+		normalized === "y"
+	) {
+		return true;
+	}
+	if (
+		normalized === "false" ||
+		normalized === "0" ||
+		normalized === "no" ||
+		normalized === "n"
+	) {
+		return false;
+	}
+	return null;
+}
+
 function toPositiveIntegerString(value: unknown): string | null {
 	if (typeof value === "bigint") {
 		return value >= 0n ? value.toString() : null;
@@ -1061,12 +1116,39 @@ function pickString(
 	return null;
 }
 
+function pickStringFromRecords(
+	records: Array<Record<string, unknown> | null>,
+	keys: string[],
+): string | null {
+	for (const record of records) {
+		if (!record) continue;
+		const value = pickString(record, keys);
+		if (value !== null) {
+			return value;
+		}
+	}
+	return null;
+}
+
 function pickNumber(
 	record: Record<string, unknown>,
 	keys: string[],
 ): number | null {
 	for (const key of keys) {
 		const parsed = toFiniteNumber(record[key]);
+		if (parsed !== null) {
+			return parsed;
+		}
+	}
+	return null;
+}
+
+function pickBoolean(
+	record: Record<string, unknown>,
+	keys: string[],
+): boolean | null {
+	for (const key of keys) {
+		const parsed = toBoolean(record[key]);
 		if (parsed !== null) {
 			return parsed;
 		}
@@ -1094,6 +1176,20 @@ function pickNumberFromRecords(
 	for (const record of records) {
 		if (!record) continue;
 		const value = pickNumber(record, keys);
+		if (value !== null) {
+			return value;
+		}
+	}
+	return null;
+}
+
+function pickBooleanFromRecords(
+	records: Array<Record<string, unknown> | null>,
+	keys: string[],
+): boolean | null {
+	for (const record of records) {
+		if (!record) continue;
+		const value = pickBoolean(record, keys);
 		if (value !== null) {
 			return value;
 		}
@@ -1297,6 +1393,46 @@ function normalizeKaminoLendingPosition(
 	};
 }
 
+function normalizeKaminoLendingMarket(
+	record: Record<string, unknown>,
+): KaminoLendingMarketSummary | null {
+	const marketAddress = resolveKaminoMarketAddress(record);
+	if (!marketAddress) {
+		return null;
+	}
+	const marketRecord = asObjectRecord(record.market);
+	const metadataRecord =
+		asObjectRecord(record.metadata) ??
+		asObjectRecord(record.meta) ??
+		asObjectRecord(record.marketMeta);
+	const lookupTableAddress = normalizePublicKey(
+		pickStringFromRecords(
+			[record, marketRecord, metadataRecord],
+			["lookupTable", "lookupTableAddress", "addressLookupTable", "lut"],
+		),
+	);
+	return {
+		marketAddress,
+		name: pickStringFromRecords(
+			[record, marketRecord, metadataRecord],
+			["name", "marketName", "displayName", "label"],
+		),
+		description: pickStringFromRecords(
+			[record, marketRecord, metadataRecord],
+			["description", "marketDescription", "summary"],
+		),
+		lookupTableAddress,
+		isPrimary: pickBooleanFromRecords(
+			[record, marketRecord, metadataRecord],
+			["isPrimary", "primary", "isMain", "main"],
+		),
+		isCurated: pickBooleanFromRecords(
+			[record, marketRecord, metadataRecord],
+			["isCurated", "curated", "isVerified", "verified"],
+		),
+	};
+}
+
 function normalizeKaminoMarketLimit(value: number | undefined): number {
 	if (typeof value !== "number" || !Number.isFinite(value)) {
 		return 20;
@@ -1358,6 +1494,42 @@ export async function getKaminoMarkets(
 		});
 		return normalizeKaminoMarketEntries(payload);
 	}
+}
+
+export async function getKaminoLendingMarkets(
+	request: KaminoLendingMarketsRequest = {},
+): Promise<KaminoLendingMarketsResult> {
+	const programId = normalizePublicKey(
+		typeof request.programId === "string" ? request.programId : null,
+	);
+	const marketQueryLimit = normalizeKaminoMarketLimit(request.limitMarkets);
+	const markets = await getKaminoMarkets({ programId: programId ?? undefined });
+	const byMarketAddress = new Map<string, KaminoLendingMarketSummary>();
+	for (const entry of markets) {
+		const normalized = normalizeKaminoLendingMarket(entry);
+		if (!normalized) continue;
+		byMarketAddress.set(normalized.marketAddress, normalized);
+	}
+	const sorted = [...byMarketAddress.values()].sort((a, b) => {
+		if (a.isPrimary === true && b.isPrimary !== true) return -1;
+		if (a.isPrimary !== true && b.isPrimary === true) return 1;
+		const aName = a.name ?? a.marketAddress;
+		const bName = b.name ?? b.marketAddress;
+		const nameCmp = aName.localeCompare(bName);
+		if (nameCmp !== 0) {
+			return nameCmp;
+		}
+		return a.marketAddress.localeCompare(b.marketAddress);
+	});
+	const limited = sorted.slice(0, marketQueryLimit);
+	return {
+		protocol: "kamino",
+		programId,
+		marketCount: sorted.length,
+		marketCountQueried: limited.length,
+		marketQueryLimit,
+		markets: limited,
+	};
 }
 
 export async function getKaminoUserObligations(

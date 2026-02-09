@@ -16,6 +16,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	getJupiterApiBaseUrl: vi.fn(),
 	getJupiterDexLabels: vi.fn(),
 	getJupiterQuote: vi.fn(),
+	getKaminoLendingMarkets: vi.fn(),
 	getKaminoLendingPositions: vi.fn(),
 	getRaydiumApiBaseUrl: vi.fn(),
 	getRaydiumPriorityFee: vi.fn(),
@@ -89,6 +90,7 @@ vi.mock("../runtime.js", async () => {
 		getJupiterApiBaseUrl: runtimeMocks.getJupiterApiBaseUrl,
 		getJupiterDexLabels: runtimeMocks.getJupiterDexLabels,
 		getJupiterQuote: runtimeMocks.getJupiterQuote,
+		getKaminoLendingMarkets: runtimeMocks.getKaminoLendingMarkets,
 		getKaminoLendingPositions: runtimeMocks.getKaminoLendingPositions,
 		getRaydiumApiBaseUrl: runtimeMocks.getRaydiumApiBaseUrl,
 		getRaydiumPriorityFee: runtimeMocks.getRaydiumPriorityFee,
@@ -581,6 +583,70 @@ describe("solana_getLendingPositions", () => {
 			}),
 		).rejects.toThrow("Unsupported lending protocol");
 		expect(runtimeMocks.getKaminoLendingPositions).not.toHaveBeenCalled();
+	});
+});
+
+describe("solana_getLendingMarkets", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+	});
+
+	it("returns Kamino lending markets summary", async () => {
+		runtimeMocks.getKaminoLendingMarkets.mockResolvedValue({
+			protocol: "kamino",
+			programId: null,
+			marketCount: 3,
+			marketCountQueried: 2,
+			marketQueryLimit: 2,
+			markets: [
+				{
+					marketAddress: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
+					name: "Main Market",
+					description: "Primary market on mainnet",
+					lookupTableAddress: "FGMSBiyVE8TvZcdQnZETAAKw28tkQJ2ccZy6pyp95URb",
+					isPrimary: true,
+					isCurated: false,
+				},
+				{
+					marketAddress: "DxXdAyU3kCjnyggvHmY5nAwg5cRbbmdyX3npfDMjjMek",
+					name: "JLP Market",
+					description: "Isolated JLP pool",
+					lookupTableAddress: "GprZNyWk67655JhX6Rq9KoebQ6WkQYRhATWzkx2P2LNc",
+					isPrimary: false,
+					isCurated: false,
+				},
+			],
+		});
+
+		const tool = getReadTool("solana_getLendingMarkets");
+		const result = await tool.execute("lending-markets-1", {
+			network: "mainnet-beta",
+			limitMarkets: 2,
+		});
+
+		expect(runtimeMocks.getKaminoLendingMarkets).toHaveBeenCalledWith({
+			programId: undefined,
+			limitMarkets: 2,
+		});
+		expect(result.details).toMatchObject({
+			protocol: "kamino",
+			marketCount: 3,
+			marketCountQueried: 2,
+			marketQueryLimit: 2,
+			network: "mainnet-beta",
+		});
+	});
+
+	it("rejects unsupported lending protocol", async () => {
+		const tool = getReadTool("solana_getLendingMarkets");
+		await expect(
+			tool.execute("lending-markets-2", {
+				protocol: "marginfi",
+				network: "mainnet-beta",
+			}),
+		).rejects.toThrow("Unsupported lending protocol");
+		expect(runtimeMocks.getKaminoLendingMarkets).not.toHaveBeenCalled();
 	});
 });
 

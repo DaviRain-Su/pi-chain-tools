@@ -16,7 +16,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 
 ## Solana Tool Groups
 
-- `read`: balance, account info, multiple accounts, blockhash, rent exemption minimum, transaction, signatures, token accounts, token balance, portfolio, DeFi positions (token protocol tags + native stake scan), Jupiter/Raydium quote + meta APIs
+- `read`: balance, account info, multiple accounts, blockhash, rent exemption minimum, transaction, signatures, token accounts, token balance, portfolio, DeFi positions (token protocol tags + native stake scan), Kamino lending positions + market catalog, Jupiter/Raydium quote + meta APIs
 - `compose`: unsigned transfer transaction builders (SOL/SPL, legacy + v0), native staking builders (create+delegate/delegate/authorize/deactivate/withdraw), Jupiter & Raydium swap builders
 - `execute`: simulate, send, sign+send, confirm, airdrop, SOL transfer, SPL transfer, native stake actions (create+delegate/delegate/authorize/deactivate/withdraw), one-shot Jupiter & Raydium swap
 - `rpc`: raw Solana JSON-RPC with safety guard for dangerous methods
@@ -30,6 +30,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 - Orca/Meteora scoped compose/execute tools (`build*SwapTransaction` / `*Swap`)
 - Native stake operation tools: create+delegate/delegate/authorize/deactivate/withdraw
 - Workflow/read support for `solana.read.defiPositions` + `solana_getDefiPositions`
+- Workflow/read support for `solana.read.lendingMarkets` / `solana.read.lendingPositions`
 - Raydium Trade API quote/serialize integration (swap-base-in/out)
 - Raydium auto-priority-fee integration and multi-transaction swap execution
 

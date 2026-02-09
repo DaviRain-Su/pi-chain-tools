@@ -45,6 +45,7 @@ vi.mock("@raydium-io/raydium-sdk-v2", () => {
 import {
 	callRaydiumApi,
 	getJupiterQuote,
+	getKaminoLendingMarkets,
 	getKaminoLendingPositions,
 	getKaminoMarkets,
 	getRaydiumPriorityFee,
@@ -189,6 +190,42 @@ describe("runtime SDK integration", () => {
 		expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).toBe(
 			"https://api.kamino.finance/v2/kamino-market",
 		);
+	});
+
+	it("normalizes Kamino lending market catalog", async () => {
+		vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+			jsonResponse([
+				{
+					lendingMarket: "DxXdAyU3kCjnyggvHmY5nAwg5cRbbmdyX3npfDMjjMek",
+					name: "JLP Market",
+					description: "Isolated JLP pool",
+					lookupTable: "GprZNyWk67655JhX6Rq9KoebQ6WkQYRhATWzkx2P2LNc",
+					isPrimary: false,
+				},
+				{
+					lendingMarket: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
+					name: "Main Market",
+					description: "Primary market on mainnet",
+					lookupTable: "FGMSBiyVE8TvZcdQnZETAAKw28tkQJ2ccZy6pyp95URb",
+					isPrimary: true,
+					isCurated: false,
+				},
+			]),
+		);
+		const result = await getKaminoLendingMarkets({ limitMarkets: 1 });
+		expect(result).toMatchObject({
+			protocol: "kamino",
+			marketCount: 2,
+			marketCountQueried: 1,
+			marketQueryLimit: 1,
+			markets: [
+				{
+					marketAddress: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
+					name: "Main Market",
+					isPrimary: true,
+				},
+			],
+		});
 	});
 
 	it("aggregates Kamino lending positions across markets", async () => {

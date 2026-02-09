@@ -34,6 +34,7 @@ import {
 	getExplorerTransactionUrl,
 	getJupiterApiBaseUrl,
 	getJupiterQuote,
+	getKaminoLendingMarkets,
 	getKaminoLendingPositions,
 	getRaydiumApiBaseUrl,
 	getRaydiumPriorityFee,
@@ -80,6 +81,7 @@ type WorkflowIntentType =
 	| "solana.read.tokenBalance"
 	| "solana.read.portfolio"
 	| "solana.read.defiPositions"
+	| "solana.read.lendingMarkets"
 	| "solana.read.lendingPositions";
 type ParsedIntentTextFields = Partial<{
 	intentType: WorkflowIntentType;
@@ -242,6 +244,12 @@ type WorkflowIntent =
 			includeStakeAccounts: boolean;
 	  }
 	| {
+			type: "solana.read.lendingMarkets";
+			protocol: "kamino";
+			programId?: string;
+			limitMarkets: number;
+	  }
+	| {
 			type: "solana.read.lendingPositions";
 			address: string;
 			protocol: "kamino";
@@ -347,6 +355,8 @@ const STAKE_OPERATION_KEYWORD_REGEX =
 const READ_KEYWORD_REGEX = /(balance|余额|portfolio|资产|持仓)/i;
 const PORTFOLIO_KEYWORD_REGEX =
 	/(portfolio|资产|持仓|all\s+balances?|全部余额|token\s+positions?)/i;
+const LENDING_MARKETS_KEYWORD_REGEX =
+	/(lending\s+markets?|markets?.*lending|kamino\s+markets?|借贷市场|贷款市场|借贷池)/i;
 const LENDING_POSITIONS_KEYWORD_REGEX =
 	/(lending|lend\s+positions?|loan\s+positions?|借贷|借款|贷款|kamino)/i;
 const DEFI_POSITIONS_KEYWORD_REGEX =
@@ -509,6 +519,7 @@ function isReadIntentType(intentType: WorkflowIntentType): boolean {
 		intentType === "solana.read.tokenBalance" ||
 		intentType === "solana.read.portfolio" ||
 		intentType === "solana.read.defiPositions" ||
+		intentType === "solana.read.lendingMarkets" ||
 		intentType === "solana.read.lendingPositions"
 	);
 }
@@ -1369,6 +1380,13 @@ function parseReadIntentText(intentText: string): ParsedIntentTextFields {
 		}
 	}
 
+	if (LENDING_MARKETS_KEYWORD_REGEX.test(intentText)) {
+		parsed.intentType = "solana.read.lendingMarkets";
+		if (!parsed.protocol) {
+			parsed.protocol = "kamino";
+		}
+		return parsed;
+	}
 	if (LENDING_POSITIONS_KEYWORD_REGEX.test(intentText)) {
 		parsed.intentType = "solana.read.lendingPositions";
 		if (!parsed.protocol) {
@@ -1585,6 +1603,12 @@ function parseIntentTextFields(intentText: unknown): ParsedIntentTextFields {
 			intentType: "solana.read.defiPositions",
 		};
 	}
+	if (lower.includes("solana.read.lendingmarkets")) {
+		return {
+			...parseReadIntentText(trimmed),
+			intentType: "solana.read.lendingMarkets",
+		};
+	}
 	if (lower.includes("solana.read.lendingpositions")) {
 		return {
 			...parseReadIntentText(trimmed),
@@ -1743,6 +1767,7 @@ function resolveIntentType(
 		params.intentType === "solana.read.tokenBalance" ||
 		params.intentType === "solana.read.portfolio" ||
 		params.intentType === "solana.read.defiPositions" ||
+		params.intentType === "solana.read.lendingMarkets" ||
 		params.intentType === "solana.read.lendingPositions"
 	) {
 		return params.intentType;
@@ -1872,12 +1897,27 @@ function resolveIntentType(
 		return "solana.read.defiPositions";
 	}
 	if (
+		typeof params.intentText === "string" &&
+		LENDING_MARKETS_KEYWORD_REGEX.test(params.intentText)
+	) {
+		return "solana.read.lendingMarkets";
+	}
+	if (
 		typeof params.programId === "string" ||
 		typeof params.limitMarkets === "number" ||
 		(typeof params.protocol === "string" &&
 			params.protocol.trim().toLowerCase() === "kamino")
 	) {
-		return "solana.read.lendingPositions";
+		if (
+			typeof params.intentText === "string" &&
+			LENDING_POSITIONS_KEYWORD_REGEX.test(params.intentText)
+		) {
+			return "solana.read.lendingPositions";
+		}
+		if (typeof params.address === "string") {
+			return "solana.read.lendingPositions";
+		}
+		return "solana.read.lendingMarkets";
 	}
 	if (
 		typeof params.intentText === "string" &&
@@ -1981,6 +2021,41 @@ async function normalizeIntent(
 			includeZero: normalizedParams.includeZero === true,
 			includeToken2022: normalizedParams.includeToken2022 !== false,
 			includeStakeAccounts: normalizedParams.includeStakeAccounts !== false,
+		};
+	}
+	if (intentType === "solana.read.lendingMarkets") {
+		const protocolRaw =
+			typeof normalizedParams.protocol === "string"
+				? normalizedParams.protocol.trim().toLowerCase()
+				: "kamino";
+		if (protocolRaw !== "kamino") {
+			throw new Error(
+				`Unsupported lending protocol: ${protocolRaw}. Supported values: kamino`,
+			);
+		}
+		const programId =
+			typeof normalizedParams.programId === "string" &&
+			normalizedParams.programId.trim().length > 0
+				? new PublicKey(normalizeAtPath(normalizedParams.programId)).toBase58()
+				: undefined;
+		let limitMarkets = 20;
+		if (normalizedParams.limitMarkets !== undefined) {
+			if (
+				typeof normalizedParams.limitMarkets !== "number" ||
+				!Number.isFinite(normalizedParams.limitMarkets)
+			) {
+				throw new Error("limitMarkets must be a positive integer");
+			}
+			limitMarkets = Math.floor(normalizedParams.limitMarkets);
+			if (limitMarkets < 1 || limitMarkets > 200) {
+				throw new Error("limitMarkets must be between 1 and 200");
+			}
+		}
+		return {
+			type: intentType,
+			protocol: "kamino",
+			programId,
+			limitMarkets,
 		};
 	}
 	if (intentType === "solana.read.lendingPositions") {
@@ -2568,6 +2643,21 @@ async function executeReadIntent(
 				network,
 				addressExplorer: getExplorerAddressUrl(owner.toBase58(), network),
 				tokenMintExplorer: getExplorerAddressUrl(mint.toBase58(), network),
+			},
+		};
+	}
+
+	if (intent.type === "solana.read.lendingMarkets") {
+		const lendingMarkets = await getKaminoLendingMarkets({
+			programId: intent.programId,
+			limitMarkets: intent.limitMarkets,
+		});
+		return {
+			summary: `Lending markets (${intent.protocol}): ${lendingMarkets.marketCountQueried}/${lendingMarkets.marketCount}`,
+			details: {
+				intentType: intent.type,
+				...lendingMarkets,
+				network: parseNetwork(network),
 			},
 		};
 	}
@@ -3596,6 +3686,7 @@ export function createSolanaWorkflowTools() {
 						Type.Literal("solana.read.tokenBalance"),
 						Type.Literal("solana.read.portfolio"),
 						Type.Literal("solana.read.defiPositions"),
+						Type.Literal("solana.read.lendingMarkets"),
 						Type.Literal("solana.read.lendingPositions"),
 					]),
 				),
@@ -3746,13 +3837,13 @@ export function createSolanaWorkflowTools() {
 				protocol: Type.Optional(
 					Type.String({
 						description:
-							"Protocol hint for read intents. For lending positions, currently supports only 'kamino'.",
+							"Protocol hint for read intents. For lending markets/positions, currently supports only 'kamino'.",
 					}),
 				),
 				programId: Type.Optional(
 					Type.String({
 						description:
-							"Optional Kamino lending program id filter for intentType=solana.read.lendingPositions",
+							"Optional Kamino lending program id filter for intentType=solana.read.lendingMarkets or solana.read.lendingPositions",
 					}),
 				),
 				limitMarkets: Type.Optional(
@@ -3760,7 +3851,7 @@ export function createSolanaWorkflowTools() {
 						minimum: 1,
 						maximum: 200,
 						description:
-							"Maximum markets to query for intentType=solana.read.lendingPositions",
+							"Maximum markets to query/return for intentType=solana.read.lendingMarkets or solana.read.lendingPositions",
 					}),
 				),
 				slippageBps: Type.Optional(Type.Integer({ minimum: 1, maximum: 5000 })),

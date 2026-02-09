@@ -13,6 +13,7 @@ const runtimeMocks = vi.hoisted(() => ({
 	getExplorerTransactionUrl: vi.fn(),
 	getJupiterApiBaseUrl: vi.fn(() => "https://lite-api.jup.ag"),
 	getJupiterQuote: vi.fn(),
+	getKaminoLendingMarkets: vi.fn(),
 	getKaminoLendingPositions: vi.fn(),
 	getRaydiumApiBaseUrl: vi.fn(() => "https://raydium.api"),
 	getRaydiumPriorityFee: vi.fn(),
@@ -56,6 +57,7 @@ vi.mock("../runtime.js", async () => {
 		getExplorerTransactionUrl: runtimeMocks.getExplorerTransactionUrl,
 		getJupiterApiBaseUrl: runtimeMocks.getJupiterApiBaseUrl,
 		getJupiterQuote: runtimeMocks.getJupiterQuote,
+		getKaminoLendingMarkets: runtimeMocks.getKaminoLendingMarkets,
 		getKaminoLendingPositions: runtimeMocks.getKaminoLendingPositions,
 		getRaydiumApiBaseUrl: runtimeMocks.getRaydiumApiBaseUrl,
 		getRaydiumPriorityFee: runtimeMocks.getRaydiumPriorityFee,
@@ -582,6 +584,103 @@ describe("w3rt_run_workflow_v0", () => {
 						totalDepositValueUsd: 321.12,
 						totalBorrowValueUsd: 21.12,
 						netValueUsd: 300,
+					},
+				},
+			},
+		});
+	});
+
+	it("parses lending markets intentText and defaults to kamino protocol", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-read-lending-markets-analysis", {
+			runId: "run-read-lending-markets-analysis",
+			runMode: "analysis",
+			intentText: "list kamino lending markets",
+		});
+
+		expect(result.details).toMatchObject({
+			runId: "run-read-lending-markets-analysis",
+			status: "analysis",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.read.lendingMarkets",
+						protocol: "kamino",
+						limitMarkets: 20,
+					},
+				},
+			},
+		});
+	});
+
+	it("simulates read lending markets workflow without mainnet approval gate", async () => {
+		runtimeMocks.parseNetwork.mockReturnValue("mainnet-beta");
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		runtimeMocks.getKaminoLendingMarkets.mockResolvedValue({
+			protocol: "kamino",
+			programId: null,
+			marketCount: 4,
+			marketCountQueried: 2,
+			marketQueryLimit: 2,
+			markets: [
+				{
+					marketAddress: "7u3HeHxYDLhnCoErrtycNokbQYbWGzLs6JSDqGAv5PfF",
+					name: "Main Market",
+					description: "Primary market on mainnet",
+					lookupTableAddress: "FGMSBiyVE8TvZcdQnZETAAKw28tkQJ2ccZy6pyp95URb",
+					isPrimary: true,
+					isCurated: false,
+				},
+				{
+					marketAddress: "DxXdAyU3kCjnyggvHmY5nAwg5cRbbmdyX3npfDMjjMek",
+					name: "JLP Market",
+					description: "Isolated JLP pool",
+					lookupTableAddress: "GprZNyWk67655JhX6Rq9KoebQ6WkQYRhATWzkx2P2LNc",
+					isPrimary: false,
+					isCurated: false,
+				},
+			],
+		});
+		const tool = getWorkflowTool();
+
+		const result = await tool.execute("wf-read-lending-markets-sim", {
+			runId: "run-read-lending-markets-sim",
+			runMode: "simulate",
+			intentType: "solana.read.lendingMarkets",
+			limitMarkets: 2,
+			network: "mainnet-beta",
+		});
+
+		expect(runtimeMocks.getKaminoLendingMarkets).toHaveBeenCalledWith({
+			programId: undefined,
+			limitMarkets: 2,
+		});
+		expect(result.details).toMatchObject({
+			runId: "run-read-lending-markets-sim",
+			status: "simulated",
+			artifacts: {
+				analysis: {
+					intent: {
+						type: "solana.read.lendingMarkets",
+						protocol: "kamino",
+						limitMarkets: 2,
+					},
+				},
+				approval: {
+					required: false,
+				},
+				simulate: {
+					ok: true,
+					context: {
+						intentType: "solana.read.lendingMarkets",
+						protocol: "kamino",
+						marketCount: 4,
+						marketCountQueried: 2,
+						marketQueryLimit: 2,
 					},
 				},
 			},

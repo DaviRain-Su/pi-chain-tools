@@ -21,6 +21,7 @@ import {
 	getJupiterApiBaseUrl,
 	getJupiterDexLabels,
 	getJupiterQuote,
+	getKaminoLendingMarkets,
 	getKaminoLendingPositions,
 	getRaydiumApiBaseUrl,
 	getRaydiumPriorityFee,
@@ -963,6 +964,59 @@ export function createSolanaReadTools() {
 							totalDelegatedStakeLamports,
 							9,
 						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}getLendingMarkets`,
+			label: "Solana Get Lending Markets",
+			description:
+				"Get Kamino lending market catalog (market addresses and metadata)",
+			parameters: Type.Object({
+				protocol: Type.Optional(
+					Type.Union([Type.Literal("kamino")], {
+						description:
+							"Lending protocol identifier. Currently supports only kamino.",
+					}),
+				),
+				programId: Type.Optional(
+					Type.String({
+						description:
+							"Optional Kamino lending program id filter for market discovery",
+					}),
+				),
+				limitMarkets: Type.Optional(
+					Type.Integer({
+						minimum: 1,
+						maximum: 200,
+						description:
+							"Limit number of markets returned (default 20, max 200)",
+					}),
+				),
+				network: solanaNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const protocol = params.protocol ?? "kamino";
+				if (protocol !== "kamino") {
+					throw new Error(
+						`Unsupported lending protocol: ${protocol}. Supported values: kamino`,
+					);
+				}
+				const lendingMarkets = await getKaminoLendingMarkets({
+					programId: params.programId,
+					limitMarkets: params.limitMarkets,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Lending markets (${protocol}): ${lendingMarkets.marketCountQueried}/${lendingMarkets.marketCount}`,
+						},
+					],
+					details: {
+						...lendingMarkets,
+						network: parseNetwork(params.network),
 					},
 				};
 			},
