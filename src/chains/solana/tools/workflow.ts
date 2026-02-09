@@ -381,6 +381,8 @@ type OrcaClosePositionIntent = {
 	ownerAddress: string;
 	positionMint: string;
 	positionMints?: string[];
+	poolAddressFilter?: string;
+	tokenMintFilter?: string;
 	slippageBps?: number;
 };
 
@@ -389,6 +391,8 @@ type OrcaHarvestPositionIntent = {
 	ownerAddress: string;
 	positionMint: string;
 	positionMints?: string[];
+	poolAddressFilter?: string;
+	tokenMintFilter?: string;
 };
 
 type MeteoraPositionTarget = {
@@ -418,6 +422,7 @@ type MeteoraRemoveLiquidityIntent = {
 	poolAddress: string;
 	positionAddress: string;
 	positionTargets?: MeteoraPositionTarget[];
+	tokenMintFilter?: string;
 	fromBinId?: number;
 	toBinId?: number;
 	bps?: number;
@@ -3273,6 +3278,28 @@ function resolveIntentType(
 	}
 	const intentText =
 		typeof params.intentText === "string" ? params.intentText : "";
+	const hasPositionMintsField =
+		Array.isArray(params.positionMints) &&
+		params.positionMints.some(
+			(entry) => typeof entry === "string" && entry.trim().length > 0,
+		);
+	const hasPositionTargetsField =
+		Array.isArray(params.positionTargets) &&
+		params.positionTargets.some((entry) => {
+			if (!entry || typeof entry !== "object") {
+				return false;
+			}
+			const candidate = entry as {
+				poolAddress?: unknown;
+				positionAddress?: unknown;
+			};
+			return (
+				typeof candidate.poolAddress === "string" &&
+				candidate.poolAddress.trim().length > 0 &&
+				typeof candidate.positionAddress === "string" &&
+				candidate.positionAddress.trim().length > 0
+			);
+		});
 	const hasOrcaRawLiquidityAmountField =
 		typeof params.liquidityAmountRaw === "string" ||
 		typeof params.tokenAAmountRaw === "string" ||
@@ -3309,6 +3336,9 @@ function resolveIntentType(
 			return "solana.lp.meteora.add";
 		}
 	}
+	if (hasPositionTargetsField) {
+		return "solana.lp.meteora.remove";
+	}
 	if (
 		typeof params.poolAddress === "string" &&
 		(hasOrcaRawLiquidityAmountField ||
@@ -3316,6 +3346,12 @@ function resolveIntentType(
 			hasGenericAmountWithTokenMintField)
 	) {
 		return "solana.lp.orca.open";
+	}
+	if (hasPositionMintsField) {
+		if (ORCA_HARVEST_POSITION_KEYWORD_REGEX.test(intentText)) {
+			return "solana.lp.orca.harvest";
+		}
+		return "solana.lp.orca.close";
 	}
 	if (
 		typeof params.positionMint === "string" &&
@@ -3880,6 +3916,91 @@ function parseOptionalIntegerField(
 	return normalized;
 }
 
+function parseOptionalPublicKeyArray(
+	value: unknown,
+	field: string,
+): string[] | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (!Array.isArray(value)) {
+		throw new Error(`${field} must be an array of public keys`);
+	}
+	if (value.length === 0) {
+		throw new Error(`${field} must contain at least one item`);
+	}
+	const parsedValues = value.map((entry, index) => {
+		if (typeof entry !== "string" || entry.trim().length === 0) {
+			throw new Error(`${field}[${index}] must be a non-empty public key`);
+		}
+		return new PublicKey(normalizeAtPath(entry)).toBase58();
+	});
+	return uniqueStrings(parsedValues);
+}
+
+function parseOptionalMeteoraPositionTargets(
+	value: unknown,
+	field: string,
+): MeteoraPositionTarget[] | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (!Array.isArray(value)) {
+		throw new Error(
+			`${field} must be an array of { poolAddress, positionAddress }`,
+		);
+	}
+	if (value.length === 0) {
+		throw new Error(`${field} must contain at least one target`);
+	}
+	const targets: MeteoraPositionTarget[] = [];
+	const seen = new Set<string>();
+	for (const [index, entry] of value.entries()) {
+		if (!entry || typeof entry !== "object") {
+			throw new Error(
+				`${field}[${index}] must be an object with poolAddress and positionAddress`,
+			);
+		}
+		const poolAddressRaw =
+			"poolAddress" in entry ? (entry.poolAddress as unknown) : undefined;
+		const positionAddressRaw =
+			"positionAddress" in entry
+				? (entry.positionAddress as unknown)
+				: undefined;
+		if (
+			typeof poolAddressRaw !== "string" ||
+			poolAddressRaw.trim().length === 0
+		) {
+			throw new Error(`${field}[${index}].poolAddress is required`);
+		}
+		if (
+			typeof positionAddressRaw !== "string" ||
+			positionAddressRaw.trim().length === 0
+		) {
+			throw new Error(`${field}[${index}].positionAddress is required`);
+		}
+		const poolAddress = new PublicKey(
+			normalizeAtPath(poolAddressRaw),
+		).toBase58();
+		const positionAddress = new PublicKey(
+			normalizeAtPath(positionAddressRaw),
+		).toBase58();
+		const key = `${poolAddress}:${positionAddress}`;
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		targets.push({
+			poolAddress,
+			positionAddress,
+		});
+	}
+	if (targets.length === 0) {
+		throw new Error(`${field} must contain at least one unique target`);
+	}
+	return targets;
+}
+
 function parseNonNegativeRawAmount(value: unknown, field: string): string {
 	if (typeof value === "string") {
 		const trimmed = value.trim();
@@ -3976,17 +4097,37 @@ async function resolveOrcaPositionMintsForIntent(args: {
 	network: string;
 	ownerAddress: string;
 	positionMint: string | undefined;
+	positionMints?: string[];
 	allPositions: boolean;
 	fieldName: string;
+	poolAddress?: string;
+	tokenMintFilter?: string;
 }): Promise<string[]> {
-	if (
-		args.allPositions &&
+	const hasSinglePositionMint =
 		typeof args.positionMint === "string" &&
-		args.positionMint.trim().length > 0
+		args.positionMint.trim().length > 0;
+	const hasPositionMints =
+		Array.isArray(args.positionMints) && args.positionMints.length > 0;
+	if (args.allPositions && (hasSinglePositionMint || hasPositionMints)) {
+		throw new Error(
+			`Cannot combine allPositions=true with ${args.fieldName}${hasPositionMints ? "/positionMints" : ""}. Provide either allPositions=true or explicit position ids.`,
+		);
+	}
+	if (hasSinglePositionMint && hasPositionMints) {
+		throw new Error(
+			`Cannot provide both ${args.fieldName} and positionMints. Use one input mode.`,
+		);
+	}
+	if (
+		!args.allPositions &&
+		(args.poolAddress !== undefined || args.tokenMintFilter !== undefined)
 	) {
 		throw new Error(
-			`Cannot combine allPositions=true with ${args.fieldName}. Provide either allPositions=true or a single ${args.fieldName}.`,
+			"poolAddress/tokenMint filters require allPositions=true for Orca close/harvest intents",
 		);
+	}
+	if (hasPositionMints) {
+		return uniqueStrings(args.positionMints ?? []);
 	}
 	if (args.allPositions) {
 		const positions = await getOrcaWhirlpoolPositions({
@@ -3994,6 +4135,17 @@ async function resolveOrcaPositionMintsForIntent(args: {
 			network: args.network,
 		});
 		const positionMints = positions.positions
+			.filter((position) =>
+				typeof args.poolAddress === "string"
+					? position.whirlpoolAddress === args.poolAddress
+					: true,
+			)
+			.filter((position) =>
+				typeof args.tokenMintFilter === "string"
+					? position.tokenMintA === args.tokenMintFilter ||
+						position.tokenMintB === args.tokenMintFilter
+					: true,
+			)
 			.map((position) =>
 				typeof position.positionMint === "string" &&
 				position.positionMint.length > 0
@@ -4003,16 +4155,17 @@ async function resolveOrcaPositionMintsForIntent(args: {
 			.filter((value): value is string => value !== null);
 		if (positionMints.length === 0) {
 			throw new Error(
-				`No Orca Whirlpool positions found for ownerAddress=${args.ownerAddress}.`,
+				`No Orca Whirlpool positions found for ownerAddress=${args.ownerAddress}${args.poolAddress ? ` poolAddress=${args.poolAddress}` : ""}${args.tokenMintFilter ? ` tokenMint=${args.tokenMintFilter}` : ""}.`,
 			);
 		}
 		return uniqueStrings(positionMints);
 	}
-	if (
-		typeof args.positionMint === "string" &&
-		args.positionMint.trim().length > 0
-	) {
-		return [new PublicKey(normalizeAtPath(args.positionMint)).toBase58()];
+	if (hasSinglePositionMint) {
+		return [
+			new PublicKey(
+				normalizeAtPath(ensureString(args.positionMint, args.fieldName)),
+			).toBase58(),
+		];
 	}
 	const positions = await getOrcaWhirlpoolPositions({
 		address: args.ownerAddress,
@@ -4194,6 +4347,8 @@ async function resolveMeteoraPositionTargetsForRemove(args: {
 	ownerAddress: string;
 	poolAddress: string | undefined;
 	positionAddress: string | undefined;
+	positionTargets?: MeteoraPositionTarget[];
+	tokenMintFilter?: string;
 	allPositions: boolean;
 }): Promise<MeteoraPositionTarget[]> {
 	const providedPoolAddress =
@@ -4205,6 +4360,43 @@ async function resolveMeteoraPositionTargetsForRemove(args: {
 		args.positionAddress.trim().length > 0
 			? new PublicKey(normalizeAtPath(args.positionAddress)).toBase58()
 			: undefined;
+	const providedPositionTargets =
+		Array.isArray(args.positionTargets) && args.positionTargets.length > 0
+			? args.positionTargets
+			: undefined;
+	if (providedPositionTargets && args.allPositions) {
+		throw new Error(
+			"Cannot combine allPositions=true with positionTargets for intentType=solana.lp.meteora.remove",
+		);
+	}
+	if (providedPositionTargets && providedPositionAddress) {
+		throw new Error(
+			"Cannot combine positionAddress with positionTargets for intentType=solana.lp.meteora.remove",
+		);
+	}
+	if (providedPositionTargets && args.tokenMintFilter) {
+		throw new Error(
+			"tokenMint filter cannot be combined with explicit positionTargets for intentType=solana.lp.meteora.remove",
+		);
+	}
+	if (providedPositionTargets) {
+		if (
+			providedPoolAddress &&
+			providedPositionTargets.some(
+				(target) => target.poolAddress !== providedPoolAddress,
+			)
+		) {
+			throw new Error(
+				`positionTargets includes entries outside poolAddress=${providedPoolAddress}`,
+			);
+		}
+		return providedPositionTargets;
+	}
+	if (!args.allPositions && args.tokenMintFilter) {
+		throw new Error(
+			"tokenMint filter requires allPositions=true for intentType=solana.lp.meteora.remove",
+		);
+	}
 	if (!args.allPositions) {
 		const resolved = await resolveMeteoraPositionForIntent({
 			network: args.network,
@@ -4228,9 +4420,25 @@ async function resolveMeteoraPositionTargetsForRemove(args: {
 		address: args.ownerAddress,
 		network: args.network,
 	});
+	const normalizeMint = (value: unknown): string | null => {
+		if (typeof value !== "string" || value.trim().length === 0) {
+			return null;
+		}
+		try {
+			return new PublicKey(normalizeAtPath(value)).toBase58();
+		} catch {
+			return null;
+		}
+	};
 	const targets = positions.pools
 		.filter((pool) =>
 			providedPoolAddress ? pool.poolAddress === providedPoolAddress : true,
+		)
+		.filter((pool) =>
+			args.tokenMintFilter
+				? normalizeMint(pool.tokenXMint) === args.tokenMintFilter ||
+					normalizeMint(pool.tokenYMint) === args.tokenMintFilter
+				: true,
 		)
 		.flatMap((pool) =>
 			pool.positions.map((position) => ({
@@ -4244,7 +4452,7 @@ async function resolveMeteoraPositionTargetsForRemove(args: {
 		);
 	if (targets.length === 0) {
 		throw new Error(
-			`No Meteora positions found for ownerAddress=${args.ownerAddress}${providedPoolAddress ? ` in poolAddress=${providedPoolAddress}` : ""}.`,
+			`No Meteora positions found for ownerAddress=${args.ownerAddress}${providedPoolAddress ? ` poolAddress=${providedPoolAddress}` : ""}${args.tokenMintFilter ? ` tokenMint=${args.tokenMintFilter}` : ""}.`,
 		);
 	}
 	const dedupedTargets: MeteoraPositionTarget[] = [];
@@ -4776,6 +4984,23 @@ async function normalizeIntent(
 				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
 			);
 		}
+		const allPositions = normalizedParams.allPositions === true;
+		const explicitPositionMints = parseOptionalPublicKeyArray(
+			normalizedParams.positionMints,
+			"positionMints",
+		);
+		const poolAddressFilter =
+			typeof normalizedParams.poolAddress === "string" &&
+			normalizedParams.poolAddress.trim().length > 0
+				? new PublicKey(
+						normalizeAtPath(normalizedParams.poolAddress),
+					).toBase58()
+				: undefined;
+		const tokenMintFilter =
+			typeof normalizedParams.tokenMint === "string" &&
+			normalizedParams.tokenMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenMint, "tokenMint")
+				: undefined;
 		const positionMints = await resolveOrcaPositionMintsForIntent({
 			network,
 			ownerAddress,
@@ -4783,8 +5008,11 @@ async function normalizeIntent(
 				typeof normalizedParams.positionMint === "string"
 					? normalizedParams.positionMint
 					: undefined,
-			allPositions: normalizedParams.allPositions === true,
+			positionMints: explicitPositionMints,
+			allPositions,
 			fieldName: "positionMint",
+			poolAddress: poolAddressFilter,
+			tokenMintFilter,
 		});
 		const positionMint = ensureString(positionMints[0], "positionMint");
 		return {
@@ -4792,6 +5020,8 @@ async function normalizeIntent(
 			ownerAddress,
 			positionMint,
 			...(positionMints.length > 1 ? { positionMints } : {}),
+			...(allPositions && poolAddressFilter ? { poolAddressFilter } : {}),
+			...(allPositions && tokenMintFilter ? { tokenMintFilter } : {}),
 			slippageBps: parseOptionalOrcaSlippageBps(normalizedParams.slippageBps),
 		};
 	}
@@ -4808,6 +5038,23 @@ async function normalizeIntent(
 				`ownerAddress mismatch: expected ${signerPublicKey}, got ${ownerAddress}`,
 			);
 		}
+		const allPositions = normalizedParams.allPositions === true;
+		const explicitPositionMints = parseOptionalPublicKeyArray(
+			normalizedParams.positionMints,
+			"positionMints",
+		);
+		const poolAddressFilter =
+			typeof normalizedParams.poolAddress === "string" &&
+			normalizedParams.poolAddress.trim().length > 0
+				? new PublicKey(
+						normalizeAtPath(normalizedParams.poolAddress),
+					).toBase58()
+				: undefined;
+		const tokenMintFilter =
+			typeof normalizedParams.tokenMint === "string" &&
+			normalizedParams.tokenMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenMint, "tokenMint")
+				: undefined;
 		const positionMints = await resolveOrcaPositionMintsForIntent({
 			network,
 			ownerAddress,
@@ -4815,8 +5062,11 @@ async function normalizeIntent(
 				typeof normalizedParams.positionMint === "string"
 					? normalizedParams.positionMint
 					: undefined,
-			allPositions: normalizedParams.allPositions === true,
+			positionMints: explicitPositionMints,
+			allPositions,
 			fieldName: "positionMint",
+			poolAddress: poolAddressFilter,
+			tokenMintFilter,
 		});
 		const positionMint = ensureString(positionMints[0], "positionMint");
 		return {
@@ -4824,6 +5074,8 @@ async function normalizeIntent(
 			ownerAddress,
 			positionMint,
 			...(positionMints.length > 1 ? { positionMints } : {}),
+			...(allPositions && poolAddressFilter ? { poolAddressFilter } : {}),
+			...(allPositions && tokenMintFilter ? { tokenMintFilter } : {}),
 		};
 	}
 	if (intentType === "solana.lp.orca.increase") {
@@ -5491,27 +5743,18 @@ async function normalizeIntent(
 			);
 		}
 		const allPositions = normalizedParams.allPositions === true;
-		const resolvedTargets = await resolveMeteoraPositionTargetsForRemove({
-			network,
-			ownerAddress,
-			poolAddress:
-				typeof normalizedParams.poolAddress === "string"
-					? normalizedParams.poolAddress
-					: undefined,
-			positionAddress:
-				typeof normalizedParams.positionAddress === "string"
-					? normalizedParams.positionAddress
-					: undefined,
-			allPositions,
-		});
-		const primaryTarget = resolvedTargets[0];
-		if (!primaryTarget) {
-			throw new Error(
-				`Unable to resolve Meteora remove target for ownerAddress=${ownerAddress}`,
-			);
-		}
-		const poolAddress = primaryTarget.poolAddress;
-		const positionAddress = primaryTarget.positionAddress;
+		const poolAddressInput =
+			typeof normalizedParams.poolAddress === "string"
+				? normalizedParams.poolAddress
+				: undefined;
+		const positionAddressInput =
+			typeof normalizedParams.positionAddress === "string"
+				? normalizedParams.positionAddress
+				: undefined;
+		const positionTargetsInput = parseOptionalMeteoraPositionTargets(
+			normalizedParams.positionTargets,
+			"positionTargets",
+		);
 		const fromBinId = parseOptionalIntegerField(
 			normalizedParams.fromBinId,
 			"fromBinId",
@@ -5601,6 +5844,29 @@ async function normalizeIntent(
 				"tokenMint is required when amountUi or amountRaw is provided for intentType=solana.lp.meteora.remove",
 			);
 		}
+		const tokenMintFilter =
+			!hasGenericAmountInput &&
+			typeof normalizedParams.tokenMint === "string" &&
+			normalizedParams.tokenMint.trim().length > 0
+				? await ensureMint(normalizedParams.tokenMint, "tokenMint")
+				: undefined;
+		const resolvedTargets = await resolveMeteoraPositionTargetsForRemove({
+			network,
+			ownerAddress,
+			poolAddress: poolAddressInput,
+			positionAddress: positionAddressInput,
+			positionTargets: positionTargetsInput,
+			tokenMintFilter,
+			allPositions,
+		});
+		const primaryTarget = resolvedTargets[0];
+		if (!primaryTarget) {
+			throw new Error(
+				`Unable to resolve Meteora remove target for ownerAddress=${ownerAddress}`,
+			);
+		}
+		const poolAddress = primaryTarget.poolAddress;
+		const positionAddress = primaryTarget.positionAddress;
 		const tokenXMintHint =
 			typeof normalizedParams.tokenXMint === "string" &&
 			normalizedParams.tokenXMint.trim().length > 0
@@ -5735,6 +6001,7 @@ async function normalizeIntent(
 			...(resolvedTargets.length > 1
 				? { positionTargets: resolvedTargets }
 				: {}),
+			...(tokenMintFilter ? { tokenMintFilter } : {}),
 			...(fromBinId !== undefined ? { fromBinId } : {}),
 			...(toBinId !== undefined ? { toBinId } : {}),
 			...(bps !== undefined ? { bps } : {}),
@@ -7702,6 +7969,12 @@ async function prepareOrcaClosePositionSimulation(
 			ownerAddress: primaryEntry.build.ownerAddress,
 			positionMint: primaryEntry.build.positionMint,
 			...(positionMints.length > 1 ? { positionMints } : {}),
+			...(intent.poolAddressFilter
+				? { poolAddressFilter: intent.poolAddressFilter }
+				: {}),
+			...(intent.tokenMintFilter
+				? { tokenMintFilter: intent.tokenMintFilter }
+				: {}),
 			slippageBps: primaryEntry.build.slippageBps,
 			instructionCount: primaryEntry.build.instructionCount,
 			quote: primaryEntry.build.quote,
@@ -7817,6 +8090,12 @@ async function prepareOrcaHarvestPositionSimulation(
 			ownerAddress: primaryEntry.build.ownerAddress,
 			positionMint: primaryEntry.build.positionMint,
 			...(positionMints.length > 1 ? { positionMints } : {}),
+			...(intent.poolAddressFilter
+				? { poolAddressFilter: intent.poolAddressFilter }
+				: {}),
+			...(intent.tokenMintFilter
+				? { tokenMintFilter: intent.tokenMintFilter }
+				: {}),
 			instructionCount: primaryEntry.build.instructionCount,
 			feesQuote: primaryEntry.build.feesQuote,
 			rewardsQuote: primaryEntry.build.rewardsQuote,
@@ -7998,6 +8277,9 @@ async function prepareMeteoraRemoveLiquiditySimulation(
 			poolAddress: primaryEntry.build.poolAddress,
 			positionAddress: primaryEntry.build.positionAddress,
 			...(preparedEntries.length > 1 ? { positionTargets } : {}),
+			...(intent.tokenMintFilter
+				? { tokenMintFilter: intent.tokenMintFilter }
+				: {}),
 			fromBinId: primaryEntry.build.fromBinId,
 			toBinId: primaryEntry.build.toBinId,
 			bps: primaryEntry.build.bps,
@@ -8834,7 +9116,7 @@ export function createSolanaWorkflowTools() {
 				tokenMint: Type.Optional(
 					Type.String({
 						description:
-							"Token mint for intentType=solana.transfer.spl, and optional side selector for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease / solana.lp.meteora.add / solana.lp.meteora.remove when using amountUi or amountRaw.",
+							"Token mint for intentType=solana.transfer.spl, optional side selector for intentType=solana.lp.orca.open / solana.lp.orca.increase / solana.lp.orca.decrease / solana.lp.meteora.add / solana.lp.meteora.remove when using amountUi or amountRaw, and optional allPositions filter for intentType=solana.lp.orca.close / solana.lp.orca.harvest / solana.lp.meteora.remove.",
 					}),
 				),
 				tokenAMint: Type.Optional(
@@ -8873,10 +9155,23 @@ export function createSolanaWorkflowTools() {
 							"Orca position mint for intentType=solana.lp.orca.close / solana.lp.orca.harvest / solana.lp.orca.increase / solana.lp.orca.decrease",
 					}),
 				),
+				positionMints: Type.Optional(
+					Type.Array(
+						Type.String({
+							description:
+								"Explicit Orca position mints for batch close/harvest when intentType=solana.lp.orca.close / solana.lp.orca.harvest",
+						}),
+						{
+							minItems: 1,
+							description:
+								"Explicit Orca position mint list for batch close/harvest. Cannot be combined with allPositions=true.",
+						},
+					),
+				),
 				poolAddress: Type.Optional(
 					Type.String({
 						description:
-							"Pool address for intentType=solana.lp.orca.open / solana.lp.meteora.add / solana.lp.meteora.remove",
+							"Pool address for intentType=solana.lp.orca.open / solana.lp.meteora.add / solana.lp.meteora.remove, and optional allPositions filter for intentType=solana.lp.orca.close / solana.lp.orca.harvest.",
 					}),
 				),
 				positionAddress: Type.Optional(
@@ -8885,10 +9180,23 @@ export function createSolanaWorkflowTools() {
 							"Meteora position address for intentType=solana.lp.meteora.add / solana.lp.meteora.remove",
 					}),
 				),
+				positionTargets: Type.Optional(
+					Type.Array(
+						Type.Object({
+							poolAddress: Type.String(),
+							positionAddress: Type.String(),
+						}),
+						{
+							minItems: 1,
+							description:
+								"Explicit Meteora { poolAddress, positionAddress } targets for intentType=solana.lp.meteora.remove. Cannot be combined with allPositions=true.",
+						},
+					),
+				),
 				allPositions: Type.Optional(
 					Type.Boolean({
 						description:
-							"Batch helper for intentType=solana.lp.orca.close / solana.lp.orca.harvest / solana.lp.meteora.remove. When true, run against all resolved positions owned by signer (or all positions in poolAddress for Meteora remove).",
+							"Batch helper for intentType=solana.lp.orca.close / solana.lp.orca.harvest / solana.lp.meteora.remove. When true, run against all resolved positions owned by signer (or all positions matching optional poolAddress/tokenMint filters).",
 					}),
 				),
 				reserveMint: Type.Optional(
