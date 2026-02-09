@@ -26,7 +26,9 @@ import {
 	assertRaydiumNetworkSupported,
 	buildJupiterSwapTransaction,
 	buildKaminoBorrowInstructions,
+	buildKaminoDepositAndBorrowInstructions,
 	buildKaminoDepositInstructions,
+	buildKaminoRepayAndWithdrawInstructions,
 	buildKaminoRepayInstructions,
 	buildKaminoWithdrawInstructions,
 	buildRaydiumSwapTransactions,
@@ -2517,6 +2519,589 @@ export function createSolanaExecuteTools() {
 						marketExplorer: getExplorerAddressUrl(build.marketAddress, network),
 						reserveMintExplorer: getExplorerAddressUrl(
 							build.reserveMint,
+							network,
+						),
+						obligationExplorer: getExplorerAddressUrl(
+							build.obligationAddress,
+							network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}kaminoDepositAndBorrow`,
+			label: "Solana Kamino Deposit+Borrow",
+			description:
+				"Execute a Kamino lending deposit+borrow with local/private key signer",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				ownerAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional signer pubkey assertion. If set, must match derived key from fromSecretKey.",
+					}),
+				),
+				depositReserveMint: Type.String({
+					description: "Liquidity mint to deposit into Kamino reserve",
+				}),
+				depositAmountRaw: Type.String({
+					description: "Deposit amount in raw integer base units",
+				}),
+				borrowReserveMint: Type.String({
+					description: "Liquidity mint to borrow from Kamino reserve",
+				}),
+				borrowAmountRaw: Type.String({
+					description: "Borrow amount in raw integer base units",
+				}),
+				marketAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional Kamino market address. Defaults to main market on mainnet-beta.",
+					}),
+				),
+				programId: Type.Optional(
+					Type.String({
+						description:
+							"Optional Kamino lending program id. Defaults to official KLend program.",
+					}),
+				),
+				useV2Ixs: Type.Optional(
+					Type.Boolean({
+						description: "Use V2 lending instructions (default true)",
+					}),
+				),
+				includeAtaIxs: Type.Optional(
+					Type.Boolean({
+						description: "Include token ATA setup instructions (default true)",
+					}),
+				),
+				extraComputeUnits: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 2_000_000,
+						description:
+							"Optional compute unit limit for Kamino action (default 1000000)",
+					}),
+				),
+				requestElevationGroup: Type.Optional(
+					Type.Boolean({
+						description:
+							"Request elevation group before deposit+borrow (default false)",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Use legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, sign and simulate only (no broadcast)",
+					}),
+				),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet Kamino deposit+borrow requires confirmMainnet=true",
+					);
+				}
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const signerPublicKey = signer.publicKey.toBase58();
+				if (params.ownerAddress) {
+					const asserted = new PublicKey(
+						normalizeAtPath(params.ownerAddress),
+					).toBase58();
+					if (asserted !== signerPublicKey) {
+						throw new Error(
+							`ownerAddress mismatch: expected ${signerPublicKey}, got ${asserted}`,
+						);
+					}
+				}
+				const depositReserveMint = new PublicKey(
+					normalizeAtPath(params.depositReserveMint),
+				).toBase58();
+				const borrowReserveMint = new PublicKey(
+					normalizeAtPath(params.borrowReserveMint),
+				).toBase58();
+				const build = await buildKaminoDepositAndBorrowInstructions({
+					ownerAddress: signerPublicKey,
+					depositReserveMint,
+					depositAmountRaw: params.depositAmountRaw,
+					borrowReserveMint,
+					borrowAmountRaw: params.borrowAmountRaw,
+					marketAddress: params.marketAddress,
+					programId: params.programId,
+					useV2Ixs: params.useV2Ixs,
+					includeAtaIxs: params.includeAtaIxs,
+					extraComputeUnits: params.extraComputeUnits,
+					requestElevationGroup: params.requestElevationGroup,
+					network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? new Transaction().add(...build.instructions)
+					: new VersionedTransaction(
+							new TransactionMessage({
+								payerKey: signer.publicKey,
+								recentBlockhash: latestBlockhash.blockhash,
+								instructions: build.instructions,
+							}).compileToV0Message(),
+						);
+
+				let version: "legacy" | "v0" = "legacy";
+				if (tx instanceof VersionedTransaction) {
+					tx.sign([signer]);
+					version = "v0";
+				} else {
+					tx.feePayer = signer.publicKey;
+					tx.recentBlockhash = latestBlockhash.blockhash;
+					tx.partialSign(signer);
+				}
+
+				const commitment = parseFinality(params.commitment);
+				if (params.simulate === true) {
+					const simulation =
+						tx instanceof VersionedTransaction
+							? await connection.simulateTransaction(tx, {
+									sigVerify: true,
+									replaceRecentBlockhash: false,
+									commitment,
+								})
+							: await connection.simulateTransaction(tx);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Kamino deposit+borrow simulation ${simulation.value.err ? "failed" : "succeeded"}`,
+							},
+						],
+						details: {
+							simulated: true,
+							version,
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+							network,
+							signer: signerPublicKey,
+							ownerAddress: build.ownerAddress,
+							marketAddress: build.marketAddress,
+							programId: build.programId,
+							depositReserveMint: build.depositReserveMint,
+							depositReserveAddress: build.depositReserveAddress,
+							depositReserveSymbol: build.depositReserveSymbol,
+							depositAmountRaw: build.depositAmountRaw,
+							borrowReserveMint: build.borrowReserveMint,
+							borrowReserveAddress: build.borrowReserveAddress,
+							borrowReserveSymbol: build.borrowReserveSymbol,
+							borrowAmountRaw: build.borrowAmountRaw,
+							obligationAddress: build.obligationAddress,
+							instructionCount: build.instructionCount,
+							setupInstructionCount: build.setupInstructionCount,
+							lendingInstructionCount: build.lendingInstructionCount,
+							cleanupInstructionCount: build.cleanupInstructionCount,
+							setupInstructionLabels: build.setupInstructionLabels,
+							lendingInstructionLabels: build.lendingInstructionLabels,
+							cleanupInstructionLabels: build.cleanupInstructionLabels,
+							signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+							marketExplorer: getExplorerAddressUrl(
+								build.marketAddress,
+								network,
+							),
+							depositReserveMintExplorer: getExplorerAddressUrl(
+								build.depositReserveMint,
+								network,
+							),
+							borrowReserveMintExplorer: getExplorerAddressUrl(
+								build.borrowReserveMint,
+								network,
+							),
+							obligationExplorer: getExplorerAddressUrl(
+								build.obligationAddress,
+								network,
+							),
+						},
+					};
+				}
+
+				const signature = await connection.sendRawTransaction(tx.serialize(), {
+					skipPreflight: params.skipPreflight === true,
+					maxRetries: params.maxRetries,
+				});
+				let confirmationErr: unknown = null;
+				if (params.confirm !== false) {
+					const confirmation = await connection.confirmTransaction(
+						signature,
+						commitment,
+					);
+					confirmationErr = confirmation.value.err;
+				}
+				if (confirmationErr) {
+					throw new Error(
+						`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+					);
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Kamino deposit+borrow sent: ${signature}`,
+						},
+					],
+					details: {
+						simulated: false,
+						signature,
+						confirmed: params.confirm !== false,
+						version,
+						network,
+						signer: signerPublicKey,
+						ownerAddress: build.ownerAddress,
+						marketAddress: build.marketAddress,
+						programId: build.programId,
+						depositReserveMint: build.depositReserveMint,
+						depositReserveAddress: build.depositReserveAddress,
+						depositReserveSymbol: build.depositReserveSymbol,
+						depositAmountRaw: build.depositAmountRaw,
+						borrowReserveMint: build.borrowReserveMint,
+						borrowReserveAddress: build.borrowReserveAddress,
+						borrowReserveSymbol: build.borrowReserveSymbol,
+						borrowAmountRaw: build.borrowAmountRaw,
+						obligationAddress: build.obligationAddress,
+						instructionCount: build.instructionCount,
+						setupInstructionCount: build.setupInstructionCount,
+						lendingInstructionCount: build.lendingInstructionCount,
+						cleanupInstructionCount: build.cleanupInstructionCount,
+						setupInstructionLabels: build.setupInstructionLabels,
+						lendingInstructionLabels: build.lendingInstructionLabels,
+						cleanupInstructionLabels: build.cleanupInstructionLabels,
+						explorer: getExplorerTransactionUrl(signature, network),
+						signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+						marketExplorer: getExplorerAddressUrl(build.marketAddress, network),
+						depositReserveMintExplorer: getExplorerAddressUrl(
+							build.depositReserveMint,
+							network,
+						),
+						borrowReserveMintExplorer: getExplorerAddressUrl(
+							build.borrowReserveMint,
+							network,
+						),
+						obligationExplorer: getExplorerAddressUrl(
+							build.obligationAddress,
+							network,
+						),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${TOOL_PREFIX}kaminoRepayAndWithdraw`,
+			label: "Solana Kamino Repay+Withdraw",
+			description:
+				"Execute a Kamino lending repay+withdraw with local/private key signer",
+			parameters: Type.Object({
+				fromSecretKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key (base58 or JSON array). Optional if SOLANA_SECRET_KEY or local keypair file is configured",
+					}),
+				),
+				ownerAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional signer pubkey assertion. If set, must match derived key from fromSecretKey.",
+					}),
+				),
+				repayReserveMint: Type.String({
+					description: "Liquidity mint to repay into Kamino reserve",
+				}),
+				repayAmountRaw: Type.String({
+					description: "Repay amount in raw integer base units",
+				}),
+				withdrawReserveMint: Type.String({
+					description: "Liquidity mint to withdraw from Kamino reserve",
+				}),
+				withdrawAmountRaw: Type.String({
+					description: "Withdraw amount in raw integer base units",
+				}),
+				currentSlot: Type.Optional(
+					Type.String({
+						description:
+							"Optional slot override for repay+withdraw instruction build. Defaults to current RPC slot.",
+					}),
+				),
+				marketAddress: Type.Optional(
+					Type.String({
+						description:
+							"Optional Kamino market address. Defaults to main market on mainnet-beta.",
+					}),
+				),
+				programId: Type.Optional(
+					Type.String({
+						description:
+							"Optional Kamino lending program id. Defaults to official KLend program.",
+					}),
+				),
+				useV2Ixs: Type.Optional(
+					Type.Boolean({
+						description: "Use V2 lending instructions (default true)",
+					}),
+				),
+				includeAtaIxs: Type.Optional(
+					Type.Boolean({
+						description: "Include token ATA setup instructions (default true)",
+					}),
+				),
+				extraComputeUnits: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						maximum: 2_000_000,
+						description:
+							"Optional compute unit limit for Kamino action (default 1000000)",
+					}),
+				),
+				requestElevationGroup: Type.Optional(
+					Type.Boolean({
+						description:
+							"Request elevation group after repay+withdraw (default false)",
+					}),
+				),
+				asLegacyTransaction: Type.Optional(
+					Type.Boolean({
+						description: "Use legacy transaction when true; v0 when false",
+					}),
+				),
+				network: solanaNetworkSchema(),
+				simulate: Type.Optional(
+					Type.Boolean({
+						description: "If true, sign and simulate only (no broadcast)",
+					}),
+				),
+				skipPreflight: Type.Optional(Type.Boolean()),
+				maxRetries: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+				confirm: Type.Optional(
+					Type.Boolean({ description: "Wait for confirmation (default true)" }),
+				),
+				commitment: commitmentSchema(),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description: "Required when network=mainnet-beta",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNetwork(params.network);
+				if (network === "mainnet-beta" && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet Kamino repay+withdraw requires confirmMainnet=true",
+					);
+				}
+				const connection = getConnection(network);
+				const signer = Keypair.fromSecretKey(
+					resolveSecretKey(params.fromSecretKey),
+				);
+				const signerPublicKey = signer.publicKey.toBase58();
+				if (params.ownerAddress) {
+					const asserted = new PublicKey(
+						normalizeAtPath(params.ownerAddress),
+					).toBase58();
+					if (asserted !== signerPublicKey) {
+						throw new Error(
+							`ownerAddress mismatch: expected ${signerPublicKey}, got ${asserted}`,
+						);
+					}
+				}
+				const repayReserveMint = new PublicKey(
+					normalizeAtPath(params.repayReserveMint),
+				).toBase58();
+				const withdrawReserveMint = new PublicKey(
+					normalizeAtPath(params.withdrawReserveMint),
+				).toBase58();
+				const build = await buildKaminoRepayAndWithdrawInstructions({
+					ownerAddress: signerPublicKey,
+					repayReserveMint,
+					repayAmountRaw: params.repayAmountRaw,
+					withdrawReserveMint,
+					withdrawAmountRaw: params.withdrawAmountRaw,
+					currentSlot: params.currentSlot,
+					marketAddress: params.marketAddress,
+					programId: params.programId,
+					useV2Ixs: params.useV2Ixs,
+					includeAtaIxs: params.includeAtaIxs,
+					extraComputeUnits: params.extraComputeUnits,
+					requestElevationGroup: params.requestElevationGroup,
+					network,
+				});
+				const latestBlockhash = await connection.getLatestBlockhash();
+				const asLegacyTransaction = params.asLegacyTransaction !== false;
+				const tx = asLegacyTransaction
+					? new Transaction().add(...build.instructions)
+					: new VersionedTransaction(
+							new TransactionMessage({
+								payerKey: signer.publicKey,
+								recentBlockhash: latestBlockhash.blockhash,
+								instructions: build.instructions,
+							}).compileToV0Message(),
+						);
+
+				let version: "legacy" | "v0" = "legacy";
+				if (tx instanceof VersionedTransaction) {
+					tx.sign([signer]);
+					version = "v0";
+				} else {
+					tx.feePayer = signer.publicKey;
+					tx.recentBlockhash = latestBlockhash.blockhash;
+					tx.partialSign(signer);
+				}
+
+				const commitment = parseFinality(params.commitment);
+				if (params.simulate === true) {
+					const simulation =
+						tx instanceof VersionedTransaction
+							? await connection.simulateTransaction(tx, {
+									sigVerify: true,
+									replaceRecentBlockhash: false,
+									commitment,
+								})
+							: await connection.simulateTransaction(tx);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Kamino repay+withdraw simulation ${simulation.value.err ? "failed" : "succeeded"}`,
+							},
+						],
+						details: {
+							simulated: true,
+							version,
+							err: simulation.value.err ?? null,
+							logs: simulation.value.logs ?? [],
+							unitsConsumed: simulation.value.unitsConsumed ?? null,
+							network,
+							signer: signerPublicKey,
+							ownerAddress: build.ownerAddress,
+							marketAddress: build.marketAddress,
+							programId: build.programId,
+							repayReserveMint: build.repayReserveMint,
+							repayReserveAddress: build.repayReserveAddress,
+							repayReserveSymbol: build.repayReserveSymbol,
+							repayAmountRaw: build.repayAmountRaw,
+							withdrawReserveMint: build.withdrawReserveMint,
+							withdrawReserveAddress: build.withdrawReserveAddress,
+							withdrawReserveSymbol: build.withdrawReserveSymbol,
+							withdrawAmountRaw: build.withdrawAmountRaw,
+							currentSlot: build.currentSlot,
+							obligationAddress: build.obligationAddress,
+							instructionCount: build.instructionCount,
+							setupInstructionCount: build.setupInstructionCount,
+							lendingInstructionCount: build.lendingInstructionCount,
+							cleanupInstructionCount: build.cleanupInstructionCount,
+							setupInstructionLabels: build.setupInstructionLabels,
+							lendingInstructionLabels: build.lendingInstructionLabels,
+							cleanupInstructionLabels: build.cleanupInstructionLabels,
+							signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+							marketExplorer: getExplorerAddressUrl(
+								build.marketAddress,
+								network,
+							),
+							repayReserveMintExplorer: getExplorerAddressUrl(
+								build.repayReserveMint,
+								network,
+							),
+							withdrawReserveMintExplorer: getExplorerAddressUrl(
+								build.withdrawReserveMint,
+								network,
+							),
+							obligationExplorer: getExplorerAddressUrl(
+								build.obligationAddress,
+								network,
+							),
+						},
+					};
+				}
+
+				const signature = await connection.sendRawTransaction(tx.serialize(), {
+					skipPreflight: params.skipPreflight === true,
+					maxRetries: params.maxRetries,
+				});
+				let confirmationErr: unknown = null;
+				if (params.confirm !== false) {
+					const confirmation = await connection.confirmTransaction(
+						signature,
+						commitment,
+					);
+					confirmationErr = confirmation.value.err;
+				}
+				if (confirmationErr) {
+					throw new Error(
+						`Transaction confirmed with error: ${stringifyUnknown(confirmationErr)}`,
+					);
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Kamino repay+withdraw sent: ${signature}`,
+						},
+					],
+					details: {
+						simulated: false,
+						signature,
+						confirmed: params.confirm !== false,
+						version,
+						network,
+						signer: signerPublicKey,
+						ownerAddress: build.ownerAddress,
+						marketAddress: build.marketAddress,
+						programId: build.programId,
+						repayReserveMint: build.repayReserveMint,
+						repayReserveAddress: build.repayReserveAddress,
+						repayReserveSymbol: build.repayReserveSymbol,
+						repayAmountRaw: build.repayAmountRaw,
+						withdrawReserveMint: build.withdrawReserveMint,
+						withdrawReserveAddress: build.withdrawReserveAddress,
+						withdrawReserveSymbol: build.withdrawReserveSymbol,
+						withdrawAmountRaw: build.withdrawAmountRaw,
+						currentSlot: build.currentSlot,
+						obligationAddress: build.obligationAddress,
+						instructionCount: build.instructionCount,
+						setupInstructionCount: build.setupInstructionCount,
+						lendingInstructionCount: build.lendingInstructionCount,
+						cleanupInstructionCount: build.cleanupInstructionCount,
+						setupInstructionLabels: build.setupInstructionLabels,
+						lendingInstructionLabels: build.lendingInstructionLabels,
+						cleanupInstructionLabels: build.cleanupInstructionLabels,
+						explorer: getExplorerTransactionUrl(signature, network),
+						signerExplorer: getExplorerAddressUrl(signerPublicKey, network),
+						marketExplorer: getExplorerAddressUrl(build.marketAddress, network),
+						repayReserveMintExplorer: getExplorerAddressUrl(
+							build.repayReserveMint,
+							network,
+						),
+						withdrawReserveMintExplorer: getExplorerAddressUrl(
+							build.withdrawReserveMint,
 							network,
 						),
 						obligationExplorer: getExplorerAddressUrl(

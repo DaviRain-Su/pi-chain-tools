@@ -931,6 +931,244 @@ export async function buildKaminoRepayInstructions(
 	};
 }
 
+export async function buildKaminoDepositAndBorrowInstructions(
+	request: KaminoDepositAndBorrowInstructionsRequest,
+): Promise<KaminoDepositAndBorrowInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const depositReserveMint = new PublicKey(
+		normalizeAtPath(request.depositReserveMint),
+	).toBase58();
+	const borrowReserveMint = new PublicKey(
+		normalizeAtPath(request.borrowReserveMint),
+	).toBase58();
+	const marketInput =
+		typeof request.marketAddress === "string" &&
+		request.marketAddress.trim().length > 0
+			? request.marketAddress
+			: network === "mainnet-beta"
+				? KAMINO_MAINNET_MARKET_ADDRESS
+				: null;
+	if (!marketInput) {
+		throw new Error(
+			"marketAddress is required when network is not mainnet-beta",
+		);
+	}
+	const marketAddress = new PublicKey(normalizeAtPath(marketInput)).toBase58();
+	const programId = new PublicKey(
+		normalizeAtPath(request.programId ?? KAMINO_PROGRAM_ID),
+	).toBase58();
+	const depositAmountRaw = parsePositiveBigInt(
+		request.depositAmountRaw,
+		"depositAmountRaw",
+	).toString();
+	const borrowAmountRaw = parsePositiveBigInt(
+		request.borrowAmountRaw,
+		"borrowAmountRaw",
+	).toString();
+	const useV2Ixs = request.useV2Ixs !== false;
+	const includeAtaIxs = request.includeAtaIxs !== false;
+	const extraComputeUnits = parseKaminoExtraComputeUnits(
+		request.extraComputeUnits,
+	);
+	const requestElevationGroup = request.requestElevationGroup === true;
+
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+	const kaminoMarket = await KaminoMarket.load(
+		rpc,
+		address(marketAddress),
+		DEFAULT_RECENT_SLOT_DURATION_MS,
+		address(programId),
+	);
+	if (!kaminoMarket) {
+		throw new Error(`Kamino market not found: ${marketAddress}`);
+	}
+	const depositReserve = kaminoMarket.getReserveByMint(
+		address(depositReserveMint),
+	);
+	if (!depositReserve) {
+		throw new Error(
+			`Kamino deposit reserve not found in market: reserveMint=${depositReserveMint} marketAddress=${marketAddress}`,
+		);
+	}
+	const borrowReserve = kaminoMarket.getReserveByMint(
+		address(borrowReserveMint),
+	);
+	if (!borrowReserve) {
+		throw new Error(
+			`Kamino borrow reserve not found in market: reserveMint=${borrowReserveMint} marketAddress=${marketAddress}`,
+		);
+	}
+	const action = await KaminoAction.buildDepositAndBorrowTxns(
+		kaminoMarket,
+		depositAmountRaw,
+		depositReserve.getLiquidityMint(),
+		borrowAmountRaw,
+		borrowReserve.getLiquidityMint(),
+		createNoopSigner(address(ownerAddress)),
+		new VanillaObligation(address(programId)),
+		useV2Ixs,
+		undefined,
+		extraComputeUnits,
+		includeAtaIxs,
+		requestElevationGroup,
+	);
+	const instructions = KaminoAction.actionToIxs(action).map(
+		convertKitInstructionToLegacy,
+	);
+	const obligationAddress = await action.getObligationPda();
+	return {
+		network,
+		ownerAddress,
+		marketAddress,
+		programId,
+		depositReserveMint,
+		depositReserveAddress: depositReserve.address,
+		depositReserveSymbol: depositReserve.symbol ?? null,
+		depositAmountRaw,
+		borrowReserveMint,
+		borrowReserveAddress: borrowReserve.address,
+		borrowReserveSymbol: borrowReserve.symbol ?? null,
+		borrowAmountRaw,
+		useV2Ixs,
+		includeAtaIxs,
+		extraComputeUnits,
+		requestElevationGroup,
+		obligationAddress,
+		instructionCount: instructions.length,
+		setupInstructionCount: action.setupIxs.length,
+		lendingInstructionCount: action.lendingIxs.length,
+		cleanupInstructionCount: action.cleanupIxs.length,
+		setupInstructionLabels: [...action.setupIxsLabels],
+		lendingInstructionLabels: [...action.lendingIxsLabels],
+		cleanupInstructionLabels: [...action.cleanupIxsLabels],
+		instructions,
+	};
+}
+
+export async function buildKaminoRepayAndWithdrawInstructions(
+	request: KaminoRepayAndWithdrawInstructionsRequest,
+): Promise<KaminoRepayAndWithdrawInstructionsResult> {
+	const network = parseNetwork(request.network);
+	const ownerAddress = new PublicKey(
+		normalizeAtPath(request.ownerAddress),
+	).toBase58();
+	const repayReserveMint = new PublicKey(
+		normalizeAtPath(request.repayReserveMint),
+	).toBase58();
+	const withdrawReserveMint = new PublicKey(
+		normalizeAtPath(request.withdrawReserveMint),
+	).toBase58();
+	const marketInput =
+		typeof request.marketAddress === "string" &&
+		request.marketAddress.trim().length > 0
+			? request.marketAddress
+			: network === "mainnet-beta"
+				? KAMINO_MAINNET_MARKET_ADDRESS
+				: null;
+	if (!marketInput) {
+		throw new Error(
+			"marketAddress is required when network is not mainnet-beta",
+		);
+	}
+	const marketAddress = new PublicKey(normalizeAtPath(marketInput)).toBase58();
+	const programId = new PublicKey(
+		normalizeAtPath(request.programId ?? KAMINO_PROGRAM_ID),
+	).toBase58();
+	const repayAmountRaw = parsePositiveBigInt(
+		request.repayAmountRaw,
+		"repayAmountRaw",
+	).toString();
+	const withdrawAmountRaw = parsePositiveBigInt(
+		request.withdrawAmountRaw,
+		"withdrawAmountRaw",
+	).toString();
+	const useV2Ixs = request.useV2Ixs !== false;
+	const includeAtaIxs = request.includeAtaIxs !== false;
+	const extraComputeUnits = parseKaminoExtraComputeUnits(
+		request.extraComputeUnits,
+	);
+	const requestElevationGroup = request.requestElevationGroup === true;
+	const currentSlot = await resolveKaminoRepayCurrentSlot(
+		network,
+		request.currentSlot,
+	);
+
+	const rpc = createSolanaRpc(getRpcEndpoint(network));
+	const kaminoMarket = await KaminoMarket.load(
+		rpc,
+		address(marketAddress),
+		DEFAULT_RECENT_SLOT_DURATION_MS,
+		address(programId),
+	);
+	if (!kaminoMarket) {
+		throw new Error(`Kamino market not found: ${marketAddress}`);
+	}
+	const repayReserve = kaminoMarket.getReserveByMint(address(repayReserveMint));
+	if (!repayReserve) {
+		throw new Error(
+			`Kamino repay reserve not found in market: reserveMint=${repayReserveMint} marketAddress=${marketAddress}`,
+		);
+	}
+	const withdrawReserve = kaminoMarket.getReserveByMint(
+		address(withdrawReserveMint),
+	);
+	if (!withdrawReserve) {
+		throw new Error(
+			`Kamino withdraw reserve not found in market: reserveMint=${withdrawReserveMint} marketAddress=${marketAddress}`,
+		);
+	}
+	const action = await KaminoAction.buildRepayAndWithdrawTxns(
+		kaminoMarket,
+		repayAmountRaw,
+		repayReserve.getLiquidityMint(),
+		withdrawAmountRaw,
+		withdrawReserve.getLiquidityMint(),
+		createNoopSigner(address(ownerAddress)),
+		currentSlot,
+		new VanillaObligation(address(programId)),
+		useV2Ixs,
+		undefined,
+		extraComputeUnits,
+		includeAtaIxs,
+		requestElevationGroup,
+	);
+	const instructions = KaminoAction.actionToIxs(action).map(
+		convertKitInstructionToLegacy,
+	);
+	const obligationAddress = await action.getObligationPda();
+	return {
+		network,
+		ownerAddress,
+		marketAddress,
+		programId,
+		repayReserveMint,
+		repayReserveAddress: repayReserve.address,
+		repayReserveSymbol: repayReserve.symbol ?? null,
+		repayAmountRaw,
+		withdrawReserveMint,
+		withdrawReserveAddress: withdrawReserve.address,
+		withdrawReserveSymbol: withdrawReserve.symbol ?? null,
+		withdrawAmountRaw,
+		useV2Ixs,
+		includeAtaIxs,
+		extraComputeUnits,
+		requestElevationGroup,
+		currentSlot: currentSlot.toString(),
+		obligationAddress,
+		instructionCount: instructions.length,
+		setupInstructionCount: action.setupIxs.length,
+		lendingInstructionCount: action.lendingIxs.length,
+		cleanupInstructionCount: action.cleanupIxs.length,
+		setupInstructionLabels: [...action.setupIxsLabels],
+		lendingInstructionLabels: [...action.lendingIxsLabels],
+		cleanupInstructionLabels: [...action.cleanupIxsLabels],
+		instructions,
+	};
+}
+
 function truncateText(value: string): string {
 	if (value.length <= 500) return value;
 	return `${value.slice(0, 500)}...`;
@@ -1049,6 +1287,90 @@ export type KaminoRepayInstructionsRequest =
 	};
 export type KaminoRepayInstructionsResult = KaminoDepositInstructionsResult & {
 	currentSlot: string;
+};
+export type KaminoDepositAndBorrowInstructionsRequest = {
+	ownerAddress: string;
+	depositReserveMint: string;
+	depositAmountRaw: string;
+	borrowReserveMint: string;
+	borrowAmountRaw: string;
+	marketAddress?: string;
+	programId?: string;
+	useV2Ixs?: boolean;
+	includeAtaIxs?: boolean;
+	extraComputeUnits?: number;
+	requestElevationGroup?: boolean;
+	network?: string;
+};
+export type KaminoDepositAndBorrowInstructionsResult = {
+	network: SolanaNetwork;
+	ownerAddress: string;
+	marketAddress: string;
+	programId: string;
+	depositReserveMint: string;
+	depositReserveAddress: string;
+	depositReserveSymbol: string | null;
+	depositAmountRaw: string;
+	borrowReserveMint: string;
+	borrowReserveAddress: string;
+	borrowReserveSymbol: string | null;
+	borrowAmountRaw: string;
+	useV2Ixs: boolean;
+	includeAtaIxs: boolean;
+	extraComputeUnits: number;
+	requestElevationGroup: boolean;
+	obligationAddress: string;
+	instructionCount: number;
+	setupInstructionCount: number;
+	lendingInstructionCount: number;
+	cleanupInstructionCount: number;
+	setupInstructionLabels: string[];
+	lendingInstructionLabels: string[];
+	cleanupInstructionLabels: string[];
+	instructions: TransactionInstruction[];
+};
+export type KaminoRepayAndWithdrawInstructionsRequest = {
+	ownerAddress: string;
+	repayReserveMint: string;
+	repayAmountRaw: string;
+	withdrawReserveMint: string;
+	withdrawAmountRaw: string;
+	currentSlot?: string | number | bigint;
+	marketAddress?: string;
+	programId?: string;
+	useV2Ixs?: boolean;
+	includeAtaIxs?: boolean;
+	extraComputeUnits?: number;
+	requestElevationGroup?: boolean;
+	network?: string;
+};
+export type KaminoRepayAndWithdrawInstructionsResult = {
+	network: SolanaNetwork;
+	ownerAddress: string;
+	marketAddress: string;
+	programId: string;
+	repayReserveMint: string;
+	repayReserveAddress: string;
+	repayReserveSymbol: string | null;
+	repayAmountRaw: string;
+	withdrawReserveMint: string;
+	withdrawReserveAddress: string;
+	withdrawReserveSymbol: string | null;
+	withdrawAmountRaw: string;
+	useV2Ixs: boolean;
+	includeAtaIxs: boolean;
+	extraComputeUnits: number;
+	requestElevationGroup: boolean;
+	currentSlot: string;
+	obligationAddress: string;
+	instructionCount: number;
+	setupInstructionCount: number;
+	lendingInstructionCount: number;
+	cleanupInstructionCount: number;
+	setupInstructionLabels: string[];
+	lendingInstructionLabels: string[];
+	cleanupInstructionLabels: string[];
+	instructions: TransactionInstruction[];
 };
 
 export type KaminoLendingProtocol = "kamino";
