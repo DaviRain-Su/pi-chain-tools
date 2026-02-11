@@ -52,6 +52,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui 
 - `read`: `sui_getPortfolio` (multi-asset balances with optional metadata)
 - `read`: `sui_getSwapQuote` (Cetus aggregator quote + route details on mainnet/testnet)
 - `execute`: `sui_swapCetus` (Cetus aggregator route + on-chain swap execution on mainnet/testnet)
+- `execute`: `sui_cetusAddLiquidity` / `sui_cetusRemoveLiquidity` (official Cetus CLMM SDK LP primitives)
 - `execute`: `sui_transferSui` (amount in `amountMist` or `amountSui`, with mainnet safety gate `confirmMainnet=true`)
 - `execute`: `sui_transferCoin` (non-SUI transfer, auto-merge coin objects, with mainnet safety gate)
 - `workflow`: `w3rt_run_sui_workflow_v0` (analysis/simulate/execute with deterministic mainnet confirmToken)

@@ -1,10 +1,12 @@
 import { AggregatorClient, Env } from "@cetusprotocol/aggregator-sdk";
+import { initCetusSDK } from "@cetusprotocol/cetus-sui-clmm-sdk";
 import { Transaction } from "@mysten/sui/transactions";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
 	SUI_COIN_TYPE,
 	SUI_TOOL_PREFIX,
+	type SuiNetwork,
 	formatCoinAmount,
 	getSuiClient,
 	getSuiExplorerTransactionUrl,
@@ -56,6 +58,43 @@ type SuiSwapCetusParams = {
 	confirmMainnet?: boolean;
 };
 
+type SuiCetusAddLiquidityParams = {
+	poolId: string;
+	positionId: string;
+	coinTypeA: string;
+	coinTypeB: string;
+	tickLower: number;
+	tickUpper: number;
+	amountA: string;
+	amountB: string;
+	fixAmountA?: boolean;
+	slippageBps?: number;
+	collectFee?: boolean;
+	rewarderCoinTypes?: string[];
+	network?: string;
+	rpcUrl?: string;
+	fromPrivateKey?: string;
+	waitForLocalExecution?: boolean;
+	confirmMainnet?: boolean;
+};
+
+type SuiCetusRemoveLiquidityParams = {
+	poolId: string;
+	positionId: string;
+	coinTypeA: string;
+	coinTypeB: string;
+	deltaLiquidity: string;
+	minAmountA: string;
+	minAmountB: string;
+	collectFee?: boolean;
+	rewarderCoinTypes?: string[];
+	network?: string;
+	rpcUrl?: string;
+	fromPrivateKey?: string;
+	waitForLocalExecution?: boolean;
+	confirmMainnet?: boolean;
+};
+
 function resolveTransferAmount(params: SuiTransferParams): bigint {
 	if (params.amountMist != null) {
 		return parsePositiveBigInt(params.amountMist, "amountMist");
@@ -71,6 +110,13 @@ function resolveAggregatorEnv(network: string): Env {
 	if (network === "testnet") return Env.Testnet;
 	throw new Error(
 		"Sui swap currently supports network=mainnet or testnet via Cetus aggregator.",
+	);
+}
+
+function resolveCetusNetwork(network: SuiNetwork): "mainnet" | "testnet" {
+	if (network === "mainnet" || network === "testnet") return network;
+	throw new Error(
+		"Cetus CLMM currently supports network=mainnet or testnet for LP operations.",
 	);
 }
 
@@ -588,6 +634,234 @@ export function createSuiExecuteTools() {
 						env,
 						endpoint: endpoint ?? null,
 						rpcUrl,
+						explorer: getSuiExplorerTransactionUrl(response.digest, network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}cetusAddLiquidity`,
+			label: "Sui Cetus Add Liquidity",
+			description:
+				"Add liquidity to an existing Cetus CLMM position using official Cetus SDK",
+			parameters: Type.Object({
+				poolId: Type.String({ description: "Cetus pool object id" }),
+				positionId: Type.String({ description: "Cetus position object id" }),
+				coinTypeA: Type.String({ description: "Pool coinTypeA" }),
+				coinTypeB: Type.String({ description: "Pool coinTypeB" }),
+				tickLower: Type.Number({ description: "Position lower tick index" }),
+				tickUpper: Type.Number({ description: "Position upper tick index" }),
+				amountA: Type.String({
+					description: "Input amount for coin A (integer string)",
+				}),
+				amountB: Type.String({
+					description: "Input amount for coin B (integer string)",
+				}),
+				fixAmountA: Type.Optional(
+					Type.Boolean({
+						description: "true=fixed amountA (default), false=fixed amountB",
+					}),
+				),
+				slippageBps: Type.Optional(
+					Type.Number({
+						description: "Slippage in bps (default 100 = 1%)",
+						minimum: 1,
+						maximum: 10_000,
+					}),
+				),
+				collectFee: Type.Optional(
+					Type.Boolean({
+						description: "Collect pending fees while adding liquidity",
+					}),
+				),
+				rewarderCoinTypes: Type.Optional(
+					Type.Array(Type.String(), { minItems: 0, maxItems: 16 }),
+				),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(Type.String()),
+				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseSuiNetwork(params.network);
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const cetusNetwork = resolveCetusNetwork(network);
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const fromAddress = signer.toSuiAddress();
+				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
+				const sdk = initCetusSDK({
+					network: cetusNetwork,
+					fullNodeUrl: rpcUrl,
+					wallet: fromAddress,
+				});
+				const tx = await sdk.Position.createAddLiquidityFixTokenPayload({
+					pool_id: params.poolId.trim(),
+					pos_id: params.positionId.trim(),
+					coinTypeA: params.coinTypeA.trim(),
+					coinTypeB: params.coinTypeB.trim(),
+					tick_lower: params.tickLower,
+					tick_upper: params.tickUpper,
+					amount_a: params.amountA.trim(),
+					amount_b: params.amountB.trim(),
+					slippage: parseSlippageDecimal(params.slippageBps),
+					fix_amount_a: params.fixAmountA !== false,
+					is_open: false,
+					collect_fee: params.collectFee === true,
+					rewarder_coin_types: params.rewarderCoinTypes ?? [],
+				});
+				const client = getSuiClient(network, params.rpcUrl);
+				const response = await client.signAndExecuteTransaction({
+					signer,
+					transaction: tx,
+					options: {
+						showEffects: true,
+						showEvents: true,
+						showObjectChanges: true,
+						showBalanceChanges: true,
+					},
+					requestType: resolveRequestType(params.waitForLocalExecution),
+				});
+
+				const status = response.effects?.status.status ?? "unknown";
+				const error =
+					response.effects?.status.error ?? response.errors?.[0] ?? null;
+				if (status === "failure") {
+					throw new Error(
+						`Cetus add liquidity failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+					);
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Cetus add liquidity submitted: digest=${response.digest} status=${status}`,
+						},
+					],
+					details: {
+						digest: response.digest,
+						status,
+						error,
+						fromAddress,
+						network,
+						rpcUrl,
+						cetusNetwork,
+						poolId: params.poolId.trim(),
+						positionId: params.positionId.trim(),
+						coinTypeA: params.coinTypeA.trim(),
+						coinTypeB: params.coinTypeB.trim(),
+						tickLower: params.tickLower,
+						tickUpper: params.tickUpper,
+						amountA: params.amountA.trim(),
+						amountB: params.amountB.trim(),
+						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
+						explorer: getSuiExplorerTransactionUrl(response.digest, network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}cetusRemoveLiquidity`,
+			label: "Sui Cetus Remove Liquidity",
+			description:
+				"Remove liquidity from an existing Cetus CLMM position using official Cetus SDK",
+			parameters: Type.Object({
+				poolId: Type.String({ description: "Cetus pool object id" }),
+				positionId: Type.String({ description: "Cetus position object id" }),
+				coinTypeA: Type.String({ description: "Pool coinTypeA" }),
+				coinTypeB: Type.String({ description: "Pool coinTypeB" }),
+				deltaLiquidity: Type.String({
+					description: "Liquidity delta to remove (integer string)",
+				}),
+				minAmountA: Type.String({
+					description: "Min receive amount for coin A (integer string)",
+				}),
+				minAmountB: Type.String({
+					description: "Min receive amount for coin B (integer string)",
+				}),
+				collectFee: Type.Optional(
+					Type.Boolean({
+						description: "Collect pending fees during remove",
+					}),
+				),
+				rewarderCoinTypes: Type.Optional(
+					Type.Array(Type.String(), { minItems: 0, maxItems: 16 }),
+				),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(Type.String()),
+				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseSuiNetwork(params.network);
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const cetusNetwork = resolveCetusNetwork(network);
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const fromAddress = signer.toSuiAddress();
+				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
+				const sdk = initCetusSDK({
+					network: cetusNetwork,
+					fullNodeUrl: rpcUrl,
+					wallet: fromAddress,
+				});
+				const tx = await sdk.Position.removeLiquidityTransactionPayload({
+					pool_id: params.poolId.trim(),
+					pos_id: params.positionId.trim(),
+					coinTypeA: params.coinTypeA.trim(),
+					coinTypeB: params.coinTypeB.trim(),
+					delta_liquidity: params.deltaLiquidity.trim(),
+					min_amount_a: params.minAmountA.trim(),
+					min_amount_b: params.minAmountB.trim(),
+					collect_fee: params.collectFee !== false,
+					rewarder_coin_types: params.rewarderCoinTypes ?? [],
+				});
+				const client = getSuiClient(network, params.rpcUrl);
+				const response = await client.signAndExecuteTransaction({
+					signer,
+					transaction: tx,
+					options: {
+						showEffects: true,
+						showEvents: true,
+						showObjectChanges: true,
+						showBalanceChanges: true,
+					},
+					requestType: resolveRequestType(params.waitForLocalExecution),
+				});
+
+				const status = response.effects?.status.status ?? "unknown";
+				const error =
+					response.effects?.status.error ?? response.errors?.[0] ?? null;
+				if (status === "failure") {
+					throw new Error(
+						`Cetus remove liquidity failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+					);
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Cetus remove liquidity submitted: digest=${response.digest} status=${status}`,
+						},
+					],
+					details: {
+						digest: response.digest,
+						status,
+						error,
+						fromAddress,
+						network,
+						rpcUrl,
+						cetusNetwork,
+						poolId: params.poolId.trim(),
+						positionId: params.positionId.trim(),
+						coinTypeA: params.coinTypeA.trim(),
+						coinTypeB: params.coinTypeB.trim(),
+						deltaLiquidity: params.deltaLiquidity.trim(),
+						minAmountA: params.minAmountA.trim(),
+						minAmountB: params.minAmountB.trim(),
+						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
 						explorer: getSuiExplorerTransactionUrl(response.digest, network),
 					},
 				};

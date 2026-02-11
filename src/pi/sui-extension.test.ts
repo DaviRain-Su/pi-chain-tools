@@ -1,3 +1,9 @@
+import { vi } from "vitest";
+
+vi.mock("@cetusprotocol/cetus-sui-clmm-sdk", () => ({
+	initCetusSDK: vi.fn(),
+}));
+
 import { describe, expect, it } from "vitest";
 import suiExtension from "./sui-extension.js";
 
@@ -12,6 +18,8 @@ describe("suiExtension", () => {
 
 		suiExtension(registrar);
 		expect(names.sort()).toEqual([
+			"sui_cetusAddLiquidity",
+			"sui_cetusRemoveLiquidity",
 			"sui_getBalance",
 			"sui_getPortfolio",
 			"sui_getSwapQuote",

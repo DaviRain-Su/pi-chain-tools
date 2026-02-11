@@ -1,5 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const cetusMocks = vi.hoisted(() => {
+	const createAddLiquidityFixTokenPayload = vi.fn();
+	const removeLiquidityTransactionPayload = vi.fn();
+	const initCetusSDK = vi.fn().mockImplementation(() => ({
+		Position: {
+			createAddLiquidityFixTokenPayload,
+			removeLiquidityTransactionPayload,
+		},
+	}));
+	return {
+		createAddLiquidityFixTokenPayload,
+		removeLiquidityTransactionPayload,
+		initCetusSDK,
+	};
+});
+
+vi.mock("@cetusprotocol/cetus-sui-clmm-sdk", () => ({
+	initCetusSDK: cetusMocks.initCetusSDK,
+}));
+
 const aggregatorMocks = vi.hoisted(() => {
 	const findRouters = vi.fn();
 	const fastRouterSwap = vi.fn();
@@ -89,6 +109,8 @@ beforeEach(() => {
 	runtimeMocks.formatCoinAmount.mockImplementation((value: string) => value);
 	aggregatorMocks.findRouters.mockReset();
 	aggregatorMocks.fastRouterSwap.mockReset();
+	cetusMocks.createAddLiquidityFixTokenPayload.mockReset();
+	cetusMocks.removeLiquidityTransactionPayload.mockReset();
 });
 
 describe("sui_transferSui", () => {
@@ -366,5 +388,141 @@ describe("sui_swapCetus", () => {
 				network: "testnet",
 			}),
 		).rejects.toThrow("No swap route available");
+	});
+});
+
+describe("sui_cetusAddLiquidity", () => {
+	it("blocks mainnet without confirmMainnet", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		const tool = getTool("sui_cetusAddLiquidity");
+		await expect(
+			tool.execute("l1", {
+				poolId: "0xpool",
+				positionId: "0xpos",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: "0x...::usdc::USDC",
+				tickLower: -100,
+				tickUpper: 100,
+				amountA: "1000",
+				amountB: "1000",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+	});
+
+	it("builds cetus add-liquidity tx and sends it", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		const tx = { tx: "add-liquidity-tx" };
+		cetusMocks.createAddLiquidityFixTokenPayload.mockResolvedValue(tx);
+		const signAndExecuteTransaction = vi.fn().mockResolvedValue({
+			digest: "0xlpadd",
+			confirmedLocalExecution: true,
+			effects: {
+				status: {
+					status: "success",
+				},
+			},
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({ signAndExecuteTransaction });
+
+		const tool = getTool("sui_cetusAddLiquidity");
+		const result = await tool.execute("l2", {
+			poolId: "0xpool",
+			positionId: "0xpos",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x...::usdc::USDC",
+			tickLower: -100,
+			tickUpper: 100,
+			amountA: "1000",
+			amountB: "2000",
+			network: "mainnet",
+			confirmMainnet: true,
+		});
+
+		expect(cetusMocks.initCetusSDK).toHaveBeenCalledWith({
+			network: "mainnet",
+			fullNodeUrl: "https://fullnode.devnet.sui.io:443",
+			wallet:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+		});
+		expect(cetusMocks.createAddLiquidityFixTokenPayload).toHaveBeenCalledWith({
+			pool_id: "0xpool",
+			pos_id: "0xpos",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x...::usdc::USDC",
+			tick_lower: -100,
+			tick_upper: 100,
+			amount_a: "1000",
+			amount_b: "2000",
+			slippage: 0.01,
+			fix_amount_a: true,
+			is_open: false,
+			collect_fee: false,
+			rewarder_coin_types: [],
+		});
+		expect(signAndExecuteTransaction).toHaveBeenCalledWith(
+			expect.objectContaining({
+				transaction: tx,
+				requestType: "WaitForLocalExecution",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			digest: "0xlpadd",
+			status: "success",
+			poolId: "0xpool",
+			positionId: "0xpos",
+		});
+	});
+});
+
+describe("sui_cetusRemoveLiquidity", () => {
+	it("builds cetus remove-liquidity tx and sends it", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("testnet");
+		const tx = { tx: "remove-liquidity-tx" };
+		cetusMocks.removeLiquidityTransactionPayload.mockResolvedValue(tx);
+		const signAndExecuteTransaction = vi.fn().mockResolvedValue({
+			digest: "0xlprem",
+			confirmedLocalExecution: true,
+			effects: {
+				status: {
+					status: "success",
+				},
+			},
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({ signAndExecuteTransaction });
+
+		const tool = getTool("sui_cetusRemoveLiquidity");
+		const result = await tool.execute("l3", {
+			poolId: "0xpool",
+			positionId: "0xpos",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x...::usdc::USDC",
+			deltaLiquidity: "12345",
+			minAmountA: "1",
+			minAmountB: "1",
+			network: "testnet",
+		});
+
+		expect(cetusMocks.initCetusSDK).toHaveBeenCalledWith({
+			network: "testnet",
+			fullNodeUrl: "https://fullnode.devnet.sui.io:443",
+			wallet:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+		});
+		expect(cetusMocks.removeLiquidityTransactionPayload).toHaveBeenCalledWith({
+			pool_id: "0xpool",
+			pos_id: "0xpos",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x...::usdc::USDC",
+			delta_liquidity: "12345",
+			min_amount_a: "1",
+			min_amount_b: "1",
+			collect_fee: true,
+			rewarder_coin_types: [],
+		});
+		expect(result.details).toMatchObject({
+			digest: "0xlprem",
+			status: "success",
+			deltaLiquidity: "12345",
+		});
 	});
 });
