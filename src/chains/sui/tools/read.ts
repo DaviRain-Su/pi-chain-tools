@@ -2,6 +2,12 @@ import { AggregatorClient, Env } from "@cetusprotocol/aggregator-sdk";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
+	getCetusFarmsPools,
+	getCetusFarmsPositions,
+	getCetusVaultsBalances,
+	resolveCetusV2Network,
+} from "../cetus-v2.js";
+import {
 	SUI_COIN_TYPE,
 	SUI_TOOL_PREFIX,
 	formatCoinAmount,
@@ -29,6 +35,27 @@ type SuiStableLayerSupplyParams = {
 	stableCoinType?: string;
 	network?: string;
 	sender?: string;
+};
+
+type SuiCetusFarmsPoolsParams = {
+	network?: string;
+	rpcUrl?: string;
+	limit?: number;
+};
+
+type SuiCetusFarmsPositionsParams = {
+	owner: string;
+	network?: string;
+	rpcUrl?: string;
+	calculateRewards?: boolean;
+	limit?: number;
+};
+
+type SuiCetusVaultsBalancesParams = {
+	owner: string;
+	network?: string;
+	rpcUrl?: string;
+	limit?: number;
 };
 
 function parseNonNegativeBigInt(value: string): bigint {
@@ -291,6 +318,175 @@ export function createSuiReadTools() {
 						stableCoinType: stableCoinType ?? null,
 						totalSupply: supply.totalSupply,
 						coinTypeSupply: supply.coinTypeSupply,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}getCetusFarmsPools`,
+			label: "Sui Get Cetus Farms Pools",
+			description:
+				"Get Cetus v2 farms pool list from SDK (mainnet/testnet only).",
+			parameters: Type.Object({
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({
+						description: "Optional fullnode URL override passed to Cetus SDK",
+					}),
+				),
+				limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiCetusFarmsPoolsParams;
+				const network = parseSuiNetwork(params.network);
+				const cetusNetwork = resolveCetusV2Network(network);
+				const limit =
+					typeof params.limit === "number"
+						? Math.max(1, Math.min(200, Math.floor(params.limit)))
+						: 50;
+				const result = await getCetusFarmsPools({
+					network: cetusNetwork,
+					rpcUrl: params.rpcUrl?.trim(),
+				});
+				const pools = result.pools.slice(0, limit).map((pool) => ({
+					poolId: pool.id,
+					clmmPoolId: pool.clmm_pool_id,
+					rewarderCount: Array.isArray(pool.rewarders)
+						? pool.rewarders.length
+						: 0,
+				}));
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Cetus farms pools: ${pools.length} item(s)`,
+						},
+					],
+					details: {
+						network,
+						cetusNetwork,
+						poolCount: pools.length,
+						hasNextPage: result.hasNextPage,
+						nextCursor: result.nextCursor,
+						pools,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}getCetusFarmsPositions`,
+			label: "Sui Get Cetus Farms Positions",
+			description:
+				"Get owner Cetus v2 farms staked positions from SDK (mainnet/testnet only).",
+			parameters: Type.Object({
+				owner: Type.String({
+					description: "Sui wallet/account address",
+				}),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({
+						description: "Optional fullnode URL override passed to Cetus SDK",
+					}),
+				),
+				calculateRewards: Type.Optional(
+					Type.Boolean({
+						description: "Whether to include calculated farming rewards",
+					}),
+				),
+				limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiCetusFarmsPositionsParams;
+				const owner = normalizeAtPath(params.owner);
+				const network = parseSuiNetwork(params.network);
+				const cetusNetwork = resolveCetusV2Network(network);
+				const limit =
+					typeof params.limit === "number"
+						? Math.max(1, Math.min(200, Math.floor(params.limit)))
+						: 50;
+				const result = await getCetusFarmsPositions({
+					network: cetusNetwork,
+					rpcUrl: params.rpcUrl?.trim(),
+					owner,
+					calculateRewards: params.calculateRewards !== false,
+				});
+				const positions = result.positions.slice(0, limit).map((position) => ({
+					positionNftId: position.id,
+					poolId: position.pool_id,
+					clmmPositionId: position.clmm_position_id ?? null,
+					clmmPoolId: position.clmm_pool_id ?? null,
+					rewardCount: Array.isArray(position.rewards)
+						? position.rewards.length
+						: 0,
+				}));
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Cetus farms positions: ${positions.length} item(s)`,
+						},
+					],
+					details: {
+						owner,
+						network,
+						cetusNetwork,
+						positionCount: positions.length,
+						hasNextPage: result.hasNextPage,
+						nextCursor: result.nextCursor,
+						positions,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}getCetusVaultsBalances`,
+			label: "Sui Get Cetus Vaults Balances",
+			description:
+				"Get owner Cetus v2 vault balances from SDK (mainnet/testnet only).",
+			parameters: Type.Object({
+				owner: Type.String({
+					description: "Sui wallet/account address",
+				}),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({
+						description: "Optional fullnode URL override passed to Cetus SDK",
+					}),
+				),
+				limit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiCetusVaultsBalancesParams;
+				const owner = normalizeAtPath(params.owner);
+				const network = parseSuiNetwork(params.network);
+				const cetusNetwork = resolveCetusV2Network(network);
+				const limit =
+					typeof params.limit === "number"
+						? Math.max(1, Math.min(200, Math.floor(params.limit)))
+						: 50;
+				const balances = await getCetusVaultsBalances({
+					network: cetusNetwork,
+					rpcUrl: params.rpcUrl?.trim(),
+					owner,
+				});
+				const items = balances.slice(0, limit).map((entry) => ({
+					vaultId: entry.vault_id ?? null,
+					clmmPoolId: entry.clmm_pool_id ?? null,
+					lpTokenBalance: entry.lp_token_balance ?? null,
+				}));
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Cetus vault balances: ${items.length} item(s)`,
+						},
+					],
+					details: {
+						owner,
+						network,
+						cetusNetwork,
+						vaultCount: items.length,
+						balances: items,
 					},
 				};
 			},

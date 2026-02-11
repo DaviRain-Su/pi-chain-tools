@@ -62,6 +62,13 @@ const stableLayerMocks = vi.hoisted(() => ({
 	buildStableLayerClaimTransaction: vi.fn(),
 }));
 
+const cetusV2Mocks = vi.hoisted(() => ({
+	resolveCetusV2Network: vi.fn(() => "mainnet"),
+	buildCetusFarmsStakeTransaction: vi.fn(),
+	buildCetusFarmsUnstakeTransaction: vi.fn(),
+	buildCetusFarmsHarvestTransaction: vi.fn(),
+}));
+
 vi.mock("../runtime.js", async () => {
 	const actual =
 		await vi.importActual<typeof import("../runtime.js")>("../runtime.js");
@@ -87,6 +94,15 @@ vi.mock("../stablelayer.js", () => ({
 		stableLayerMocks.buildStableLayerBurnTransaction,
 	buildStableLayerClaimTransaction:
 		stableLayerMocks.buildStableLayerClaimTransaction,
+}));
+
+vi.mock("../cetus-v2.js", () => ({
+	resolveCetusV2Network: cetusV2Mocks.resolveCetusV2Network,
+	buildCetusFarmsStakeTransaction: cetusV2Mocks.buildCetusFarmsStakeTransaction,
+	buildCetusFarmsUnstakeTransaction:
+		cetusV2Mocks.buildCetusFarmsUnstakeTransaction,
+	buildCetusFarmsHarvestTransaction:
+		cetusV2Mocks.buildCetusFarmsHarvestTransaction,
 }));
 
 import { createSuiComposeTools } from "./compose.js";
@@ -163,6 +179,19 @@ beforeEach(() => {
 	stableLayerMocks.buildStableLayerClaimTransaction.mockResolvedValue({
 		setSender: vi.fn(),
 		serialize: vi.fn(() => "serialized-stable-claim"),
+	});
+	cetusV2Mocks.resolveCetusV2Network.mockReturnValue("mainnet");
+	cetusV2Mocks.buildCetusFarmsStakeTransaction.mockResolvedValue({
+		setSender: vi.fn(),
+		serialize: vi.fn(() => "serialized-cetus-farms-stake"),
+	});
+	cetusV2Mocks.buildCetusFarmsUnstakeTransaction.mockResolvedValue({
+		setSender: vi.fn(),
+		serialize: vi.fn(() => "serialized-cetus-farms-unstake"),
+	});
+	cetusV2Mocks.buildCetusFarmsHarvestTransaction.mockResolvedValue({
+		setSender: vi.fn(),
+		serialize: vi.fn(() => "serialized-cetus-farms-harvest"),
 	});
 });
 
@@ -325,6 +354,113 @@ describe("sui compose tools", () => {
 				"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
 			deltaLiquidity: "999",
 			serializedTransaction: "serialized-cetus-remove",
+		});
+	});
+
+	it("builds Cetus farms stake transaction payload", async () => {
+		const tool = getTool("sui_buildCetusFarmsStakeTransaction");
+		const result = await tool.execute("sui-compose-farms-1", {
+			fromAddress:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			poolId:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			clmmPositionId:
+				"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			clmmPoolId:
+				"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x2::usdc::USDC",
+			network: "mainnet",
+		});
+
+		expect(cetusV2Mocks.buildCetusFarmsStakeTransaction).toHaveBeenCalledWith({
+			network: "mainnet",
+			rpcUrl: undefined,
+			sender:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			poolId:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			clmmPositionId:
+				"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			clmmPoolId:
+				"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x2::usdc::USDC",
+		});
+		expect(result.details).toMatchObject({
+			poolId:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			clmmPositionId:
+				"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			clmmPoolId:
+				"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+			serializedTransaction: "serialized-cetus-farms-stake",
+		});
+	});
+
+	it("builds Cetus farms unstake transaction payload", async () => {
+		const tool = getTool("sui_buildCetusFarmsUnstakeTransaction");
+		const result = await tool.execute("sui-compose-farms-2", {
+			fromAddress:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			poolId:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			positionNftId:
+				"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			network: "mainnet",
+		});
+
+		expect(cetusV2Mocks.buildCetusFarmsUnstakeTransaction).toHaveBeenCalledWith(
+			{
+				network: "mainnet",
+				rpcUrl: undefined,
+				sender:
+					"0x1111111111111111111111111111111111111111111111111111111111111111",
+				poolId:
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				positionNftId:
+					"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			},
+		);
+		expect(result.details).toMatchObject({
+			poolId:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			positionNftId:
+				"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			serializedTransaction: "serialized-cetus-farms-unstake",
+		});
+	});
+
+	it("builds Cetus farms harvest transaction payload", async () => {
+		const tool = getTool("sui_buildCetusFarmsHarvestTransaction");
+		const result = await tool.execute("sui-compose-farms-3", {
+			fromAddress:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			poolId:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			positionNftId:
+				"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			network: "mainnet",
+		});
+
+		expect(cetusV2Mocks.buildCetusFarmsHarvestTransaction).toHaveBeenCalledWith(
+			{
+				network: "mainnet",
+				rpcUrl: undefined,
+				sender:
+					"0x1111111111111111111111111111111111111111111111111111111111111111",
+				poolId:
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				positionNftId:
+					"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			},
+		);
+		expect(result.details).toMatchObject({
+			poolId:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			positionNftId:
+				"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+			serializedTransaction: "serialized-cetus-farms-harvest",
 		});
 	});
 

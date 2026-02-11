@@ -35,6 +35,9 @@ const executeMocks = vi.hoisted(() => {
 	const swapCetusExecute = vi.fn();
 	const cetusAddLiquidityExecute = vi.fn();
 	const cetusRemoveLiquidityExecute = vi.fn();
+	const cetusFarmsStakeExecute = vi.fn();
+	const cetusFarmsUnstakeExecute = vi.fn();
+	const cetusFarmsHarvestExecute = vi.fn();
 	const stableLayerMintExecute = vi.fn();
 	const stableLayerBurnExecute = vi.fn();
 	const stableLayerClaimExecute = vi.fn();
@@ -44,6 +47,9 @@ const executeMocks = vi.hoisted(() => {
 		swapCetusExecute,
 		cetusAddLiquidityExecute,
 		cetusRemoveLiquidityExecute,
+		cetusFarmsStakeExecute,
+		cetusFarmsUnstakeExecute,
+		cetusFarmsHarvestExecute,
 		stableLayerMintExecute,
 		stableLayerBurnExecute,
 		stableLayerClaimExecute,
@@ -57,6 +63,13 @@ const stableLayerMocks = vi.hoisted(() => ({
 	buildStableLayerMintTransaction: vi.fn(),
 	buildStableLayerBurnTransaction: vi.fn(),
 	buildStableLayerClaimTransaction: vi.fn(),
+}));
+
+const cetusV2Mocks = vi.hoisted(() => ({
+	resolveCetusV2Network: vi.fn(() => "mainnet"),
+	buildCetusFarmsStakeTransaction: vi.fn(),
+	buildCetusFarmsUnstakeTransaction: vi.fn(),
+	buildCetusFarmsHarvestTransaction: vi.fn(),
 }));
 
 vi.mock("../runtime.js", async () => {
@@ -112,6 +125,27 @@ vi.mock("./execute.js", () => ({
 			execute: executeMocks.cetusRemoveLiquidityExecute,
 		},
 		{
+			name: "sui_cetusFarmsStake",
+			label: "cetus farms stake",
+			description: "cetus farms stake",
+			parameters: {},
+			execute: executeMocks.cetusFarmsStakeExecute,
+		},
+		{
+			name: "sui_cetusFarmsUnstake",
+			label: "cetus farms unstake",
+			description: "cetus farms unstake",
+			parameters: {},
+			execute: executeMocks.cetusFarmsUnstakeExecute,
+		},
+		{
+			name: "sui_cetusFarmsHarvest",
+			label: "cetus farms harvest",
+			description: "cetus farms harvest",
+			parameters: {},
+			execute: executeMocks.cetusFarmsHarvestExecute,
+		},
+		{
 			name: "sui_stableLayerMint",
 			label: "stable layer mint",
 			description: "stable layer mint",
@@ -162,6 +196,15 @@ vi.mock("../stablelayer.js", () => ({
 		stableLayerMocks.buildStableLayerClaimTransaction,
 }));
 
+vi.mock("../cetus-v2.js", () => ({
+	resolveCetusV2Network: cetusV2Mocks.resolveCetusV2Network,
+	buildCetusFarmsStakeTransaction: cetusV2Mocks.buildCetusFarmsStakeTransaction,
+	buildCetusFarmsUnstakeTransaction:
+		cetusV2Mocks.buildCetusFarmsUnstakeTransaction,
+	buildCetusFarmsHarvestTransaction:
+		cetusV2Mocks.buildCetusFarmsHarvestTransaction,
+}));
+
 import { createSuiWorkflowTools } from "./workflow.js";
 
 type WorkflowTool = {
@@ -209,6 +252,18 @@ beforeEach(() => {
 		content: [{ type: "text", text: "ok" }],
 		details: { digest: "0xexec-remove-liquidity" },
 	});
+	executeMocks.cetusFarmsStakeExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: { digest: "0xexec-cetus-farms-stake" },
+	});
+	executeMocks.cetusFarmsUnstakeExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: { digest: "0xexec-cetus-farms-unstake" },
+	});
+	executeMocks.cetusFarmsHarvestExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: { digest: "0xexec-cetus-farms-harvest" },
+	});
 	executeMocks.stableLayerMintExecute.mockResolvedValue({
 		content: [{ type: "text", text: "ok" }],
 		details: { digest: "0xexec-stable-mint" },
@@ -235,6 +290,16 @@ beforeEach(() => {
 		setSender: vi.fn(),
 	});
 	stableLayerMocks.buildStableLayerClaimTransaction.mockResolvedValue({
+		setSender: vi.fn(),
+	});
+	cetusV2Mocks.resolveCetusV2Network.mockReturnValue("mainnet");
+	cetusV2Mocks.buildCetusFarmsStakeTransaction.mockResolvedValue({
+		setSender: vi.fn(),
+	});
+	cetusV2Mocks.buildCetusFarmsUnstakeTransaction.mockResolvedValue({
+		setSender: vi.fn(),
+	});
+	cetusV2Mocks.buildCetusFarmsHarvestTransaction.mockResolvedValue({
 		setSender: vi.fn(),
 	});
 });
@@ -540,6 +605,114 @@ describe("w3rt_run_sui_stablelayer_workflow_v0", () => {
 			artifacts: {
 				execute: {
 					digest: "0xexec-stable-burn",
+				},
+			},
+		});
+	});
+});
+
+describe("w3rt_run_sui_cetus_farms_workflow_v0", () => {
+	it("analyzes farms stake intentText and returns confirmToken", async () => {
+		const tool = getTool("w3rt_run_sui_cetus_farms_workflow_v0");
+		const poolId =
+			"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+		const clmmPositionId =
+			"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+		const clmmPoolId =
+			"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+		const result = await tool.execute("cetus-farms-wf-1", {
+			runId: "wf-sui-cetus-farms-01",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: `stake farm pool: ${poolId} position: ${clmmPositionId} clmmPoolId: ${clmmPoolId} 0x2::sui::SUI 0x2::usdc::USDC`,
+		});
+
+		expect(result.content[0]?.text).toContain("Workflow analyzed");
+		expect(result.details).toMatchObject({
+			runId: "wf-sui-cetus-farms-01",
+			intentType: "sui.cetus.farms.stake",
+			intent: {
+				type: "sui.cetus.farms.stake",
+				poolId,
+				clmmPositionId,
+				clmmPoolId,
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: "0x2::usdc::USDC",
+			},
+		});
+		expect(
+			(result.details as { confirmToken?: string }).confirmToken?.startsWith(
+				"SUI-",
+			),
+		).toBe(true);
+	});
+
+	it("simulates farms unstake and returns artifacts", async () => {
+		const tool = getTool("w3rt_run_sui_cetus_farms_workflow_v0");
+		const poolId =
+			"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+		const positionNftId =
+			"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+		const result = await tool.execute("cetus-farms-wf-2", {
+			runId: "wf-sui-cetus-farms-02",
+			runMode: "simulate",
+			intentType: "sui.cetus.farms.unstake",
+			network: "mainnet",
+			poolId,
+			positionNftId,
+		});
+
+		expect(cetusV2Mocks.buildCetusFarmsUnstakeTransaction).toHaveBeenCalledWith(
+			{
+				network: "mainnet",
+				rpcUrl: undefined,
+				sender:
+					"0x1111111111111111111111111111111111111111111111111111111111111111",
+				poolId,
+				positionNftId,
+			},
+		);
+		expect(result.details).toMatchObject({
+			intentType: "sui.cetus.farms.unstake",
+			artifacts: {
+				simulate: {
+					status: "success",
+					poolId,
+					positionNftId,
+				},
+			},
+		});
+	});
+
+	it("executes farms harvest after mainnet confirmation", async () => {
+		const tool = getTool("w3rt_run_sui_cetus_farms_workflow_v0");
+		const baseParams = {
+			runId: "wf-sui-cetus-farms-03",
+			intentType: "sui.cetus.farms.harvest" as const,
+			network: "mainnet",
+			poolId:
+				"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+			positionNftId:
+				"0x9999999999999999999999999999999999999999999999999999999999999999",
+		};
+		const analysis = await tool.execute("cetus-farms-wf-3-analysis", {
+			...baseParams,
+			runMode: "analysis",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		const execute = await tool.execute("cetus-farms-wf-3-execute", {
+			...baseParams,
+			runMode: "execute",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.cetusFarmsHarvestExecute).toHaveBeenCalledTimes(1);
+		expect(execute.details).toMatchObject({
+			intentType: "sui.cetus.farms.harvest",
+			artifacts: {
+				execute: {
+					digest: "0xexec-cetus-farms-harvest",
 				},
 			},
 		});

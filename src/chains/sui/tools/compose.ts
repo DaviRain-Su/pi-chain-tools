@@ -4,6 +4,12 @@ import { Transaction } from "@mysten/sui/transactions";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
+	buildCetusFarmsHarvestTransaction,
+	buildCetusFarmsStakeTransaction,
+	buildCetusFarmsUnstakeTransaction,
+	resolveCetusV2Network,
+} from "../cetus-v2.js";
+import {
 	SUI_COIN_TYPE,
 	SUI_TOOL_PREFIX,
 	type SuiNetwork,
@@ -84,6 +90,33 @@ type BuildCetusRemoveLiquidityParams = {
 	minAmountB: string;
 	collectFee?: boolean;
 	rewarderCoinTypes?: string[];
+	network?: string;
+	rpcUrl?: string;
+};
+
+type BuildCetusFarmsStakeParams = {
+	fromAddress: string;
+	poolId: string;
+	clmmPositionId: string;
+	clmmPoolId: string;
+	coinTypeA: string;
+	coinTypeB: string;
+	network?: string;
+	rpcUrl?: string;
+};
+
+type BuildCetusFarmsUnstakeParams = {
+	fromAddress: string;
+	poolId: string;
+	positionNftId: string;
+	network?: string;
+	rpcUrl?: string;
+};
+
+type BuildCetusFarmsHarvestParams = {
+	fromAddress: string;
+	poolId: string;
+	positionNftId: string;
 	network?: string;
 	rpcUrl?: string;
 };
@@ -647,6 +680,165 @@ export function createSuiComposeTools() {
 						deltaLiquidity: params.deltaLiquidity.trim(),
 						minAmountA: params.minAmountA.trim(),
 						minAmountB: params.minAmountB.trim(),
+						serializedTransaction: serializeTransactionPayload(tx),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}buildCetusFarmsStakeTransaction`,
+			label: "Sui Build Cetus Farms Stake Transaction",
+			description:
+				"Build unsigned Cetus v2 farms stake transaction payload (mainnet/testnet, no broadcast).",
+			parameters: Type.Object({
+				fromAddress: Type.String({
+					description: "Sender Sui address (transaction sender)",
+				}),
+				poolId: Type.String({ description: "Cetus farms pool id" }),
+				clmmPositionId: Type.String({
+					description: "Cetus CLMM position id to stake",
+				}),
+				clmmPoolId: Type.String({ description: "Related Cetus CLMM pool id" }),
+				coinTypeA: Type.String({ description: "CLMM coinTypeA" }),
+				coinTypeB: Type.String({ description: "CLMM coinTypeB" }),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({ description: "Optional fullnode URL override" }),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as BuildCetusFarmsStakeParams;
+				const network = parseSuiNetwork(params.network);
+				const cetusNetwork = resolveCetusV2Network(network);
+				const fromAddress = normalizeAtPath(params.fromAddress);
+				const tx = await buildCetusFarmsStakeTransaction({
+					network: cetusNetwork,
+					rpcUrl: params.rpcUrl?.trim(),
+					sender: fromAddress,
+					poolId: params.poolId,
+					clmmPositionId: params.clmmPositionId,
+					clmmPoolId: params.clmmPoolId,
+					coinTypeA: params.coinTypeA,
+					coinTypeB: params.coinTypeB,
+				});
+				maybeSetSender(tx, fromAddress);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Built Cetus farms stake transaction: pool=${params.poolId.trim()} clmmPosition=${params.clmmPositionId.trim()}`,
+						},
+					],
+					details: {
+						network,
+						cetusNetwork,
+						rpcUrl: params.rpcUrl?.trim() ?? null,
+						fromAddress,
+						poolId: params.poolId.trim(),
+						clmmPositionId: params.clmmPositionId.trim(),
+						clmmPoolId: params.clmmPoolId.trim(),
+						coinTypeA: params.coinTypeA.trim(),
+						coinTypeB: params.coinTypeB.trim(),
+						serializedTransaction: serializeTransactionPayload(tx),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}buildCetusFarmsUnstakeTransaction`,
+			label: "Sui Build Cetus Farms Unstake Transaction",
+			description:
+				"Build unsigned Cetus v2 farms unstake transaction payload (mainnet/testnet, no broadcast).",
+			parameters: Type.Object({
+				fromAddress: Type.String({
+					description: "Sender Sui address (transaction sender)",
+				}),
+				poolId: Type.String({ description: "Cetus farms pool id" }),
+				positionNftId: Type.String({
+					description: "Farms position NFT id returned after stake",
+				}),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({ description: "Optional fullnode URL override" }),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as BuildCetusFarmsUnstakeParams;
+				const network = parseSuiNetwork(params.network);
+				const cetusNetwork = resolveCetusV2Network(network);
+				const fromAddress = normalizeAtPath(params.fromAddress);
+				const tx = await buildCetusFarmsUnstakeTransaction({
+					network: cetusNetwork,
+					rpcUrl: params.rpcUrl?.trim(),
+					sender: fromAddress,
+					poolId: params.poolId,
+					positionNftId: params.positionNftId,
+				});
+				maybeSetSender(tx, fromAddress);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Built Cetus farms unstake transaction: pool=${params.poolId.trim()} positionNft=${params.positionNftId.trim()}`,
+						},
+					],
+					details: {
+						network,
+						cetusNetwork,
+						rpcUrl: params.rpcUrl?.trim() ?? null,
+						fromAddress,
+						poolId: params.poolId.trim(),
+						positionNftId: params.positionNftId.trim(),
+						serializedTransaction: serializeTransactionPayload(tx),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}buildCetusFarmsHarvestTransaction`,
+			label: "Sui Build Cetus Farms Harvest Transaction",
+			description:
+				"Build unsigned Cetus v2 farms harvest transaction payload (mainnet/testnet, no broadcast).",
+			parameters: Type.Object({
+				fromAddress: Type.String({
+					description: "Sender Sui address (transaction sender)",
+				}),
+				poolId: Type.String({ description: "Cetus farms pool id" }),
+				positionNftId: Type.String({
+					description: "Farms position NFT id used for reward harvest",
+				}),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({ description: "Optional fullnode URL override" }),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as BuildCetusFarmsHarvestParams;
+				const network = parseSuiNetwork(params.network);
+				const cetusNetwork = resolveCetusV2Network(network);
+				const fromAddress = normalizeAtPath(params.fromAddress);
+				const tx = await buildCetusFarmsHarvestTransaction({
+					network: cetusNetwork,
+					rpcUrl: params.rpcUrl?.trim(),
+					sender: fromAddress,
+					poolId: params.poolId,
+					positionNftId: params.positionNftId,
+				});
+				maybeSetSender(tx, fromAddress);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Built Cetus farms harvest transaction: pool=${params.poolId.trim()} positionNft=${params.positionNftId.trim()}`,
+						},
+					],
+					details: {
+						network,
+						cetusNetwork,
+						rpcUrl: params.rpcUrl?.trim() ?? null,
+						fromAddress,
+						poolId: params.poolId.trim(),
+						positionNftId: params.positionNftId.trim(),
 						serializedTransaction: serializeTransactionPayload(tx),
 					},
 				};

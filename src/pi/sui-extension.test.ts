@@ -19,6 +19,9 @@ describe("suiExtension", () => {
 		suiExtension(registrar);
 		expect(names.sort()).toEqual([
 			"sui_buildCetusAddLiquidityTransaction",
+			"sui_buildCetusFarmsHarvestTransaction",
+			"sui_buildCetusFarmsStakeTransaction",
+			"sui_buildCetusFarmsUnstakeTransaction",
 			"sui_buildCetusRemoveLiquidityTransaction",
 			"sui_buildStableLayerBurnTransaction",
 			"sui_buildStableLayerClaimTransaction",
@@ -27,8 +30,14 @@ describe("suiExtension", () => {
 			"sui_buildTransferCoinTransaction",
 			"sui_buildTransferSuiTransaction",
 			"sui_cetusAddLiquidity",
+			"sui_cetusFarmsHarvest",
+			"sui_cetusFarmsStake",
+			"sui_cetusFarmsUnstake",
 			"sui_cetusRemoveLiquidity",
 			"sui_getBalance",
+			"sui_getCetusFarmsPools",
+			"sui_getCetusFarmsPositions",
+			"sui_getCetusVaultsBalances",
 			"sui_getPortfolio",
 			"sui_getStableLayerSupply",
 			"sui_getSwapQuote",
@@ -39,6 +48,7 @@ describe("suiExtension", () => {
 			"sui_swapCetus",
 			"sui_transferCoin",
 			"sui_transferSui",
+			"w3rt_run_sui_cetus_farms_workflow_v0",
 			"w3rt_run_sui_stablelayer_workflow_v0",
 			"w3rt_run_sui_workflow_v0",
 		]);

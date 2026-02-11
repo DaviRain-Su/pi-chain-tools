@@ -5,6 +5,12 @@ import { Transaction } from "@mysten/sui/transactions";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
+	buildCetusFarmsHarvestTransaction,
+	buildCetusFarmsStakeTransaction,
+	buildCetusFarmsUnstakeTransaction,
+	resolveCetusV2Network,
+} from "../cetus-v2.js";
+import {
 	type SuiNetwork,
 	getSuiClient,
 	getSuiRpcEndpoint,
@@ -195,6 +201,61 @@ type ParsedStableLayerIntentHints = {
 	stableCoinType?: string;
 	amountRaw?: string;
 	burnAll?: boolean;
+};
+
+type CetusFarmsStakeIntent = {
+	type: "sui.cetus.farms.stake";
+	poolId: string;
+	clmmPositionId: string;
+	clmmPoolId: string;
+	coinTypeA: string;
+	coinTypeB: string;
+};
+
+type CetusFarmsUnstakeIntent = {
+	type: "sui.cetus.farms.unstake";
+	poolId: string;
+	positionNftId: string;
+};
+
+type CetusFarmsHarvestIntent = {
+	type: "sui.cetus.farms.harvest";
+	poolId: string;
+	positionNftId: string;
+};
+
+type CetusFarmsWorkflowIntent =
+	| CetusFarmsStakeIntent
+	| CetusFarmsUnstakeIntent
+	| CetusFarmsHarvestIntent;
+
+type CetusFarmsWorkflowParams = {
+	runId?: string;
+	runMode?: WorkflowRunMode;
+	intentType?: CetusFarmsWorkflowIntent["type"];
+	intentText?: string;
+	network?: string;
+	rpcUrl?: string;
+	poolId?: string;
+	clmmPositionId?: string;
+	clmmPoolId?: string;
+	coinTypeA?: string;
+	coinTypeB?: string;
+	positionNftId?: string;
+	fromPrivateKey?: string;
+	confirmMainnet?: boolean;
+	confirmToken?: string;
+	waitForLocalExecution?: boolean;
+};
+
+type ParsedCetusFarmsIntentHints = {
+	intentType?: CetusFarmsWorkflowIntent["type"];
+	poolId?: string;
+	clmmPositionId?: string;
+	clmmPoolId?: string;
+	coinTypeA?: string;
+	coinTypeB?: string;
+	positionNftId?: string;
 };
 
 function workflowRunModeSchema() {
@@ -429,6 +490,148 @@ function normalizeStableLayerIntent(
 	return {
 		type: "sui.stablelayer.claim",
 		stableCoinType,
+	};
+}
+
+function parseCetusFarmsIntentText(text?: string): ParsedCetusFarmsIntentHints {
+	if (!text?.trim()) return {};
+	const lower = text.toLowerCase();
+	const addressMatches = [...text.matchAll(/0x[a-fA-F0-9]{64}/g)].map(
+		(entry) => entry[0],
+	);
+	const coinTypeMatches = [
+		...text.matchAll(/0x[a-fA-F0-9]{1,64}::[A-Za-z0-9_]+::[A-Za-z0-9_]+/g),
+	].map((entry) => entry[0]);
+
+	const poolLabelMatch =
+		text.match(
+			/(?:pool|poolId|farm pool|farms pool|farm|池子)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i,
+		) ?? null;
+	const clmmPositionLabelMatch =
+		text.match(
+			/(?:clmmPositionId|clmm position|positionId|position|仓位)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i,
+		) ?? null;
+	const clmmPoolLabelMatch =
+		text.match(/(?:clmmPoolId|clmm pool)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i) ??
+		null;
+	const positionNftLabelMatch =
+		text.match(
+			/(?:positionNftId|position nft|nft|farm position|头寸)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i,
+		) ?? null;
+
+	if (/\bharvest\b|领取奖励|收获奖励|提取奖励/i.test(lower)) {
+		return {
+			intentType: "sui.cetus.farms.harvest",
+			poolId: poolLabelMatch?.[1] || addressMatches[0],
+			positionNftId: positionNftLabelMatch?.[1] || addressMatches[1],
+		};
+	}
+
+	if (
+		/\bunstake\b|\bwithdraw\b|解除质押|解质押|取回仓位|移除质押/i.test(lower)
+	) {
+		return {
+			intentType: "sui.cetus.farms.unstake",
+			poolId: poolLabelMatch?.[1] || addressMatches[0],
+			positionNftId: positionNftLabelMatch?.[1] || addressMatches[1],
+		};
+	}
+
+	if (
+		/\bstake\b|\bdeposit\b|质押|存入农场|farm stake|farm deposit/i.test(lower)
+	) {
+		return {
+			intentType: "sui.cetus.farms.stake",
+			poolId: poolLabelMatch?.[1] || addressMatches[0],
+			clmmPositionId: clmmPositionLabelMatch?.[1] || addressMatches[1],
+			clmmPoolId: clmmPoolLabelMatch?.[1] || addressMatches[2],
+			coinTypeA: coinTypeMatches[0],
+			coinTypeB: coinTypeMatches[1],
+		};
+	}
+
+	return {};
+}
+
+function inferCetusFarmsIntentType(
+	params: CetusFarmsWorkflowParams,
+	parsed: ParsedCetusFarmsIntentHints,
+): CetusFarmsWorkflowIntent["type"] {
+	if (params.intentType) return params.intentType;
+	if (parsed.intentType) return parsed.intentType;
+	if (params.positionNftId?.trim()) return "sui.cetus.farms.unstake";
+	if (
+		params.clmmPositionId?.trim() &&
+		params.clmmPoolId?.trim() &&
+		params.coinTypeA?.trim() &&
+		params.coinTypeB?.trim()
+	) {
+		return "sui.cetus.farms.stake";
+	}
+	throw new Error(
+		"Cannot infer Cetus farms intentType. Provide intentType or enough structured fields.",
+	);
+}
+
+function normalizeCetusFarmsIntent(
+	params: CetusFarmsWorkflowParams,
+): CetusFarmsWorkflowIntent {
+	const parsed = parseCetusFarmsIntentText(params.intentText);
+	const intentType = inferCetusFarmsIntentType(params, parsed);
+	const poolId = params.poolId?.trim() || parsed.poolId;
+	if (!poolId) {
+		throw new Error("poolId is required for Cetus farms workflow.");
+	}
+
+	if (intentType === "sui.cetus.farms.stake") {
+		const clmmPositionId =
+			params.clmmPositionId?.trim() || parsed.clmmPositionId;
+		const clmmPoolId = params.clmmPoolId?.trim() || parsed.clmmPoolId;
+		const coinTypeA = params.coinTypeA?.trim() || parsed.coinTypeA;
+		const coinTypeB = params.coinTypeB?.trim() || parsed.coinTypeB;
+		if (!clmmPositionId) {
+			throw new Error(
+				"clmmPositionId is required for intentType=sui.cetus.farms.stake",
+			);
+		}
+		if (!clmmPoolId) {
+			throw new Error(
+				"clmmPoolId is required for intentType=sui.cetus.farms.stake",
+			);
+		}
+		if (!coinTypeA || !coinTypeB) {
+			throw new Error(
+				"coinTypeA and coinTypeB are required for intentType=sui.cetus.farms.stake",
+			);
+		}
+		return {
+			type: "sui.cetus.farms.stake",
+			poolId,
+			clmmPositionId,
+			clmmPoolId,
+			coinTypeA,
+			coinTypeB,
+		};
+	}
+
+	const positionNftId = params.positionNftId?.trim() || parsed.positionNftId;
+	if (!positionNftId) {
+		throw new Error(
+			"positionNftId is required for Cetus farms unstake/harvest intents",
+		);
+	}
+	if (intentType === "sui.cetus.farms.harvest") {
+		return {
+			type: "sui.cetus.farms.harvest",
+			poolId,
+			positionNftId,
+		};
+	}
+
+	return {
+		type: "sui.cetus.farms.unstake",
+		poolId,
+		positionNftId,
 	};
 }
 
@@ -947,6 +1150,80 @@ async function buildStableLayerSimulation(
 	};
 }
 
+async function buildCetusFarmsSimulation(
+	intent: CetusFarmsWorkflowIntent,
+	network: SuiNetwork,
+	signerAddress: string,
+	rpcUrl?: string,
+): Promise<{
+	tx: Transaction;
+	artifacts: Record<string, unknown>;
+}> {
+	const cetusNetwork = resolveCetusV2Network(network);
+	const normalizedRpcUrl = rpcUrl?.trim();
+
+	if (intent.type === "sui.cetus.farms.stake") {
+		const tx = await buildCetusFarmsStakeTransaction({
+			network: cetusNetwork,
+			rpcUrl: normalizedRpcUrl,
+			sender: signerAddress,
+			poolId: intent.poolId,
+			clmmPositionId: intent.clmmPositionId,
+			clmmPoolId: intent.clmmPoolId,
+			coinTypeA: intent.coinTypeA,
+			coinTypeB: intent.coinTypeB,
+		});
+		return {
+			tx,
+			artifacts: {
+				cetusNetwork,
+				rpcUrl: normalizedRpcUrl ?? null,
+				poolId: intent.poolId,
+				clmmPositionId: intent.clmmPositionId,
+				clmmPoolId: intent.clmmPoolId,
+				coinTypeA: intent.coinTypeA,
+				coinTypeB: intent.coinTypeB,
+			},
+		};
+	}
+
+	if (intent.type === "sui.cetus.farms.unstake") {
+		const tx = await buildCetusFarmsUnstakeTransaction({
+			network: cetusNetwork,
+			rpcUrl: normalizedRpcUrl,
+			sender: signerAddress,
+			poolId: intent.poolId,
+			positionNftId: intent.positionNftId,
+		});
+		return {
+			tx,
+			artifacts: {
+				cetusNetwork,
+				rpcUrl: normalizedRpcUrl ?? null,
+				poolId: intent.poolId,
+				positionNftId: intent.positionNftId,
+			},
+		};
+	}
+
+	const tx = await buildCetusFarmsHarvestTransaction({
+		network: cetusNetwork,
+		rpcUrl: normalizedRpcUrl,
+		sender: signerAddress,
+		poolId: intent.poolId,
+		positionNftId: intent.positionNftId,
+	});
+	return {
+		tx,
+		artifacts: {
+			cetusNetwork,
+			rpcUrl: normalizedRpcUrl ?? null,
+			poolId: intent.poolId,
+			positionNftId: intent.positionNftId,
+		},
+	};
+}
+
 function resolveExecutionTool(
 	name:
 		| "sui_transferSui"
@@ -954,6 +1231,9 @@ function resolveExecutionTool(
 		| "sui_swapCetus"
 		| "sui_cetusAddLiquidity"
 		| "sui_cetusRemoveLiquidity"
+		| "sui_cetusFarmsStake"
+		| "sui_cetusFarmsUnstake"
+		| "sui_cetusFarmsHarvest"
 		| "sui_stableLayerMint"
 		| "sui_stableLayerBurn"
 		| "sui_stableLayerClaim",
@@ -1088,6 +1368,50 @@ async function executeStableLayerIntent(
 	return tool.execute("wf-stablelayer-execute", {
 		stableCoinType: intent.stableCoinType,
 		network,
+		fromPrivateKey: params.fromPrivateKey,
+		waitForLocalExecution: params.waitForLocalExecution,
+		confirmMainnet: params.confirmMainnet,
+	});
+}
+
+async function executeCetusFarmsIntent(
+	intent: CetusFarmsWorkflowIntent,
+	params: CetusFarmsWorkflowParams,
+	network: SuiNetwork,
+) {
+	if (intent.type === "sui.cetus.farms.stake") {
+		const tool = resolveExecutionTool("sui_cetusFarmsStake");
+		return tool.execute("wf-cetus-farms-execute", {
+			poolId: intent.poolId,
+			clmmPositionId: intent.clmmPositionId,
+			clmmPoolId: intent.clmmPoolId,
+			coinTypeA: intent.coinTypeA,
+			coinTypeB: intent.coinTypeB,
+			network,
+			rpcUrl: params.rpcUrl,
+			fromPrivateKey: params.fromPrivateKey,
+			waitForLocalExecution: params.waitForLocalExecution,
+			confirmMainnet: params.confirmMainnet,
+		});
+	}
+	if (intent.type === "sui.cetus.farms.unstake") {
+		const tool = resolveExecutionTool("sui_cetusFarmsUnstake");
+		return tool.execute("wf-cetus-farms-execute", {
+			poolId: intent.poolId,
+			positionNftId: intent.positionNftId,
+			network,
+			rpcUrl: params.rpcUrl,
+			fromPrivateKey: params.fromPrivateKey,
+			waitForLocalExecution: params.waitForLocalExecution,
+			confirmMainnet: params.confirmMainnet,
+		});
+	}
+	const tool = resolveExecutionTool("sui_cetusFarmsHarvest");
+	return tool.execute("wf-cetus-farms-execute", {
+		poolId: intent.poolId,
+		positionNftId: intent.positionNftId,
+		network,
+		rpcUrl: params.rpcUrl,
 		fromPrivateKey: params.fromPrivateKey,
 		waitForLocalExecution: params.waitForLocalExecution,
 		confirmMainnet: params.confirmMainnet,
@@ -1416,6 +1740,163 @@ export function createSuiWorkflowTools() {
 						runMode,
 						network,
 						stableLayerNetwork,
+						intentType: intent.type,
+						intent,
+						needsMainnetConfirmation,
+						confirmToken,
+						requestType: resolveRequestType(params.waitForLocalExecution),
+						artifacts: {
+							execute: executeResult.details ?? null,
+						},
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: "w3rt_run_sui_cetus_farms_workflow_v0",
+			label: "W3RT Sui Cetus Farms Workflow v0",
+			description:
+				"Deterministic Cetus farms workflow entrypoint: analysis -> simulate -> execute",
+			parameters: Type.Object({
+				runId: Type.Optional(Type.String()),
+				runMode: workflowRunModeSchema(),
+				intentType: Type.Optional(
+					Type.Union([
+						Type.Literal("sui.cetus.farms.stake"),
+						Type.Literal("sui.cetus.farms.unstake"),
+						Type.Literal("sui.cetus.farms.harvest"),
+					]),
+				),
+				intentText: Type.Optional(Type.String()),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				poolId: Type.Optional(Type.String()),
+				clmmPositionId: Type.Optional(Type.String()),
+				clmmPoolId: Type.Optional(Type.String()),
+				coinTypeA: Type.Optional(Type.String()),
+				coinTypeB: Type.Optional(Type.String()),
+				positionNftId: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(Type.String()),
+				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+				confirmToken: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as CetusFarmsWorkflowParams;
+				const runId = createRunId(params.runId);
+				const runMode = parseRunMode(params.runMode);
+				const network = parseSuiNetwork(params.network);
+				const cetusNetwork = resolveCetusV2Network(network);
+				const intent = normalizeCetusFarmsIntent(params);
+				const needsMainnetConfirmation = network === "mainnet";
+				const confirmToken = createConfirmToken(runId, network, intent);
+				const plan = ["analysis", "simulate", "execute"];
+
+				if (runMode === "analysis") {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Workflow analyzed: ${intent.type}`,
+							},
+						],
+						details: {
+							runId,
+							runMode,
+							network,
+							cetusNetwork,
+							intentType: intent.type,
+							intent,
+							needsMainnetConfirmation,
+							confirmToken,
+							artifacts: {
+								analysis: {
+									intent,
+									plan,
+								},
+							},
+						},
+					};
+				}
+
+				if (runMode === "simulate") {
+					const signer = resolveSuiKeypair(params.fromPrivateKey);
+					const sender = signer.toSuiAddress();
+					const { tx, artifacts } = await buildCetusFarmsSimulation(
+						intent,
+						network,
+						sender,
+						params.rpcUrl,
+					);
+					tx.setSender(sender);
+					const client = getSuiClient(network, params.rpcUrl);
+					const simulation = await client.devInspectTransactionBlock({
+						sender,
+						transactionBlock: tx,
+					});
+					const { status, error } = getSimulationStatus(simulation);
+					if (status !== "success") {
+						throw new Error(
+							`Simulation failed: ${error ?? "unknown error"} (intent=${intent.type})`,
+						);
+					}
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Workflow simulated: ${intent.type} status=${status}`,
+							},
+						],
+						details: {
+							runId,
+							runMode,
+							network,
+							cetusNetwork,
+							intentType: intent.type,
+							intent,
+							needsMainnetConfirmation,
+							confirmToken,
+							artifacts: {
+								simulate: {
+									status,
+									error,
+									...artifacts,
+								},
+							},
+						},
+					};
+				}
+
+				if (needsMainnetConfirmation) {
+					if (params.confirmMainnet !== true) {
+						throw new Error(
+							"Mainnet workflow execute is blocked. Set confirmMainnet=true.",
+						);
+					}
+					if (!params.confirmToken || params.confirmToken !== confirmToken) {
+						throw new Error(
+							"Invalid confirmToken for mainnet execute. Run simulate first and pass returned confirmToken.",
+						);
+					}
+				}
+
+				const executeResult = await executeCetusFarmsIntent(
+					intent,
+					params,
+					network,
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Workflow executed: ${intent.type}`,
+						},
+					],
+					details: {
+						runId,
+						runMode,
+						network,
+						cetusNetwork,
 						intentType: intent.type,
 						intent,
 						needsMainnetConfirmation,

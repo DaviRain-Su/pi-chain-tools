@@ -29,6 +29,13 @@ const stableLayerMocks = vi.hoisted(() => ({
 	resolveStableLayerNetwork: vi.fn(() => "mainnet"),
 }));
 
+const cetusV2Mocks = vi.hoisted(() => ({
+	getCetusFarmsPools: vi.fn(),
+	getCetusFarmsPositions: vi.fn(),
+	getCetusVaultsBalances: vi.fn(),
+	resolveCetusV2Network: vi.fn(() => "mainnet"),
+}));
+
 vi.mock("@cetusprotocol/aggregator-sdk", () => ({
 	AggregatorClient: aggregatorMocks.AggregatorClient,
 	Env: aggregatorMocks.Env,
@@ -51,6 +58,13 @@ vi.mock("../runtime.js", async () => {
 vi.mock("../stablelayer.js", () => ({
 	getStableLayerSupply: stableLayerMocks.getStableLayerSupply,
 	resolveStableLayerNetwork: stableLayerMocks.resolveStableLayerNetwork,
+}));
+
+vi.mock("../cetus-v2.js", () => ({
+	getCetusFarmsPools: cetusV2Mocks.getCetusFarmsPools,
+	getCetusFarmsPositions: cetusV2Mocks.getCetusFarmsPositions,
+	getCetusVaultsBalances: cetusV2Mocks.getCetusVaultsBalances,
+	resolveCetusV2Network: cetusV2Mocks.resolveCetusV2Network,
 }));
 
 import { createSuiReadTools } from "./read.js";
@@ -80,6 +94,18 @@ beforeEach(() => {
 		totalSupply: "1000000000",
 		coinTypeSupply: null,
 	});
+	cetusV2Mocks.resolveCetusV2Network.mockReturnValue("mainnet");
+	cetusV2Mocks.getCetusFarmsPools.mockResolvedValue({
+		pools: [],
+		hasNextPage: false,
+		nextCursor: null,
+	});
+	cetusV2Mocks.getCetusFarmsPositions.mockResolvedValue({
+		positions: [],
+		hasNextPage: false,
+		nextCursor: null,
+	});
+	cetusV2Mocks.getCetusVaultsBalances.mockResolvedValue([]);
 });
 
 describe("sui_getBalance", () => {
@@ -366,6 +392,106 @@ describe("sui_getStableLayerSupply", () => {
 			stableLayerNetwork: "mainnet",
 			totalSupply: "123456789",
 			coinTypeSupply: "1000000",
+		});
+	});
+});
+
+describe("sui_getCetusFarmsPools", () => {
+	it("returns farms pool summaries", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		cetusV2Mocks.getCetusFarmsPools.mockResolvedValue({
+			pools: [
+				{
+					id: "0xpool1",
+					clmm_pool_id: "0xclmm1",
+					rewarders: [{}, {}],
+				},
+			],
+			hasNextPage: false,
+			nextCursor: null,
+		});
+		const tool = getTool("sui_getCetusFarmsPools");
+		const result = await tool.execute("cetus-read-1", {
+			network: "mainnet",
+		});
+		expect(cetusV2Mocks.getCetusFarmsPools).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			poolCount: 1,
+			pools: [
+				{
+					poolId: "0xpool1",
+					clmmPoolId: "0xclmm1",
+					rewarderCount: 2,
+				},
+			],
+		});
+	});
+});
+
+describe("sui_getCetusFarmsPositions", () => {
+	it("returns owner farms position summaries", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		cetusV2Mocks.getCetusFarmsPositions.mockResolvedValue({
+			positions: [
+				{
+					id: "0xposnft1",
+					pool_id: "0xpool1",
+					clmm_position_id: "0xclmmpos1",
+					clmm_pool_id: "0xclmm1",
+					rewards: [{}, {}],
+				},
+			],
+			hasNextPage: false,
+			nextCursor: null,
+		});
+		const tool = getTool("sui_getCetusFarmsPositions");
+		const result = await tool.execute("cetus-read-2", {
+			owner: "0xowner",
+			network: "mainnet",
+		});
+		expect(cetusV2Mocks.getCetusFarmsPositions).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			owner: "0xowner",
+			positionCount: 1,
+			positions: [
+				{
+					positionNftId: "0xposnft1",
+					poolId: "0xpool1",
+					clmmPositionId: "0xclmmpos1",
+					clmmPoolId: "0xclmm1",
+					rewardCount: 2,
+				},
+			],
+		});
+	});
+});
+
+describe("sui_getCetusVaultsBalances", () => {
+	it("returns owner vault balance summaries", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		cetusV2Mocks.getCetusVaultsBalances.mockResolvedValue([
+			{
+				vault_id: "0xvault1",
+				clmm_pool_id: "0xclmm1",
+				lp_token_balance: "12345",
+			},
+		]);
+		const tool = getTool("sui_getCetusVaultsBalances");
+		const result = await tool.execute("cetus-read-3", {
+			owner: "0xowner",
+			network: "mainnet",
+		});
+		expect(cetusV2Mocks.getCetusVaultsBalances).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			owner: "0xowner",
+			vaultCount: 1,
+			balances: [
+				{
+					vaultId: "0xvault1",
+					clmmPoolId: "0xclmm1",
+					lpTokenBalance: "12345",
+				},
+			],
 		});
 	});
 });

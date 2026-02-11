@@ -70,6 +70,13 @@ const stableLayerMocks = vi.hoisted(() => ({
 	buildStableLayerClaimTransaction: vi.fn(),
 }));
 
+const cetusV2Mocks = vi.hoisted(() => ({
+	resolveCetusV2Network: vi.fn(() => "mainnet"),
+	buildCetusFarmsStakeTransaction: vi.fn(),
+	buildCetusFarmsUnstakeTransaction: vi.fn(),
+	buildCetusFarmsHarvestTransaction: vi.fn(),
+}));
+
 vi.mock("../runtime.js", async () => {
 	const actual =
 		await vi.importActual<typeof import("../runtime.js")>("../runtime.js");
@@ -98,6 +105,15 @@ vi.mock("../stablelayer.js", () => ({
 		stableLayerMocks.buildStableLayerBurnTransaction,
 	buildStableLayerClaimTransaction:
 		stableLayerMocks.buildStableLayerClaimTransaction,
+}));
+
+vi.mock("../cetus-v2.js", () => ({
+	resolveCetusV2Network: cetusV2Mocks.resolveCetusV2Network,
+	buildCetusFarmsStakeTransaction: cetusV2Mocks.buildCetusFarmsStakeTransaction,
+	buildCetusFarmsUnstakeTransaction:
+		cetusV2Mocks.buildCetusFarmsUnstakeTransaction,
+	buildCetusFarmsHarvestTransaction:
+		cetusV2Mocks.buildCetusFarmsHarvestTransaction,
 }));
 
 import { createSuiExecuteTools } from "./execute.js";
@@ -141,6 +157,16 @@ beforeEach(() => {
 	});
 	stableLayerMocks.buildStableLayerClaimTransaction.mockResolvedValue({
 		tx: "stable-claim",
+	});
+	cetusV2Mocks.resolveCetusV2Network.mockReturnValue("mainnet");
+	cetusV2Mocks.buildCetusFarmsStakeTransaction.mockResolvedValue({
+		tx: "cetus-farms-stake",
+	});
+	cetusV2Mocks.buildCetusFarmsUnstakeTransaction.mockResolvedValue({
+		tx: "cetus-farms-unstake",
+	});
+	cetusV2Mocks.buildCetusFarmsHarvestTransaction.mockResolvedValue({
+		tx: "cetus-farms-harvest",
 	});
 });
 
@@ -554,6 +580,135 @@ describe("sui_cetusRemoveLiquidity", () => {
 			digest: "0xlprem",
 			status: "success",
 			deltaLiquidity: "12345",
+		});
+	});
+});
+
+describe("sui_cetusFarmsStake", () => {
+	it("blocks mainnet execution without confirmMainnet", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		const tool = getTool("sui_cetusFarmsStake");
+		await expect(
+			tool.execute("farms-s1", {
+				poolId: "0xpool",
+				clmmPositionId: "0xclmm-pos",
+				clmmPoolId: "0xclmm-pool",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: "0x2::usdc::USDC",
+				network: "mainnet",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+	});
+
+	it("builds and sends Cetus farms stake tx", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("testnet");
+		const signAndExecuteTransaction = vi.fn().mockResolvedValue({
+			digest: "0xfarms-stake",
+			confirmedLocalExecution: true,
+			effects: { status: { status: "success" } },
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({ signAndExecuteTransaction });
+
+		const tool = getTool("sui_cetusFarmsStake");
+		const result = await tool.execute("farms-s2", {
+			poolId: "0xpool",
+			clmmPositionId: "0xclmm-pos",
+			clmmPoolId: "0xclmm-pool",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x2::usdc::USDC",
+			network: "testnet",
+		});
+
+		expect(cetusV2Mocks.buildCetusFarmsStakeTransaction).toHaveBeenCalledWith({
+			network: "mainnet",
+			rpcUrl: undefined,
+			sender:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			poolId: "0xpool",
+			clmmPositionId: "0xclmm-pos",
+			clmmPoolId: "0xclmm-pool",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x2::usdc::USDC",
+		});
+		expect(signAndExecuteTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			digest: "0xfarms-stake",
+			status: "success",
+			poolId: "0xpool",
+			clmmPositionId: "0xclmm-pos",
+			clmmPoolId: "0xclmm-pool",
+		});
+	});
+});
+
+describe("sui_cetusFarmsUnstake", () => {
+	it("builds and sends Cetus farms unstake tx", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("testnet");
+		const signAndExecuteTransaction = vi.fn().mockResolvedValue({
+			digest: "0xfarms-unstake",
+			confirmedLocalExecution: true,
+			effects: { status: { status: "success" } },
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({ signAndExecuteTransaction });
+
+		const tool = getTool("sui_cetusFarmsUnstake");
+		const result = await tool.execute("farms-u1", {
+			poolId: "0xpool",
+			positionNftId: "0xposnft",
+			network: "testnet",
+		});
+
+		expect(cetusV2Mocks.buildCetusFarmsUnstakeTransaction).toHaveBeenCalledWith(
+			{
+				network: "mainnet",
+				rpcUrl: undefined,
+				sender:
+					"0x1111111111111111111111111111111111111111111111111111111111111111",
+				poolId: "0xpool",
+				positionNftId: "0xposnft",
+			},
+		);
+		expect(result.details).toMatchObject({
+			digest: "0xfarms-unstake",
+			status: "success",
+			poolId: "0xpool",
+			positionNftId: "0xposnft",
+		});
+	});
+});
+
+describe("sui_cetusFarmsHarvest", () => {
+	it("builds and sends Cetus farms harvest tx", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("testnet");
+		const signAndExecuteTransaction = vi.fn().mockResolvedValue({
+			digest: "0xfarms-harvest",
+			confirmedLocalExecution: true,
+			effects: { status: { status: "success" } },
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({ signAndExecuteTransaction });
+
+		const tool = getTool("sui_cetusFarmsHarvest");
+		const result = await tool.execute("farms-h1", {
+			poolId: "0xpool",
+			positionNftId: "0xposnft",
+			network: "testnet",
+		});
+
+		expect(cetusV2Mocks.buildCetusFarmsHarvestTransaction).toHaveBeenCalledWith(
+			{
+				network: "mainnet",
+				rpcUrl: undefined,
+				sender:
+					"0x1111111111111111111111111111111111111111111111111111111111111111",
+				poolId: "0xpool",
+				positionNftId: "0xposnft",
+			},
+		);
+		expect(result.details).toMatchObject({
+			digest: "0xfarms-harvest",
+			status: "success",
+			poolId: "0xpool",
+			positionNftId: "0xposnft",
 		});
 	});
 });

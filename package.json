@@ -25,6 +25,9 @@
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",
 		"@cetusprotocol/cetus-sui-clmm-sdk": "^5.4.0",
+		"@cetusprotocol/farms-sdk": "^1.4.0",
+		"@cetusprotocol/sui-clmm-sdk": "^1.4.0",
+		"@cetusprotocol/vaults-sdk": "^1.7.0",
 		"@jup-ag/api": "^6.0.48",
 		"@kamino-finance/klend-sdk": "^7.3.18",
 		"@meteora-ag/dlmm": "^1.9.3",

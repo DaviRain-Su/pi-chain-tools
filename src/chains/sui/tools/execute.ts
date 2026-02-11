@@ -4,6 +4,12 @@ import { Transaction } from "@mysten/sui/transactions";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
+	buildCetusFarmsHarvestTransaction,
+	buildCetusFarmsStakeTransaction,
+	buildCetusFarmsUnstakeTransaction,
+	resolveCetusV2Network,
+} from "../cetus-v2.js";
+import {
 	SUI_COIN_TYPE,
 	SUI_TOOL_PREFIX,
 	type SuiNetwork,
@@ -95,6 +101,39 @@ type SuiCetusRemoveLiquidityParams = {
 	minAmountB: string;
 	collectFee?: boolean;
 	rewarderCoinTypes?: string[];
+	network?: string;
+	rpcUrl?: string;
+	fromPrivateKey?: string;
+	waitForLocalExecution?: boolean;
+	confirmMainnet?: boolean;
+};
+
+type SuiCetusFarmsStakeParams = {
+	poolId: string;
+	clmmPositionId: string;
+	clmmPoolId: string;
+	coinTypeA: string;
+	coinTypeB: string;
+	network?: string;
+	rpcUrl?: string;
+	fromPrivateKey?: string;
+	waitForLocalExecution?: boolean;
+	confirmMainnet?: boolean;
+};
+
+type SuiCetusFarmsUnstakeParams = {
+	poolId: string;
+	positionNftId: string;
+	network?: string;
+	rpcUrl?: string;
+	fromPrivateKey?: string;
+	waitForLocalExecution?: boolean;
+	confirmMainnet?: boolean;
+};
+
+type SuiCetusFarmsHarvestParams = {
+	poolId: string;
+	positionNftId: string;
 	network?: string;
 	rpcUrl?: string;
 	fromPrivateKey?: string;
@@ -899,6 +938,240 @@ export function createSuiExecuteTools() {
 						deltaLiquidity: params.deltaLiquidity.trim(),
 						minAmountA: params.minAmountA.trim(),
 						minAmountB: params.minAmountB.trim(),
+						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
+						explorer: getSuiExplorerTransactionUrl(response.digest, network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}cetusFarmsStake`,
+			label: "Sui Cetus Farms Stake",
+			description:
+				"Stake a Cetus CLMM position into Cetus v2 farms and submit on-chain transaction.",
+			parameters: Type.Object({
+				poolId: Type.String({ description: "Cetus farms pool id" }),
+				clmmPositionId: Type.String({
+					description: "Cetus CLMM position id to stake",
+				}),
+				clmmPoolId: Type.String({ description: "Related Cetus CLMM pool id" }),
+				coinTypeA: Type.String({ description: "CLMM coinTypeA" }),
+				coinTypeB: Type.String({ description: "CLMM coinTypeB" }),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(Type.String()),
+				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiCetusFarmsStakeParams;
+				const network = parseSuiNetwork(params.network);
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const cetusNetwork = resolveCetusV2Network(network);
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const fromAddress = signer.toSuiAddress();
+				const tx = await buildCetusFarmsStakeTransaction({
+					network: cetusNetwork,
+					rpcUrl: params.rpcUrl?.trim(),
+					sender: fromAddress,
+					poolId: params.poolId,
+					clmmPositionId: params.clmmPositionId,
+					clmmPoolId: params.clmmPoolId,
+					coinTypeA: params.coinTypeA,
+					coinTypeB: params.coinTypeB,
+				});
+				const client = getSuiClient(network, params.rpcUrl);
+				const response = await client.signAndExecuteTransaction({
+					signer,
+					transaction: tx,
+					options: {
+						showEffects: true,
+						showEvents: true,
+						showObjectChanges: true,
+						showBalanceChanges: true,
+					},
+					requestType: resolveRequestType(params.waitForLocalExecution),
+				});
+
+				const status = response.effects?.status.status ?? "unknown";
+				const error =
+					response.effects?.status.error ?? response.errors?.[0] ?? null;
+				if (status === "failure") {
+					throw new Error(
+						`Cetus farms stake failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+					);
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Cetus farms stake submitted: digest=${response.digest} status=${status}`,
+						},
+					],
+					details: {
+						digest: response.digest,
+						status,
+						error,
+						fromAddress,
+						network,
+						cetusNetwork,
+						rpcUrl: params.rpcUrl?.trim() ?? null,
+						poolId: params.poolId.trim(),
+						clmmPositionId: params.clmmPositionId.trim(),
+						clmmPoolId: params.clmmPoolId.trim(),
+						coinTypeA: params.coinTypeA.trim(),
+						coinTypeB: params.coinTypeB.trim(),
+						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
+						explorer: getSuiExplorerTransactionUrl(response.digest, network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}cetusFarmsUnstake`,
+			label: "Sui Cetus Farms Unstake",
+			description:
+				"Unstake a Cetus farms position NFT and submit on-chain transaction.",
+			parameters: Type.Object({
+				poolId: Type.String({ description: "Cetus farms pool id" }),
+				positionNftId: Type.String({
+					description: "Farms position NFT id returned by stake",
+				}),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(Type.String()),
+				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiCetusFarmsUnstakeParams;
+				const network = parseSuiNetwork(params.network);
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const cetusNetwork = resolveCetusV2Network(network);
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const fromAddress = signer.toSuiAddress();
+				const tx = await buildCetusFarmsUnstakeTransaction({
+					network: cetusNetwork,
+					rpcUrl: params.rpcUrl?.trim(),
+					sender: fromAddress,
+					poolId: params.poolId,
+					positionNftId: params.positionNftId,
+				});
+				const client = getSuiClient(network, params.rpcUrl);
+				const response = await client.signAndExecuteTransaction({
+					signer,
+					transaction: tx,
+					options: {
+						showEffects: true,
+						showEvents: true,
+						showObjectChanges: true,
+						showBalanceChanges: true,
+					},
+					requestType: resolveRequestType(params.waitForLocalExecution),
+				});
+
+				const status = response.effects?.status.status ?? "unknown";
+				const error =
+					response.effects?.status.error ?? response.errors?.[0] ?? null;
+				if (status === "failure") {
+					throw new Error(
+						`Cetus farms unstake failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+					);
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Cetus farms unstake submitted: digest=${response.digest} status=${status}`,
+						},
+					],
+					details: {
+						digest: response.digest,
+						status,
+						error,
+						fromAddress,
+						network,
+						cetusNetwork,
+						rpcUrl: params.rpcUrl?.trim() ?? null,
+						poolId: params.poolId.trim(),
+						positionNftId: params.positionNftId.trim(),
+						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
+						explorer: getSuiExplorerTransactionUrl(response.digest, network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}cetusFarmsHarvest`,
+			label: "Sui Cetus Farms Harvest",
+			description:
+				"Harvest rewards from a Cetus farms position NFT and submit on-chain transaction.",
+			parameters: Type.Object({
+				poolId: Type.String({ description: "Cetus farms pool id" }),
+				positionNftId: Type.String({
+					description: "Farms position NFT id used for reward harvest",
+				}),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(Type.String()),
+				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiCetusFarmsHarvestParams;
+				const network = parseSuiNetwork(params.network);
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const cetusNetwork = resolveCetusV2Network(network);
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const fromAddress = signer.toSuiAddress();
+				const tx = await buildCetusFarmsHarvestTransaction({
+					network: cetusNetwork,
+					rpcUrl: params.rpcUrl?.trim(),
+					sender: fromAddress,
+					poolId: params.poolId,
+					positionNftId: params.positionNftId,
+				});
+				const client = getSuiClient(network, params.rpcUrl);
+				const response = await client.signAndExecuteTransaction({
+					signer,
+					transaction: tx,
+					options: {
+						showEffects: true,
+						showEvents: true,
+						showObjectChanges: true,
+						showBalanceChanges: true,
+					},
+					requestType: resolveRequestType(params.waitForLocalExecution),
+				});
+
+				const status = response.effects?.status.status ?? "unknown";
+				const error =
+					response.effects?.status.error ?? response.errors?.[0] ?? null;
+				if (status === "failure") {
+					throw new Error(
+						`Cetus farms harvest failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+					);
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Cetus farms harvest submitted: digest=${response.digest} status=${status}`,
+						},
+					],
+					details: {
+						digest: response.digest,
+						status,
+						error,
+						fromAddress,
+						network,
+						cetusNetwork,
+						rpcUrl: params.rpcUrl?.trim() ?? null,
+						poolId: params.poolId.trim(),
+						positionNftId: params.positionNftId.trim(),
 						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
 						explorer: getSuiExplorerTransactionUrl(response.digest, network),
 					},
