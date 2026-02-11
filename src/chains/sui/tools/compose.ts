@@ -15,6 +15,13 @@ import {
 	suiNetworkSchema,
 	toMist,
 } from "../runtime.js";
+import {
+	STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+	buildStableLayerBurnTransaction,
+	buildStableLayerClaimTransaction,
+	buildStableLayerMintTransaction,
+	resolveStableLayerNetwork,
+} from "../stablelayer.js";
 
 type BuildTransferSuiParams = {
 	fromAddress: string;
@@ -79,6 +86,28 @@ type BuildCetusRemoveLiquidityParams = {
 	rewarderCoinTypes?: string[];
 	network?: string;
 	rpcUrl?: string;
+};
+
+type BuildStableLayerMintParams = {
+	fromAddress: string;
+	stableCoinType: string;
+	amountUsdcRaw: string;
+	usdcCoinType?: string;
+	network?: string;
+};
+
+type BuildStableLayerBurnParams = {
+	fromAddress: string;
+	stableCoinType: string;
+	amountStableRaw?: string;
+	burnAll?: boolean;
+	network?: string;
+};
+
+type BuildStableLayerClaimParams = {
+	fromAddress: string;
+	stableCoinType: string;
+	network?: string;
 };
 
 function resolveTransferAmount(params: BuildTransferSuiParams): bigint {
@@ -618,6 +647,179 @@ export function createSuiComposeTools() {
 						deltaLiquidity: params.deltaLiquidity.trim(),
 						minAmountA: params.minAmountA.trim(),
 						minAmountB: params.minAmountB.trim(),
+						serializedTransaction: serializeTransactionPayload(tx),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}buildStableLayerMintTransaction`,
+			label: "Sui Build Stable Layer Mint Transaction",
+			description:
+				"Build unsigned Stable Layer mint transaction (USDC -> stable coin) using stable-layer-sdk (no broadcast).",
+			parameters: Type.Object({
+				fromAddress: Type.String({
+					description: "Sender Sui address (transaction sender)",
+				}),
+				stableCoinType: Type.String({
+					description: "Stable Layer coin type, e.g. 0x...::btc_usdc::BtcUSDC",
+				}),
+				amountUsdcRaw: Type.String({
+					description: "USDC raw integer amount used for mint",
+				}),
+				usdcCoinType: Type.Optional(
+					Type.String({
+						description: `USDC coin type override (default ${STABLE_LAYER_DEFAULT_USDC_COIN_TYPE})`,
+					}),
+				),
+				network: suiNetworkSchema(),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as BuildStableLayerMintParams;
+				const network = parseSuiNetwork(params.network);
+				const stableLayerNetwork = resolveStableLayerNetwork(network);
+				const fromAddress = normalizeAtPath(params.fromAddress);
+				const amountUsdcRaw = parsePositiveBigInt(
+					params.amountUsdcRaw,
+					"amountUsdcRaw",
+				);
+				const tx = await buildStableLayerMintTransaction({
+					network: stableLayerNetwork,
+					sender: fromAddress,
+					stableCoinType: params.stableCoinType.trim(),
+					amountUsdcRaw,
+					usdcCoinType: params.usdcCoinType?.trim(),
+					autoTransfer: true,
+				});
+				maybeSetSender(tx, fromAddress);
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Built Stable Layer mint transaction: stableCoinType=${params.stableCoinType.trim()} amountUsdcRaw=${amountUsdcRaw.toString()}`,
+						},
+					],
+					details: {
+						network,
+						stableLayerNetwork,
+						fromAddress,
+						stableCoinType: params.stableCoinType.trim(),
+						amountUsdcRaw: amountUsdcRaw.toString(),
+						usdcCoinType:
+							params.usdcCoinType?.trim() ||
+							STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+						serializedTransaction: serializeTransactionPayload(tx),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}buildStableLayerBurnTransaction`,
+			label: "Sui Build Stable Layer Burn Transaction",
+			description:
+				"Build unsigned Stable Layer burn transaction (stable coin -> USDC) using stable-layer-sdk (no broadcast).",
+			parameters: Type.Object({
+				fromAddress: Type.String({
+					description: "Sender Sui address (transaction sender)",
+				}),
+				stableCoinType: Type.String({
+					description: "Stable Layer coin type, e.g. 0x...::btc_usdc::BtcUSDC",
+				}),
+				amountStableRaw: Type.Optional(
+					Type.String({
+						description:
+							"Stable coin raw integer amount to burn (required unless burnAll=true)",
+					}),
+				),
+				burnAll: Type.Optional(
+					Type.Boolean({
+						description:
+							"When true, burn all wallet balance for stableCoinType and ignore amountStableRaw",
+					}),
+				),
+				network: suiNetworkSchema(),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as BuildStableLayerBurnParams;
+				const network = parseSuiNetwork(params.network);
+				const stableLayerNetwork = resolveStableLayerNetwork(network);
+				const fromAddress = normalizeAtPath(params.fromAddress);
+				const burnAll = params.burnAll === true;
+				const amountStableRaw = params.amountStableRaw?.trim()
+					? parsePositiveBigInt(params.amountStableRaw, "amountStableRaw")
+					: undefined;
+				if (!burnAll && amountStableRaw == null) {
+					throw new Error("amountStableRaw is required unless burnAll=true.");
+				}
+				const tx = await buildStableLayerBurnTransaction({
+					network: stableLayerNetwork,
+					sender: fromAddress,
+					stableCoinType: params.stableCoinType.trim(),
+					amountStableRaw,
+					burnAll,
+					autoTransfer: true,
+				});
+				maybeSetSender(tx, fromAddress);
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Built Stable Layer burn transaction: stableCoinType=${params.stableCoinType.trim()} burnAll=${burnAll}${amountStableRaw ? ` amountStableRaw=${amountStableRaw.toString()}` : ""}`,
+						},
+					],
+					details: {
+						network,
+						stableLayerNetwork,
+						fromAddress,
+						stableCoinType: params.stableCoinType.trim(),
+						burnAll,
+						amountStableRaw: amountStableRaw?.toString() ?? null,
+						serializedTransaction: serializeTransactionPayload(tx),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}buildStableLayerClaimTransaction`,
+			label: "Sui Build Stable Layer Claim Transaction",
+			description:
+				"Build unsigned Stable Layer claim rewards transaction using stable-layer-sdk (no broadcast).",
+			parameters: Type.Object({
+				fromAddress: Type.String({
+					description: "Sender Sui address (transaction sender)",
+				}),
+				stableCoinType: Type.String({
+					description: "Stable Layer coin type, e.g. 0x...::btc_usdc::BtcUSDC",
+				}),
+				network: suiNetworkSchema(),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as BuildStableLayerClaimParams;
+				const network = parseSuiNetwork(params.network);
+				const stableLayerNetwork = resolveStableLayerNetwork(network);
+				const fromAddress = normalizeAtPath(params.fromAddress);
+				const tx = await buildStableLayerClaimTransaction({
+					network: stableLayerNetwork,
+					sender: fromAddress,
+					stableCoinType: params.stableCoinType.trim(),
+					autoTransfer: true,
+				});
+				maybeSetSender(tx, fromAddress);
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Built Stable Layer claim transaction: stableCoinType=${params.stableCoinType.trim()}`,
+						},
+					],
+					details: {
+						network,
+						stableLayerNetwork,
+						fromAddress,
+						stableCoinType: params.stableCoinType.trim(),
 						serializedTransaction: serializeTransactionPayload(tx),
 					},
 				};

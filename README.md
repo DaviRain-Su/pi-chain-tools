@@ -51,14 +51,18 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui 
 - `read`: `sui_getBalance` (SUI or custom `coinType`)
 - `read`: `sui_getPortfolio` (multi-asset balances with optional metadata)
 - `read`: `sui_getSwapQuote` (Cetus aggregator quote + route details on mainnet/testnet)
+- `read`: `sui_getStableLayerSupply` (Stable Layer total supply + optional per-coin supply on mainnet/testnet)
 - `compose`: `sui_buildTransferSuiTransaction` / `sui_buildTransferCoinTransaction` (unsigned tx payload builders)
 - `compose`: `sui_buildSwapCetusTransaction` (quote + unsigned swap tx build)
 - `compose`: `sui_buildCetusAddLiquidityTransaction` / `sui_buildCetusRemoveLiquidityTransaction` (official Cetus CLMM SDK unsigned LP tx build)
+- `compose`: `sui_buildStableLayerMintTransaction` / `sui_buildStableLayerBurnTransaction` / `sui_buildStableLayerClaimTransaction` (stable-layer-sdk unsigned tx build)
 - `execute`: `sui_swapCetus` (Cetus aggregator route + on-chain swap execution on mainnet/testnet)
 - `execute`: `sui_cetusAddLiquidity` / `sui_cetusRemoveLiquidity` (official Cetus CLMM SDK LP primitives)
+- `execute`: `sui_stableLayerMint` / `sui_stableLayerBurn` / `sui_stableLayerClaim` (stable-layer-sdk execute tools)
 - `execute`: `sui_transferSui` (amount in `amountMist` or `amountSui`, with mainnet safety gate `confirmMainnet=true`)
 - `execute`: `sui_transferCoin` (non-SUI transfer, auto-merge coin objects, with mainnet safety gate)
 - `workflow`: `w3rt_run_sui_workflow_v0` (analysis/simulate/execute with deterministic mainnet confirmToken)
+- `workflow`: `w3rt_run_sui_stablelayer_workflow_v0` (analysis/simulate/execute for stable-layer mint/burn/claim with deterministic mainnet confirmToken)
 - `rpc`: `sui_rpc` (generic Sui JSON-RPC passthrough with dangerous method safety guard)
 
 ## Use As Pi Extension
@@ -95,6 +99,7 @@ npm test
 
 - Local default package manager: Bun
 - CI package manager: npm (`npm ci` + lockfile)
+- npm peer strategy: project-level `.npmrc` sets `legacy-peer-deps=true` to allow mixed SDK peer ranges (Sui + Solana ecosystems).
 
 ## PR Required Checks
 

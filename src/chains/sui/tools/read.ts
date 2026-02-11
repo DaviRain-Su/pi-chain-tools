@@ -12,6 +12,10 @@ import {
 	parseSuiNetwork,
 	suiNetworkSchema,
 } from "../runtime.js";
+import {
+	getStableLayerSupply,
+	resolveStableLayerNetwork,
+} from "../stablelayer.js";
 
 type SuiBalanceEntry = {
 	coinType: string;
@@ -19,6 +23,12 @@ type SuiBalanceEntry = {
 	totalBalance: string;
 	lockedBalance: Record<string, string>;
 	fundsInAddressBalance?: string;
+};
+
+type SuiStableLayerSupplyParams = {
+	stableCoinType?: string;
+	network?: string;
+	sender?: string;
 };
 
 function parseNonNegativeBigInt(value: string): bigint {
@@ -228,6 +238,59 @@ export function createSuiReadTools() {
 						quoteId: route.quoteID ?? null,
 						pathCount: routes.length,
 						routes,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}getStableLayerSupply`,
+			label: "Sui Get Stable Layer Supply",
+			description:
+				"Get Stable Layer total supply and optional per-stable-coin supply (mainnet/testnet)",
+			parameters: Type.Object({
+				stableCoinType: Type.Optional(
+					Type.String({
+						description:
+							"Stable Layer coin type, e.g. 0x...::btc_usdc::BtcUSDC",
+					}),
+				),
+				network: suiNetworkSchema(),
+				sender: Type.Optional(
+					Type.String({
+						description:
+							"Optional sender address used for SDK initialization (read-only call)",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiStableLayerSupplyParams;
+				const network = parseSuiNetwork(params.network);
+				const stableLayerNetwork = resolveStableLayerNetwork(network);
+				const stableCoinType = params.stableCoinType?.trim() || undefined;
+				const sender = params.sender?.trim() || undefined;
+				const supply = await getStableLayerSupply({
+					network: stableLayerNetwork,
+					stableCoinType,
+					sender,
+				});
+
+				const lines = [
+					`Stable Layer total supply: ${supply.totalSupply ?? "unknown"}`,
+				];
+				if (stableCoinType) {
+					lines.push(
+						`${stableCoinType} supply: ${supply.coinTypeSupply ?? "unknown"}`,
+					);
+				}
+
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						network,
+						stableLayerNetwork,
+						stableCoinType: stableCoinType ?? null,
+						totalSupply: supply.totalSupply,
+						coinTypeSupply: supply.coinTypeSupply,
 					},
 				};
 			},

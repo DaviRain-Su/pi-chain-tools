@@ -18,6 +18,13 @@ import {
 	suiNetworkSchema,
 	toMist,
 } from "../runtime.js";
+import {
+	STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+	buildStableLayerBurnTransaction,
+	buildStableLayerClaimTransaction,
+	buildStableLayerMintTransaction,
+	resolveStableLayerNetwork,
+} from "../stablelayer.js";
 
 type SuiTransferParams = {
 	toAddress: string;
@@ -88,6 +95,37 @@ type SuiCetusRemoveLiquidityParams = {
 	minAmountB: string;
 	collectFee?: boolean;
 	rewarderCoinTypes?: string[];
+	network?: string;
+	rpcUrl?: string;
+	fromPrivateKey?: string;
+	waitForLocalExecution?: boolean;
+	confirmMainnet?: boolean;
+};
+
+type SuiStableLayerMintParams = {
+	stableCoinType: string;
+	amountUsdcRaw: string;
+	usdcCoinType?: string;
+	network?: string;
+	rpcUrl?: string;
+	fromPrivateKey?: string;
+	waitForLocalExecution?: boolean;
+	confirmMainnet?: boolean;
+};
+
+type SuiStableLayerBurnParams = {
+	stableCoinType: string;
+	amountStableRaw?: string;
+	burnAll?: boolean;
+	network?: string;
+	rpcUrl?: string;
+	fromPrivateKey?: string;
+	waitForLocalExecution?: boolean;
+	confirmMainnet?: boolean;
+};
+
+type SuiStableLayerClaimParams = {
+	stableCoinType: string;
 	network?: string;
 	rpcUrl?: string;
 	fromPrivateKey?: string;
@@ -861,6 +899,260 @@ export function createSuiExecuteTools() {
 						deltaLiquidity: params.deltaLiquidity.trim(),
 						minAmountA: params.minAmountA.trim(),
 						minAmountB: params.minAmountB.trim(),
+						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
+						explorer: getSuiExplorerTransactionUrl(response.digest, network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}stableLayerMint`,
+			label: "Sui Stable Layer Mint",
+			description:
+				"Mint Stable Layer stable coin from USDC using stable-layer-sdk and submit on-chain transaction.",
+			parameters: Type.Object({
+				stableCoinType: Type.String({
+					description: "Stable Layer coin type, e.g. 0x...::btc_usdc::BtcUSDC",
+				}),
+				amountUsdcRaw: Type.String({
+					description: "USDC raw integer amount used for mint",
+				}),
+				usdcCoinType: Type.Optional(
+					Type.String({
+						description: `USDC coin type override (default ${STABLE_LAYER_DEFAULT_USDC_COIN_TYPE})`,
+					}),
+				),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(Type.String()),
+				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiStableLayerMintParams;
+				const network = parseSuiNetwork(params.network);
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const stableLayerNetwork = resolveStableLayerNetwork(network);
+				const amountUsdcRaw = parsePositiveBigInt(
+					params.amountUsdcRaw,
+					"amountUsdcRaw",
+				);
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const fromAddress = signer.toSuiAddress();
+				const tx = await buildStableLayerMintTransaction({
+					network: stableLayerNetwork,
+					sender: fromAddress,
+					stableCoinType: params.stableCoinType.trim(),
+					amountUsdcRaw,
+					usdcCoinType: params.usdcCoinType?.trim(),
+					autoTransfer: true,
+				});
+				const client = getSuiClient(network, params.rpcUrl);
+				const response = await client.signAndExecuteTransaction({
+					signer,
+					transaction: tx,
+					options: {
+						showEffects: true,
+						showEvents: true,
+						showObjectChanges: true,
+						showBalanceChanges: true,
+					},
+					requestType: resolveRequestType(params.waitForLocalExecution),
+				});
+
+				const status = response.effects?.status.status ?? "unknown";
+				const error =
+					response.effects?.status.error ?? response.errors?.[0] ?? null;
+				if (status === "failure") {
+					throw new Error(
+						`Stable Layer mint failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+					);
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Stable Layer mint submitted: digest=${response.digest} status=${status}`,
+						},
+					],
+					details: {
+						digest: response.digest,
+						status,
+						error,
+						fromAddress,
+						network,
+						stableLayerNetwork,
+						stableCoinType: params.stableCoinType.trim(),
+						amountUsdcRaw: amountUsdcRaw.toString(),
+						usdcCoinType:
+							params.usdcCoinType?.trim() ||
+							STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
+						explorer: getSuiExplorerTransactionUrl(response.digest, network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}stableLayerBurn`,
+			label: "Sui Stable Layer Burn",
+			description:
+				"Burn Stable Layer stable coin to redeem USDC using stable-layer-sdk and submit on-chain transaction.",
+			parameters: Type.Object({
+				stableCoinType: Type.String({
+					description: "Stable Layer coin type, e.g. 0x...::btc_usdc::BtcUSDC",
+				}),
+				amountStableRaw: Type.Optional(
+					Type.String({
+						description:
+							"Stable coin raw integer amount to burn (required unless burnAll=true)",
+					}),
+				),
+				burnAll: Type.Optional(
+					Type.Boolean({
+						description:
+							"When true, burn all wallet balance for stableCoinType and ignore amountStableRaw",
+					}),
+				),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(Type.String()),
+				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiStableLayerBurnParams;
+				const network = parseSuiNetwork(params.network);
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const stableLayerNetwork = resolveStableLayerNetwork(network);
+				const burnAll = params.burnAll === true;
+				const amountStableRaw = params.amountStableRaw?.trim()
+					? parsePositiveBigInt(params.amountStableRaw, "amountStableRaw")
+					: undefined;
+				if (!burnAll && amountStableRaw == null) {
+					throw new Error("amountStableRaw is required unless burnAll=true.");
+				}
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const fromAddress = signer.toSuiAddress();
+				const tx = await buildStableLayerBurnTransaction({
+					network: stableLayerNetwork,
+					sender: fromAddress,
+					stableCoinType: params.stableCoinType.trim(),
+					amountStableRaw,
+					burnAll,
+					autoTransfer: true,
+				});
+				const client = getSuiClient(network, params.rpcUrl);
+				const response = await client.signAndExecuteTransaction({
+					signer,
+					transaction: tx,
+					options: {
+						showEffects: true,
+						showEvents: true,
+						showObjectChanges: true,
+						showBalanceChanges: true,
+					},
+					requestType: resolveRequestType(params.waitForLocalExecution),
+				});
+
+				const status = response.effects?.status.status ?? "unknown";
+				const error =
+					response.effects?.status.error ?? response.errors?.[0] ?? null;
+				if (status === "failure") {
+					throw new Error(
+						`Stable Layer burn failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+					);
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Stable Layer burn submitted: digest=${response.digest} status=${status}`,
+						},
+					],
+					details: {
+						digest: response.digest,
+						status,
+						error,
+						fromAddress,
+						network,
+						stableLayerNetwork,
+						stableCoinType: params.stableCoinType.trim(),
+						burnAll,
+						amountStableRaw: amountStableRaw?.toString() ?? null,
+						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
+						explorer: getSuiExplorerTransactionUrl(response.digest, network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}stableLayerClaim`,
+			label: "Sui Stable Layer Claim",
+			description:
+				"Claim Stable Layer rewards using stable-layer-sdk and submit on-chain transaction.",
+			parameters: Type.Object({
+				stableCoinType: Type.String({
+					description: "Stable Layer coin type, e.g. 0x...::btc_usdc::BtcUSDC",
+				}),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(Type.String()),
+				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiStableLayerClaimParams;
+				const network = parseSuiNetwork(params.network);
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const stableLayerNetwork = resolveStableLayerNetwork(network);
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const fromAddress = signer.toSuiAddress();
+				const tx = await buildStableLayerClaimTransaction({
+					network: stableLayerNetwork,
+					sender: fromAddress,
+					stableCoinType: params.stableCoinType.trim(),
+					autoTransfer: true,
+				});
+				const client = getSuiClient(network, params.rpcUrl);
+				const response = await client.signAndExecuteTransaction({
+					signer,
+					transaction: tx,
+					options: {
+						showEffects: true,
+						showEvents: true,
+						showObjectChanges: true,
+						showBalanceChanges: true,
+					},
+					requestType: resolveRequestType(params.waitForLocalExecution),
+				});
+
+				const status = response.effects?.status.status ?? "unknown";
+				const error =
+					response.effects?.status.error ?? response.errors?.[0] ?? null;
+				if (status === "failure") {
+					throw new Error(
+						`Stable Layer claim failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+					);
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Stable Layer claim submitted: digest=${response.digest} status=${status}`,
+						},
+					],
+					details: {
+						digest: response.digest,
+						status,
+						error,
+						fromAddress,
+						network,
+						stableLayerNetwork,
+						stableCoinType: params.stableCoinType.trim(),
 						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
 						explorer: getSuiExplorerTransactionUrl(response.digest, network),
 					},

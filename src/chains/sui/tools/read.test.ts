@@ -24,6 +24,11 @@ const aggregatorMocks = vi.hoisted(() => {
 	};
 });
 
+const stableLayerMocks = vi.hoisted(() => ({
+	getStableLayerSupply: vi.fn(),
+	resolveStableLayerNetwork: vi.fn(() => "mainnet"),
+}));
+
 vi.mock("@cetusprotocol/aggregator-sdk", () => ({
 	AggregatorClient: aggregatorMocks.AggregatorClient,
 	Env: aggregatorMocks.Env,
@@ -42,6 +47,11 @@ vi.mock("../runtime.js", async () => {
 		suiNetworkSchema: runtimeMocks.suiNetworkSchema,
 	};
 });
+
+vi.mock("../stablelayer.js", () => ({
+	getStableLayerSupply: stableLayerMocks.getStableLayerSupply,
+	resolveStableLayerNetwork: stableLayerMocks.resolveStableLayerNetwork,
+}));
 
 import { createSuiReadTools } from "./read.js";
 
@@ -65,6 +75,11 @@ beforeEach(() => {
 		"https://fullnode.devnet.sui.io:443",
 	);
 	runtimeMocks.formatCoinAmount.mockImplementation((value: string) => value);
+	stableLayerMocks.resolveStableLayerNetwork.mockReturnValue("mainnet");
+	stableLayerMocks.getStableLayerSupply.mockResolvedValue({
+		totalSupply: "1000000000",
+		coinTypeSupply: null,
+	});
 });
 
 describe("sui_getBalance", () => {
@@ -322,6 +337,35 @@ describe("sui_getPortfolio", () => {
 					metadata: null,
 				},
 			],
+		});
+	});
+});
+
+describe("sui_getStableLayerSupply", () => {
+	it("returns total supply and per-coin supply", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		stableLayerMocks.resolveStableLayerNetwork.mockReturnValue("mainnet");
+		stableLayerMocks.getStableLayerSupply.mockResolvedValue({
+			totalSupply: "123456789",
+			coinTypeSupply: "1000000",
+		});
+
+		const tool = getTool("sui_getStableLayerSupply");
+		const result = await tool.execute("stable-read-1", {
+			network: "mainnet",
+			stableCoinType: "0x6d9fc...::btc_usdc::BtcUSDC".replace(
+				"...",
+				"aaaaaaaa",
+			),
+		});
+
+		expect(stableLayerMocks.getStableLayerSupply).toHaveBeenCalledTimes(1);
+		expect(result.content[0]?.text).toContain("Stable Layer total supply");
+		expect(result.details).toMatchObject({
+			network: "mainnet",
+			stableLayerNetwork: "mainnet",
+			totalSupply: "123456789",
+			coinTypeSupply: "1000000",
 		});
 	});
 });

@@ -53,6 +53,15 @@ const runtimeMocks = vi.hoisted(() => ({
 	toMist: vi.fn((value: number) => BigInt(Math.round(value * 1_000_000_000))),
 }));
 
+const stableLayerMocks = vi.hoisted(() => ({
+	STABLE_LAYER_DEFAULT_USDC_COIN_TYPE:
+		"0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC",
+	resolveStableLayerNetwork: vi.fn(() => "mainnet"),
+	buildStableLayerMintTransaction: vi.fn(),
+	buildStableLayerBurnTransaction: vi.fn(),
+	buildStableLayerClaimTransaction: vi.fn(),
+}));
+
 vi.mock("../runtime.js", async () => {
 	const actual =
 		await vi.importActual<typeof import("../runtime.js")>("../runtime.js");
@@ -67,6 +76,18 @@ vi.mock("../runtime.js", async () => {
 		toMist: runtimeMocks.toMist,
 	};
 });
+
+vi.mock("../stablelayer.js", () => ({
+	STABLE_LAYER_DEFAULT_USDC_COIN_TYPE:
+		stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+	resolveStableLayerNetwork: stableLayerMocks.resolveStableLayerNetwork,
+	buildStableLayerMintTransaction:
+		stableLayerMocks.buildStableLayerMintTransaction,
+	buildStableLayerBurnTransaction:
+		stableLayerMocks.buildStableLayerBurnTransaction,
+	buildStableLayerClaimTransaction:
+		stableLayerMocks.buildStableLayerClaimTransaction,
+}));
 
 import { createSuiComposeTools } from "./compose.js";
 
@@ -129,6 +150,19 @@ beforeEach(() => {
 	cetusMocks.removeLiquidityTransactionPayload.mockResolvedValue({
 		setSender: vi.fn(),
 		serialize: vi.fn(() => "serialized-cetus-remove"),
+	});
+	stableLayerMocks.resolveStableLayerNetwork.mockReturnValue("mainnet");
+	stableLayerMocks.buildStableLayerMintTransaction.mockResolvedValue({
+		setSender: vi.fn(),
+		serialize: vi.fn(() => "serialized-stable-mint"),
+	});
+	stableLayerMocks.buildStableLayerBurnTransaction.mockResolvedValue({
+		setSender: vi.fn(),
+		serialize: vi.fn(() => "serialized-stable-burn"),
+	});
+	stableLayerMocks.buildStableLayerClaimTransaction.mockResolvedValue({
+		setSender: vi.fn(),
+		serialize: vi.fn(() => "serialized-stable-claim"),
 	});
 });
 
@@ -291,6 +325,61 @@ describe("sui compose tools", () => {
 				"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
 			deltaLiquidity: "999",
 			serializedTransaction: "serialized-cetus-remove",
+		});
+	});
+
+	it("builds Stable Layer mint transaction payload", async () => {
+		const tool = getTool("sui_buildStableLayerMintTransaction");
+		const result = await tool.execute("sui-compose-7", {
+			fromAddress:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			stableCoinType:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::btc_usdc::BtcUSDC",
+			amountUsdcRaw: "1000000",
+			network: "mainnet",
+		});
+
+		expect(stableLayerMocks.buildStableLayerMintTransaction).toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			amountUsdcRaw: "1000000",
+			serializedTransaction: "serialized-stable-mint",
+		});
+	});
+
+	it("builds Stable Layer burn transaction payload", async () => {
+		const tool = getTool("sui_buildStableLayerBurnTransaction");
+		const result = await tool.execute("sui-compose-8", {
+			fromAddress:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			stableCoinType:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::btc_usdc::BtcUSDC",
+			amountStableRaw: "500000",
+			network: "mainnet",
+		});
+
+		expect(stableLayerMocks.buildStableLayerBurnTransaction).toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			amountStableRaw: "500000",
+			burnAll: false,
+			serializedTransaction: "serialized-stable-burn",
+		});
+	});
+
+	it("builds Stable Layer claim transaction payload", async () => {
+		const tool = getTool("sui_buildStableLayerClaimTransaction");
+		const result = await tool.execute("sui-compose-9", {
+			fromAddress:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			stableCoinType:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::btc_usdc::BtcUSDC",
+			network: "mainnet",
+		});
+
+		expect(
+			stableLayerMocks.buildStableLayerClaimTransaction,
+		).toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			serializedTransaction: "serialized-stable-claim",
 		});
 	});
 });

@@ -14,6 +14,13 @@ import {
 	suiNetworkSchema,
 	toMist,
 } from "../runtime.js";
+import {
+	STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+	buildStableLayerBurnTransaction,
+	buildStableLayerClaimTransaction,
+	buildStableLayerMintTransaction,
+	resolveStableLayerNetwork,
+} from "../stablelayer.js";
 import { createSuiExecuteTools } from "./execute.js";
 
 type WorkflowRunMode = "analysis" | "simulate" | "execute";
@@ -140,6 +147,54 @@ type WorkflowParams = {
 	confirmMainnet?: boolean;
 	confirmToken?: string;
 	waitForLocalExecution?: boolean;
+};
+
+type StableLayerMintIntent = {
+	type: "sui.stablelayer.mint";
+	stableCoinType: string;
+	amountUsdcRaw: string;
+	usdcCoinType?: string;
+};
+
+type StableLayerBurnIntent = {
+	type: "sui.stablelayer.burn";
+	stableCoinType: string;
+	amountStableRaw?: string;
+	burnAll: boolean;
+};
+
+type StableLayerClaimIntent = {
+	type: "sui.stablelayer.claim";
+	stableCoinType: string;
+};
+
+type StableLayerWorkflowIntent =
+	| StableLayerMintIntent
+	| StableLayerBurnIntent
+	| StableLayerClaimIntent;
+
+type StableLayerWorkflowParams = {
+	runId?: string;
+	runMode?: WorkflowRunMode;
+	intentType?: StableLayerWorkflowIntent["type"];
+	intentText?: string;
+	network?: string;
+	stableCoinType?: string;
+	amountUsdcRaw?: string;
+	amountStableRaw?: string;
+	burnAll?: boolean;
+	usdcCoinType?: string;
+	fromPrivateKey?: string;
+	confirmMainnet?: boolean;
+	confirmToken?: string;
+	waitForLocalExecution?: boolean;
+};
+
+type ParsedStableLayerIntentHints = {
+	intentType?: StableLayerWorkflowIntent["type"];
+	stableCoinType?: string;
+	amountRaw?: string;
+	burnAll?: boolean;
 };
 
 function workflowRunModeSchema() {
@@ -272,6 +327,109 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	}
 
 	return {};
+}
+
+function parseStableLayerIntentText(
+	text?: string,
+): ParsedStableLayerIntentHints {
+	if (!text?.trim()) return {};
+	const lower = text.toLowerCase();
+	const coinTypeMatches = [
+		...text.matchAll(/0x[a-fA-F0-9]{1,64}::[A-Za-z0-9_]+::[A-Za-z0-9_]+/g),
+	].map((entry) => entry[0]);
+	const integerMatch = text.match(/\b\d+\b/);
+	const burnAll =
+		/\bburn\s+all\b|\b全部燃烧\b|\b全部销毁\b|\ball\s+balance\b/i.test(lower);
+
+	if (/\bclaim\b|领取|提取奖励|收获奖励|领收益/i.test(lower)) {
+		return {
+			intentType: "sui.stablelayer.claim",
+			stableCoinType: coinTypeMatches[0],
+		};
+	}
+
+	if (/\bburn\b|赎回|销毁|回收/i.test(lower)) {
+		return {
+			intentType: "sui.stablelayer.burn",
+			stableCoinType: coinTypeMatches[0],
+			amountRaw: integerMatch?.[0],
+			burnAll,
+		};
+	}
+
+	if (/\bmint\b|铸造|生成稳定币|兑换稳定币/i.test(lower)) {
+		return {
+			intentType: "sui.stablelayer.mint",
+			stableCoinType: coinTypeMatches[0],
+			amountRaw: integerMatch?.[0],
+		};
+	}
+
+	return {};
+}
+
+function inferStableLayerIntentType(
+	params: StableLayerWorkflowParams,
+	parsed: ParsedStableLayerIntentHints,
+): StableLayerWorkflowIntent["type"] {
+	if (params.intentType) return params.intentType;
+	if (parsed.intentType) return parsed.intentType;
+	if (params.burnAll === true) return "sui.stablelayer.burn";
+	if (params.amountUsdcRaw?.trim()) return "sui.stablelayer.mint";
+	if (params.amountStableRaw?.trim()) return "sui.stablelayer.burn";
+	throw new Error(
+		"Cannot infer stable layer intentType. Provide intentType or enough structured fields.",
+	);
+}
+
+function normalizeStableLayerIntent(
+	params: StableLayerWorkflowParams,
+): StableLayerWorkflowIntent {
+	const parsed = parseStableLayerIntentText(params.intentText);
+	const intentType = inferStableLayerIntentType(params, parsed);
+	const stableCoinType = params.stableCoinType?.trim() || parsed.stableCoinType;
+	if (!stableCoinType) {
+		throw new Error("stableCoinType is required for stable layer workflow.");
+	}
+
+	if (intentType === "sui.stablelayer.mint") {
+		const amountUsdcRaw = params.amountUsdcRaw?.trim() || parsed.amountRaw;
+		if (!amountUsdcRaw) {
+			throw new Error(
+				"amountUsdcRaw is required for intentType=sui.stablelayer.mint",
+			);
+		}
+		parsePositiveBigInt(amountUsdcRaw, "amountUsdcRaw");
+		return {
+			type: "sui.stablelayer.mint",
+			stableCoinType,
+			amountUsdcRaw,
+			usdcCoinType: params.usdcCoinType?.trim() || undefined,
+		};
+	}
+
+	if (intentType === "sui.stablelayer.burn") {
+		const burnAll = params.burnAll === true || parsed.burnAll === true;
+		const amountStableRaw = params.amountStableRaw?.trim() || parsed.amountRaw;
+		if (!burnAll && !amountStableRaw) {
+			throw new Error(
+				"amountStableRaw is required unless burnAll=true for intentType=sui.stablelayer.burn",
+			);
+		}
+		if (amountStableRaw)
+			parsePositiveBigInt(amountStableRaw, "amountStableRaw");
+		return {
+			type: "sui.stablelayer.burn",
+			stableCoinType,
+			amountStableRaw: amountStableRaw || undefined,
+			burnAll,
+		};
+	}
+
+	return {
+		type: "sui.stablelayer.claim",
+		stableCoinType,
+	};
 }
 
 function inferIntentType(params: WorkflowParams, parsed: ParsedIntentHints) {
@@ -451,7 +609,7 @@ function normalizeIntent(params: WorkflowParams): SuiWorkflowIntent {
 function createConfirmToken(
 	runId: string,
 	network: string,
-	intent: SuiWorkflowIntent,
+	intent: unknown,
 ): string {
 	const digest = createHash("sha256")
 		.update(JSON.stringify({ runId, network, intent }))
@@ -716,13 +874,89 @@ async function buildSimulation(
 	};
 }
 
+async function buildStableLayerSimulation(
+	intent: StableLayerWorkflowIntent,
+	network: SuiNetwork,
+	signerAddress: string,
+): Promise<{
+	tx: Transaction;
+	artifacts: Record<string, unknown>;
+}> {
+	const stableLayerNetwork = resolveStableLayerNetwork(network);
+
+	if (intent.type === "sui.stablelayer.mint") {
+		const amountUsdcRaw = parsePositiveBigInt(
+			intent.amountUsdcRaw,
+			"amountUsdcRaw",
+		);
+		const tx = await buildStableLayerMintTransaction({
+			network: stableLayerNetwork,
+			sender: signerAddress,
+			stableCoinType: intent.stableCoinType,
+			amountUsdcRaw,
+			usdcCoinType: intent.usdcCoinType,
+			autoTransfer: true,
+		});
+		return {
+			tx,
+			artifacts: {
+				stableLayerNetwork,
+				stableCoinType: intent.stableCoinType,
+				amountUsdcRaw: amountUsdcRaw.toString(),
+				usdcCoinType:
+					intent.usdcCoinType ?? STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+			},
+		};
+	}
+
+	if (intent.type === "sui.stablelayer.burn") {
+		const amountStableRaw = intent.amountStableRaw
+			? parsePositiveBigInt(intent.amountStableRaw, "amountStableRaw")
+			: undefined;
+		const tx = await buildStableLayerBurnTransaction({
+			network: stableLayerNetwork,
+			sender: signerAddress,
+			stableCoinType: intent.stableCoinType,
+			amountStableRaw,
+			burnAll: intent.burnAll,
+			autoTransfer: true,
+		});
+		return {
+			tx,
+			artifacts: {
+				stableLayerNetwork,
+				stableCoinType: intent.stableCoinType,
+				burnAll: intent.burnAll,
+				amountStableRaw: amountStableRaw?.toString() ?? null,
+			},
+		};
+	}
+
+	const tx = await buildStableLayerClaimTransaction({
+		network: stableLayerNetwork,
+		sender: signerAddress,
+		stableCoinType: intent.stableCoinType,
+		autoTransfer: true,
+	});
+	return {
+		tx,
+		artifacts: {
+			stableLayerNetwork,
+			stableCoinType: intent.stableCoinType,
+		},
+	};
+}
+
 function resolveExecutionTool(
 	name:
 		| "sui_transferSui"
 		| "sui_transferCoin"
 		| "sui_swapCetus"
 		| "sui_cetusAddLiquidity"
-		| "sui_cetusRemoveLiquidity",
+		| "sui_cetusRemoveLiquidity"
+		| "sui_stableLayerMint"
+		| "sui_stableLayerBurn"
+		| "sui_stableLayerClaim",
 ) {
 	const tool = createSuiExecuteTools().find((entry) => entry.name === name);
 	if (!tool) throw new Error(`Execution tool not found: ${name}`);
@@ -814,6 +1048,45 @@ async function executeIntent(
 		depth: intent.depth,
 		endpoint: intent.endpoint,
 		apiKey: intent.apiKey,
+		network,
+		fromPrivateKey: params.fromPrivateKey,
+		waitForLocalExecution: params.waitForLocalExecution,
+		confirmMainnet: params.confirmMainnet,
+	});
+}
+
+async function executeStableLayerIntent(
+	intent: StableLayerWorkflowIntent,
+	params: StableLayerWorkflowParams,
+	network: SuiNetwork,
+) {
+	if (intent.type === "sui.stablelayer.mint") {
+		const tool = resolveExecutionTool("sui_stableLayerMint");
+		return tool.execute("wf-stablelayer-execute", {
+			stableCoinType: intent.stableCoinType,
+			amountUsdcRaw: intent.amountUsdcRaw,
+			usdcCoinType: intent.usdcCoinType,
+			network,
+			fromPrivateKey: params.fromPrivateKey,
+			waitForLocalExecution: params.waitForLocalExecution,
+			confirmMainnet: params.confirmMainnet,
+		});
+	}
+	if (intent.type === "sui.stablelayer.burn") {
+		const tool = resolveExecutionTool("sui_stableLayerBurn");
+		return tool.execute("wf-stablelayer-execute", {
+			stableCoinType: intent.stableCoinType,
+			amountStableRaw: intent.amountStableRaw,
+			burnAll: intent.burnAll,
+			network,
+			fromPrivateKey: params.fromPrivateKey,
+			waitForLocalExecution: params.waitForLocalExecution,
+			confirmMainnet: params.confirmMainnet,
+		});
+	}
+	const tool = resolveExecutionTool("sui_stableLayerClaim");
+	return tool.execute("wf-stablelayer-execute", {
+		stableCoinType: intent.stableCoinType,
 		network,
 		fromPrivateKey: params.fromPrivateKey,
 		waitForLocalExecution: params.waitForLocalExecution,
@@ -989,6 +1262,160 @@ export function createSuiWorkflowTools() {
 						runId,
 						runMode,
 						network,
+						intentType: intent.type,
+						intent,
+						needsMainnetConfirmation,
+						confirmToken,
+						requestType: resolveRequestType(params.waitForLocalExecution),
+						artifacts: {
+							execute: executeResult.details ?? null,
+						},
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: "w3rt_run_sui_stablelayer_workflow_v0",
+			label: "W3RT Sui Stable Layer Workflow v0",
+			description:
+				"Deterministic Stable Layer workflow entrypoint: analysis -> simulate -> execute",
+			parameters: Type.Object({
+				runId: Type.Optional(Type.String()),
+				runMode: workflowRunModeSchema(),
+				intentType: Type.Optional(
+					Type.Union([
+						Type.Literal("sui.stablelayer.mint"),
+						Type.Literal("sui.stablelayer.burn"),
+						Type.Literal("sui.stablelayer.claim"),
+					]),
+				),
+				intentText: Type.Optional(Type.String()),
+				network: suiNetworkSchema(),
+				stableCoinType: Type.Optional(Type.String()),
+				amountUsdcRaw: Type.Optional(Type.String()),
+				amountStableRaw: Type.Optional(Type.String()),
+				burnAll: Type.Optional(Type.Boolean()),
+				usdcCoinType: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(Type.String()),
+				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+				confirmToken: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as StableLayerWorkflowParams;
+				const runId = createRunId(params.runId);
+				const runMode = parseRunMode(params.runMode);
+				const network = parseSuiNetwork(params.network);
+				const stableLayerNetwork = resolveStableLayerNetwork(network);
+				const intent = normalizeStableLayerIntent(params);
+				const needsMainnetConfirmation = network === "mainnet";
+				const confirmToken = createConfirmToken(runId, network, intent);
+				const plan = ["analysis", "simulate", "execute"];
+
+				if (runMode === "analysis") {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Workflow analyzed: ${intent.type}`,
+							},
+						],
+						details: {
+							runId,
+							runMode,
+							network,
+							stableLayerNetwork,
+							intentType: intent.type,
+							intent,
+							needsMainnetConfirmation,
+							confirmToken,
+							artifacts: {
+								analysis: {
+									intent,
+									plan,
+								},
+							},
+						},
+					};
+				}
+
+				if (runMode === "simulate") {
+					const signer = resolveSuiKeypair(params.fromPrivateKey);
+					const sender = signer.toSuiAddress();
+					const { tx, artifacts } = await buildStableLayerSimulation(
+						intent,
+						network,
+						sender,
+					);
+					tx.setSender(sender);
+					const client = getSuiClient(network);
+					const simulation = await client.devInspectTransactionBlock({
+						sender,
+						transactionBlock: tx,
+					});
+					const { status, error } = getSimulationStatus(simulation);
+					if (status !== "success") {
+						throw new Error(
+							`Simulation failed: ${error ?? "unknown error"} (intent=${intent.type})`,
+						);
+					}
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Workflow simulated: ${intent.type} status=${status}`,
+							},
+						],
+						details: {
+							runId,
+							runMode,
+							network,
+							stableLayerNetwork,
+							intentType: intent.type,
+							intent,
+							needsMainnetConfirmation,
+							confirmToken,
+							artifacts: {
+								simulate: {
+									status,
+									error,
+									...artifacts,
+								},
+							},
+						},
+					};
+				}
+
+				if (needsMainnetConfirmation) {
+					if (params.confirmMainnet !== true) {
+						throw new Error(
+							"Mainnet workflow execute is blocked. Set confirmMainnet=true.",
+						);
+					}
+					if (!params.confirmToken || params.confirmToken !== confirmToken) {
+						throw new Error(
+							"Invalid confirmToken for mainnet execute. Run simulate first and pass returned confirmToken.",
+						);
+					}
+				}
+
+				const executeResult = await executeStableLayerIntent(
+					intent,
+					params,
+					network,
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Workflow executed: ${intent.type}`,
+						},
+					],
+					details: {
+						runId,
+						runMode,
+						network,
+						stableLayerNetwork,
 						intentType: intent.type,
 						intent,
 						needsMainnetConfirmation,

@@ -61,6 +61,15 @@ const runtimeMocks = vi.hoisted(() => ({
 	toMist: vi.fn((value: number) => BigInt(Math.round(value * 1_000_000_000))),
 }));
 
+const stableLayerMocks = vi.hoisted(() => ({
+	STABLE_LAYER_DEFAULT_USDC_COIN_TYPE:
+		"0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC",
+	resolveStableLayerNetwork: vi.fn(() => "mainnet"),
+	buildStableLayerMintTransaction: vi.fn(),
+	buildStableLayerBurnTransaction: vi.fn(),
+	buildStableLayerClaimTransaction: vi.fn(),
+}));
+
 vi.mock("../runtime.js", async () => {
 	const actual =
 		await vi.importActual<typeof import("../runtime.js")>("../runtime.js");
@@ -78,6 +87,18 @@ vi.mock("../runtime.js", async () => {
 		toMist: runtimeMocks.toMist,
 	};
 });
+
+vi.mock("../stablelayer.js", () => ({
+	STABLE_LAYER_DEFAULT_USDC_COIN_TYPE:
+		stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+	resolveStableLayerNetwork: stableLayerMocks.resolveStableLayerNetwork,
+	buildStableLayerMintTransaction:
+		stableLayerMocks.buildStableLayerMintTransaction,
+	buildStableLayerBurnTransaction:
+		stableLayerMocks.buildStableLayerBurnTransaction,
+	buildStableLayerClaimTransaction:
+		stableLayerMocks.buildStableLayerClaimTransaction,
+}));
 
 import { createSuiExecuteTools } from "./execute.js";
 
@@ -111,6 +132,16 @@ beforeEach(() => {
 	aggregatorMocks.fastRouterSwap.mockReset();
 	cetusMocks.createAddLiquidityFixTokenPayload.mockReset();
 	cetusMocks.removeLiquidityTransactionPayload.mockReset();
+	stableLayerMocks.resolveStableLayerNetwork.mockReturnValue("mainnet");
+	stableLayerMocks.buildStableLayerMintTransaction.mockResolvedValue({
+		tx: "stable-mint",
+	});
+	stableLayerMocks.buildStableLayerBurnTransaction.mockResolvedValue({
+		tx: "stable-burn",
+	});
+	stableLayerMocks.buildStableLayerClaimTransaction.mockResolvedValue({
+		tx: "stable-claim",
+	});
 });
 
 describe("sui_transferSui", () => {
@@ -523,6 +554,109 @@ describe("sui_cetusRemoveLiquidity", () => {
 			digest: "0xlprem",
 			status: "success",
 			deltaLiquidity: "12345",
+		});
+	});
+});
+
+describe("sui_stableLayerMint", () => {
+	it("builds and sends stable layer mint tx", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		const signAndExecuteTransaction = vi.fn().mockResolvedValue({
+			digest: "0xstable-mint",
+			confirmedLocalExecution: true,
+			effects: {
+				status: {
+					status: "success",
+				},
+			},
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({ signAndExecuteTransaction });
+
+		const tool = getTool("sui_stableLayerMint");
+		const result = await tool.execute("stable-exec-1", {
+			stableCoinType:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::btc_usdc::BtcUSDC",
+			amountUsdcRaw: "1000000",
+			network: "mainnet",
+			confirmMainnet: true,
+		});
+
+		expect(stableLayerMocks.buildStableLayerMintTransaction).toHaveBeenCalled();
+		expect(signAndExecuteTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			digest: "0xstable-mint",
+			status: "success",
+			amountUsdcRaw: "1000000",
+		});
+	});
+});
+
+describe("sui_stableLayerBurn", () => {
+	it("requires amountStableRaw unless burnAll=true", async () => {
+		const tool = getTool("sui_stableLayerBurn");
+		await expect(
+			tool.execute("stable-exec-2", {
+				stableCoinType:
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::btc_usdc::BtcUSDC",
+			}),
+		).rejects.toThrow("amountStableRaw is required unless burnAll=true");
+	});
+
+	it("builds and sends stable layer burn tx", async () => {
+		const signAndExecuteTransaction = vi.fn().mockResolvedValue({
+			digest: "0xstable-burn",
+			confirmedLocalExecution: true,
+			effects: {
+				status: {
+					status: "success",
+				},
+			},
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({ signAndExecuteTransaction });
+
+		const tool = getTool("sui_stableLayerBurn");
+		const result = await tool.execute("stable-exec-3", {
+			stableCoinType:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::btc_usdc::BtcUSDC",
+			amountStableRaw: "500000",
+			network: "testnet",
+		});
+
+		expect(stableLayerMocks.buildStableLayerBurnTransaction).toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			digest: "0xstable-burn",
+			status: "success",
+			amountStableRaw: "500000",
+		});
+	});
+});
+
+describe("sui_stableLayerClaim", () => {
+	it("builds and sends stable layer claim tx", async () => {
+		const signAndExecuteTransaction = vi.fn().mockResolvedValue({
+			digest: "0xstable-claim",
+			confirmedLocalExecution: true,
+			effects: {
+				status: {
+					status: "success",
+				},
+			},
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({ signAndExecuteTransaction });
+
+		const tool = getTool("sui_stableLayerClaim");
+		const result = await tool.execute("stable-exec-4", {
+			stableCoinType:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::btc_usdc::BtcUSDC",
+			network: "testnet",
+		});
+
+		expect(
+			stableLayerMocks.buildStableLayerClaimTransaction,
+		).toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			digest: "0xstable-claim",
+			status: "success",
 		});
 	});
 });
