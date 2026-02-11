@@ -14,9 +14,9 @@ import {
 	formatCoinAmount,
 	getSuiClient,
 	getSuiRpcEndpoint,
-	normalizeAtPath,
 	parsePositiveBigInt,
 	parseSuiNetwork,
+	resolveSuiOwnerAddress,
 	suiNetworkSchema,
 } from "../runtime.js";
 import {
@@ -45,7 +45,7 @@ type SuiCetusFarmsPoolsParams = {
 };
 
 type SuiCetusFarmsPositionsParams = {
-	owner: string;
+	owner?: string;
 	network?: string;
 	rpcUrl?: string;
 	calculateRewards?: boolean;
@@ -53,14 +53,14 @@ type SuiCetusFarmsPositionsParams = {
 };
 
 type SuiCetusVaultsBalancesParams = {
-	owner: string;
+	owner?: string;
 	network?: string;
 	rpcUrl?: string;
 	limit?: number;
 };
 
 type SuiDefiPositionsParams = {
-	owner: string;
+	owner?: string;
 	network?: string;
 	rpcUrl?: string;
 	limit?: number;
@@ -536,9 +536,14 @@ export function createSuiReadTools() {
 			name: `${SUI_TOOL_PREFIX}getBalance`,
 			label: "Sui Get Balance",
 			description:
-				"Get owner balance for SUI or a specific coin type on Sui (mainnet/testnet/devnet/localnet)",
+				"Get owner balance for SUI or a specific coin type on Sui (mainnet/testnet/devnet/localnet). If owner is omitted, uses local Sui CLI active wallet.",
 			parameters: Type.Object({
-				owner: Type.String({ description: "Sui wallet/account address" }),
+				owner: Type.Optional(
+					Type.String({
+						description:
+							"Sui wallet/account address. Optional: defaults to local active wallet",
+					}),
+				),
 				coinType: Type.Optional(
 					Type.String({
 						description:
@@ -551,35 +556,85 @@ export function createSuiReadTools() {
 				),
 			}),
 			async execute(_toolCallId, params) {
-				const owner = normalizeAtPath(params.owner);
+				const owner = resolveSuiOwnerAddress(params.owner);
 				const network = parseSuiNetwork(params.network);
-				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
-				const client = getSuiClient(network, params.rpcUrl);
-				const balance = await client.getBalance({
-					owner,
-					coinType: params.coinType,
-				});
-				const coinType = balance.coinType || params.coinType || SUI_COIN_TYPE;
-				const totalBalance = balance.totalBalance;
-				const uiAmount =
-					coinType === SUI_COIN_TYPE ? formatCoinAmount(totalBalance, 9) : null;
+				const requestedCoinType = params.coinType?.trim();
+				if (requestedCoinType) {
+					const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
+					const client = getSuiClient(network, params.rpcUrl);
+					const balance = await client.getBalance({
+						owner,
+						coinType: requestedCoinType,
+					});
+					const coinType =
+						balance.coinType || requestedCoinType || SUI_COIN_TYPE;
+					const totalBalance = balance.totalBalance;
+					const uiAmount =
+						coinType === SUI_COIN_TYPE
+							? formatCoinAmount(totalBalance, 9)
+							: null;
 
-				const text =
-					coinType === SUI_COIN_TYPE
-						? `Balance: ${uiAmount} SUI (${totalBalance} MIST)`
-						: `Balance: ${totalBalance} (${coinType})`;
+					const text =
+						coinType === SUI_COIN_TYPE
+							? `Balance: ${uiAmount} SUI (${totalBalance} MIST)`
+							: `Balance: ${totalBalance} (${coinType})`;
+
+					return {
+						content: [{ type: "text", text }],
+						details: {
+							owner,
+							coinType,
+							totalBalance,
+							uiAmount,
+							coinObjectCount: balance.coinObjectCount,
+							lockedBalance: balance.lockedBalance,
+							network,
+							rpcUrl,
+							mode: "singleCoin",
+						},
+					};
+				}
+
+				const { rpcUrl, portfolio } = await buildPortfolioSummary({
+					owner,
+					network,
+					rpcUrl: params.rpcUrl,
+					includeZeroBalances: false,
+					includeMetadata: true,
+					limit: 50,
+				});
+				const previewAssets = portfolio.assets.slice(0, HUMAN_READABLE_LIMIT);
+				const lines = [
+					`Balances (${network}) for ${owner}: ${portfolio.assetCount} asset(s)`,
+				];
+
+				for (const [index, asset] of previewAssets.entries()) {
+					const symbol =
+						asset.metadata?.symbol || fallbackCoinSymbol(asset.coinType);
+					if (asset.uiAmount) {
+						lines.push(
+							`${index + 1}. ${symbol}: ${asset.uiAmount} (${asset.totalBalance} raw)`,
+						);
+						continue;
+					}
+					lines.push(
+						`${index + 1}. ${shortCoinType(asset.coinType)}: ${asset.totalBalance}`,
+					);
+				}
+				if (portfolio.assetCount > previewAssets.length) {
+					lines.push(
+						`... and ${portfolio.assetCount - previewAssets.length} more asset(s)`,
+					);
+				}
 
 				return {
-					content: [{ type: "text", text }],
+					content: [{ type: "text", text: lines.join("\n") }],
 					details: {
 						owner,
-						coinType,
-						totalBalance,
-						uiAmount,
-						coinObjectCount: balance.coinObjectCount,
-						lockedBalance: balance.lockedBalance,
 						network,
 						rpcUrl,
+						mode: "allAssets",
+						...portfolio,
 					},
 				};
 			},
@@ -869,9 +924,12 @@ export function createSuiReadTools() {
 			description:
 				"Get owner Cetus v2 farms staked positions from SDK (mainnet/testnet only).",
 			parameters: Type.Object({
-				owner: Type.String({
-					description: "Sui wallet/account address",
-				}),
+				owner: Type.Optional(
+					Type.String({
+						description:
+							"Sui wallet/account address. Optional: defaults to local active wallet",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(
 					Type.String({
@@ -887,7 +945,7 @@ export function createSuiReadTools() {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as SuiCetusFarmsPositionsParams;
-				const owner = normalizeAtPath(params.owner);
+				const owner = resolveSuiOwnerAddress(params.owner);
 				const network = parseSuiNetwork(params.network);
 				const cetusNetwork = resolveCetusV2Network(network);
 				const limit =
@@ -944,9 +1002,12 @@ export function createSuiReadTools() {
 			description:
 				"Get owner Cetus v2 vault balances from SDK (mainnet/testnet only).",
 			parameters: Type.Object({
-				owner: Type.String({
-					description: "Sui wallet/account address",
-				}),
+				owner: Type.Optional(
+					Type.String({
+						description:
+							"Sui wallet/account address. Optional: defaults to local active wallet",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(
 					Type.String({
@@ -957,7 +1018,7 @@ export function createSuiReadTools() {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as SuiCetusVaultsBalancesParams;
-				const owner = normalizeAtPath(params.owner);
+				const owner = resolveSuiOwnerAddress(params.owner);
 				const network = parseSuiNetwork(params.network);
 				const cetusNetwork = resolveCetusV2Network(network);
 				const limit =
@@ -1005,9 +1066,12 @@ export function createSuiReadTools() {
 			description:
 				"Get owner DeFi position snapshot on Sui: portfolio + Cetus farms/vault positions (mainnet/testnet only for Cetus).",
 			parameters: Type.Object({
-				owner: Type.String({
-					description: "Sui wallet/account address",
-				}),
+				owner: Type.Optional(
+					Type.String({
+						description:
+							"Sui wallet/account address. Optional: defaults to local active wallet",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(
 					Type.String({ description: "Override Sui JSON-RPC endpoint URL" }),
@@ -1051,7 +1115,7 @@ export function createSuiReadTools() {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as SuiDefiPositionsParams;
-				const owner = normalizeAtPath(params.owner);
+				const owner = resolveSuiOwnerAddress(params.owner);
 				const network = parseSuiNetwork(params.network);
 				const { rpcUrl, portfolio } = await buildPortfolioSummary({
 					owner,
@@ -1157,7 +1221,12 @@ export function createSuiReadTools() {
 			description:
 				"Get aggregated multi-asset balances for a Sui owner, with optional coin metadata",
 			parameters: Type.Object({
-				owner: Type.String({ description: "Sui wallet/account address" }),
+				owner: Type.Optional(
+					Type.String({
+						description:
+							"Sui wallet/account address. Optional: defaults to local active wallet",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(
 					Type.String({ description: "Override Sui JSON-RPC endpoint URL" }),
@@ -1183,7 +1252,7 @@ export function createSuiReadTools() {
 				),
 			}),
 			async execute(_toolCallId, params) {
-				const owner = normalizeAtPath(params.owner);
+				const owner = resolveSuiOwnerAddress(params.owner);
 				const network = parseSuiNetwork(params.network);
 				const { rpcUrl, portfolio } = await buildPortfolioSummary({
 					owner,

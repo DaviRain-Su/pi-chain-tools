@@ -4,8 +4,8 @@ const runtimeMocks = vi.hoisted(() => ({
 	formatCoinAmount: vi.fn((value: string) => value),
 	getSuiClient: vi.fn(),
 	getSuiRpcEndpoint: vi.fn(() => "https://fullnode.devnet.sui.io:443"),
-	normalizeAtPath: vi.fn((value: string) => value),
 	parseSuiNetwork: vi.fn(() => "devnet"),
+	resolveSuiOwnerAddress: vi.fn((owner?: string) => owner ?? "0xlocal"),
 	suiNetworkSchema: vi.fn(),
 }));
 
@@ -49,8 +49,8 @@ vi.mock("../runtime.js", async () => {
 		formatCoinAmount: runtimeMocks.formatCoinAmount,
 		getSuiClient: runtimeMocks.getSuiClient,
 		getSuiRpcEndpoint: runtimeMocks.getSuiRpcEndpoint,
-		normalizeAtPath: runtimeMocks.normalizeAtPath,
 		parseSuiNetwork: runtimeMocks.parseSuiNetwork,
+		resolveSuiOwnerAddress: runtimeMocks.resolveSuiOwnerAddress,
 		suiNetworkSchema: runtimeMocks.suiNetworkSchema,
 	};
 });
@@ -89,6 +89,9 @@ beforeEach(() => {
 		"https://fullnode.devnet.sui.io:443",
 	);
 	runtimeMocks.formatCoinAmount.mockImplementation((value: string) => value);
+	runtimeMocks.resolveSuiOwnerAddress.mockImplementation(
+		(owner?: string) => owner ?? "0xlocal",
+	);
 	stableLayerMocks.resolveStableLayerNetwork.mockReturnValue("mainnet");
 	stableLayerMocks.getStableLayerSupply.mockResolvedValue({
 		totalSupply: "1000000000",
@@ -123,11 +126,12 @@ describe("sui_getBalance", () => {
 		const result = await tool.execute("t1", {
 			owner: "0xabc",
 			network: "devnet",
+			coinType: "0x2::sui::SUI",
 		});
 
 		expect(getBalance).toHaveBeenCalledWith({
 			owner: "0xabc",
-			coinType: undefined,
+			coinType: "0x2::sui::SUI",
 		});
 		expect(runtimeMocks.formatCoinAmount).toHaveBeenCalledWith("1230000000", 9);
 		expect(result.content[0]?.text).toContain("1.23 SUI");
@@ -137,6 +141,7 @@ describe("sui_getBalance", () => {
 			totalBalance: "1230000000",
 			uiAmount: "1.23",
 			network: "devnet",
+			mode: "singleCoin",
 		});
 	});
 
@@ -162,6 +167,62 @@ describe("sui_getBalance", () => {
 			coinType: "0x2::usdc::USDC",
 			totalBalance: "987654",
 			uiAmount: null,
+			mode: "singleCoin",
+		});
+	});
+
+	it("uses local default owner and returns all assets when coinType is omitted", async () => {
+		const getAllBalances = vi.fn().mockResolvedValue([
+			{
+				coinType: "0x2::sui::SUI",
+				totalBalance: "353050933",
+				coinObjectCount: 2,
+				lockedBalance: {},
+			},
+			{
+				coinType: "0x5d4b30...::coin::COIN",
+				totalBalance: "10186",
+				coinObjectCount: 1,
+				lockedBalance: {},
+			},
+		]);
+		const getCoinMetadata = vi
+			.fn()
+			.mockImplementation(async ({ coinType }: { coinType: string }) =>
+				coinType === "0x5d4b30...::coin::COIN"
+					? {
+							id: null,
+							name: "USD Coin",
+							symbol: "USDC",
+							description: "",
+							iconUrl: null,
+							decimals: 6,
+						}
+					: null,
+			);
+		runtimeMocks.getSuiClient.mockReturnValue({
+			getAllBalances,
+			getCoinMetadata,
+		});
+		runtimeMocks.resolveSuiOwnerAddress.mockReturnValue("0xlocal-owner");
+		runtimeMocks.formatCoinAmount.mockImplementation((value: string) =>
+			value === "353050933" ? "0.353050933" : "0.010186",
+		);
+
+		const tool = getTool("sui_getBalance");
+		const result = await tool.execute("t3", {
+			network: "mainnet",
+		});
+
+		expect(runtimeMocks.resolveSuiOwnerAddress).toHaveBeenCalledWith(undefined);
+		expect(getAllBalances).toHaveBeenCalledWith({
+			owner: "0xlocal-owner",
+		});
+		expect(result.content[0]?.text).toContain("USDC");
+		expect(result.details).toMatchObject({
+			owner: "0xlocal-owner",
+			mode: "allAssets",
+			assetCount: 2,
 		});
 	});
 });

@@ -3,7 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseSuiNetwork, resolveSuiKeypair, toMist } from "./runtime.js";
+import {
+	parseSuiNetwork,
+	resolveSuiKeypair,
+	resolveSuiOwnerAddress,
+	toMist,
+} from "./runtime.js";
 
 const ORIGINAL_ENV = {
 	SUI_PRIVATE_KEY: process.env.SUI_PRIVATE_KEY,
@@ -147,5 +152,46 @@ describe("resolveSuiKeypair", () => {
 		useTempSuiConfigDir(configDir);
 
 		expect(() => resolveSuiKeypair()).toThrow("sui.keystore");
+	});
+});
+
+describe("resolveSuiOwnerAddress", () => {
+	it("uses explicit owner argument when provided", () => {
+		expect(resolveSuiOwnerAddress("@0xabc")).toBe("0xabc");
+	});
+
+	it("uses active_address from local client config when owner is omitted", () => {
+		setOptionalEnv("SUI_PRIVATE_KEY", undefined);
+		const configDir = withTempSuiConfig({
+			activeAddress:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			keystoreEntries: [],
+		});
+		useTempSuiConfigDir(configDir);
+
+		expect(resolveSuiOwnerAddress()).toBe(
+			"0x1111111111111111111111111111111111111111111111111111111111111111",
+		);
+	});
+
+	it("falls back to SUI_PRIVATE_KEY when active_address is unavailable", () => {
+		const env = Ed25519Keypair.generate();
+		process.env.SUI_PRIVATE_KEY = env.getSecretKey();
+		const configDir = withTempSuiConfig({
+			keystoreEntries: [],
+		});
+		useTempSuiConfigDir(configDir);
+
+		expect(resolveSuiOwnerAddress()).toBe(env.toSuiAddress().toLowerCase());
+	});
+
+	it("throws when owner and local signer configuration are all unavailable", () => {
+		setOptionalEnv("SUI_PRIVATE_KEY", undefined);
+		const configDir = withTempSuiConfig({
+			keystoreEntries: [],
+		});
+		useTempSuiConfigDir(configDir);
+
+		expect(() => resolveSuiOwnerAddress()).toThrow("No Sui owner address");
 	});
 });

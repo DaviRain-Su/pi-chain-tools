@@ -6,13 +6,14 @@
 	"description": "Chain toolsets and Pi adapters (Solana first, multi-chain ready)",
 	"exports": {
 		".": "./src/index.ts",
+		"./pi/default-extension": "./src/pi/default-extension.ts",
 		"./pi/solana-extension": "./src/pi/solana-extension.ts",
 		"./pi/solana-workflow-extension": "./src/pi/solana-workflow-extension.ts",
 		"./pi/evm-extension": "./src/pi/evm-extension.ts",
 		"./pi/sui-extension": "./src/pi/sui-extension.ts"
 	},
 	"pi": {
-		"extensions": ["./src/pi/solana-workflow-extension.ts"]
+		"extensions": ["./src/pi/default-extension.ts"]
 	},
 	"scripts": {
 		"postinstall": "node scripts/ensure-mysten-compat.mjs",

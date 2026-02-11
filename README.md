@@ -89,19 +89,101 @@ Recommended execution flow on mainnet:
 2. `runMode=simulate` -> verify artifacts/status
 3. `runMode=execute` with `confirmMainnet=true` and `confirmToken=<token>`
 
-## Use As Pi Extension
+## Use In Pi (Recommended)
 
-```ts
-import solanaExtension from "pi-chain-tools/pi/solana-extension";
+You do **not** need `pi-mono`. Install this project as a normal Pi extension source.
 
-export default solanaExtension;
+### 1) Install once
+
+Local repository source:
+
+```bash
+pi install /Users/davirian/dev/pi-chain-tools
 ```
 
-```ts
-import suiExtension from "pi-chain-tools/pi/sui-extension";
+After npm publish:
 
-export default suiExtension;
+```bash
+pi install npm:pi-chain-tools
 ```
+
+The package auto-loads one bundled extension (`src/pi/default-extension.ts`) that registers:
+
+- Solana workflow toolset
+- Sui full toolset (read/compose/execute/workflow/rpc)
+
+### 2) Reload Pi and smoke test
+
+Run in Pi:
+
+```text
+/reload
+```
+
+Then ask naturally:
+
+```text
+帮我查一下 Sui 主网余额
+```
+
+### 3) Sui signer config (no `fromPrivateKey` needed)
+
+Sui execute/workflow tools now auto-load signer in this order:
+
+1. `SUI_PRIVATE_KEY` (optional env override)
+2. `SUI_KEYSTORE_PATH` + `SUI_CLIENT_CONFIG_PATH` (optional custom paths)
+3. default local Sui CLI config:
+   - `~/.sui/sui_config/sui.keystore`
+   - `~/.sui/sui_config/client.yaml` (`active_address`)
+
+Useful checks:
+
+```bash
+sui client active-address
+ls ~/.sui/sui_config/sui.keystore
+```
+
+### 4) Execution allow/safety config
+
+- Mainnet execute is guarded. You must explicitly confirm (internally `confirmMainnet=true`).
+- Workflow execute on mainnet also requires the matching `confirmToken` from prior analysis/simulate.
+- `sui_rpc` blocks dangerous methods by default; only use `allowDangerous=true` when you know exactly what you are doing.
+
+Natural language confirmation example:
+
+```text
+继续执行刚才这笔，确认主网执行
+```
+
+### 5) Natural language examples (Sui)
+
+- Swap simulate:
+  - `把 0.01 SUI 换成 USDC，先模拟。`
+- Swap execute (after simulate):
+  - `继续执行刚才这笔，确认主网执行。`
+- Cetus farms pools:
+  - `帮我查一下 Sui 主网 Cetus farms 的池子列表。`
+- StableLayer:
+  - `在 Sui 主网把 1000000 raw USDC mint 成 stable，先模拟。`
+
+### 6) Troubleshooting
+
+- `Cannot find module ...`: run `npm install` (or `bun install`), then `/reload`.
+- Extension conflicts in Pi: ensure duplicated tool providers are not loaded at the same time.
+- Wallet/signing issues: verify `sui client active-address` and keystore path, then restart Pi once.
+
+Useful extension management commands:
+
+```bash
+pi list
+pi update
+pi remove /Users/davirian/dev/pi-chain-tools
+```
+
+### 7) Optional: `pi-mono` development wiring
+
+Only needed if you intentionally develop extensions inside `pi-mono`.
+The bundled default extension already reuses the same Solana/Sui dedupe guards, so mixed loading is safer, but keeping a single source of truth is still recommended.
 
 ## Development
 

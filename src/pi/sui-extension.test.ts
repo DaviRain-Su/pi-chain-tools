@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import suiExtension from "./sui-extension.js";
 
 describe("suiExtension", () => {
-	it("registers minimal Sui tool surface", () => {
+	it("registers minimal Sui tool surface once", () => {
 		const names: string[] = [];
 		const registrar = {
 			registerTool(tool: { name: string }) {
@@ -16,6 +16,7 @@ describe("suiExtension", () => {
 			},
 		};
 
+		suiExtension(registrar);
 		suiExtension(registrar);
 		expect(names.sort()).toEqual([
 			"sui_buildCetusAddLiquidityTransaction",

@@ -167,6 +167,14 @@ function resolveSuiConfigDir(): string {
 	return path.join(os.homedir(), ".sui", "sui_config");
 }
 
+function resolveSuiClientConfigPath(): string {
+	const configDir = resolveSuiConfigDir();
+	return (
+		process.env[SUI_CLIENT_CONFIG_PATH_ENV]?.trim() ||
+		path.join(configDir, "client.yaml")
+	);
+}
+
 function normalizeAddress(value: string): string {
 	const lower = value.trim().toLowerCase();
 	return lower.startsWith("0x") ? lower : `0x${lower}`;
@@ -244,9 +252,7 @@ function resolveSuiKeypairFromLocalKeystore(): Ed25519Keypair | null {
 	const keystorePath =
 		process.env[SUI_KEYSTORE_PATH_ENV]?.trim() ||
 		path.join(configDir, "sui.keystore");
-	const clientConfigPath =
-		process.env[SUI_CLIENT_CONFIG_PATH_ENV]?.trim() ||
-		path.join(configDir, "client.yaml");
+	const clientConfigPath = resolveSuiClientConfigPath();
 	const activeAddress = parseActiveAddress(clientConfigPath);
 
 	try {
@@ -271,6 +277,32 @@ function resolveSuiKeypairFromLocalKeystore(): Ed25519Keypair | null {
 	} catch {
 		return null;
 	}
+}
+
+export function resolveSuiOwnerAddress(owner?: string): string {
+	if (typeof owner === "string" && owner.trim().length > 0) {
+		return normalizeAtPath(owner.trim());
+	}
+
+	const activeAddress = parseActiveAddress(resolveSuiClientConfigPath());
+	if (activeAddress) {
+		return activeAddress;
+	}
+
+	const envPrivateKey = process.env.SUI_PRIVATE_KEY?.trim();
+	if (envPrivateKey) {
+		const keypair = resolveSuiKeypair(envPrivateKey);
+		return normalizeAddress(keypair.toSuiAddress());
+	}
+
+	const fallbackKeypair = resolveSuiKeypairFromLocalKeystore();
+	if (fallbackKeypair) {
+		return normalizeAddress(fallbackKeypair.toSuiAddress());
+	}
+
+	throw new Error(
+		"No Sui owner address available. Provide owner, or configure sui client active-address in client.yaml, or set SUI_PRIVATE_KEY / sui.keystore.",
+	);
 }
 
 export function resolveSuiKeypair(privateKey?: string): Ed25519Keypair {
