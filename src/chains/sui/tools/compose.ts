@@ -1,5 +1,4 @@
 import { AggregatorClient, Env } from "@cetusprotocol/aggregator-sdk";
-import { initCetusSDK } from "@cetusprotocol/cetus-sui-clmm-sdk";
 import { Transaction } from "@mysten/sui/transactions";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
@@ -142,6 +141,58 @@ type BuildStableLayerClaimParams = {
 	stableCoinType: string;
 	network?: string;
 };
+
+type CetusClmmSdkLike = {
+	Position: {
+		createAddLiquidityFixTokenPayload(params: {
+			pool_id: string;
+			pos_id: string;
+			coinTypeA: string;
+			coinTypeB: string;
+			tick_lower: number;
+			tick_upper: number;
+			amount_a: string;
+			amount_b: string;
+			slippage: number;
+			fix_amount_a: boolean;
+			is_open: boolean;
+			collect_fee: boolean;
+			rewarder_coin_types: string[];
+		}): Promise<unknown>;
+		removeLiquidityTransactionPayload(params: {
+			pool_id: string;
+			pos_id: string;
+			coinTypeA: string;
+			coinTypeB: string;
+			delta_liquidity: string;
+			min_amount_a: string;
+			min_amount_b: string;
+			collect_fee: boolean;
+			rewarder_coin_types: string[];
+		}): Promise<unknown>;
+	};
+};
+
+type InitCetusSDKFn = (config: {
+	network: "mainnet" | "testnet";
+	fullNodeUrl: string;
+	wallet: string;
+}) => CetusClmmSdkLike;
+
+let cachedInitCetusSDK: InitCetusSDKFn | null = null;
+
+async function getInitCetusSDK(): Promise<InitCetusSDKFn> {
+	if (cachedInitCetusSDK) return cachedInitCetusSDK;
+	const moduleValue = await import("@cetusprotocol/cetus-sui-clmm-sdk");
+	const candidate = (moduleValue as { initCetusSDK?: unknown }).initCetusSDK;
+	if (typeof candidate !== "function") {
+		throw new Error(
+			"Failed to load @cetusprotocol/cetus-sui-clmm-sdk: initCetusSDK not found.",
+		);
+	}
+	cachedInitCetusSDK = candidate as InitCetusSDKFn;
+	return cachedInitCetusSDK;
+}
 
 function resolveTransferAmount(params: BuildTransferSuiParams): bigint {
 	if (params.amountMist != null) {
@@ -561,6 +612,7 @@ export function createSuiComposeTools() {
 				const cetusNetwork = resolveCetusNetwork(network);
 				const fromAddress = normalizeAtPath(params.fromAddress);
 				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
+				const initCetusSDK = await getInitCetusSDK();
 				const sdk = initCetusSDK({
 					network: cetusNetwork,
 					fullNodeUrl: rpcUrl,
@@ -643,6 +695,7 @@ export function createSuiComposeTools() {
 				const cetusNetwork = resolveCetusNetwork(network);
 				const fromAddress = normalizeAtPath(params.fromAddress);
 				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
+				const initCetusSDK = await getInitCetusSDK();
 				const sdk = initCetusSDK({
 					network: cetusNetwork,
 					fullNodeUrl: rpcUrl,
