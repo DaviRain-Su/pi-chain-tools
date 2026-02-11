@@ -59,7 +59,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui 
 - `execute`: `sui_transferSui` (amount in `amountMist` or `amountSui`, with mainnet safety gate `confirmMainnet=true`)
 - `execute`: `sui_transferCoin` (non-SUI transfer, auto-merge coin objects, with mainnet safety gate)
 - `workflow`: `w3rt_run_sui_workflow_v0` (analysis/simulate/execute with deterministic mainnet confirmToken)
-- `rpc`: scaffolded and ready for follow-up additions
+- `rpc`: `sui_rpc` (generic Sui JSON-RPC passthrough with dangerous method safety guard)
 
 ## Use As Pi Extension
 

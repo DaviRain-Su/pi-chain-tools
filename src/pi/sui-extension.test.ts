@@ -28,6 +28,7 @@ describe("suiExtension", () => {
 			"sui_getBalance",
 			"sui_getPortfolio",
 			"sui_getSwapQuote",
+			"sui_rpc",
 			"sui_swapCetus",
 			"sui_transferCoin",
 			"sui_transferSui",
