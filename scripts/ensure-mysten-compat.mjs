@@ -23,9 +23,7 @@ function relativeImport(fromFile, toFile) {
 	return rel;
 }
 
-async function ensureModuleAlias(distDir, outputSubpath, sourceSubpath) {
-	const outputFile = path.join(distDir, outputSubpath, "index.mjs");
-	const sourceFile = path.join(distDir, sourceSubpath);
+async function ensureFileAlias(outputFile, sourceFile) {
 	if (await exists(outputFile)) return;
 	if (!(await exists(sourceFile))) return;
 
@@ -35,8 +33,13 @@ async function ensureModuleAlias(distDir, outputSubpath, sourceSubpath) {
 	await writeFile(outputFile, content, "utf8");
 }
 
-async function main() {
-	const rootDir = process.cwd();
+async function ensureModuleAlias(distDir, outputSubpath, sourceSubpath) {
+	const outputFile = path.join(distDir, outputSubpath, "index.mjs");
+	const sourceFile = path.join(distDir, sourceSubpath);
+	await ensureFileAlias(outputFile, sourceFile);
+}
+
+async function ensureSuiAliases(rootDir) {
 	const suiDir = path.join(rootDir, "node_modules", "@mysten", "sui");
 	const pkgPath = path.join(suiDir, "package.json");
 	if (!(await exists(pkgPath))) return;
@@ -76,6 +79,29 @@ async function main() {
 	for (const [outputSubpath, sourceSubpath] of aliases) {
 		await ensureModuleAlias(distDir, outputSubpath, sourceSubpath);
 	}
+}
+
+async function ensureUtilsAliases(rootDir) {
+	const utilsDir = path.join(rootDir, "node_modules", "@mysten", "utils");
+	const pkgPath = path.join(utilsDir, "package.json");
+	if (!(await exists(pkgPath))) return;
+
+	const distDir = path.join(utilsDir, "dist");
+	const esmIndex = path.join(distDir, "esm", "index.js");
+	const aliases = [
+		path.join(distDir, "index.mjs"),
+		path.join(utilsDir, "index.mjs"),
+	];
+
+	for (const outputFile of aliases) {
+		await ensureFileAlias(outputFile, esmIndex);
+	}
+}
+
+async function main() {
+	const rootDir = process.cwd();
+	await ensureSuiAliases(rootDir);
+	await ensureUtilsAliases(rootDir);
 }
 
 await main();
