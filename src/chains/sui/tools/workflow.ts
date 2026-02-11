@@ -1218,9 +1218,6 @@ function parseSlippageDecimal(slippageBps?: number): number {
 	return bps / 10_000;
 }
 
-const SUI_WORKFLOW_SIGNER_PRIVATE_KEY_DESCRIPTION =
-	"Optional signer private key in suiprivkey format. If omitted, auto-loads SUI_PRIVATE_KEY, then local ~/.sui/sui_config/sui.keystore active_address key.";
-
 function stringifyError(error: unknown): string {
 	if (error instanceof Error) {
 		return error.message;
@@ -1267,7 +1264,7 @@ function formatSimulationSummary(params: {
 	};
 }): string {
 	if (params.unsignedPayload.unsignedTransactionBytesBase64) {
-		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported`;
+		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported (execute can proceed without fromPrivateKey)`;
 	}
 	if (params.unsignedPayload.unsignedPayloadError) {
 		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=unavailable`;
@@ -1991,11 +1988,6 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				),
 				endpoint: Type.Optional(Type.String()),
 				apiKey: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(
-					Type.String({
-						description: SUI_WORKFLOW_SIGNER_PRIVATE_KEY_DESCRIPTION,
-					}),
-				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
@@ -2192,11 +2184,6 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				amountStableRaw: Type.Optional(Type.String()),
 				burnAll: Type.Optional(Type.Boolean()),
 				usdcCoinType: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(
-					Type.String({
-						description: SUI_WORKFLOW_SIGNER_PRIVATE_KEY_DESCRIPTION,
-					}),
-				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
@@ -2406,11 +2393,6 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				coinTypeA: Type.Optional(Type.String()),
 				coinTypeB: Type.Optional(Type.String()),
 				positionNftId: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(
-					Type.String({
-						description: SUI_WORKFLOW_SIGNER_PRIVATE_KEY_DESCRIPTION,
-					}),
-				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
@@ -2652,11 +2634,6 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				clmmPositionId: Type.Optional(Type.String()),
 				clmmPoolId: Type.Optional(Type.String()),
 				positionNftId: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(
-					Type.String({
-						description: SUI_WORKFLOW_SIGNER_PRIVATE_KEY_DESCRIPTION,
-					}),
-				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
