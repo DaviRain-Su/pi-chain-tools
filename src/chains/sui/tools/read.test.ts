@@ -104,3 +104,107 @@ describe("sui_getBalance", () => {
 		});
 	});
 });
+
+describe("sui_getPortfolio", () => {
+	it("returns sorted multi-asset balances with metadata and SUI summary", async () => {
+		const getAllBalances = vi.fn().mockResolvedValue([
+			{
+				coinType: "0x2::sui::SUI",
+				coinObjectCount: 2,
+				totalBalance: "2500000000",
+				lockedBalance: {},
+			},
+			{
+				coinType: "0x2::usdc::USDC",
+				coinObjectCount: 1,
+				totalBalance: "2000000",
+				lockedBalance: {},
+			},
+			{
+				coinType: "0x2::dust::DUST",
+				coinObjectCount: 1,
+				totalBalance: "0",
+				lockedBalance: {},
+			},
+		]);
+		const getCoinMetadata = vi
+			.fn()
+			.mockImplementation(async ({ coinType }: { coinType: string }) => {
+				if (coinType === "0x2::usdc::USDC") {
+					return {
+						decimals: 6,
+						symbol: "USDC",
+						name: "USD Coin",
+						description: "USD Coin",
+						iconUrl: null,
+					};
+				}
+				return null;
+			});
+		runtimeMocks.getSuiClient.mockReturnValue({
+			getAllBalances,
+			getCoinMetadata,
+		});
+		runtimeMocks.formatCoinAmount
+			.mockReturnValueOnce("2.5")
+			.mockReturnValueOnce("2");
+
+		const tool = getTool("sui_getPortfolio");
+		const result = await tool.execute("p1", {
+			owner: "0xportfolio",
+			network: "devnet",
+		});
+
+		expect(getAllBalances).toHaveBeenCalledWith({ owner: "0xportfolio" });
+		expect(getCoinMetadata).toHaveBeenCalledTimes(2);
+		expect(runtimeMocks.formatCoinAmount).toHaveBeenCalledWith("2500000000", 9);
+		expect(runtimeMocks.formatCoinAmount).toHaveBeenCalledWith("2000000", 6);
+		expect(result.content[0]?.text).toContain("Portfolio: 2 assets");
+		expect(result.details).toMatchObject({
+			owner: "0xportfolio",
+			assetCount: 2,
+			totalCoinObjectCount: 3,
+			suiBalance: {
+				coinType: "0x2::sui::SUI",
+				totalBalance: "2500000000",
+				uiAmount: "2.5",
+			},
+		});
+	});
+
+	it("supports disabling metadata and includes zero balances when requested", async () => {
+		const getAllBalances = vi.fn().mockResolvedValue([
+			{
+				coinType: "0x2::dust::DUST",
+				coinObjectCount: 1,
+				totalBalance: "0",
+				lockedBalance: {},
+			},
+		]);
+		const getCoinMetadata = vi.fn();
+		runtimeMocks.getSuiClient.mockReturnValue({
+			getAllBalances,
+			getCoinMetadata,
+		});
+
+		const tool = getTool("sui_getPortfolio");
+		const result = await tool.execute("p2", {
+			owner: "0xportfolio",
+			includeMetadata: false,
+			includeZeroBalances: true,
+		});
+
+		expect(getCoinMetadata).not.toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			assetCount: 1,
+			assets: [
+				{
+					coinType: "0x2::dust::DUST",
+					totalBalance: "0",
+					uiAmount: null,
+					metadata: null,
+				},
+			],
+		});
+	});
+});

@@ -11,6 +11,11 @@ describe("suiExtension", () => {
 		};
 
 		suiExtension(registrar);
-		expect(names.sort()).toEqual(["sui_getBalance", "sui_transferSui"]);
+		expect(names.sort()).toEqual([
+			"sui_getBalance",
+			"sui_getPortfolio",
+			"sui_transferCoin",
+			"sui_transferSui",
+		]);
 	});
 });

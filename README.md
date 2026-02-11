@@ -49,7 +49,9 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui 
 ## Sui (Minimal)
 
 - `read`: `sui_getBalance` (SUI or custom `coinType`)
+- `read`: `sui_getPortfolio` (multi-asset balances with optional metadata)
 - `execute`: `sui_transferSui` (amount in `amountMist` or `amountSui`, with mainnet safety gate `confirmMainnet=true`)
+- `execute`: `sui_transferCoin` (non-SUI transfer, auto-merge coin objects, with mainnet safety gate)
 - `compose/rpc`: scaffolded and ready for follow-up additions
 
 ## Use As Pi Extension

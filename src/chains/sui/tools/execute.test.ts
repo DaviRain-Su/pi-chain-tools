@@ -147,3 +147,106 @@ describe("sui_transferSui", () => {
 		).rejects.toThrow("insufficient gas");
 	});
 });
+
+describe("sui_transferCoin", () => {
+	const toAddress =
+		"0x3333333333333333333333333333333333333333333333333333333333333333";
+	const coinType = "0x2::usdc::USDC";
+	const coinObjectIdA =
+		"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+	const coinObjectIdB =
+		"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+	it("rejects SUI coin type for this tool", async () => {
+		const tool = getTool("sui_transferCoin");
+		await expect(
+			tool.execute("c1", {
+				toAddress,
+				coinType: "0x2::sui::SUI",
+				amountRaw: "1000",
+			}),
+		).rejects.toThrow("Use sui_transferSui");
+	});
+
+	it("collects and merges coin objects before sending", async () => {
+		const getCoins = vi.fn().mockResolvedValue({
+			data: [
+				{
+					coinObjectId: coinObjectIdA,
+					balance: "400",
+				},
+				{
+					coinObjectId: coinObjectIdB,
+					balance: "700",
+				},
+			],
+			hasNextPage: false,
+			nextCursor: null,
+		});
+		const signAndExecuteTransaction = vi.fn().mockResolvedValue({
+			digest: "0xcoin-ok",
+			confirmedLocalExecution: true,
+			effects: {
+				status: {
+					status: "success",
+				},
+			},
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({
+			getCoins,
+			signAndExecuteTransaction,
+		});
+
+		const tool = getTool("sui_transferCoin");
+		const result = await tool.execute("c2", {
+			toAddress,
+			coinType,
+			amountRaw: "1000",
+		});
+
+		expect(getCoins).toHaveBeenCalledWith({
+			owner:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			coinType,
+			cursor: undefined,
+			limit: 20,
+		});
+		expect(signAndExecuteTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			digest: "0xcoin-ok",
+			status: "success",
+			coinType,
+			amountRaw: "1000",
+			selectedCoinObjectIds: [coinObjectIdA, coinObjectIdB],
+			selectedCoinObjectCount: 2,
+			selectedBalanceRaw: "1100",
+		});
+	});
+
+	it("throws when selected coin objects are insufficient", async () => {
+		const getCoins = vi.fn().mockResolvedValue({
+			data: [
+				{
+					coinObjectId: coinObjectIdA,
+					balance: "100",
+				},
+			],
+			hasNextPage: false,
+			nextCursor: null,
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({
+			getCoins,
+			signAndExecuteTransaction: vi.fn(),
+		});
+
+		const tool = getTool("sui_transferCoin");
+		await expect(
+			tool.execute("c3", {
+				toAddress,
+				coinType,
+				amountRaw: "1000",
+				maxCoinObjectsToMerge: 1,
+			}),
+		).rejects.toThrow("Insufficient balance");
+	});
+});
