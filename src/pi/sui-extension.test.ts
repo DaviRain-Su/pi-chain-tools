@@ -38,6 +38,7 @@ describe("suiExtension", () => {
 			"sui_getCetusFarmsPools",
 			"sui_getCetusFarmsPositions",
 			"sui_getCetusVaultsBalances",
+			"sui_getDefiPositions",
 			"sui_getPortfolio",
 			"sui_getStableLayerSupply",
 			"sui_getSwapQuote",
@@ -49,6 +50,7 @@ describe("suiExtension", () => {
 			"sui_transferCoin",
 			"sui_transferSui",
 			"w3rt_run_sui_cetus_farms_workflow_v0",
+			"w3rt_run_sui_defi_workflow_v0",
 			"w3rt_run_sui_stablelayer_workflow_v0",
 			"w3rt_run_sui_workflow_v0",
 		]);

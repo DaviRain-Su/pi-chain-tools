@@ -495,3 +495,140 @@ describe("sui_getCetusVaultsBalances", () => {
 		});
 	});
 });
+
+describe("sui_getDefiPositions", () => {
+	it("returns aggregated portfolio + cetus farms/vault positions", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		const getAllBalances = vi.fn().mockResolvedValue([
+			{
+				coinType: "0x2::sui::SUI",
+				coinObjectCount: 2,
+				totalBalance: "2500000000",
+				lockedBalance: {},
+			},
+			{
+				coinType: "0x2::usdc::USDC",
+				coinObjectCount: 1,
+				totalBalance: "2000000",
+				lockedBalance: {},
+			},
+		]);
+		const getCoinMetadata = vi
+			.fn()
+			.mockImplementation(async ({ coinType }: { coinType: string }) => {
+				if (coinType === "0x2::usdc::USDC") {
+					return {
+						decimals: 6,
+						symbol: "USDC",
+						name: "USD Coin",
+						description: "USD Coin",
+						iconUrl: null,
+					};
+				}
+				return null;
+			});
+		runtimeMocks.getSuiClient.mockReturnValue({
+			getAllBalances,
+			getCoinMetadata,
+		});
+		runtimeMocks.formatCoinAmount
+			.mockReturnValueOnce("2.5")
+			.mockReturnValueOnce("2");
+		cetusV2Mocks.getCetusFarmsPositions.mockResolvedValue({
+			positions: [
+				{
+					id: "0xposnft1",
+					pool_id: "0xpool1",
+					clmm_position_id: "0xclmmpos1",
+					clmm_pool_id: "0xclmm1",
+					rewards: [{}, {}],
+				},
+			],
+			hasNextPage: false,
+			nextCursor: null,
+		});
+		cetusV2Mocks.getCetusVaultsBalances.mockResolvedValue([
+			{
+				vault_id: "0xvault1",
+				clmm_pool_id: "0xclmm1",
+				lp_token_balance: "12345",
+			},
+		]);
+
+		const tool = getTool("sui_getDefiPositions");
+		const result = await tool.execute("defi-read-1", {
+			owner: "0xowner",
+			network: "mainnet",
+		});
+
+		expect(cetusV2Mocks.getCetusFarmsPositions).toHaveBeenCalledTimes(1);
+		expect(cetusV2Mocks.getCetusVaultsBalances).toHaveBeenCalledTimes(1);
+		expect(result.content[0]?.text).toContain("DeFi positions");
+		expect(result.details).toMatchObject({
+			owner: "0xowner",
+			network: "mainnet",
+			portfolio: {
+				assetCount: 2,
+				suiBalance: {
+					coinType: "0x2::sui::SUI",
+					uiAmount: "2.5",
+				},
+			},
+			defi: {
+				cetusNetwork: "mainnet",
+				cetusError: null,
+				farms: {
+					positionCount: 1,
+				},
+				vaults: {
+					vaultCount: 1,
+				},
+			},
+		});
+	});
+
+	it("degrades gracefully on unsupported cetus network", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("devnet");
+		const getAllBalances = vi.fn().mockResolvedValue([
+			{
+				coinType: "0x2::sui::SUI",
+				coinObjectCount: 1,
+				totalBalance: "1000000000",
+				lockedBalance: {},
+			},
+		]);
+		runtimeMocks.getSuiClient.mockReturnValue({
+			getAllBalances,
+			getCoinMetadata: vi.fn().mockResolvedValue(null),
+		});
+		runtimeMocks.formatCoinAmount.mockReturnValue("1");
+		cetusV2Mocks.resolveCetusV2Network.mockImplementationOnce(() => {
+			throw new Error(
+				"Cetus v2 SDK currently supports network=mainnet or testnet.",
+			);
+		});
+
+		const tool = getTool("sui_getDefiPositions");
+		const result = await tool.execute("defi-read-2", {
+			owner: "0xowner",
+			network: "devnet",
+		});
+
+		expect(cetusV2Mocks.getCetusFarmsPositions).not.toHaveBeenCalled();
+		expect(cetusV2Mocks.getCetusVaultsBalances).not.toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			network: "devnet",
+			defi: {
+				cetusNetwork: null,
+				cetusError:
+					"Cetus v2 SDK currently supports network=mainnet or testnet.",
+				farms: {
+					positionCount: 0,
+				},
+				vaults: {
+					vaultCount: 0,
+				},
+			},
+		});
+	});
+});

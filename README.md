@@ -49,6 +49,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui 
 ## Sui (Minimal)
 
 - `read`: `sui_getBalance` (SUI or custom `coinType`)
+- `read`: `sui_getDefiPositions` (aggregated wallet + Cetus farms/vault positions snapshot)
 - `read`: `sui_getPortfolio` (multi-asset balances with optional metadata)
 - `read`: `sui_getSwapQuote` (Cetus aggregator quote + route details on mainnet/testnet)
 - `read`: `sui_getStableLayerSupply` (Stable Layer total supply + optional per-coin supply on mainnet/testnet)
@@ -67,6 +68,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui 
 - `workflow`: `w3rt_run_sui_workflow_v0` (analysis/simulate/execute with deterministic mainnet confirmToken)
 - `workflow`: `w3rt_run_sui_stablelayer_workflow_v0` (analysis/simulate/execute for stable-layer mint/burn/claim with deterministic mainnet confirmToken)
 - `workflow`: `w3rt_run_sui_cetus_farms_workflow_v0` (analysis/simulate/execute for Cetus v2 farms stake/unstake/harvest with deterministic mainnet confirmToken)
+- `workflow`: `w3rt_run_sui_defi_workflow_v0` (unified DeFi router workflow; auto-routes to core/stablelayer/cetus-farms flows)
 - `rpc`: `sui_rpc` (generic Sui JSON-RPC passthrough with dangerous method safety guard)
 
 ## Use As Pi Extension

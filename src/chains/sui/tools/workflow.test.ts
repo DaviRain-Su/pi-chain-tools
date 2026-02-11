@@ -718,3 +718,61 @@ describe("w3rt_run_sui_cetus_farms_workflow_v0", () => {
 		});
 	});
 });
+
+describe("w3rt_run_sui_defi_workflow_v0", () => {
+	it("routes stablelayer intent to stablelayer workflow", async () => {
+		const tool = getTool("w3rt_run_sui_defi_workflow_v0");
+		const result = await tool.execute("sui-defi-wf-1", {
+			runId: "wf-sui-defi-01",
+			runMode: "analysis",
+			intentType: "sui.stablelayer.claim",
+			network: "mainnet",
+			stableCoinType:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::btc_usdc::BtcUSDC",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.stablelayer.claim",
+			routedWorkflow: "w3rt_run_sui_stablelayer_workflow_v0",
+		});
+	});
+
+	it("routes farms intent text to cetus farms workflow", async () => {
+		const tool = getTool("w3rt_run_sui_defi_workflow_v0");
+		const result = await tool.execute("sui-defi-wf-2", {
+			runId: "wf-sui-defi-02",
+			runMode: "analysis",
+			intentText:
+				"farm harvest rewards pool: 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa nft: 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			network: "mainnet",
+			poolId:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			positionNftId:
+				"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.cetus.farms.harvest",
+			routedWorkflow: "w3rt_run_sui_cetus_farms_workflow_v0",
+		});
+	});
+
+	it("routes generic transfer intent to core sui workflow", async () => {
+		const tool = getTool("w3rt_run_sui_defi_workflow_v0");
+		const destination =
+			"0x2222222222222222222222222222222222222222222222222222222222222222";
+		const result = await tool.execute("sui-defi-wf-3", {
+			runId: "wf-sui-defi-03",
+			runMode: "analysis",
+			intentType: "sui.transfer.sui",
+			network: "mainnet",
+			toAddress: destination,
+			amountSui: 0.000001,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.transfer.sui",
+			routedWorkflow: "w3rt_run_sui_workflow_v0",
+		});
+	});
+});

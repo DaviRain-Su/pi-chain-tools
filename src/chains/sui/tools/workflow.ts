@@ -3,7 +3,7 @@ import { AggregatorClient, Env } from "@cetusprotocol/aggregator-sdk";
 import { initCetusSDK } from "@cetusprotocol/cetus-sui-clmm-sdk";
 import { Transaction } from "@mysten/sui/transactions";
 import { Type } from "@sinclair/typebox";
-import { defineTool } from "../../../core/types.js";
+import { type RegisteredTool, defineTool } from "../../../core/types.js";
 import {
 	buildCetusFarmsHarvestTransaction,
 	buildCetusFarmsStakeTransaction,
@@ -256,6 +256,54 @@ type ParsedCetusFarmsIntentHints = {
 	coinTypeA?: string;
 	coinTypeB?: string;
 	positionNftId?: string;
+};
+
+type SuiDefiWorkflowParams = {
+	runId?: string;
+	runMode?: WorkflowRunMode;
+	intentType?: string;
+	intentText?: string;
+	network?: string;
+	toAddress?: string;
+	amountSui?: number;
+	amountRaw?: string;
+	coinType?: string;
+	inputCoinType?: string;
+	outputCoinType?: string;
+	byAmountIn?: boolean;
+	slippageBps?: number;
+	providers?: string[];
+	depth?: number;
+	poolId?: string;
+	positionId?: string;
+	coinTypeA?: string;
+	coinTypeB?: string;
+	tickLower?: number;
+	tickUpper?: number;
+	amountA?: string;
+	amountB?: string;
+	fixAmountA?: boolean;
+	deltaLiquidity?: string;
+	minAmountA?: string;
+	minAmountB?: string;
+	collectFee?: boolean;
+	rewarderCoinTypes?: string[];
+	maxCoinObjectsToMerge?: number;
+	endpoint?: string;
+	apiKey?: string;
+	stableCoinType?: string;
+	amountUsdcRaw?: string;
+	amountStableRaw?: string;
+	burnAll?: boolean;
+	usdcCoinType?: string;
+	rpcUrl?: string;
+	clmmPositionId?: string;
+	clmmPoolId?: string;
+	positionNftId?: string;
+	fromPrivateKey?: string;
+	confirmMainnet?: boolean;
+	confirmToken?: string;
+	waitForLocalExecution?: boolean;
 };
 
 function workflowRunModeSchema() {
@@ -1418,7 +1466,84 @@ async function executeCetusFarmsIntent(
 	});
 }
 
-export function createSuiWorkflowTools() {
+function resolveWorkflowTool(
+	name:
+		| "w3rt_run_sui_workflow_v0"
+		| "w3rt_run_sui_stablelayer_workflow_v0"
+		| "w3rt_run_sui_cetus_farms_workflow_v0",
+): {
+	execute(
+		toolCallId: string,
+		params: Record<string, unknown>,
+	): Promise<{
+		content: { type: string; text: string }[];
+		details?: unknown;
+	}>;
+} {
+	const tool = createSuiWorkflowTools().find((entry) => entry.name === name);
+	if (!tool) throw new Error(`Workflow tool not found: ${name}`);
+	return tool as unknown as {
+		execute(
+			toolCallId: string,
+			params: Record<string, unknown>,
+		): Promise<{
+			content: { type: string; text: string }[];
+			details?: unknown;
+		}>;
+	};
+}
+
+function resolveDefiWorkflowRoute(
+	params: SuiDefiWorkflowParams,
+):
+	| "w3rt_run_sui_workflow_v0"
+	| "w3rt_run_sui_stablelayer_workflow_v0"
+	| "w3rt_run_sui_cetus_farms_workflow_v0" {
+	const intentType = params.intentType?.trim().toLowerCase();
+	if (intentType?.startsWith("sui.stablelayer.")) {
+		return "w3rt_run_sui_stablelayer_workflow_v0";
+	}
+	if (intentType?.startsWith("sui.cetus.farms.")) {
+		return "w3rt_run_sui_cetus_farms_workflow_v0";
+	}
+
+	if (
+		params.stableCoinType?.trim() ||
+		params.amountUsdcRaw?.trim() ||
+		params.amountStableRaw?.trim() ||
+		params.burnAll === true
+	) {
+		return "w3rt_run_sui_stablelayer_workflow_v0";
+	}
+
+	if (
+		params.clmmPositionId?.trim() ||
+		params.clmmPoolId?.trim() ||
+		params.positionNftId?.trim()
+	) {
+		return "w3rt_run_sui_cetus_farms_workflow_v0";
+	}
+
+	const lowerIntentText = params.intentText?.toLowerCase() ?? "";
+	if (
+		/\bstablelayer\b|\bstable layer\b|\bmint\b|\bburn\b|\bclaim\b|稳定币|铸造|赎回|销毁|领取奖励|提取奖励/i.test(
+			lowerIntentText,
+		)
+	) {
+		return "w3rt_run_sui_stablelayer_workflow_v0";
+	}
+	if (
+		/\bfarm\b|\bstake\b|\bunstake\b|\bharvest\b|农场|挖矿|质押|解质押|收割/i.test(
+			lowerIntentText,
+		)
+	) {
+		return "w3rt_run_sui_cetus_farms_workflow_v0";
+	}
+
+	return "w3rt_run_sui_workflow_v0";
+}
+
+export function createSuiWorkflowTools(): RegisteredTool[] {
 	return [
 		defineTool({
 			name: "w3rt_run_sui_workflow_v0",
@@ -1906,6 +2031,89 @@ export function createSuiWorkflowTools() {
 							execute: executeResult.details ?? null,
 						},
 					},
+				};
+			},
+		}),
+		defineTool({
+			name: "w3rt_run_sui_defi_workflow_v0",
+			label: "W3RT Sui DeFi Workflow v0",
+			description:
+				"Unified Sui DeFi workflow router. Automatically routes to core/swap-lp, stablelayer, or cetus-farms workflows.",
+			parameters: Type.Object({
+				runId: Type.Optional(Type.String()),
+				runMode: workflowRunModeSchema(),
+				intentType: Type.Optional(Type.String()),
+				intentText: Type.Optional(Type.String()),
+				network: suiNetworkSchema(),
+				toAddress: Type.Optional(Type.String()),
+				amountSui: Type.Optional(Type.Number()),
+				amountRaw: Type.Optional(Type.String()),
+				coinType: Type.Optional(Type.String()),
+				inputCoinType: Type.Optional(Type.String()),
+				outputCoinType: Type.Optional(Type.String()),
+				byAmountIn: Type.Optional(Type.Boolean()),
+				slippageBps: Type.Optional(
+					Type.Number({ minimum: 1, maximum: 10_000 }),
+				),
+				providers: Type.Optional(
+					Type.Array(Type.String(), { minItems: 1, maxItems: 50 }),
+				),
+				depth: Type.Optional(Type.Number({ minimum: 1, maximum: 8 })),
+				poolId: Type.Optional(Type.String()),
+				positionId: Type.Optional(Type.String()),
+				coinTypeA: Type.Optional(Type.String()),
+				coinTypeB: Type.Optional(Type.String()),
+				tickLower: Type.Optional(Type.Number()),
+				tickUpper: Type.Optional(Type.Number()),
+				amountA: Type.Optional(Type.String()),
+				amountB: Type.Optional(Type.String()),
+				fixAmountA: Type.Optional(Type.Boolean()),
+				deltaLiquidity: Type.Optional(Type.String()),
+				minAmountA: Type.Optional(Type.String()),
+				minAmountB: Type.Optional(Type.String()),
+				collectFee: Type.Optional(Type.Boolean()),
+				rewarderCoinTypes: Type.Optional(
+					Type.Array(Type.String(), { minItems: 0, maxItems: 16 }),
+				),
+				maxCoinObjectsToMerge: Type.Optional(
+					Type.Number({ minimum: 1, maximum: 100 }),
+				),
+				endpoint: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				stableCoinType: Type.Optional(Type.String()),
+				amountUsdcRaw: Type.Optional(Type.String()),
+				amountStableRaw: Type.Optional(Type.String()),
+				burnAll: Type.Optional(Type.Boolean()),
+				usdcCoinType: Type.Optional(Type.String()),
+				rpcUrl: Type.Optional(Type.String()),
+				clmmPositionId: Type.Optional(Type.String()),
+				clmmPoolId: Type.Optional(Type.String()),
+				positionNftId: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(Type.String()),
+				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+				confirmToken: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiDefiWorkflowParams;
+				const targetWorkflow = resolveDefiWorkflowRoute(params);
+				const workflow = resolveWorkflowTool(targetWorkflow);
+				const routed = await workflow.execute("wf-sui-defi-route", {
+					...(rawParams as Record<string, unknown>),
+				});
+				const details =
+					routed.details && typeof routed.details === "object"
+						? {
+								...(routed.details as Record<string, unknown>),
+								routedWorkflow: targetWorkflow,
+							}
+						: {
+								routedWorkflow: targetWorkflow,
+								innerDetails: routed.details ?? null,
+							};
+				return {
+					content: routed.content,
+					details,
 				};
 			},
 		}),

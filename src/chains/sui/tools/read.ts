@@ -58,6 +58,43 @@ type SuiCetusVaultsBalancesParams = {
 	limit?: number;
 };
 
+type SuiDefiPositionsParams = {
+	owner: string;
+	network?: string;
+	rpcUrl?: string;
+	limit?: number;
+	includeZeroBalances?: boolean;
+	includeMetadata?: boolean;
+	includeCetusFarms?: boolean;
+	includeCetusVaults?: boolean;
+	calculateFarmsRewards?: boolean;
+	farmsLimit?: number;
+	vaultLimit?: number;
+};
+
+type SuiPortfolioAsset = {
+	coinType: string;
+	totalBalance: string;
+	uiAmount: string | null;
+	decimals: number | null;
+	coinObjectCount: number;
+	lockedBalance: Record<string, string>;
+	fundsInAddressBalance: string | null;
+	metadata: {
+		symbol: string;
+		name: string;
+		description: string;
+		iconUrl: string | null;
+	} | null;
+};
+
+type SuiPortfolioSummary = {
+	assetCount: number;
+	totalCoinObjectCount: number;
+	assets: SuiPortfolioAsset[];
+	suiBalance: SuiPortfolioAsset | null;
+};
+
 function parseNonNegativeBigInt(value: string): bigint {
 	const normalized = value.trim();
 	if (!/^\d+$/.test(normalized)) {
@@ -72,6 +109,108 @@ function resolveAggregatorEnv(network: string): Env {
 	throw new Error(
 		"sui_getSwapQuote currently supports network=mainnet or testnet.",
 	);
+}
+
+function clampLimit(value: number | undefined, fallback: number): number {
+	if (typeof value !== "number") return fallback;
+	return Math.max(1, Math.min(200, Math.floor(value)));
+}
+
+async function buildPortfolioSummary(params: {
+	owner: string;
+	network: string;
+	rpcUrl?: string;
+	limit?: number;
+	includeZeroBalances?: boolean;
+	includeMetadata?: boolean;
+}): Promise<{ rpcUrl: string; portfolio: SuiPortfolioSummary }> {
+	const client = getSuiClient(params.network, params.rpcUrl);
+	const rpcUrl = getSuiRpcEndpoint(params.network, params.rpcUrl);
+	const includeZeroBalances = params.includeZeroBalances === true;
+	const includeMetadata = params.includeMetadata !== false;
+	const limit = clampLimit(params.limit, 50);
+
+	const allBalances = await client.getAllBalances({ owner: params.owner });
+	const filteredBalances = allBalances
+		.filter((entry) => {
+			const amount = parseNonNegativeBigInt(entry.totalBalance);
+			return includeZeroBalances || amount > 0n;
+		})
+		.sort((a, b) => {
+			const aAmount = parseNonNegativeBigInt(a.totalBalance);
+			const bAmount = parseNonNegativeBigInt(b.totalBalance);
+			if (aAmount === bAmount) return a.coinType.localeCompare(b.coinType);
+			return aAmount > bAmount ? -1 : 1;
+		})
+		.slice(0, limit);
+
+	const metadataByCoinType = new Map<
+		string,
+		Awaited<ReturnType<typeof client.getCoinMetadata>>
+	>();
+
+	if (includeMetadata) {
+		await Promise.all(
+			filteredBalances.map(async (entry) => {
+				try {
+					const metadata = await client.getCoinMetadata({
+						coinType: entry.coinType,
+					});
+					metadataByCoinType.set(entry.coinType, metadata);
+				} catch {
+					metadataByCoinType.set(entry.coinType, null);
+				}
+			}),
+		);
+	}
+
+	const assets = filteredBalances.map((entry) => {
+		const metadata = metadataByCoinType.get(entry.coinType) ?? null;
+		const decimals =
+			entry.coinType === SUI_COIN_TYPE
+				? 9
+				: typeof metadata?.decimals === "number"
+					? metadata.decimals
+					: null;
+		const uiAmount =
+			typeof decimals === "number"
+				? formatCoinAmount(entry.totalBalance, decimals)
+				: null;
+		return {
+			coinType: entry.coinType,
+			totalBalance: entry.totalBalance,
+			uiAmount,
+			decimals,
+			coinObjectCount: entry.coinObjectCount,
+			lockedBalance: entry.lockedBalance,
+			fundsInAddressBalance: entry.fundsInAddressBalance ?? null,
+			metadata: metadata
+				? {
+						symbol: metadata.symbol,
+						name: metadata.name,
+						description: metadata.description,
+						iconUrl: metadata.iconUrl ?? null,
+					}
+				: null,
+		};
+	});
+
+	const suiAsset =
+		assets.find((entry) => entry.coinType === SUI_COIN_TYPE) ?? null;
+	const totalCoinObjectCount = (filteredBalances as SuiBalanceEntry[]).reduce(
+		(sum, entry) => sum + entry.coinObjectCount,
+		0,
+	);
+
+	return {
+		rpcUrl,
+		portfolio: {
+			assetCount: assets.length,
+			totalCoinObjectCount,
+			assets,
+			suiBalance: suiAsset,
+		},
+	};
 }
 
 export function createSuiReadTools() {
@@ -492,6 +631,158 @@ export function createSuiReadTools() {
 			},
 		}),
 		defineTool({
+			name: `${SUI_TOOL_PREFIX}getDefiPositions`,
+			label: "Sui Get DeFi Positions",
+			description:
+				"Get owner DeFi position snapshot on Sui: portfolio + Cetus farms/vault positions (mainnet/testnet only for Cetus).",
+			parameters: Type.Object({
+				owner: Type.String({
+					description: "Sui wallet/account address",
+				}),
+				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({ description: "Override Sui JSON-RPC endpoint URL" }),
+				),
+				limit: Type.Optional(
+					Type.Number({
+						description:
+							"Max number of assets returned after sorting by balance",
+						minimum: 1,
+						maximum: 200,
+					}),
+				),
+				includeZeroBalances: Type.Optional(
+					Type.Boolean({
+						description: "Include zero-balance assets (default false)",
+					}),
+				),
+				includeMetadata: Type.Optional(
+					Type.Boolean({
+						description:
+							"Fetch coin metadata (symbol/decimals/name) (default true)",
+					}),
+				),
+				includeCetusFarms: Type.Optional(
+					Type.Boolean({
+						description: "Include Cetus farms staked positions (default true)",
+					}),
+				),
+				includeCetusVaults: Type.Optional(
+					Type.Boolean({
+						description: "Include Cetus vault LP balances (default true)",
+					}),
+				),
+				calculateFarmsRewards: Type.Optional(
+					Type.Boolean({
+						description: "Whether to include calculated farms rewards",
+					}),
+				),
+				farmsLimit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
+				vaultLimit: Type.Optional(Type.Number({ minimum: 1, maximum: 200 })),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as SuiDefiPositionsParams;
+				const owner = normalizeAtPath(params.owner);
+				const network = parseSuiNetwork(params.network);
+				const { rpcUrl, portfolio } = await buildPortfolioSummary({
+					owner,
+					network,
+					rpcUrl: params.rpcUrl,
+					limit: params.limit,
+					includeZeroBalances: params.includeZeroBalances,
+					includeMetadata: params.includeMetadata,
+				});
+
+				const includeCetusFarms = params.includeCetusFarms !== false;
+				const includeCetusVaults = params.includeCetusVaults !== false;
+				const farmsLimit = clampLimit(params.farmsLimit, 50);
+				const vaultLimit = clampLimit(params.vaultLimit, 50);
+
+				let cetusNetwork: "mainnet" | "testnet" | null = null;
+				let cetusError: string | null = null;
+				let farmsData: Awaited<
+					ReturnType<typeof getCetusFarmsPositions>
+				> | null = null;
+				let vaultsData: Awaited<
+					ReturnType<typeof getCetusVaultsBalances>
+				> | null = null;
+
+				if (includeCetusFarms || includeCetusVaults) {
+					try {
+						cetusNetwork = resolveCetusV2Network(network);
+						const [farmsResult, vaultsResult] = await Promise.all([
+							includeCetusFarms
+								? getCetusFarmsPositions({
+										network: cetusNetwork,
+										rpcUrl: params.rpcUrl?.trim(),
+										owner,
+										calculateRewards: params.calculateFarmsRewards !== false,
+									})
+								: Promise.resolve(null),
+							includeCetusVaults
+								? getCetusVaultsBalances({
+										network: cetusNetwork,
+										rpcUrl: params.rpcUrl?.trim(),
+										owner,
+									})
+								: Promise.resolve(null),
+						]);
+						farmsData = farmsResult;
+						vaultsData = vaultsResult;
+					} catch (error) {
+						cetusError =
+							error instanceof Error ? error.message : "Unknown Cetus error";
+					}
+				}
+
+				const farmsPositions = (farmsData?.positions ?? [])
+					.slice(0, farmsLimit)
+					.map((position) => ({
+						positionNftId: position.id,
+						poolId: position.pool_id,
+						clmmPositionId: position.clmm_position_id ?? null,
+						clmmPoolId: position.clmm_pool_id ?? null,
+						rewardCount: Array.isArray(position.rewards)
+							? position.rewards.length
+							: 0,
+					}));
+				const vaultBalances = (vaultsData ?? [])
+					.slice(0, vaultLimit)
+					.map((entry) => ({
+						vaultId: entry.vault_id ?? null,
+						clmmPoolId: entry.clmm_pool_id ?? null,
+						lpTokenBalance: entry.lp_token_balance ?? null,
+					}));
+				const summary = `DeFi positions: assets=${portfolio.assetCount} farms=${farmsPositions.length} vaults=${vaultBalances.length}`;
+
+				return {
+					content: [{ type: "text", text: summary }],
+					details: {
+						owner,
+						network,
+						rpcUrl,
+						portfolio,
+						defi: {
+							cetusNetwork,
+							cetusError,
+							farms: {
+								enabled: includeCetusFarms,
+								positionCount: farmsPositions.length,
+								hasNextPage: farmsData?.hasNextPage ?? false,
+								nextCursor: farmsData?.nextCursor ?? null,
+								positions: farmsPositions,
+							},
+							vaults: {
+								enabled: includeCetusVaults,
+								vaultCount: vaultBalances.length,
+								balances: vaultBalances,
+							},
+						},
+					},
+				};
+			},
+		}),
+		defineTool({
 			name: `${SUI_TOOL_PREFIX}getPortfolio`,
 			label: "Sui Get Portfolio",
 			description:
@@ -525,90 +816,17 @@ export function createSuiReadTools() {
 			async execute(_toolCallId, params) {
 				const owner = normalizeAtPath(params.owner);
 				const network = parseSuiNetwork(params.network);
-				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
-				const client = getSuiClient(network, params.rpcUrl);
-				const includeZeroBalances = params.includeZeroBalances === true;
-				const includeMetadata = params.includeMetadata !== false;
-				const limit =
-					typeof params.limit === "number"
-						? Math.max(1, Math.min(200, Math.floor(params.limit)))
-						: 50;
-
-				const allBalances = await client.getAllBalances({ owner });
-				const filteredBalances = allBalances
-					.filter((entry) => {
-						const amount = parseNonNegativeBigInt(entry.totalBalance);
-						return includeZeroBalances || amount > 0n;
-					})
-					.sort((a, b) => {
-						const aAmount = parseNonNegativeBigInt(a.totalBalance);
-						const bAmount = parseNonNegativeBigInt(b.totalBalance);
-						if (aAmount === bAmount)
-							return a.coinType.localeCompare(b.coinType);
-						return aAmount > bAmount ? -1 : 1;
-					})
-					.slice(0, limit);
-
-				const metadataByCoinType = new Map<
-					string,
-					Awaited<ReturnType<typeof client.getCoinMetadata>>
-				>();
-
-				if (includeMetadata) {
-					await Promise.all(
-						filteredBalances.map(async (entry) => {
-							try {
-								const metadata = await client.getCoinMetadata({
-									coinType: entry.coinType,
-								});
-								metadataByCoinType.set(entry.coinType, metadata);
-							} catch {
-								metadataByCoinType.set(entry.coinType, null);
-							}
-						}),
-					);
-				}
-
-				const assets = filteredBalances.map((entry) => {
-					const metadata = metadataByCoinType.get(entry.coinType) ?? null;
-					const decimals =
-						entry.coinType === SUI_COIN_TYPE
-							? 9
-							: typeof metadata?.decimals === "number"
-								? metadata.decimals
-								: null;
-					const uiAmount =
-						typeof decimals === "number"
-							? formatCoinAmount(entry.totalBalance, decimals)
-							: null;
-					return {
-						coinType: entry.coinType,
-						totalBalance: entry.totalBalance,
-						uiAmount,
-						decimals,
-						coinObjectCount: entry.coinObjectCount,
-						lockedBalance: entry.lockedBalance,
-						fundsInAddressBalance: entry.fundsInAddressBalance ?? null,
-						metadata: metadata
-							? {
-									symbol: metadata.symbol,
-									name: metadata.name,
-									description: metadata.description,
-									iconUrl: metadata.iconUrl,
-								}
-							: null,
-					};
+				const { rpcUrl, portfolio } = await buildPortfolioSummary({
+					owner,
+					network,
+					rpcUrl: params.rpcUrl,
+					limit: params.limit,
+					includeZeroBalances: params.includeZeroBalances,
+					includeMetadata: params.includeMetadata,
 				});
-
-				const suiAsset = assets.find(
-					(entry) => entry.coinType === SUI_COIN_TYPE,
-				);
-				const totalCoinObjectCount = (
-					filteredBalances as SuiBalanceEntry[]
-				).reduce((sum, entry) => sum + entry.coinObjectCount, 0);
-				const summary = suiAsset
-					? `Portfolio: ${assets.length} assets (SUI=${suiAsset.uiAmount} / ${suiAsset.totalBalance} MIST)`
-					: `Portfolio: ${assets.length} assets`;
+				const summary = portfolio.suiBalance
+					? `Portfolio: ${portfolio.assetCount} assets (SUI=${portfolio.suiBalance.uiAmount} / ${portfolio.suiBalance.totalBalance} MIST)`
+					: `Portfolio: ${portfolio.assetCount} assets`;
 
 				return {
 					content: [{ type: "text", text: summary }],
@@ -616,10 +834,7 @@ export function createSuiReadTools() {
 						owner,
 						network,
 						rpcUrl,
-						assetCount: assets.length,
-						totalCoinObjectCount,
-						assets,
-						suiBalance: suiAsset ?? null,
+						...portfolio,
 					},
 				};
 			},
