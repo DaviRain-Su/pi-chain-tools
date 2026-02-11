@@ -1,6 +1,6 @@
-# pi-chain-tools
+# Gradience
 
-Multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui has a minimal read/execute vertical slice, and EVM skeleton is scaffolded, with a chain-agnostic grouping model:
+Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui has a minimal read/execute vertical slice, and EVM skeleton is scaffolded, with a chain-agnostic grouping model:
 
 - `read`
 - `compose`
