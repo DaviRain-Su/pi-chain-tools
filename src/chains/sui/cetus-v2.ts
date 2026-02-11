@@ -1,5 +1,5 @@
 import type { Transaction } from "@mysten/sui/transactions";
-import type { SuiNetwork } from "./runtime.js";
+import { type SuiNetwork, getSuiRpcEndpoint } from "./runtime.js";
 
 export type CetusV2Network = "mainnet" | "testnet";
 
@@ -83,21 +83,43 @@ type CetusVaultsSDKCtor = {
 let cachedFarmsCtor: CetusFarmsSDKCtor | null = null;
 let cachedVaultsCtor: CetusVaultsSDKCtor | null = null;
 
+function isSdkCtor(
+	value: unknown,
+): value is { createSDK: (...args: unknown[]) => unknown } {
+	if (
+		value == null ||
+		(typeof value !== "object" && typeof value !== "function") ||
+		!("createSDK" in value)
+	) {
+		return false;
+	}
+	return typeof (value as { createSDK?: unknown }).createSDK === "function";
+}
+
 function parseFarmsCtor(moduleValue: unknown): CetusFarmsSDKCtor | null {
 	if (!moduleValue || typeof moduleValue !== "object") return null;
-	const candidate = (moduleValue as { CetusFarmsSDK?: unknown }).CetusFarmsSDK;
-	return candidate && typeof candidate === "object"
-		? (candidate as CetusFarmsSDKCtor)
-		: null;
+	const typed = moduleValue as {
+		CetusFarmsSDK?: unknown;
+		default?: unknown;
+	};
+	const candidates = [typed.CetusFarmsSDK, typed.default];
+	for (const candidate of candidates) {
+		if (isSdkCtor(candidate)) return candidate as CetusFarmsSDKCtor;
+	}
+	return null;
 }
 
 function parseVaultsCtor(moduleValue: unknown): CetusVaultsSDKCtor | null {
 	if (!moduleValue || typeof moduleValue !== "object") return null;
-	const candidate = (moduleValue as { CetusVaultsSDK?: unknown })
-		.CetusVaultsSDK;
-	return candidate && typeof candidate === "object"
-		? (candidate as CetusVaultsSDKCtor)
-		: null;
+	const typed = moduleValue as {
+		CetusVaultsSDK?: unknown;
+		default?: unknown;
+	};
+	const candidates = [typed.CetusVaultsSDK, typed.default];
+	for (const candidate of candidates) {
+		if (isSdkCtor(candidate)) return candidate as CetusVaultsSDKCtor;
+	}
+	return null;
 }
 
 async function getFarmsCtor(): Promise<CetusFarmsSDKCtor> {
@@ -139,9 +161,10 @@ async function createFarmsSDK(params: {
 	sender?: string;
 }): Promise<CetusFarmsSDKLike> {
 	const ctor = await getFarmsCtor();
+	const resolvedRpcUrl = getSuiRpcEndpoint(params.network, params.rpcUrl);
 	const sdk = ctor.createSDK({
 		env: params.network,
-		full_rpc_url: params.rpcUrl,
+		full_rpc_url: resolvedRpcUrl,
 	});
 	if (params.sender?.trim()) {
 		sdk.setSenderAddress(params.sender.trim());
@@ -155,9 +178,10 @@ async function createVaultsSDK(params: {
 	sender?: string;
 }): Promise<CetusVaultsSDKLike> {
 	const ctor = await getVaultsCtor();
+	const resolvedRpcUrl = getSuiRpcEndpoint(params.network, params.rpcUrl);
 	const sdk = ctor.createSDK({
 		env: params.network,
-		full_rpc_url: params.rpcUrl,
+		full_rpc_url: resolvedRpcUrl,
 	});
 	if (params.sender?.trim()) {
 		sdk.setSenderAddress(params.sender.trim());

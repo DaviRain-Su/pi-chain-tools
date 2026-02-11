@@ -166,6 +166,13 @@ async function buildPortfolioSummary(params: {
 
 	const assets = filteredBalances.map((entry) => {
 		const metadata = metadataByCoinType.get(entry.coinType) ?? null;
+		const entryWithFunds = entry as unknown as {
+			fundsInAddressBalance?: unknown;
+		};
+		const fundsInAddressBalance =
+			typeof entryWithFunds.fundsInAddressBalance === "string"
+				? entryWithFunds.fundsInAddressBalance
+				: null;
 		const decimals =
 			entry.coinType === SUI_COIN_TYPE
 				? 9
@@ -183,7 +190,7 @@ async function buildPortfolioSummary(params: {
 			decimals,
 			coinObjectCount: entry.coinObjectCount,
 			lockedBalance: entry.lockedBalance,
-			fundsInAddressBalance: entry.fundsInAddressBalance ?? null,
+			fundsInAddressBalance,
 			metadata: metadata
 				? {
 						symbol: metadata.symbol,

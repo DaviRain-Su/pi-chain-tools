@@ -1,5 +1,5 @@
+import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
-import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Type } from "@sinclair/typebox";
 
@@ -64,7 +64,7 @@ export function getSuiRpcEndpoint(network?: string, rpcUrl?: string): string {
 	const fallbackEnv = process.env.SUI_RPC_URL?.trim();
 	if (fallbackEnv) return fallbackEnv;
 
-	return getJsonRpcFullnodeUrl(parsedNetwork);
+	return getFullnodeUrl(parsedNetwork);
 }
 
 export function getSuiExplorerTransactionUrl(
@@ -79,13 +79,10 @@ export function getSuiExplorerTransactionUrl(
 	return `${origin}/txblock/${encodeURIComponent(digest)}`;
 }
 
-export function getSuiClient(
-	network?: string,
-	rpcUrl?: string,
-): SuiJsonRpcClient {
+export function getSuiClient(network?: string, rpcUrl?: string): SuiClient {
 	const parsedNetwork = parseSuiNetwork(network);
 	const endpoint = getSuiRpcEndpoint(parsedNetwork, rpcUrl);
-	return new SuiJsonRpcClient({
+	return new SuiClient({
 		network: parsedNetwork,
 		url: endpoint,
 	});
