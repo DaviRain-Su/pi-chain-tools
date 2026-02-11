@@ -281,7 +281,7 @@ export function resolveSuiKeypair(privateKey?: string): Ed25519Keypair {
 			return fallbackKeypair;
 		}
 		throw new Error(
-			"No Sui private key provided. Set fromPrivateKey or SUI_PRIVATE_KEY (suiprivkey...), or configure ~/.sui/sui_config/sui.keystore with an ED25519 key.",
+			"No signer key available. Set SUI_PRIVATE_KEY (suiprivkey...) or configure ~/.sui/sui_config/sui.keystore with an ED25519 key.",
 		);
 	}
 

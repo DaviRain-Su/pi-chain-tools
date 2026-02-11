@@ -149,7 +149,6 @@ type WorkflowParams = {
 	maxCoinObjectsToMerge?: number;
 	endpoint?: string;
 	apiKey?: string;
-	fromPrivateKey?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
 	waitForLocalExecution?: boolean;
@@ -190,7 +189,6 @@ type StableLayerWorkflowParams = {
 	amountStableRaw?: string;
 	burnAll?: boolean;
 	usdcCoinType?: string;
-	fromPrivateKey?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
 	waitForLocalExecution?: boolean;
@@ -242,7 +240,6 @@ type CetusFarmsWorkflowParams = {
 	coinTypeA?: string;
 	coinTypeB?: string;
 	positionNftId?: string;
-	fromPrivateKey?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
 	waitForLocalExecution?: boolean;
@@ -300,7 +297,6 @@ type SuiDefiWorkflowParams = {
 	clmmPositionId?: string;
 	clmmPoolId?: string;
 	positionNftId?: string;
-	fromPrivateKey?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
 	waitForLocalExecution?: boolean;
@@ -1264,7 +1260,7 @@ function formatSimulationSummary(params: {
 	};
 }): string {
 	if (params.unsignedPayload.unsignedTransactionBytesBase64) {
-		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported (execute can proceed without fromPrivateKey)`;
+		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported (execute can proceed with local signer)`;
 	}
 	if (params.unsignedPayload.unsignedPayloadError) {
 		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=unavailable`;
@@ -1685,7 +1681,6 @@ async function executeIntent(
 			amountMist: intent.amountMist,
 			amountSui: intent.amountSui,
 			network,
-			fromPrivateKey: params.fromPrivateKey,
 			waitForLocalExecution: params.waitForLocalExecution,
 			confirmMainnet: params.confirmMainnet,
 		});
@@ -1698,7 +1693,6 @@ async function executeIntent(
 			amountRaw: intent.amountRaw,
 			maxCoinObjectsToMerge: intent.maxCoinObjectsToMerge,
 			network,
-			fromPrivateKey: params.fromPrivateKey,
 			waitForLocalExecution: params.waitForLocalExecution,
 			confirmMainnet: params.confirmMainnet,
 		});
@@ -1719,7 +1713,6 @@ async function executeIntent(
 			collectFee: intent.collectFee,
 			rewarderCoinTypes: intent.rewarderCoinTypes,
 			network,
-			fromPrivateKey: params.fromPrivateKey,
 			waitForLocalExecution: params.waitForLocalExecution,
 			confirmMainnet: params.confirmMainnet,
 		});
@@ -1737,7 +1730,6 @@ async function executeIntent(
 			collectFee: intent.collectFee,
 			rewarderCoinTypes: intent.rewarderCoinTypes,
 			network,
-			fromPrivateKey: params.fromPrivateKey,
 			waitForLocalExecution: params.waitForLocalExecution,
 			confirmMainnet: params.confirmMainnet,
 		});
@@ -1754,7 +1746,6 @@ async function executeIntent(
 		endpoint: intent.endpoint,
 		apiKey: intent.apiKey,
 		network,
-		fromPrivateKey: params.fromPrivateKey,
 		waitForLocalExecution: params.waitForLocalExecution,
 		confirmMainnet: params.confirmMainnet,
 	});
@@ -1772,7 +1763,6 @@ async function executeStableLayerIntent(
 			amountUsdcRaw: intent.amountUsdcRaw,
 			usdcCoinType: intent.usdcCoinType,
 			network,
-			fromPrivateKey: params.fromPrivateKey,
 			waitForLocalExecution: params.waitForLocalExecution,
 			confirmMainnet: params.confirmMainnet,
 		});
@@ -1784,7 +1774,6 @@ async function executeStableLayerIntent(
 			amountStableRaw: intent.amountStableRaw,
 			burnAll: intent.burnAll,
 			network,
-			fromPrivateKey: params.fromPrivateKey,
 			waitForLocalExecution: params.waitForLocalExecution,
 			confirmMainnet: params.confirmMainnet,
 		});
@@ -1793,7 +1782,6 @@ async function executeStableLayerIntent(
 	return tool.execute("wf-stablelayer-execute", {
 		stableCoinType: intent.stableCoinType,
 		network,
-		fromPrivateKey: params.fromPrivateKey,
 		waitForLocalExecution: params.waitForLocalExecution,
 		confirmMainnet: params.confirmMainnet,
 	});
@@ -1814,7 +1802,6 @@ async function executeCetusFarmsIntent(
 			coinTypeB: intent.coinTypeB,
 			network,
 			rpcUrl: params.rpcUrl,
-			fromPrivateKey: params.fromPrivateKey,
 			waitForLocalExecution: params.waitForLocalExecution,
 			confirmMainnet: params.confirmMainnet,
 		});
@@ -1826,7 +1813,6 @@ async function executeCetusFarmsIntent(
 			positionNftId: intent.positionNftId,
 			network,
 			rpcUrl: params.rpcUrl,
-			fromPrivateKey: params.fromPrivateKey,
 			waitForLocalExecution: params.waitForLocalExecution,
 			confirmMainnet: params.confirmMainnet,
 		});
@@ -1837,7 +1823,6 @@ async function executeCetusFarmsIntent(
 		positionNftId: intent.positionNftId,
 		network,
 		rpcUrl: params.rpcUrl,
-		fromPrivateKey: params.fromPrivateKey,
 		waitForLocalExecution: params.waitForLocalExecution,
 		confirmMainnet: params.confirmMainnet,
 	});
@@ -1938,7 +1923,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			name: "w3rt_run_sui_workflow_v0",
 			label: "W3RT Sui Workflow v0",
 			description:
-				"Deterministic Sui workflow entrypoint: analysis -> simulate -> execute. Signer auto-loads local Sui keystore when fromPrivateKey is omitted.",
+				"Deterministic Sui workflow entrypoint: analysis -> simulate -> execute. Signer auto-loads from local Sui keystore or SUI_PRIVATE_KEY.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -2056,7 +2041,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				}
 
 				if (runMode === "simulate") {
-					const signer = resolveSuiKeypair(params.fromPrivateKey);
+					const signer = resolveSuiKeypair();
 					const sender = signer.toSuiAddress();
 					const { tx, artifacts } = await buildSimulation(
 						intent,
@@ -2166,7 +2151,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			name: "w3rt_run_sui_stablelayer_workflow_v0",
 			label: "W3RT Sui Stable Layer Workflow v0",
 			description:
-				"Deterministic Stable Layer workflow entrypoint: analysis -> simulate -> execute. Signer auto-loads local Sui keystore when fromPrivateKey is omitted.",
+				"Deterministic Stable Layer workflow entrypoint: analysis -> simulate -> execute. Signer auto-loads from local Sui keystore or SUI_PRIVATE_KEY.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -2257,7 +2242,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				}
 
 				if (runMode === "simulate") {
-					const signer = resolveSuiKeypair(params.fromPrivateKey);
+					const signer = resolveSuiKeypair();
 					const sender = signer.toSuiAddress();
 					const { tx, artifacts } = await buildStableLayerSimulation(
 						intent,
@@ -2373,7 +2358,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			name: "w3rt_run_sui_cetus_farms_workflow_v0",
 			label: "W3RT Sui Cetus Farms Workflow v0",
 			description:
-				"Deterministic Cetus farms workflow entrypoint: analysis -> simulate -> execute. Signer auto-loads local Sui keystore when fromPrivateKey is omitted.",
+				"Deterministic Cetus farms workflow entrypoint: analysis -> simulate -> execute. Signer auto-loads from local Sui keystore or SUI_PRIVATE_KEY.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -2466,7 +2451,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				}
 
 				if (runMode === "simulate") {
-					const signer = resolveSuiKeypair(params.fromPrivateKey);
+					const signer = resolveSuiKeypair();
 					const sender = signer.toSuiAddress();
 					const { tx, artifacts } = await buildCetusFarmsSimulation(
 						intent,
