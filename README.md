@@ -54,6 +54,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui 
 - `execute`: `sui_swapCetus` (Cetus aggregator route + on-chain swap execution on mainnet/testnet)
 - `execute`: `sui_transferSui` (amount in `amountMist` or `amountSui`, with mainnet safety gate `confirmMainnet=true`)
 - `execute`: `sui_transferCoin` (non-SUI transfer, auto-merge coin objects, with mainnet safety gate)
+- `workflow`: `w3rt_run_sui_workflow_v0` (analysis/simulate/execute with deterministic mainnet confirmToken)
 - `compose/rpc`: scaffolded and ready for follow-up additions
 
 ## Use As Pi Extension

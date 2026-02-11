@@ -117,4 +117,5 @@ export { createSuiReadTools } from "./chains/sui/tools/read.js";
 export { createSuiComposeTools } from "./chains/sui/tools/compose.js";
 export { createSuiExecuteTools } from "./chains/sui/tools/execute.js";
 export { createSuiRpcTools } from "./chains/sui/tools/rpc.js";
+export { createSuiWorkflowTools } from "./chains/sui/tools/workflow.js";
 export { createSuiToolset } from "./chains/sui/toolset.js";

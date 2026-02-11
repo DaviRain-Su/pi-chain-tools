@@ -18,6 +18,7 @@ describe("suiExtension", () => {
 			"sui_swapCetus",
 			"sui_transferCoin",
 			"sui_transferSui",
+			"w3rt_run_sui_workflow_v0",
 		]);
 	});
 });

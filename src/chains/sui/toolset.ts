@@ -3,6 +3,7 @@ import { createSuiComposeTools } from "./tools/compose.js";
 import { createSuiExecuteTools } from "./tools/execute.js";
 import { createSuiReadTools } from "./tools/read.js";
 import { createSuiRpcTools } from "./tools/rpc.js";
+import { createSuiWorkflowTools } from "./tools/workflow.js";
 
 export function createSuiToolset(): ChainToolset {
 	return {
@@ -10,7 +11,10 @@ export function createSuiToolset(): ChainToolset {
 		groups: [
 			{ name: "read", tools: createSuiReadTools() },
 			{ name: "compose", tools: createSuiComposeTools() },
-			{ name: "execute", tools: createSuiExecuteTools() },
+			{
+				name: "execute",
+				tools: [...createSuiExecuteTools(), ...createSuiWorkflowTools()],
+			},
 			{ name: "rpc", tools: createSuiRpcTools() },
 		],
 	};
