@@ -122,15 +122,23 @@ ls ~/.sui/sui_config/sui.keystore
 ls ~/.sui/sui_config/client.yaml
 ```
 
-### 2) Install once
+### 2) Install once (GitHub source recommended)
 
-Local repository source:
+Install directly from GitHub:
+
+```bash
+pi install https://github.com/DaviRain-Su/pi-chain-tools
+# or
+pi install git:github.com/DaviRain-Su/pi-chain-tools
+```
+
+Local repository install (for development):
 
 ```bash
 pi install /Users/davirian/dev/pi-chain-tools
 ```
 
-After npm publish:
+npm install source (optional, after publish):
 
 ```bash
 pi install npm:pi-chain-tools
@@ -213,10 +221,11 @@ Useful extension management commands:
 ```bash
 pi list
 pi update
+pi remove https://github.com/<your-org>/pi-chain-tools
 pi remove /Users/davirian/dev/pi-chain-tools
 ```
 
-### 8) Publish To npm (required for `pi install npm:...`)
+### 8) Publish To npm (optional)
 
 Before publish:
 
@@ -238,7 +247,7 @@ If name is occupied, use a scoped name (for example `@davirian/pi-chain-tools`) 
 npm publish --access public
 ```
 
-After publish, users install with:
+After publish, users can install with:
 
 ```bash
 pi install npm:pi-chain-tools
