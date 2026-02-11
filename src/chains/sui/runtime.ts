@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { SuiClient, getFullnodeUrl } from "@mysten/sui/client";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
@@ -22,6 +25,11 @@ const SUI_EXPLORER_ORIGIN: Record<Exclude<SuiNetwork, "localnet">, string> = {
 	testnet: "https://testnet.suivision.xyz",
 	devnet: "https://devnet.suivision.xyz",
 };
+
+const SUI_CONFIG_DIR_ENV = "SUI_CONFIG_DIR";
+const SUI_KEYSTORE_PATH_ENV = "SUI_KEYSTORE_PATH";
+const SUI_CLIENT_CONFIG_PATH_ENV = "SUI_CLIENT_CONFIG_PATH";
+const ED25519_FLAG = 0;
 
 export function suiNetworkSchema() {
 	return Type.Optional(
@@ -153,11 +161,127 @@ export function formatCoinAmount(rawAmount: string, decimals: number): string {
 	return `${whole.toString()}.${fraction}`;
 }
 
+function resolveSuiConfigDir(): string {
+	const explicitConfigDir = process.env[SUI_CONFIG_DIR_ENV]?.trim();
+	if (explicitConfigDir) return explicitConfigDir;
+	return path.join(os.homedir(), ".sui", "sui_config");
+}
+
+function normalizeAddress(value: string): string {
+	const lower = value.trim().toLowerCase();
+	return lower.startsWith("0x") ? lower : `0x${lower}`;
+}
+
+function parseActiveAddress(clientConfigPath: string): string | null {
+	try {
+		const content = readFileSync(clientConfigPath, "utf8");
+		const matched = content.match(
+			/^\s*active_address\s*:\s*["']?(0x[a-fA-F0-9]{1,64})["']?\s*$/m,
+		);
+		if (!matched?.[1]) return null;
+		return normalizeAddress(matched[1]);
+	} catch {
+		return null;
+	}
+}
+
+function parseEd25519FromKeyMaterial(
+	keyMaterial: Uint8Array,
+): Ed25519Keypair | null {
+	if (keyMaterial.length === 32) {
+		try {
+			return Ed25519Keypair.fromSecretKey(keyMaterial);
+		} catch {
+			return null;
+		}
+	}
+	if (keyMaterial.length === 33 && keyMaterial[0] === ED25519_FLAG) {
+		try {
+			return Ed25519Keypair.fromSecretKey(keyMaterial.slice(1));
+		} catch {
+			return null;
+		}
+	}
+	if (keyMaterial.length === 64) {
+		try {
+			return Ed25519Keypair.fromSecretKey(keyMaterial.slice(0, 32));
+		} catch {
+			return null;
+		}
+	}
+	return null;
+}
+
+function parseEd25519FromKeystoreEntry(entry: unknown): Ed25519Keypair | null {
+	if (typeof entry !== "string") return null;
+	const trimmed = entry.trim();
+	if (!trimmed) return null;
+
+	if (trimmed.startsWith("suiprivkey")) {
+		try {
+			const parsed = decodeSuiPrivateKey(trimmed);
+			if (parsed.scheme !== "ED25519") return null;
+			return Ed25519Keypair.fromSecretKey(parsed.secretKey);
+		} catch {
+			return null;
+		}
+	}
+
+	if (!/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed) || trimmed.length % 4 !== 0) {
+		return null;
+	}
+
+	try {
+		const decoded = Buffer.from(trimmed, "base64");
+		return parseEd25519FromKeyMaterial(new Uint8Array(decoded));
+	} catch {
+		return null;
+	}
+}
+
+function resolveSuiKeypairFromLocalKeystore(): Ed25519Keypair | null {
+	const configDir = resolveSuiConfigDir();
+	const keystorePath =
+		process.env[SUI_KEYSTORE_PATH_ENV]?.trim() ||
+		path.join(configDir, "sui.keystore");
+	const clientConfigPath =
+		process.env[SUI_CLIENT_CONFIG_PATH_ENV]?.trim() ||
+		path.join(configDir, "client.yaml");
+	const activeAddress = parseActiveAddress(clientConfigPath);
+
+	try {
+		const raw = readFileSync(keystorePath, "utf8");
+		const parsed = JSON.parse(raw) as unknown;
+		if (!Array.isArray(parsed)) return null;
+
+		let fallbackKeypair: Ed25519Keypair | null = null;
+		for (const entry of parsed) {
+			const keypair = parseEd25519FromKeystoreEntry(entry);
+			if (!keypair) continue;
+			if (!fallbackKeypair) fallbackKeypair = keypair;
+
+			if (activeAddress) {
+				const candidateAddress = normalizeAddress(keypair.toSuiAddress());
+				if (candidateAddress === activeAddress) {
+					return keypair;
+				}
+			}
+		}
+		return fallbackKeypair;
+	} catch {
+		return null;
+	}
+}
+
 export function resolveSuiKeypair(privateKey?: string): Ed25519Keypair {
 	const key = privateKey?.trim() || process.env.SUI_PRIVATE_KEY?.trim();
 	if (!key) {
+		const fallbackKeypair = resolveSuiKeypairFromLocalKeystore();
+		if (fallbackKeypair) {
+			return fallbackKeypair;
+		}
 		throw new Error(
-			"No Sui private key provided. Set fromPrivateKey or SUI_PRIVATE_KEY (suiprivkey...).",
+			"No Sui private key provided. Set fromPrivateKey or SUI_PRIVATE_KEY (suiprivkey...), or configure ~/.sui/sui_config/sui.keystore with an ED25519 key.",
 		);
 	}
 
