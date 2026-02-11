@@ -280,6 +280,21 @@ npm test
 - CI package manager: npm (`npm ci` + lockfile)
 - npm peer strategy: project-level `.npmrc` sets `legacy-peer-deps=true` to allow mixed SDK peer ranges (Sui + Solana ecosystems).
 
+## Website (GitHub Pages)
+
+This repo includes a submission-ready static site in `docs/`.
+
+- entry: `docs/index.html`
+- style: `docs/styles.css`
+- behavior: `docs/app.js`
+
+Deploy with GitHub Pages:
+
+1. Open GitHub repository `Settings` -> `Pages`.
+2. Set Source to `Deploy from a branch`.
+3. Select branch `main` and folder `/docs`.
+4. Save and wait for the published URL.
+
 ## PR Required Checks
 
 To enforce CI as merge-gate on `main`:

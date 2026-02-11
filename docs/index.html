@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>ChainIntent | Pi DeFi Extension</title>
+		<meta
+			name="description"
+			content="ChainIntent is a Pi-native multi-chain DeFi extension for natural-language workflows across Sui and Solana."
+		/>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+			rel="stylesheet"
+		/>
+		<link rel="stylesheet" href="./styles.css" />
+	</head>
+	<body>
+		<div class="bg-shape bg-shape-a"></div>
+		<div class="bg-shape bg-shape-b"></div>
+		<div class="page">
+			<header class="hero reveal">
+				<p class="badge">Pi Extension • Sui + Solana</p>
+				<h1>ChainIntent</h1>
+				<p class="lead">
+					Natural-language DeFi operations with deterministic workflow safety.
+				</p>
+				<div class="hero-actions">
+					<a
+						class="btn btn-primary"
+						href="https://github.com/DaviRain-Su/pi-chain-tools"
+						target="_blank"
+						rel="noreferrer"
+					>
+						View GitHub
+					</a>
+					<a class="btn btn-ghost" href="#install">Quick Install</a>
+				</div>
+			</header>
+
+			<section class="stat-grid reveal">
+				<article class="stat-card">
+					<p class="stat-label">Chains</p>
+					<p class="stat-value">2</p>
+				</article>
+				<article class="stat-card">
+					<p class="stat-label">Workflow Pattern</p>
+					<p class="stat-value">analysis → simulate → execute</p>
+				</article>
+				<article class="stat-card">
+					<p class="stat-label">Mainnet Safety</p>
+					<p class="stat-value">confirmMainnet + confirmToken</p>
+				</article>
+			</section>
+
+			<section class="panel reveal" id="install">
+				<h2>Install in 60 Seconds</h2>
+				<ol>
+					<li>Install extension directly from GitHub source.</li>
+					<li>Reload Pi.</li>
+					<li>Query or execute using plain language.</li>
+				</ol>
+				<div class="command-block">
+					<code id="install-command"
+						>pi install https://github.com/DaviRain-Su/pi-chain-tools</code
+					>
+					<button id="copy-button" type="button">Copy</button>
+				</div>
+				<p class="note">
+					Sui local wallet is loaded from
+					<code>~/.sui/sui_config/sui.keystore</code> and active address from
+					<code>client.yaml</code>.
+				</p>
+			</section>
+
+			<section class="panel reveal">
+				<h2>Natural Language Examples</h2>
+				<div class="example-grid">
+					<article class="example-card">
+						<h3>Balance / Portfolio</h3>
+						<p>帮我查一下 Sui 主网本地钱包余额（包含USDC）</p>
+					</article>
+					<article class="example-card">
+						<h3>Swap Simulation</h3>
+						<p>把 0.01 SUI 换成 USDC，先模拟。</p>
+					</article>
+					<article class="example-card">
+						<h3>Mainnet Execute</h3>
+						<p>继续执行刚才这笔，确认主网执行。</p>
+					</article>
+					<article class="example-card">
+						<h3>Cetus Farms</h3>
+						<p>帮我查一下 Sui 主网 Cetus farms 的池子列表。</p>
+					</article>
+				</div>
+			</section>
+
+			<section class="panel reveal" id="demo">
+				<h2>Live Demo</h2>
+				<p>
+					Add your recorded demo URL here before submission:
+					<a href="#" id="demo-link">https://your-demo-link</a>
+				</p>
+				<ul class="checklist">
+					<li>Show install from GitHub source</li>
+					<li>Show local wallet balance with non-SUI asset</li>
+					<li>Show analysis → simulate → execute safety flow</li>
+				</ul>
+			</section>
+
+			<footer class="footer reveal">
+				<p>
+					Open Source:
+					<a
+						href="https://github.com/DaviRain-Su/pi-chain-tools"
+						target="_blank"
+						rel="noreferrer"
+					>
+						github.com/DaviRain-Su/pi-chain-tools
+					</a>
+				</p>
+			</footer>
+		</div>
+		<script src="./app.js" defer></script>
+	</body>
+</html>
