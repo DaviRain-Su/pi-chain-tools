@@ -1124,6 +1124,59 @@ function parseSlippageDecimal(slippageBps?: number): number {
 	return bps / 10_000;
 }
 
+function stringifyError(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	return String(error);
+}
+
+async function exportUnsignedPayload(
+	tx: Transaction,
+	client: ReturnType<typeof getSuiClient>,
+): Promise<{
+	unsignedTransactionBytesBase64?: string;
+	unsignedTransactionBytesLength?: number;
+	serializedTransaction?: string | null;
+	unsignedPayloadError?: string;
+}> {
+	try {
+		const built = await tx.build({ client });
+		let serializedTransaction: string | null = null;
+		try {
+			serializedTransaction = tx.serialize();
+		} catch {
+			serializedTransaction = null;
+		}
+		return {
+			unsignedTransactionBytesBase64: Buffer.from(built).toString("base64"),
+			unsignedTransactionBytesLength: built.length,
+			serializedTransaction,
+		};
+	} catch (error) {
+		return {
+			unsignedPayloadError: stringifyError(error),
+		};
+	}
+}
+
+function formatSimulationSummary(params: {
+	intentType: string;
+	status: string;
+	unsignedPayload: {
+		unsignedTransactionBytesBase64?: string;
+		unsignedPayloadError?: string;
+	};
+}): string {
+	if (params.unsignedPayload.unsignedTransactionBytesBase64) {
+		return `Workflow simulated: ${params.intentType} status=${params.status} unsignedPayload=exported`;
+	}
+	if (params.unsignedPayload.unsignedPayloadError) {
+		return `Workflow simulated: ${params.intentType} status=${params.status} unsignedPayload=unavailable`;
+	}
+	return `Workflow simulated: ${params.intentType} status=${params.status}`;
+}
+
 async function resolveCoinObjectIdsForAmount(
 	client: ReturnType<typeof getSuiClient>,
 	owner: string,
@@ -1879,6 +1932,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					);
 					tx.setSender(sender);
 					const client = getSuiClient(network);
+					const unsignedPayload = await exportUnsignedPayload(tx, client);
 					const simulation = await client.devInspectTransactionBlock({
 						sender,
 						transactionBlock: tx,
@@ -1893,7 +1947,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						content: [
 							{
 								type: "text",
-								text: `Workflow simulated: ${intent.type} status=${status}`,
+								text: formatSimulationSummary({
+									intentType: intent.type,
+									status,
+									unsignedPayload,
+								}),
 							},
 						],
 						details: {
@@ -1909,6 +1967,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									status,
 									error,
 									...artifacts,
+									...unsignedPayload,
 								},
 							},
 						},
@@ -2027,6 +2086,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					);
 					tx.setSender(sender);
 					const client = getSuiClient(network);
+					const unsignedPayload = await exportUnsignedPayload(tx, client);
 					const simulation = await client.devInspectTransactionBlock({
 						sender,
 						transactionBlock: tx,
@@ -2041,7 +2101,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						content: [
 							{
 								type: "text",
-								text: `Workflow simulated: ${intent.type} status=${status}`,
+								text: formatSimulationSummary({
+									intentType: intent.type,
+									status,
+									unsignedPayload,
+								}),
 							},
 						],
 						details: {
@@ -2058,6 +2122,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									status,
 									error,
 									...artifacts,
+									...unsignedPayload,
 								},
 							},
 						},
@@ -2184,6 +2249,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					);
 					tx.setSender(sender);
 					const client = getSuiClient(network, params.rpcUrl);
+					const unsignedPayload = await exportUnsignedPayload(tx, client);
 					const simulation = await client.devInspectTransactionBlock({
 						sender,
 						transactionBlock: tx,
@@ -2198,7 +2264,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						content: [
 							{
 								type: "text",
-								text: `Workflow simulated: ${intent.type} status=${status}`,
+								text: formatSimulationSummary({
+									intentType: intent.type,
+									status,
+									unsignedPayload,
+								}),
 							},
 						],
 						details: {
@@ -2215,6 +2285,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									status,
 									error,
 									...artifacts,
+									...unsignedPayload,
 								},
 							},
 						},
