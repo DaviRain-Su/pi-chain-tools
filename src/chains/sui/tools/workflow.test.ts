@@ -1,7 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const cetusMocks = vi.hoisted(() => {
+	const createAddLiquidityFixTokenPayload = vi.fn();
+	const removeLiquidityTransactionPayload = vi.fn();
+	const initCetusSDK = vi.fn().mockImplementation(() => ({
+		Position: {
+			createAddLiquidityFixTokenPayload,
+			removeLiquidityTransactionPayload,
+		},
+	}));
+	return {
+		createAddLiquidityFixTokenPayload,
+		removeLiquidityTransactionPayload,
+		initCetusSDK,
+	};
+});
+
 const runtimeMocks = vi.hoisted(() => ({
 	getSuiClient: vi.fn(),
+	getSuiRpcEndpoint: vi.fn(() => "https://fullnode.mainnet.sui.io:443"),
 	parsePositiveBigInt: vi.fn((value: string) => BigInt(value)),
 	parseSuiNetwork: vi.fn(() => "mainnet"),
 	resolveSuiKeypair: vi.fn(() => ({
@@ -16,10 +33,14 @@ const executeMocks = vi.hoisted(() => {
 	const transferSuiExecute = vi.fn();
 	const transferCoinExecute = vi.fn();
 	const swapCetusExecute = vi.fn();
+	const cetusAddLiquidityExecute = vi.fn();
+	const cetusRemoveLiquidityExecute = vi.fn();
 	return {
 		transferSuiExecute,
 		transferCoinExecute,
 		swapCetusExecute,
+		cetusAddLiquidityExecute,
+		cetusRemoveLiquidityExecute,
 	};
 });
 
@@ -29,6 +50,7 @@ vi.mock("../runtime.js", async () => {
 	return {
 		...actual,
 		getSuiClient: runtimeMocks.getSuiClient,
+		getSuiRpcEndpoint: runtimeMocks.getSuiRpcEndpoint,
 		parsePositiveBigInt: runtimeMocks.parsePositiveBigInt,
 		parseSuiNetwork: runtimeMocks.parseSuiNetwork,
 		resolveSuiKeypair: runtimeMocks.resolveSuiKeypair,
@@ -60,7 +82,25 @@ vi.mock("./execute.js", () => ({
 			parameters: {},
 			execute: executeMocks.swapCetusExecute,
 		},
+		{
+			name: "sui_cetusAddLiquidity",
+			label: "add liquidity",
+			description: "add liquidity",
+			parameters: {},
+			execute: executeMocks.cetusAddLiquidityExecute,
+		},
+		{
+			name: "sui_cetusRemoveLiquidity",
+			label: "remove liquidity",
+			description: "remove liquidity",
+			parameters: {},
+			execute: executeMocks.cetusRemoveLiquidityExecute,
+		},
 	],
+}));
+
+vi.mock("@cetusprotocol/cetus-sui-clmm-sdk", () => ({
+	initCetusSDK: cetusMocks.initCetusSDK,
 }));
 
 vi.mock("@cetusprotocol/aggregator-sdk", () => ({
@@ -114,6 +154,20 @@ beforeEach(() => {
 	executeMocks.swapCetusExecute.mockResolvedValue({
 		content: [{ type: "text", text: "ok" }],
 		details: { digest: "0xexec-swap" },
+	});
+	executeMocks.cetusAddLiquidityExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: { digest: "0xexec-add-liquidity" },
+	});
+	executeMocks.cetusRemoveLiquidityExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: { digest: "0xexec-remove-liquidity" },
+	});
+	cetusMocks.createAddLiquidityFixTokenPayload.mockResolvedValue({
+		setSender: vi.fn(),
+	});
+	cetusMocks.removeLiquidityTransactionPayload.mockResolvedValue({
+		setSender: vi.fn(),
 	});
 });
 
@@ -222,6 +276,121 @@ describe("w3rt_run_sui_workflow_v0", () => {
 			artifacts: {
 				execute: {
 					digest: "0xexec",
+				},
+			},
+		});
+	});
+
+	it("analyzes LP add intentText with minimal structured fields", async () => {
+		const tool = getTool();
+		const poolId =
+			"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+		const positionId =
+			"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+		const result = await tool.execute("wf5", {
+			runId: "wf-sui-05",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: `add liquidity pool: ${poolId} position: ${positionId} 0x2::sui::SUI 0x2::usdc::USDC tick: -100 to 100 amountA: 1000 amountB: 2000`,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				poolId,
+				positionId,
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: "0x2::usdc::USDC",
+				tickLower: -100,
+				tickUpper: 100,
+				amountA: "1000",
+				amountB: "2000",
+			},
+		});
+	});
+
+	it("simulates LP add and returns simulation artifacts", async () => {
+		const tool = getTool();
+		const poolId =
+			"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+		const positionId =
+			"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+		const result = await tool.execute("wf6", {
+			runId: "wf-sui-06",
+			runMode: "simulate",
+			intentType: "sui.lp.cetus.add",
+			network: "mainnet",
+			poolId,
+			positionId,
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x2::usdc::USDC",
+			tickLower: -120,
+			tickUpper: 120,
+			amountA: "1500",
+			amountB: "2500",
+		});
+
+		expect(cetusMocks.initCetusSDK).toHaveBeenCalledWith({
+			network: "mainnet",
+			fullNodeUrl: "https://fullnode.mainnet.sui.io:443",
+			wallet:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+		});
+		expect(cetusMocks.createAddLiquidityFixTokenPayload).toHaveBeenCalledTimes(
+			1,
+		);
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			artifacts: {
+				simulate: {
+					status: "success",
+					poolId,
+					positionId,
+					amountA: "1500",
+					amountB: "2500",
+				},
+			},
+		});
+	});
+
+	it("executes LP remove after mainnet confirmation", async () => {
+		const tool = getTool();
+		const poolId =
+			"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+		const positionId =
+			"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+		const baseParams = {
+			runId: "wf-sui-07",
+			intentType: "sui.lp.cetus.remove" as const,
+			network: "mainnet",
+			poolId,
+			positionId,
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x2::usdc::USDC",
+			deltaLiquidity: "999",
+			minAmountA: "10",
+			minAmountB: "20",
+		};
+		const analysis = await tool.execute("wf7-analysis", {
+			...baseParams,
+			runMode: "analysis",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+
+		const execute = await tool.execute("wf7-execute", {
+			...baseParams,
+			runMode: "execute",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.cetusRemoveLiquidityExecute).toHaveBeenCalledTimes(1);
+		expect(execute.details).toMatchObject({
+			intentType: "sui.lp.cetus.remove",
+			artifacts: {
+				execute: {
+					digest: "0xexec-remove-liquidity",
 				},
 			},
 		});

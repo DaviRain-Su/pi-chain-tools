@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { AggregatorClient, Env } from "@cetusprotocol/aggregator-sdk";
+import { initCetusSDK } from "@cetusprotocol/cetus-sui-clmm-sdk";
 import { Transaction } from "@mysten/sui/transactions";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
 	type SuiNetwork,
 	getSuiClient,
+	getSuiRpcEndpoint,
 	parsePositiveBigInt,
 	parseSuiNetwork,
 	resolveSuiKeypair,
@@ -44,10 +46,41 @@ type SwapCetusIntent = {
 	apiKey?: string;
 };
 
+type CetusAddLiquidityIntent = {
+	type: "sui.lp.cetus.add";
+	poolId: string;
+	positionId: string;
+	coinTypeA: string;
+	coinTypeB: string;
+	tickLower: number;
+	tickUpper: number;
+	amountA: string;
+	amountB: string;
+	fixAmountA: boolean;
+	slippageBps: number;
+	collectFee: boolean;
+	rewarderCoinTypes: string[];
+};
+
+type CetusRemoveLiquidityIntent = {
+	type: "sui.lp.cetus.remove";
+	poolId: string;
+	positionId: string;
+	coinTypeA: string;
+	coinTypeB: string;
+	deltaLiquidity: string;
+	minAmountA: string;
+	minAmountB: string;
+	collectFee: boolean;
+	rewarderCoinTypes: string[];
+};
+
 type SuiWorkflowIntent =
 	| TransferSuiIntent
 	| TransferCoinIntent
-	| SwapCetusIntent;
+	| SwapCetusIntent
+	| CetusAddLiquidityIntent
+	| CetusRemoveLiquidityIntent;
 
 type ParsedIntentHints = {
 	intentType?: SuiWorkflowIntent["type"];
@@ -57,6 +90,17 @@ type ParsedIntentHints = {
 	coinType?: string;
 	inputCoinType?: string;
 	outputCoinType?: string;
+	poolId?: string;
+	positionId?: string;
+	coinTypeA?: string;
+	coinTypeB?: string;
+	tickLower?: number;
+	tickUpper?: number;
+	amountA?: string;
+	amountB?: string;
+	deltaLiquidity?: string;
+	minAmountA?: string;
+	minAmountB?: string;
 };
 
 type WorkflowParams = {
@@ -75,6 +119,20 @@ type WorkflowParams = {
 	slippageBps?: number;
 	providers?: string[];
 	depth?: number;
+	poolId?: string;
+	positionId?: string;
+	coinTypeA?: string;
+	coinTypeB?: string;
+	tickLower?: number;
+	tickUpper?: number;
+	amountA?: string;
+	amountB?: string;
+	fixAmountA?: boolean;
+	deltaLiquidity?: string;
+	minAmountA?: string;
+	minAmountB?: string;
+	collectFee?: boolean;
+	rewarderCoinTypes?: string[];
 	maxCoinObjectsToMerge?: number;
 	endpoint?: string;
 	apiKey?: string;
@@ -113,15 +171,80 @@ function resolveAggregatorEnv(network: SuiNetwork): Env {
 	);
 }
 
+function resolveCetusNetwork(network: SuiNetwork): "mainnet" | "testnet" {
+	if (network === "mainnet" || network === "testnet") return network;
+	throw new Error(
+		"Cetus LP workflow currently supports network=mainnet or testnet.",
+	);
+}
+
+function parseInteger(value: string | undefined): number | undefined {
+	if (!value) return undefined;
+	if (!/^-?\d+$/.test(value.trim())) return undefined;
+	return Number(value.trim());
+}
+
 function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
 	const lower = text.toLowerCase();
-	const addressMatch = text.match(/0x[a-fA-F0-9]{64}/);
+	const addressMatches = [...text.matchAll(/0x[a-fA-F0-9]{64}/g)].map(
+		(entry) => entry[0],
+	);
 	const coinTypeMatches = [
 		...text.matchAll(/0x[a-fA-F0-9]{1,64}::[A-Za-z0-9_]+::[A-Za-z0-9_]+/g),
 	].map((entry) => entry[0]);
 	const suiAmountMatch = text.match(/(\d+(?:\.\d+)?)\s*sui\b/i);
 	const integerMatch = text.match(/\b\d+\b/);
+	const poolLabelMatch =
+		text.match(/(?:pool|poolId|池子|池)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i) ??
+		null;
+	const positionLabelMatch =
+		text.match(
+			/(?:position|positionId|pos|仓位|头寸)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i,
+		) ?? null;
+	const tickRangeMatch =
+		text.match(
+			/(?:tick|ticks|范围)\s*[:= ]?\s*(-?\d+)\s*(?:to|~|-)\s*(-?\d+)/i,
+		) ?? null;
+	const amountAMatch =
+		text.match(/(?:amountA|tokenA|a金额|a_amount)\s*[:= ]\s*(\d+)/i) ?? null;
+	const amountBMatch =
+		text.match(/(?:amountB|tokenB|b金额|b_amount)\s*[:= ]\s*(\d+)/i) ?? null;
+	const deltaLiquidityMatch =
+		text.match(
+			/(?:deltaLiquidity|delta_liquidity|liquidityDelta|移除流动性|减少流动性|liquidity)\s*[:= ]\s*(\d+)/i,
+		) ?? null;
+	const minAmountAMatch =
+		text.match(/(?:minAmountA|min_a|minA)\s*[:= ]\s*(\d+)/i) ?? null;
+	const minAmountBMatch =
+		text.match(/(?:minAmountB|min_b|minB)\s*[:= ]\s*(\d+)/i) ?? null;
+
+	if (/(add liquidity|增加流动性|添加流动性|加流动性|加池)/i.test(lower)) {
+		return {
+			intentType: "sui.lp.cetus.add",
+			poolId: poolLabelMatch?.[1] || addressMatches[0],
+			positionId: positionLabelMatch?.[1] || addressMatches[1],
+			coinTypeA: coinTypeMatches[0],
+			coinTypeB: coinTypeMatches[1],
+			tickLower: parseInteger(tickRangeMatch?.[1]),
+			tickUpper: parseInteger(tickRangeMatch?.[2]),
+			amountA: amountAMatch?.[1],
+			amountB: amountBMatch?.[1],
+		};
+	}
+
+	if (/(remove liquidity|移除流动性|减少流动性|撤池|减池)/i.test(lower)) {
+		return {
+			intentType: "sui.lp.cetus.remove",
+			poolId: poolLabelMatch?.[1] || addressMatches[0],
+			positionId: positionLabelMatch?.[1] || addressMatches[1],
+			coinTypeA: coinTypeMatches[0],
+			coinTypeB: coinTypeMatches[1],
+			deltaLiquidity: deltaLiquidityMatch?.[1] || integerMatch?.[0],
+			minAmountA: minAmountAMatch?.[1],
+			minAmountB: minAmountBMatch?.[1],
+		};
+	}
 
 	if (/(swap|兑换|换币|交易对)/i.test(lower)) {
 		return {
@@ -136,13 +259,13 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		if (suiAmountMatch) {
 			return {
 				intentType: "sui.transfer.sui",
-				toAddress: addressMatch?.[0],
+				toAddress: addressMatches[0],
 				amountSui: Number(suiAmountMatch[1]),
 			};
 		}
 		return {
 			intentType: "sui.transfer.coin",
-			toAddress: addressMatch?.[0],
+			toAddress: addressMatches[0],
 			coinType: coinTypeMatches[0],
 			amountRaw: integerMatch?.[0],
 		};
@@ -154,6 +277,25 @@ function parseIntentText(text?: string): ParsedIntentHints {
 function inferIntentType(params: WorkflowParams, parsed: ParsedIntentHints) {
 	if (params.intentType) return params.intentType;
 	if (parsed.intentType) return parsed.intentType;
+	if (
+		params.poolId &&
+		params.positionId &&
+		params.deltaLiquidity &&
+		params.minAmountA &&
+		params.minAmountB
+	) {
+		return "sui.lp.cetus.remove";
+	}
+	if (
+		params.poolId &&
+		params.positionId &&
+		params.amountA &&
+		params.amountB &&
+		params.tickLower != null &&
+		params.tickUpper != null
+	) {
+		return "sui.lp.cetus.add";
+	}
 	if (params.inputCoinType && params.outputCoinType) return "sui.swap.cetus";
 	if (params.coinType) return "sui.transfer.coin";
 	if (
@@ -204,6 +346,80 @@ function normalizeIntent(params: WorkflowParams): SuiWorkflowIntent {
 			coinType,
 			amountRaw,
 			maxCoinObjectsToMerge: params.maxCoinObjectsToMerge,
+		};
+	}
+
+	if (intentType === "sui.lp.cetus.add") {
+		const poolId = params.poolId?.trim() || parsed.poolId;
+		const positionId = params.positionId?.trim() || parsed.positionId;
+		const coinTypeA = params.coinTypeA?.trim() || parsed.coinTypeA;
+		const coinTypeB = params.coinTypeB?.trim() || parsed.coinTypeB;
+		const tickLower = params.tickLower ?? parsed.tickLower;
+		const tickUpper = params.tickUpper ?? parsed.tickUpper;
+		const amountA = params.amountA?.trim() || parsed.amountA;
+		const amountB = params.amountB?.trim() || parsed.amountB;
+		if (!poolId) throw new Error("poolId is required for sui.lp.cetus.add");
+		if (!positionId)
+			throw new Error("positionId is required for sui.lp.cetus.add");
+		if (!coinTypeA)
+			throw new Error("coinTypeA is required for sui.lp.cetus.add");
+		if (!coinTypeB)
+			throw new Error("coinTypeB is required for sui.lp.cetus.add");
+		if (tickLower == null || tickUpper == null) {
+			throw new Error(
+				"tickLower and tickUpper are required for sui.lp.cetus.add",
+			);
+		}
+		if (!amountA || !amountB) {
+			throw new Error("amountA and amountB are required for sui.lp.cetus.add");
+		}
+		return {
+			type: "sui.lp.cetus.add",
+			poolId,
+			positionId,
+			coinTypeA,
+			coinTypeB,
+			tickLower,
+			tickUpper,
+			amountA,
+			amountB,
+			fixAmountA: params.fixAmountA !== false,
+			slippageBps: params.slippageBps ?? 100,
+			collectFee: params.collectFee === true,
+			rewarderCoinTypes: params.rewarderCoinTypes ?? [],
+		};
+	}
+
+	if (intentType === "sui.lp.cetus.remove") {
+		const poolId = params.poolId?.trim() || parsed.poolId;
+		const positionId = params.positionId?.trim() || parsed.positionId;
+		const coinTypeA = params.coinTypeA?.trim() || parsed.coinTypeA;
+		const coinTypeB = params.coinTypeB?.trim() || parsed.coinTypeB;
+		const deltaLiquidity =
+			params.deltaLiquidity?.trim() || parsed.deltaLiquidity;
+		const minAmountA = params.minAmountA?.trim() || parsed.minAmountA || "0";
+		const minAmountB = params.minAmountB?.trim() || parsed.minAmountB || "0";
+		if (!poolId) throw new Error("poolId is required for sui.lp.cetus.remove");
+		if (!positionId)
+			throw new Error("positionId is required for sui.lp.cetus.remove");
+		if (!coinTypeA)
+			throw new Error("coinTypeA is required for sui.lp.cetus.remove");
+		if (!coinTypeB)
+			throw new Error("coinTypeB is required for sui.lp.cetus.remove");
+		if (!deltaLiquidity) {
+			throw new Error("deltaLiquidity is required for sui.lp.cetus.remove");
+		}
+		return {
+			type: "sui.lp.cetus.remove",
+			poolId,
+			positionId,
+			coinTypeA,
+			coinTypeB,
+			deltaLiquidity,
+			minAmountA,
+			minAmountB,
+			collectFee: params.collectFee !== false,
+			rewarderCoinTypes: params.rewarderCoinTypes ?? [],
 		};
 	}
 
@@ -390,6 +606,73 @@ async function buildSimulation(
 		};
 	}
 
+	if (intent.type === "sui.lp.cetus.add") {
+		const cetusNetwork = resolveCetusNetwork(network);
+		const rpcUrl = getSuiRpcEndpoint(network);
+		const sdk = initCetusSDK({
+			network: cetusNetwork,
+			fullNodeUrl: rpcUrl,
+			wallet: signerAddress,
+		});
+		const tx = await sdk.Position.createAddLiquidityFixTokenPayload({
+			pool_id: intent.poolId,
+			pos_id: intent.positionId,
+			coinTypeA: intent.coinTypeA,
+			coinTypeB: intent.coinTypeB,
+			tick_lower: intent.tickLower,
+			tick_upper: intent.tickUpper,
+			amount_a: intent.amountA,
+			amount_b: intent.amountB,
+			slippage: parseSlippageDecimal(intent.slippageBps),
+			fix_amount_a: intent.fixAmountA,
+			is_open: false,
+			collect_fee: intent.collectFee,
+			rewarder_coin_types: intent.rewarderCoinTypes,
+		});
+		return {
+			tx: tx as unknown as Transaction,
+			artifacts: {
+				poolId: intent.poolId,
+				positionId: intent.positionId,
+				amountA: intent.amountA,
+				amountB: intent.amountB,
+				tickLower: intent.tickLower,
+				tickUpper: intent.tickUpper,
+			},
+		};
+	}
+
+	if (intent.type === "sui.lp.cetus.remove") {
+		const cetusNetwork = resolveCetusNetwork(network);
+		const rpcUrl = getSuiRpcEndpoint(network);
+		const sdk = initCetusSDK({
+			network: cetusNetwork,
+			fullNodeUrl: rpcUrl,
+			wallet: signerAddress,
+		});
+		const tx = await sdk.Position.removeLiquidityTransactionPayload({
+			pool_id: intent.poolId,
+			pos_id: intent.positionId,
+			coinTypeA: intent.coinTypeA,
+			coinTypeB: intent.coinTypeB,
+			delta_liquidity: intent.deltaLiquidity,
+			min_amount_a: intent.minAmountA,
+			min_amount_b: intent.minAmountB,
+			collect_fee: intent.collectFee,
+			rewarder_coin_types: intent.rewarderCoinTypes,
+		});
+		return {
+			tx: tx as unknown as Transaction,
+			artifacts: {
+				poolId: intent.poolId,
+				positionId: intent.positionId,
+				deltaLiquidity: intent.deltaLiquidity,
+				minAmountA: intent.minAmountA,
+				minAmountB: intent.minAmountB,
+			},
+		};
+	}
+
 	const env = resolveAggregatorEnv(network);
 	const routeClient = new AggregatorClient({
 		env,
@@ -434,7 +717,12 @@ async function buildSimulation(
 }
 
 function resolveExecutionTool(
-	name: "sui_transferSui" | "sui_transferCoin" | "sui_swapCetus",
+	name:
+		| "sui_transferSui"
+		| "sui_transferCoin"
+		| "sui_swapCetus"
+		| "sui_cetusAddLiquidity"
+		| "sui_cetusRemoveLiquidity",
 ) {
 	const tool = createSuiExecuteTools().find((entry) => entry.name === name);
 	if (!tool) throw new Error(`Execution tool not found: ${name}`);
@@ -476,6 +764,45 @@ async function executeIntent(
 			confirmMainnet: params.confirmMainnet,
 		});
 	}
+	if (intent.type === "sui.lp.cetus.add") {
+		const tool = resolveExecutionTool("sui_cetusAddLiquidity");
+		return tool.execute("wf-execute", {
+			poolId: intent.poolId,
+			positionId: intent.positionId,
+			coinTypeA: intent.coinTypeA,
+			coinTypeB: intent.coinTypeB,
+			tickLower: intent.tickLower,
+			tickUpper: intent.tickUpper,
+			amountA: intent.amountA,
+			amountB: intent.amountB,
+			fixAmountA: intent.fixAmountA,
+			slippageBps: intent.slippageBps,
+			collectFee: intent.collectFee,
+			rewarderCoinTypes: intent.rewarderCoinTypes,
+			network,
+			fromPrivateKey: params.fromPrivateKey,
+			waitForLocalExecution: params.waitForLocalExecution,
+			confirmMainnet: params.confirmMainnet,
+		});
+	}
+	if (intent.type === "sui.lp.cetus.remove") {
+		const tool = resolveExecutionTool("sui_cetusRemoveLiquidity");
+		return tool.execute("wf-execute", {
+			poolId: intent.poolId,
+			positionId: intent.positionId,
+			coinTypeA: intent.coinTypeA,
+			coinTypeB: intent.coinTypeB,
+			deltaLiquidity: intent.deltaLiquidity,
+			minAmountA: intent.minAmountA,
+			minAmountB: intent.minAmountB,
+			collectFee: intent.collectFee,
+			rewarderCoinTypes: intent.rewarderCoinTypes,
+			network,
+			fromPrivateKey: params.fromPrivateKey,
+			waitForLocalExecution: params.waitForLocalExecution,
+			confirmMainnet: params.confirmMainnet,
+		});
+	}
 	const tool = resolveExecutionTool("sui_swapCetus");
 	return tool.execute("wf-execute", {
 		inputCoinType: intent.inputCoinType,
@@ -509,6 +836,8 @@ export function createSuiWorkflowTools() {
 						Type.Literal("sui.transfer.sui"),
 						Type.Literal("sui.transfer.coin"),
 						Type.Literal("sui.swap.cetus"),
+						Type.Literal("sui.lp.cetus.add"),
+						Type.Literal("sui.lp.cetus.remove"),
 					]),
 				),
 				intentText: Type.Optional(Type.String()),
@@ -527,6 +856,22 @@ export function createSuiWorkflowTools() {
 					Type.Array(Type.String(), { minItems: 1, maxItems: 50 }),
 				),
 				depth: Type.Optional(Type.Number({ minimum: 1, maximum: 8 })),
+				poolId: Type.Optional(Type.String()),
+				positionId: Type.Optional(Type.String()),
+				coinTypeA: Type.Optional(Type.String()),
+				coinTypeB: Type.Optional(Type.String()),
+				tickLower: Type.Optional(Type.Number()),
+				tickUpper: Type.Optional(Type.Number()),
+				amountA: Type.Optional(Type.String()),
+				amountB: Type.Optional(Type.String()),
+				fixAmountA: Type.Optional(Type.Boolean()),
+				deltaLiquidity: Type.Optional(Type.String()),
+				minAmountA: Type.Optional(Type.String()),
+				minAmountB: Type.Optional(Type.String()),
+				collectFee: Type.Optional(Type.Boolean()),
+				rewarderCoinTypes: Type.Optional(
+					Type.Array(Type.String(), { minItems: 0, maxItems: 16 }),
+				),
 				maxCoinObjectsToMerge: Type.Optional(
 					Type.Number({ minimum: 1, maximum: 100 }),
 				),
