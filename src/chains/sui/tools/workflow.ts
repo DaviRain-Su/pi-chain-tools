@@ -351,7 +351,7 @@ function parseInteger(value: string | undefined): number | undefined {
 function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
 	const lower = text.toLowerCase();
-	const addressMatches = [...text.matchAll(/0x[a-fA-F0-9]{64}/g)].map(
+	const addressMatches = [...text.matchAll(/0x[a-fA-F0-9]{1,64}/g)].map(
 		(entry) => entry[0],
 	);
 	const coinTypeMatches = [
@@ -360,20 +360,28 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	const suiAmountMatch = text.match(/(\d+(?:\.\d+)?)\s*sui\b/i);
 	const integerMatch = text.match(/\b\d+\b/);
 	const poolLabelMatch =
-		text.match(/(?:pool|poolId|池子|池)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i) ??
+		text.match(/(?:pool|poolId|池子|池)\s*[:= ]\s*(0x[a-fA-F0-9]{1,64})/i) ??
 		null;
 	const positionLabelMatch =
 		text.match(
-			/(?:position|positionId|pos|仓位|头寸)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i,
+			/(?:position|positionId|pos|仓位|头寸)\s*[:= ]\s*(0x[a-fA-F0-9]{1,64})/i,
 		) ?? null;
 	const tickRangeMatch =
 		text.match(
 			/(?:tick|ticks|范围)\s*[:= ]?\s*(-?\d+)\s*(?:to|~|-)\s*(-?\d+)/i,
 		) ?? null;
 	const amountAMatch =
-		text.match(/(?:amountA|tokenA|a金额|a_amount)\s*[:= ]\s*(\d+)/i) ?? null;
+		text.match(
+			/(?:amountA|tokenA|a金额|a_amount|amount a|a amount|币A|代币A)\s*[:= ]\s*(\d+)/i,
+		) ??
+		text.match(/\ba\s*[:= ]\s*(\d+)\b/i) ??
+		null;
 	const amountBMatch =
-		text.match(/(?:amountB|tokenB|b金额|b_amount)\s*[:= ]\s*(\d+)/i) ?? null;
+		text.match(
+			/(?:amountB|tokenB|b金额|b_amount|amount b|b amount|币B|代币B)\s*[:= ]\s*(\d+)/i,
+		) ??
+		text.match(/\bb\s*[:= ]\s*(\d+)\b/i) ??
+		null;
 	const deltaLiquidityMatch =
 		text.match(
 			/(?:deltaLiquidity|delta_liquidity|liquidityDelta|移除流动性|减少流动性|liquidity)\s*[:= ]\s*(\d+)/i,
@@ -383,7 +391,11 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	const minAmountBMatch =
 		text.match(/(?:minAmountB|min_b|minB)\s*[:= ]\s*(\d+)/i) ?? null;
 
-	if (/(add liquidity|增加流动性|添加流动性|加流动性|加池)/i.test(lower)) {
+	if (
+		/(add liquidity|provide liquidity|open position|increase liquidity|增加流动性|添加流动性|加流动性|加池|做市|开仓|加仓)/i.test(
+			lower,
+		)
+	) {
 		return {
 			intentType: "sui.lp.cetus.add",
 			poolId: poolLabelMatch?.[1] || addressMatches[0],
@@ -397,7 +409,11 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		};
 	}
 
-	if (/(remove liquidity|移除流动性|减少流动性|撤池|减池)/i.test(lower)) {
+	if (
+		/(remove liquidity|withdraw liquidity|close position|decrease liquidity|移除流动性|减少流动性|撤池|减池|平仓|撤流动性|减仓)/i.test(
+			lower,
+		)
+	) {
 		return {
 			intentType: "sui.lp.cetus.remove",
 			poolId: poolLabelMatch?.[1] || addressMatches[0],
@@ -410,7 +426,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		};
 	}
 
-	if (/(swap|兑换|换币|交易对)/i.test(lower)) {
+	if (/(swap|兑换|换币|交易对|换成|换为|兑换成)/i.test(lower)) {
 		return {
 			intentType: "sui.swap.cetus",
 			inputCoinType: coinTypeMatches[0],
@@ -446,31 +462,34 @@ function parseStableLayerIntentText(
 	const coinTypeMatches = [
 		...text.matchAll(/0x[a-fA-F0-9]{1,64}::[A-Za-z0-9_]+::[A-Za-z0-9_]+/g),
 	].map((entry) => entry[0]);
-	const integerMatch = text.match(/\b\d+\b/);
+	const amountLabelMatch = text.match(
+		/(?:amount|数量|金额|额度|数量为)\s*[:= ]\s*(\d+)/i,
+	);
+	const integerMatch = amountLabelMatch?.[1] ?? text.match(/\b\d+\b/)?.[0];
 	const burnAll =
 		/\bburn\s+all\b|\b全部燃烧\b|\b全部销毁\b|\ball\s+balance\b/i.test(lower);
 
-	if (/\bclaim\b|领取|提取奖励|收获奖励|领收益/i.test(lower)) {
+	if (/\bclaim\b|领取|提取奖励|收获奖励|领收益|领取稳定币收益/i.test(lower)) {
 		return {
 			intentType: "sui.stablelayer.claim",
 			stableCoinType: coinTypeMatches[0],
 		};
 	}
 
-	if (/\bburn\b|赎回|销毁|回收/i.test(lower)) {
+	if (/\bburn\b|\bredeem\b|赎回|销毁|回收/i.test(lower)) {
 		return {
 			intentType: "sui.stablelayer.burn",
 			stableCoinType: coinTypeMatches[0],
-			amountRaw: integerMatch?.[0],
+			amountRaw: integerMatch,
 			burnAll,
 		};
 	}
 
-	if (/\bmint\b|铸造|生成稳定币|兑换稳定币/i.test(lower)) {
+	if (/\bmint\b|铸造|生成稳定币|兑换稳定币|铸稳定币/i.test(lower)) {
 		return {
 			intentType: "sui.stablelayer.mint",
 			stableCoinType: coinTypeMatches[0],
-			amountRaw: integerMatch?.[0],
+			amountRaw: integerMatch,
 		};
 	}
 
@@ -544,7 +563,7 @@ function normalizeStableLayerIntent(
 function parseCetusFarmsIntentText(text?: string): ParsedCetusFarmsIntentHints {
 	if (!text?.trim()) return {};
 	const lower = text.toLowerCase();
-	const addressMatches = [...text.matchAll(/0x[a-fA-F0-9]{64}/g)].map(
+	const addressMatches = [...text.matchAll(/0x[a-fA-F0-9]{1,64}/g)].map(
 		(entry) => entry[0],
 	);
 	const coinTypeMatches = [
@@ -553,21 +572,25 @@ function parseCetusFarmsIntentText(text?: string): ParsedCetusFarmsIntentHints {
 
 	const poolLabelMatch =
 		text.match(
-			/(?:pool|poolId|farm pool|farms pool|farm|池子)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i,
+			/(?:pool|poolId|farm pool|farms pool|farm|池子)\s*[:= ]\s*(0x[a-fA-F0-9]{1,64})/i,
 		) ?? null;
 	const clmmPositionLabelMatch =
 		text.match(
-			/(?:clmmPositionId|clmm position|positionId|position|仓位)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i,
+			/(?:clmmPositionId|clmm position|positionId|position|仓位)\s*[:= ]\s*(0x[a-fA-F0-9]{1,64})/i,
 		) ?? null;
 	const clmmPoolLabelMatch =
-		text.match(/(?:clmmPoolId|clmm pool)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i) ??
+		text.match(/(?:clmmPoolId|clmm pool)\s*[:= ]\s*(0x[a-fA-F0-9]{1,64})/i) ??
 		null;
 	const positionNftLabelMatch =
 		text.match(
-			/(?:positionNftId|position nft|nft|farm position|头寸)\s*[:= ]\s*(0x[a-fA-F0-9]{64})/i,
+			/(?:positionNftId|position nft|nft|farm position|头寸|pos nft)\s*[:= ]\s*(0x[a-fA-F0-9]{1,64})/i,
 		) ?? null;
 
-	if (/\bharvest\b|领取奖励|收获奖励|提取奖励/i.test(lower)) {
+	if (
+		/\bharvest\b|\bclaim\b|\bclaim reward\b|\bcollect reward\b|领取奖励|收获奖励|提取奖励|收割/i.test(
+			lower,
+		)
+	) {
 		return {
 			intentType: "sui.cetus.farms.harvest",
 			poolId: poolLabelMatch?.[1] || addressMatches[0],
@@ -576,7 +599,9 @@ function parseCetusFarmsIntentText(text?: string): ParsedCetusFarmsIntentHints {
 	}
 
 	if (
-		/\bunstake\b|\bwithdraw\b|解除质押|解质押|取回仓位|移除质押/i.test(lower)
+		/\bunstake\b|\bwithdraw\b|\bwithdraw farm\b|解除质押|解质押|取回仓位|移除质押/i.test(
+			lower,
+		)
 	) {
 		return {
 			intentType: "sui.cetus.farms.unstake",
@@ -586,7 +611,9 @@ function parseCetusFarmsIntentText(text?: string): ParsedCetusFarmsIntentHints {
 	}
 
 	if (
-		/\bstake\b|\bdeposit\b|质押|存入农场|farm stake|farm deposit/i.test(lower)
+		/\bstake\b|\bdeposit\b|\bfarm stake\b|\bfarm deposit\b|质押|存入农场|存入farm/i.test(
+			lower,
+		)
 	) {
 		return {
 			intentType: "sui.cetus.farms.stake",
@@ -1526,18 +1553,18 @@ function resolveDefiWorkflowRoute(
 
 	const lowerIntentText = params.intentText?.toLowerCase() ?? "";
 	if (
+		/\bfarm\b|\bstake\b|\bunstake\b|\bharvest\b|农场|挖矿|质押|解质押|收割|收获farm/i.test(
+			lowerIntentText,
+		)
+	) {
+		return "w3rt_run_sui_cetus_farms_workflow_v0";
+	}
+	if (
 		/\bstablelayer\b|\bstable layer\b|\bmint\b|\bburn\b|\bclaim\b|稳定币|铸造|赎回|销毁|领取奖励|提取奖励/i.test(
 			lowerIntentText,
 		)
 	) {
 		return "w3rt_run_sui_stablelayer_workflow_v0";
-	}
-	if (
-		/\bfarm\b|\bstake\b|\bunstake\b|\bharvest\b|农场|挖矿|质押|解质押|收割/i.test(
-			lowerIntentText,
-		)
-	) {
-		return "w3rt_run_sui_cetus_farms_workflow_v0";
 	}
 
 	return "w3rt_run_sui_workflow_v0";

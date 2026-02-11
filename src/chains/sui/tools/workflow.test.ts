@@ -443,6 +443,32 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("parses LP add intentText with short addresses and a/b shorthand", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5b", {
+			runId: "wf-sui-05b",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"provide liquidity pool: 0xabc position: 0xdef 0x2::sui::SUI 0x2::usdc::USDC tick: -5 to 5 a: 10 b: 20",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				poolId: "0xabc",
+				positionId: "0xdef",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: "0x2::usdc::USDC",
+				tickLower: -5,
+				tickUpper: 5,
+				amountA: "10",
+				amountB: "20",
+			},
+		});
+	});
+
 	it("simulates LP add and returns simulation artifacts", async () => {
 		const tool = getTool();
 		const poolId =
@@ -717,6 +743,25 @@ describe("w3rt_run_sui_cetus_farms_workflow_v0", () => {
 			},
 		});
 	});
+
+	it("parses farms harvest intentText with short addresses", async () => {
+		const tool = getTool("w3rt_run_sui_cetus_farms_workflow_v0");
+		const result = await tool.execute("cetus-farms-wf-4", {
+			runId: "wf-sui-cetus-farms-04",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "claim reward farm pool: 0xabc nft: 0xdef",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.cetus.farms.harvest",
+			intent: {
+				type: "sui.cetus.farms.harvest",
+				poolId: "0xabc",
+				positionNftId: "0xdef",
+			},
+		});
+	});
 });
 
 describe("w3rt_run_sui_defi_workflow_v0", () => {
@@ -743,7 +788,7 @@ describe("w3rt_run_sui_defi_workflow_v0", () => {
 			runId: "wf-sui-defi-02",
 			runMode: "analysis",
 			intentText:
-				"farm harvest rewards pool: 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa nft: 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"claim farm rewards pool: 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa nft: 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			network: "mainnet",
 			poolId:
 				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

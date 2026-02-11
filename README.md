@@ -71,6 +71,24 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui 
 - `workflow`: `w3rt_run_sui_defi_workflow_v0` (unified DeFi router workflow; auto-routes to core/stablelayer/cetus-farms flows)
 - `rpc`: `sui_rpc` (generic Sui JSON-RPC passthrough with dangerous method safety guard)
 
+### Sui DeFi NL Examples (Pi)
+
+Use unified router tool `w3rt_run_sui_defi_workflow_v0`:
+
+- Swap (analysis):
+  - `intentText: "swap 1000000 from 0x2::sui::SUI to 0x...::usdc::USDC"`
+- LP Add (analysis, less structured):
+  - `intentText: "provide liquidity pool: 0xabc position: 0xdef 0x2::sui::SUI 0x2::usdc::USDC tick: -5 to 5 a: 10 b: 20"`
+- Cetus Farms Harvest (analysis):
+  - `intentText: "claim farm rewards pool: 0xabc nft: 0xdef"`
+- StableLayer Mint (analysis):
+  - `intentText: "mint stable coin 0x...::btc_usdc::BtcUSDC amount 1000000"`
+
+Recommended execution flow on mainnet:
+1. `runMode=analysis` -> capture `confirmToken`
+2. `runMode=simulate` -> verify artifacts/status
+3. `runMode=execute` with `confirmMainnet=true` and `confirmToken=<token>`
+
 ## Use As Pi Extension
 
 ```ts
