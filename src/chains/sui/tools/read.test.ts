@@ -415,6 +415,9 @@ describe("sui_getCetusFarmsPools", () => {
 			network: "mainnet",
 		});
 		expect(cetusV2Mocks.getCetusFarmsPools).toHaveBeenCalledTimes(1);
+		expect(result.content[0]?.text).toContain("Cetus farms pools (mainnet)");
+		expect(result.content[0]?.text).toContain("poolId: 0xpool1");
+		expect(result.content[0]?.text).toContain("clmmPoolId: 0xclmm1");
 		expect(result.details).toMatchObject({
 			poolCount: 1,
 			pools: [
@@ -450,6 +453,11 @@ describe("sui_getCetusFarmsPositions", () => {
 			network: "mainnet",
 		});
 		expect(cetusV2Mocks.getCetusFarmsPositions).toHaveBeenCalledTimes(1);
+		expect(result.content[0]?.text).toContain(
+			"Cetus farms positions (mainnet)",
+		);
+		expect(result.content[0]?.text).toContain("owner: 0xowner");
+		expect(result.content[0]?.text).toContain("positionNftId: 0xposnft1");
 		expect(result.details).toMatchObject({
 			owner: "0xowner",
 			positionCount: 1,
@@ -482,6 +490,9 @@ describe("sui_getCetusVaultsBalances", () => {
 			network: "mainnet",
 		});
 		expect(cetusV2Mocks.getCetusVaultsBalances).toHaveBeenCalledTimes(1);
+		expect(result.content[0]?.text).toContain("Cetus vault balances (mainnet)");
+		expect(result.content[0]?.text).toContain("owner: 0xowner");
+		expect(result.content[0]?.text).toContain("vaultId: 0xvault1");
 		expect(result.details).toMatchObject({
 			owner: "0xowner",
 			vaultCount: 1,

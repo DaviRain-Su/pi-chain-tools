@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import type { Transaction } from "@mysten/sui/transactions";
 import { type SuiNetwork, getSuiRpcEndpoint } from "./runtime.js";
 
@@ -82,6 +83,7 @@ type CetusVaultsSDKCtor = {
 
 let cachedFarmsCtor: CetusFarmsSDKCtor | null = null;
 let cachedVaultsCtor: CetusVaultsSDKCtor | null = null;
+const require = createRequire(import.meta.url);
 
 function isSdkCtor(
 	value: unknown,
@@ -97,12 +99,26 @@ function isSdkCtor(
 }
 
 function parseFarmsCtor(moduleValue: unknown): CetusFarmsSDKCtor | null {
-	if (!moduleValue || typeof moduleValue !== "object") return null;
-	const typed = moduleValue as {
-		CetusFarmsSDK?: unknown;
-		default?: unknown;
-	};
-	const candidates = [typed.CetusFarmsSDK, typed.default];
+	const typed =
+		moduleValue &&
+		(typeof moduleValue === "object" || typeof moduleValue === "function")
+			? (moduleValue as {
+					CetusFarmsSDK?: unknown;
+					default?: unknown;
+				})
+			: null;
+	const defaultValue =
+		typed?.default &&
+		(typeof typed.default === "object" || typeof typed.default === "function")
+			? (typed.default as { CetusFarmsSDK?: unknown; default?: unknown })
+			: null;
+	const candidates = [
+		moduleValue,
+		typed?.CetusFarmsSDK,
+		typed?.default,
+		defaultValue?.CetusFarmsSDK,
+		defaultValue?.default,
+	];
 	for (const candidate of candidates) {
 		if (isSdkCtor(candidate)) return candidate as CetusFarmsSDKCtor;
 	}
@@ -110,12 +126,26 @@ function parseFarmsCtor(moduleValue: unknown): CetusFarmsSDKCtor | null {
 }
 
 function parseVaultsCtor(moduleValue: unknown): CetusVaultsSDKCtor | null {
-	if (!moduleValue || typeof moduleValue !== "object") return null;
-	const typed = moduleValue as {
-		CetusVaultsSDK?: unknown;
-		default?: unknown;
-	};
-	const candidates = [typed.CetusVaultsSDK, typed.default];
+	const typed =
+		moduleValue &&
+		(typeof moduleValue === "object" || typeof moduleValue === "function")
+			? (moduleValue as {
+					CetusVaultsSDK?: unknown;
+					default?: unknown;
+				})
+			: null;
+	const defaultValue =
+		typed?.default &&
+		(typeof typed.default === "object" || typeof typed.default === "function")
+			? (typed.default as { CetusVaultsSDK?: unknown; default?: unknown })
+			: null;
+	const candidates = [
+		moduleValue,
+		typed?.CetusVaultsSDK,
+		typed?.default,
+		defaultValue?.CetusVaultsSDK,
+		defaultValue?.default,
+	];
 	for (const candidate of candidates) {
 		if (isSdkCtor(candidate)) return candidate as CetusVaultsSDKCtor;
 	}
@@ -124,8 +154,16 @@ function parseVaultsCtor(moduleValue: unknown): CetusVaultsSDKCtor | null {
 
 async function getFarmsCtor(): Promise<CetusFarmsSDKCtor> {
 	if (cachedFarmsCtor) return cachedFarmsCtor;
-	const moduleValue = await import("@cetusprotocol/farms-sdk");
-	const ctor = parseFarmsCtor(moduleValue);
+	const importValue = await import("@cetusprotocol/farms-sdk");
+	let ctor = parseFarmsCtor(importValue);
+	if (!ctor) {
+		try {
+			const requireValue = require("@cetusprotocol/farms-sdk");
+			ctor = parseFarmsCtor(requireValue);
+		} catch {
+			// ignore and throw unified error below
+		}
+	}
 	if (!ctor || typeof ctor.createSDK !== "function") {
 		throw new Error(
 			"Failed to load @cetusprotocol/farms-sdk: CetusFarmsSDK.createSDK not found.",
@@ -137,8 +175,16 @@ async function getFarmsCtor(): Promise<CetusFarmsSDKCtor> {
 
 async function getVaultsCtor(): Promise<CetusVaultsSDKCtor> {
 	if (cachedVaultsCtor) return cachedVaultsCtor;
-	const moduleValue = await import("@cetusprotocol/vaults-sdk");
-	const ctor = parseVaultsCtor(moduleValue);
+	const importValue = await import("@cetusprotocol/vaults-sdk");
+	let ctor = parseVaultsCtor(importValue);
+	if (!ctor) {
+		try {
+			const requireValue = require("@cetusprotocol/vaults-sdk");
+			ctor = parseVaultsCtor(requireValue);
+		} catch {
+			// ignore and throw unified error below
+		}
+	}
 	if (!ctor || typeof ctor.createSDK !== "function") {
 		throw new Error(
 			"Failed to load @cetusprotocol/vaults-sdk: CetusVaultsSDK.createSDK not found.",

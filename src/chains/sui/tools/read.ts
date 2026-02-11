@@ -95,6 +95,31 @@ type SuiPortfolioSummary = {
 	suiBalance: SuiPortfolioAsset | null;
 };
 
+type CetusFarmsPoolSummary = {
+	poolId: string;
+	clmmPoolId: string;
+	rewarderCount: number;
+	effectiveTickLower: number | null;
+	effectiveTickUpper: number | null;
+	totalShare: string | null;
+};
+
+type CetusFarmsPositionSummary = {
+	positionNftId: string;
+	poolId: string;
+	clmmPositionId: string | null;
+	clmmPoolId: string | null;
+	rewardCount: number;
+};
+
+type CetusVaultBalanceSummary = {
+	vaultId: string | null;
+	clmmPoolId: string | null;
+	lpTokenBalance: string | null;
+};
+
+const HUMAN_READABLE_LIMIT = 12;
+
 function parseNonNegativeBigInt(value: string): bigint {
 	const normalized = value.trim();
 	if (!/^\d+$/.test(normalized)) {
@@ -114,6 +139,135 @@ function resolveAggregatorEnv(network: string): Env {
 function clampLimit(value: number | undefined, fallback: number): number {
 	if (typeof value !== "number") return fallback;
 	return Math.max(1, Math.min(200, Math.floor(value)));
+}
+
+function shortId(value: string): string {
+	if (value.length <= 20) return value;
+	return `${value.slice(0, 10)}...${value.slice(-8)}`;
+}
+
+function formatCetusPoolsText(params: {
+	network: string;
+	pools: CetusFarmsPoolSummary[];
+	hasNextPage: boolean;
+	nextCursor: string | null;
+}): string {
+	const lines = [
+		`Cetus farms pools (${params.network}): ${params.pools.length} item(s)`,
+	];
+	if (params.pools.length === 0) {
+		lines.push("No pools found.");
+		return lines.join("\n");
+	}
+
+	const visible = params.pools.slice(0, HUMAN_READABLE_LIMIT);
+	for (const [index, pool] of visible.entries()) {
+		lines.push(
+			`${index + 1}. ${shortId(pool.poolId)} rewards=${pool.rewarderCount}`,
+		);
+		lines.push(`   poolId: ${pool.poolId}`);
+		lines.push(`   clmmPoolId: ${pool.clmmPoolId}`);
+		if (
+			typeof pool.effectiveTickLower === "number" &&
+			typeof pool.effectiveTickUpper === "number"
+		) {
+			lines.push(
+				`   effectiveTicks: [${pool.effectiveTickLower}, ${pool.effectiveTickUpper}]`,
+			);
+		}
+		if (pool.totalShare) {
+			lines.push(`   totalShare: ${pool.totalShare}`);
+		}
+	}
+
+	const hiddenCount = params.pools.length - visible.length;
+	if (hiddenCount > 0) {
+		lines.push(`... and ${hiddenCount} more pool(s) in details.pools`);
+	}
+	if (params.hasNextPage) {
+		lines.push(
+			`hasNextPage: true${params.nextCursor ? ` (nextCursor=${params.nextCursor})` : ""}`,
+		);
+	}
+	return lines.join("\n");
+}
+
+function formatCetusPositionsText(params: {
+	owner: string;
+	network: string;
+	positions: CetusFarmsPositionSummary[];
+	hasNextPage: boolean;
+	nextCursor: string | null;
+}): string {
+	const lines = [
+		`Cetus farms positions (${params.network}): ${params.positions.length} item(s)`,
+		`owner: ${params.owner}`,
+	];
+	if (params.positions.length === 0) {
+		lines.push("No positions found.");
+		return lines.join("\n");
+	}
+
+	const visible = params.positions.slice(0, HUMAN_READABLE_LIMIT);
+	for (const [index, position] of visible.entries()) {
+		lines.push(
+			`${index + 1}. ${shortId(position.positionNftId)} rewards=${position.rewardCount}`,
+		);
+		lines.push(`   positionNftId: ${position.positionNftId}`);
+		lines.push(`   poolId: ${position.poolId}`);
+		if (position.clmmPositionId) {
+			lines.push(`   clmmPositionId: ${position.clmmPositionId}`);
+		}
+		if (position.clmmPoolId) {
+			lines.push(`   clmmPoolId: ${position.clmmPoolId}`);
+		}
+	}
+
+	const hiddenCount = params.positions.length - visible.length;
+	if (hiddenCount > 0) {
+		lines.push(`... and ${hiddenCount} more position(s) in details.positions`);
+	}
+	if (params.hasNextPage) {
+		lines.push(
+			`hasNextPage: true${params.nextCursor ? ` (nextCursor=${params.nextCursor})` : ""}`,
+		);
+	}
+	return lines.join("\n");
+}
+
+function formatCetusVaultBalancesText(params: {
+	owner: string;
+	network: string;
+	balances: CetusVaultBalanceSummary[];
+}): string {
+	const lines = [
+		`Cetus vault balances (${params.network}): ${params.balances.length} item(s)`,
+		`owner: ${params.owner}`,
+	];
+	if (params.balances.length === 0) {
+		lines.push("No vault balances found.");
+		return lines.join("\n");
+	}
+
+	const visible = params.balances.slice(0, HUMAN_READABLE_LIMIT);
+	for (const [index, balance] of visible.entries()) {
+		lines.push(`${index + 1}. ${shortId(balance.vaultId ?? "unknown-vault")}`);
+		lines.push(`   vaultId: ${balance.vaultId ?? "unknown"}`);
+		if (balance.clmmPoolId) {
+			lines.push(`   clmmPoolId: ${balance.clmmPoolId}`);
+		}
+		if (balance.lpTokenBalance) {
+			lines.push(`   lpTokenBalance: ${balance.lpTokenBalance}`);
+		}
+	}
+
+	const hiddenCount = params.balances.length - visible.length;
+	if (hiddenCount > 0) {
+		lines.push(
+			`... and ${hiddenCount} more balance item(s) in details.balances`,
+		);
+	}
+	return lines.join("\n");
 }
 
 async function buildPortfolioSummary(params: {
@@ -494,18 +648,41 @@ export function createSuiReadTools() {
 					network: cetusNetwork,
 					rpcUrl: params.rpcUrl?.trim(),
 				});
-				const pools = result.pools.slice(0, limit).map((pool) => ({
-					poolId: pool.id,
-					clmmPoolId: pool.clmm_pool_id,
-					rewarderCount: Array.isArray(pool.rewarders)
-						? pool.rewarders.length
-						: 0,
-				}));
+				const pools = result.pools.slice(0, limit).map((pool) => {
+					const extra = pool as {
+						effective_tick_lower?: unknown;
+						effective_tick_upper?: unknown;
+						total_share?: unknown;
+					};
+					return {
+						poolId: pool.id,
+						clmmPoolId: pool.clmm_pool_id,
+						rewarderCount: Array.isArray(pool.rewarders)
+							? pool.rewarders.length
+							: 0,
+						effectiveTickLower:
+							typeof extra.effective_tick_lower === "number"
+								? extra.effective_tick_lower
+								: null,
+						effectiveTickUpper:
+							typeof extra.effective_tick_upper === "number"
+								? extra.effective_tick_upper
+								: null,
+						totalShare:
+							typeof extra.total_share === "string" ? extra.total_share : null,
+					} satisfies CetusFarmsPoolSummary;
+				});
+				const summaryText = formatCetusPoolsText({
+					network,
+					pools,
+					hasNextPage: result.hasNextPage,
+					nextCursor: result.nextCursor,
+				});
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Cetus farms pools: ${pools.length} item(s)`,
+							text: summaryText,
 						},
 					],
 					details: {
@@ -556,20 +733,30 @@ export function createSuiReadTools() {
 					owner,
 					calculateRewards: params.calculateRewards !== false,
 				});
-				const positions = result.positions.slice(0, limit).map((position) => ({
-					positionNftId: position.id,
-					poolId: position.pool_id,
-					clmmPositionId: position.clmm_position_id ?? null,
-					clmmPoolId: position.clmm_pool_id ?? null,
-					rewardCount: Array.isArray(position.rewards)
-						? position.rewards.length
-						: 0,
-				}));
+				const positions = result.positions.slice(0, limit).map(
+					(position) =>
+						({
+							positionNftId: position.id,
+							poolId: position.pool_id,
+							clmmPositionId: position.clmm_position_id ?? null,
+							clmmPoolId: position.clmm_pool_id ?? null,
+							rewardCount: Array.isArray(position.rewards)
+								? position.rewards.length
+								: 0,
+						}) satisfies CetusFarmsPositionSummary,
+				);
+				const summaryText = formatCetusPositionsText({
+					owner,
+					network,
+					positions,
+					hasNextPage: result.hasNextPage,
+					nextCursor: result.nextCursor,
+				});
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Cetus farms positions: ${positions.length} item(s)`,
+							text: summaryText,
 						},
 					],
 					details: {
@@ -615,16 +802,24 @@ export function createSuiReadTools() {
 					rpcUrl: params.rpcUrl?.trim(),
 					owner,
 				});
-				const items = balances.slice(0, limit).map((entry) => ({
-					vaultId: entry.vault_id ?? null,
-					clmmPoolId: entry.clmm_pool_id ?? null,
-					lpTokenBalance: entry.lp_token_balance ?? null,
-				}));
+				const items = balances.slice(0, limit).map(
+					(entry) =>
+						({
+							vaultId: entry.vault_id ?? null,
+							clmmPoolId: entry.clmm_pool_id ?? null,
+							lpTokenBalance: entry.lp_token_balance ?? null,
+						}) satisfies CetusVaultBalanceSummary,
+				);
+				const summaryText = formatCetusVaultBalancesText({
+					owner,
+					network,
+					balances: items,
+				});
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Cetus vault balances: ${items.length} item(s)`,
+							text: summaryText,
 						},
 					],
 					details: {
