@@ -93,7 +93,36 @@ Recommended execution flow on mainnet:
 
 You do **not** need `pi-mono`. Install this project as a normal Pi extension source.
 
-### 1) Install once
+### 1) Prerequisites
+
+- Pi CLI installed (`pi --version`)
+- Node.js 20+ and npm
+- Sui CLI installed (`sui --version`)
+- Local Sui wallet initialized and active on mainnet
+
+Sui CLI quick init (first-time setup):
+
+```bash
+# Create/switch mainnet environment
+sui client new-env --alias mainnet --rpc https://fullnode.mainnet.sui.io:443
+sui client switch --env mainnet
+
+# Create address if you do not have one yet
+sui client new-address ed25519
+
+# Verify active wallet
+sui client active-address
+sui client active-env
+```
+
+Expected local files:
+
+```bash
+ls ~/.sui/sui_config/sui.keystore
+ls ~/.sui/sui_config/client.yaml
+```
+
+### 2) Install once
 
 Local repository source:
 
@@ -112,7 +141,7 @@ The package auto-loads one bundled extension (`src/pi/default-extension.ts`) tha
 - Solana workflow toolset
 - Sui full toolset (read/compose/execute/workflow/rpc)
 
-### 2) Reload Pi and smoke test
+### 3) Reload Pi and smoke test
 
 Run in Pi:
 
@@ -126,7 +155,12 @@ Then ask naturally:
 帮我查一下 Sui 主网余额
 ```
 
-### 3) Sui signer config (no `fromPrivateKey` needed)
+Notes:
+
+- Sui is Move-based, not ERC20-based; assets are identified by `coinType`.
+- `sui_getBalance` without `coinType` returns all non-zero assets (including USDC if present).
+
+### 4) Sui signer config (no `fromPrivateKey` needed)
 
 Sui execute/workflow tools now auto-load signer in this order:
 
@@ -143,7 +177,7 @@ sui client active-address
 ls ~/.sui/sui_config/sui.keystore
 ```
 
-### 4) Execution allow/safety config
+### 5) Execution allow/safety config
 
 - Mainnet execute is guarded. You must explicitly confirm (internally `confirmMainnet=true`).
 - Workflow execute on mainnet also requires the matching `confirmToken` from prior analysis/simulate.
@@ -155,7 +189,7 @@ Natural language confirmation example:
 继续执行刚才这笔，确认主网执行
 ```
 
-### 5) Natural language examples (Sui)
+### 6) Natural language examples (Sui)
 
 - Swap simulate:
   - `把 0.01 SUI 换成 USDC，先模拟。`
@@ -165,8 +199,10 @@ Natural language confirmation example:
   - `帮我查一下 Sui 主网 Cetus farms 的池子列表。`
 - StableLayer:
   - `在 Sui 主网把 1000000 raw USDC mint 成 stable，先模拟。`
+- Portfolio (include stablecoins):
+  - `帮我查一下 Sui 主网本地钱包余额（包含USDC）`
 
-### 6) Troubleshooting
+### 7) Troubleshooting
 
 - `Cannot find module ...`: run `npm install` (or `bun install`), then `/reload`.
 - Extension conflicts in Pi: ensure duplicated tool providers are not loaded at the same time.
@@ -180,7 +216,35 @@ pi update
 pi remove /Users/davirian/dev/pi-chain-tools
 ```
 
-### 7) Optional: `pi-mono` development wiring
+### 8) Publish To npm (required for `pi install npm:...`)
+
+Before publish:
+
+```bash
+npm login
+npm whoami
+npm run ci
+```
+
+Check package name availability:
+
+```bash
+npm view pi-chain-tools version
+```
+
+If name is occupied, use a scoped name (for example `@davirian/pi-chain-tools`) in `package.json`, then publish:
+
+```bash
+npm publish --access public
+```
+
+After publish, users install with:
+
+```bash
+pi install npm:pi-chain-tools
+```
+
+### 9) Optional: `pi-mono` development wiring
 
 Only needed if you intentionally develop extensions inside `pi-mono`.
 The bundled default extension already reuses the same Solana/Sui dedupe guards, so mixed loading is safer, but keeping a single source of truth is still recommended.

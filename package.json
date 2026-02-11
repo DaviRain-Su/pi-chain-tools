@@ -1,9 +1,12 @@
 {
 	"name": "pi-chain-tools",
 	"version": "0.1.0",
-	"private": true,
+	"private": false,
 	"type": "module",
 	"description": "Chain toolsets and Pi adapters (Solana first, multi-chain ready)",
+	"publishConfig": {
+		"access": "public"
+	},
 	"exports": {
 		".": "./src/index.ts",
 		"./pi/default-extension": "./src/pi/default-extension.ts",

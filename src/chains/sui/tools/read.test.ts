@@ -378,7 +378,9 @@ describe("sui_getPortfolio", () => {
 		expect(getCoinMetadata).toHaveBeenCalledTimes(2);
 		expect(runtimeMocks.formatCoinAmount).toHaveBeenCalledWith("2500000000", 9);
 		expect(runtimeMocks.formatCoinAmount).toHaveBeenCalledWith("2000000", 6);
-		expect(result.content[0]?.text).toContain("Portfolio: 2 assets");
+		expect(result.content[0]?.text).toContain("2 asset(s)");
+		expect(result.content[0]?.text).toContain("SUI");
+		expect(result.content[0]?.text).toContain("USDC");
 		expect(result.details).toMatchObject({
 			owner: "0xportfolio",
 			assetCount: 2,

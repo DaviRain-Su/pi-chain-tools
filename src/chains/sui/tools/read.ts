@@ -1262,12 +1262,32 @@ export function createSuiReadTools() {
 					includeZeroBalances: params.includeZeroBalances,
 					includeMetadata: params.includeMetadata,
 				});
-				const summary = portfolio.suiBalance
-					? `Portfolio: ${portfolio.assetCount} assets (SUI=${portfolio.suiBalance.uiAmount} / ${portfolio.suiBalance.totalBalance} MIST)`
-					: `Portfolio: ${portfolio.assetCount} assets`;
+				const previewAssets = portfolio.assets.slice(0, HUMAN_READABLE_LIMIT);
+				const lines = [
+					`Portfolio (${network}) for ${owner}: ${portfolio.assetCount} asset(s)`,
+				];
+
+				for (const [index, asset] of previewAssets.entries()) {
+					const symbol =
+						asset.metadata?.symbol || fallbackCoinSymbol(asset.coinType);
+					if (asset.uiAmount) {
+						lines.push(
+							`${index + 1}. ${symbol}: ${asset.uiAmount} (${asset.totalBalance} raw)`,
+						);
+						continue;
+					}
+					lines.push(
+						`${index + 1}. ${shortCoinType(asset.coinType)}: ${asset.totalBalance}`,
+					);
+				}
+				if (portfolio.assetCount > previewAssets.length) {
+					lines.push(
+						`... and ${portfolio.assetCount - previewAssets.length} more asset(s)`,
+					);
+				}
 
 				return {
-					content: [{ type: "text", text: summary }],
+					content: [{ type: "text", text: lines.join("\n") }],
 					details: {
 						owner,
 						network,
