@@ -18,6 +18,11 @@ describe("suiExtension", () => {
 
 		suiExtension(registrar);
 		expect(names.sort()).toEqual([
+			"sui_buildCetusAddLiquidityTransaction",
+			"sui_buildCetusRemoveLiquidityTransaction",
+			"sui_buildSwapCetusTransaction",
+			"sui_buildTransferCoinTransaction",
+			"sui_buildTransferSuiTransaction",
 			"sui_cetusAddLiquidity",
 			"sui_cetusRemoveLiquidity",
 			"sui_getBalance",
