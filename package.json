@@ -15,6 +15,7 @@
 		"extensions": ["./src/pi/solana-workflow-extension.ts"]
 	},
 	"scripts": {
+		"postinstall": "node scripts/ensure-mysten-compat.mjs",
 		"lint": "biome check --error-on-warnings .",
 		"typecheck": "tsc --noEmit",
 		"build": "npm run typecheck",
