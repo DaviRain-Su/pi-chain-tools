@@ -434,6 +434,38 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("supports natural follow-up execute using latest simulated session", async () => {
+		const tool = getTool();
+		const destination =
+			"0x2222222222222222222222222222222222222222222222222222222222222222";
+		const simulated = await tool.execute("wf-followup-sim", {
+			runMode: "simulate",
+			network: "mainnet",
+			intentType: "sui.transfer.sui",
+			toAddress: destination,
+			amountSui: 0.000001,
+		});
+		expect(simulated.content[0]?.text).toContain("unsignedPayload");
+
+		const executed = await tool.execute("wf-followup-exec", {
+			runMode: "execute",
+			confirmMainnet: true,
+		});
+
+		expect(executeMocks.transferSuiExecute).toHaveBeenCalledTimes(1);
+		expect(executed.details).toMatchObject({
+			intentType: "sui.transfer.sui",
+			artifacts: {
+				execute: {
+					digest: "0xexec",
+				},
+			},
+		});
+		expect(executed.details).toMatchObject({
+			runId: (simulated.details as { runId: string }).runId,
+		});
+	});
+
 	it("analyzes LP add intentText with minimal structured fields", async () => {
 		const tool = getTool();
 		const poolId =

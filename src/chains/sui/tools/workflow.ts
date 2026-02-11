@@ -379,6 +379,40 @@ function createRunId(input?: string): string {
 	return `wf-sui-${Date.now().toString(36)}-${nonce}`;
 }
 
+type WorkflowToolRoute =
+	| "w3rt_run_sui_workflow_v0"
+	| "w3rt_run_sui_stablelayer_workflow_v0"
+	| "w3rt_run_sui_cetus_farms_workflow_v0";
+
+type WorkflowSessionRecord = {
+	route: WorkflowToolRoute;
+	runId: string;
+	network: SuiNetwork;
+	intent: unknown;
+};
+
+const WORKFLOW_SESSION_BY_RUN_ID = new Map<string, WorkflowSessionRecord>();
+let latestWorkflowSession: WorkflowSessionRecord | null = null;
+
+function rememberWorkflowSession(record: WorkflowSessionRecord): void {
+	WORKFLOW_SESSION_BY_RUN_ID.set(record.runId, record);
+	latestWorkflowSession = record;
+}
+
+function readWorkflowSession(
+	route: WorkflowToolRoute,
+	runId?: string,
+): WorkflowSessionRecord | null {
+	if (runId?.trim()) {
+		const found = WORKFLOW_SESSION_BY_RUN_ID.get(runId.trim());
+		if (found && found.route === route) return found;
+	}
+	if (latestWorkflowSession?.route === route) {
+		return latestWorkflowSession;
+	}
+	return null;
+}
+
 function resolveAggregatorEnv(network: SuiNetwork): Env {
 	if (network === "mainnet") return Env.Mainnet;
 	if (network === "testnet") return Env.Testnet;
@@ -1097,6 +1131,66 @@ function createConfirmToken(
 	return `SUI-${digest}`;
 }
 
+function intentsMatch(a: unknown, b: unknown): boolean {
+	return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function hasCoreIntentInput(params: WorkflowParams): boolean {
+	return Boolean(
+		params.intentType ||
+			params.intentText ||
+			params.toAddress?.trim() ||
+			params.amountSui != null ||
+			params.amountRaw?.trim() ||
+			params.coinType?.trim() ||
+			params.inputCoinType?.trim() ||
+			params.outputCoinType?.trim() ||
+			params.poolId?.trim() ||
+			params.positionId?.trim() ||
+			params.coinTypeA?.trim() ||
+			params.coinTypeB?.trim() ||
+			params.tickLower != null ||
+			params.tickUpper != null ||
+			params.amountA?.trim() ||
+			params.amountB?.trim() ||
+			params.deltaLiquidity?.trim() ||
+			params.minAmountA?.trim() ||
+			params.minAmountB?.trim() ||
+			params.collectFee != null ||
+			params.rewarderCoinTypes?.length ||
+			params.maxCoinObjectsToMerge != null ||
+			params.providers?.length ||
+			params.depth != null ||
+			params.endpoint?.trim() ||
+			params.apiKey?.trim(),
+	);
+}
+
+function hasStableLayerIntentInput(params: StableLayerWorkflowParams): boolean {
+	return Boolean(
+		params.intentType ||
+			params.intentText ||
+			params.stableCoinType?.trim() ||
+			params.amountUsdcRaw?.trim() ||
+			params.amountStableRaw?.trim() ||
+			params.burnAll === true ||
+			params.usdcCoinType?.trim(),
+	);
+}
+
+function hasCetusFarmsIntentInput(params: CetusFarmsWorkflowParams): boolean {
+	return Boolean(
+		params.intentType ||
+			params.intentText ||
+			params.poolId?.trim() ||
+			params.clmmPositionId?.trim() ||
+			params.clmmPoolId?.trim() ||
+			params.coinTypeA?.trim() ||
+			params.coinTypeB?.trim() ||
+			params.positionNftId?.trim(),
+	);
+}
+
 function getSimulationStatus(simulation: unknown): {
 	status: string;
 	error: string | null;
@@ -1166,18 +1260,19 @@ async function exportUnsignedPayload(
 function formatSimulationSummary(params: {
 	intentType: string;
 	status: string;
+	signerAddress: string;
 	unsignedPayload: {
 		unsignedTransactionBytesBase64?: string;
 		unsignedPayloadError?: string;
 	};
 }): string {
 	if (params.unsignedPayload.unsignedTransactionBytesBase64) {
-		return `Workflow simulated: ${params.intentType} status=${params.status} unsignedPayload=exported`;
+		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported`;
 	}
 	if (params.unsignedPayload.unsignedPayloadError) {
-		return `Workflow simulated: ${params.intentType} status=${params.status} unsignedPayload=unavailable`;
+		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=unavailable`;
 	}
-	return `Workflow simulated: ${params.intentType} status=${params.status}`;
+	return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress}`;
 }
 
 async function resolveCoinObjectIdsForAmount(
@@ -1780,10 +1875,7 @@ function resolveWorkflowTool(
 
 function resolveDefiWorkflowRoute(
 	params: SuiDefiWorkflowParams,
-):
-	| "w3rt_run_sui_workflow_v0"
-	| "w3rt_run_sui_stablelayer_workflow_v0"
-	| "w3rt_run_sui_cetus_farms_workflow_v0" {
+): WorkflowToolRoute {
 	const intentType = params.intentType?.trim().toLowerCase();
 	if (intentType?.startsWith("sui.stablelayer.")) {
 		return "w3rt_run_sui_stablelayer_workflow_v0";
@@ -1825,6 +1917,21 @@ function resolveDefiWorkflowRoute(
 		return "w3rt_run_sui_stablelayer_workflow_v0";
 	}
 
+	const runMode = parseRunMode(params.runMode);
+	const hasRoutingHints = Boolean(
+		intentType ||
+			params.intentText?.trim() ||
+			params.stableCoinType?.trim() ||
+			params.amountUsdcRaw?.trim() ||
+			params.amountStableRaw?.trim() ||
+			params.clmmPositionId?.trim() ||
+			params.clmmPoolId?.trim() ||
+			params.positionNftId?.trim(),
+	);
+	if (runMode === "execute" && !hasRoutingHints && latestWorkflowSession) {
+		return latestWorkflowSession.route;
+	}
+
 	return "w3rt_run_sui_workflow_v0";
 }
 
@@ -1834,7 +1941,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			name: "w3rt_run_sui_workflow_v0",
 			label: "W3RT Sui Workflow v0",
 			description:
-				"Deterministic Sui workflow entrypoint: analysis -> simulate -> execute",
+				"Deterministic Sui workflow entrypoint: analysis -> simulate -> execute. Signer auto-loads local Sui keystore when fromPrivateKey is omitted.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -1895,15 +2002,42 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as WorkflowParams;
-				const runId = createRunId(params.runId);
 				const runMode = parseRunMode(params.runMode);
-				const network = parseSuiNetwork(params.network);
-				const intent = normalizeIntent(params);
+				const priorSession =
+					runMode === "execute"
+						? readWorkflowSession("w3rt_run_sui_workflow_v0", params.runId)
+						: null;
+				const runId = createRunId(
+					params.runId ||
+						(runMode === "execute" ? priorSession?.runId : undefined),
+				);
+				const network = parseSuiNetwork(
+					params.network ||
+						(runMode === "execute" ? priorSession?.network : undefined),
+				);
+				const intent =
+					runMode === "execute" &&
+					!hasCoreIntentInput(params) &&
+					priorSession?.intent
+						? (priorSession.intent as SuiWorkflowIntent)
+						: normalizeIntent(params);
 				const needsMainnetConfirmation = network === "mainnet";
 				const confirmToken = createConfirmToken(runId, network, intent);
+				const hasSessionConfirmation =
+					runMode === "execute" &&
+					!params.confirmToken &&
+					priorSession?.runId === runId &&
+					priorSession.network === network &&
+					intentsMatch(priorSession.intent, intent);
 				const plan = ["analysis", "simulate", "execute"];
 
 				if (runMode === "analysis") {
+					rememberWorkflowSession({
+						route: "w3rt_run_sui_workflow_v0",
+						runId,
+						network,
+						intent,
+					});
 					return {
 						content: [
 							{
@@ -1950,6 +2084,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							`Simulation failed: ${error ?? "unknown error"} (intent=${intent.type})`,
 						);
 					}
+					rememberWorkflowSession({
+						route: "w3rt_run_sui_workflow_v0",
+						runId,
+						network,
+						intent,
+					});
 					return {
 						content: [
 							{
@@ -1957,6 +2097,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								text: formatSimulationSummary({
 									intentType: intent.type,
 									status,
+									signerAddress: sender,
 									unsignedPayload,
 								}),
 							},
@@ -1971,6 +2112,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							confirmToken,
 							artifacts: {
 								simulate: {
+									signerAddress: sender,
 									status,
 									error,
 									...artifacts,
@@ -1987,7 +2129,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							"Mainnet workflow execute is blocked. Set confirmMainnet=true.",
 						);
 					}
-					if (!params.confirmToken || params.confirmToken !== confirmToken) {
+					const providedConfirmToken = params.confirmToken?.trim();
+					if (
+						(!providedConfirmToken || providedConfirmToken !== confirmToken) &&
+						!hasSessionConfirmation
+					) {
 						throw new Error(
 							"Invalid confirmToken for mainnet execute. Run simulate first and pass returned confirmToken.",
 						);
@@ -1995,6 +2141,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				}
 
 				const executeResult = await executeIntent(intent, params, network);
+				rememberWorkflowSession({
+					route: "w3rt_run_sui_workflow_v0",
+					runId,
+					network,
+					intent,
+				});
 				return {
 					content: [
 						{
@@ -2022,7 +2174,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			name: "w3rt_run_sui_stablelayer_workflow_v0",
 			label: "W3RT Sui Stable Layer Workflow v0",
 			description:
-				"Deterministic Stable Layer workflow entrypoint: analysis -> simulate -> execute",
+				"Deterministic Stable Layer workflow entrypoint: analysis -> simulate -> execute. Signer auto-loads local Sui keystore when fromPrivateKey is omitted.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -2051,16 +2203,46 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as StableLayerWorkflowParams;
-				const runId = createRunId(params.runId);
 				const runMode = parseRunMode(params.runMode);
-				const network = parseSuiNetwork(params.network);
+				const priorSession =
+					runMode === "execute"
+						? readWorkflowSession(
+								"w3rt_run_sui_stablelayer_workflow_v0",
+								params.runId,
+							)
+						: null;
+				const runId = createRunId(
+					params.runId ||
+						(runMode === "execute" ? priorSession?.runId : undefined),
+				);
+				const network = parseSuiNetwork(
+					params.network ||
+						(runMode === "execute" ? priorSession?.network : undefined),
+				);
 				const stableLayerNetwork = resolveStableLayerNetwork(network);
-				const intent = normalizeStableLayerIntent(params);
+				const intent =
+					runMode === "execute" &&
+					!hasStableLayerIntentInput(params) &&
+					priorSession?.intent
+						? (priorSession.intent as StableLayerWorkflowIntent)
+						: normalizeStableLayerIntent(params);
 				const needsMainnetConfirmation = network === "mainnet";
 				const confirmToken = createConfirmToken(runId, network, intent);
+				const hasSessionConfirmation =
+					runMode === "execute" &&
+					!params.confirmToken &&
+					priorSession?.runId === runId &&
+					priorSession.network === network &&
+					intentsMatch(priorSession.intent, intent);
 				const plan = ["analysis", "simulate", "execute"];
 
 				if (runMode === "analysis") {
+					rememberWorkflowSession({
+						route: "w3rt_run_sui_stablelayer_workflow_v0",
+						runId,
+						network,
+						intent,
+					});
 					return {
 						content: [
 							{
@@ -2108,6 +2290,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							`Simulation failed: ${error ?? "unknown error"} (intent=${intent.type})`,
 						);
 					}
+					rememberWorkflowSession({
+						route: "w3rt_run_sui_stablelayer_workflow_v0",
+						runId,
+						network,
+						intent,
+					});
 					return {
 						content: [
 							{
@@ -2115,6 +2303,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								text: formatSimulationSummary({
 									intentType: intent.type,
 									status,
+									signerAddress: sender,
 									unsignedPayload,
 								}),
 							},
@@ -2130,6 +2319,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							confirmToken,
 							artifacts: {
 								simulate: {
+									signerAddress: sender,
 									status,
 									error,
 									...artifacts,
@@ -2146,7 +2336,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							"Mainnet workflow execute is blocked. Set confirmMainnet=true.",
 						);
 					}
-					if (!params.confirmToken || params.confirmToken !== confirmToken) {
+					const providedConfirmToken = params.confirmToken?.trim();
+					if (
+						(!providedConfirmToken || providedConfirmToken !== confirmToken) &&
+						!hasSessionConfirmation
+					) {
 						throw new Error(
 							"Invalid confirmToken for mainnet execute. Run simulate first and pass returned confirmToken.",
 						);
@@ -2158,6 +2352,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					params,
 					network,
 				);
+				rememberWorkflowSession({
+					route: "w3rt_run_sui_stablelayer_workflow_v0",
+					runId,
+					network,
+					intent,
+				});
 				return {
 					content: [
 						{
@@ -2186,7 +2386,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			name: "w3rt_run_sui_cetus_farms_workflow_v0",
 			label: "W3RT Sui Cetus Farms Workflow v0",
 			description:
-				"Deterministic Cetus farms workflow entrypoint: analysis -> simulate -> execute",
+				"Deterministic Cetus farms workflow entrypoint: analysis -> simulate -> execute. Signer auto-loads local Sui keystore when fromPrivateKey is omitted.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -2217,16 +2417,46 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as CetusFarmsWorkflowParams;
-				const runId = createRunId(params.runId);
 				const runMode = parseRunMode(params.runMode);
-				const network = parseSuiNetwork(params.network);
+				const priorSession =
+					runMode === "execute"
+						? readWorkflowSession(
+								"w3rt_run_sui_cetus_farms_workflow_v0",
+								params.runId,
+							)
+						: null;
+				const runId = createRunId(
+					params.runId ||
+						(runMode === "execute" ? priorSession?.runId : undefined),
+				);
+				const network = parseSuiNetwork(
+					params.network ||
+						(runMode === "execute" ? priorSession?.network : undefined),
+				);
 				const cetusNetwork = resolveCetusV2Network(network);
-				const intent = normalizeCetusFarmsIntent(params);
+				const intent =
+					runMode === "execute" &&
+					!hasCetusFarmsIntentInput(params) &&
+					priorSession?.intent
+						? (priorSession.intent as CetusFarmsWorkflowIntent)
+						: normalizeCetusFarmsIntent(params);
 				const needsMainnetConfirmation = network === "mainnet";
 				const confirmToken = createConfirmToken(runId, network, intent);
+				const hasSessionConfirmation =
+					runMode === "execute" &&
+					!params.confirmToken &&
+					priorSession?.runId === runId &&
+					priorSession.network === network &&
+					intentsMatch(priorSession.intent, intent);
 				const plan = ["analysis", "simulate", "execute"];
 
 				if (runMode === "analysis") {
+					rememberWorkflowSession({
+						route: "w3rt_run_sui_cetus_farms_workflow_v0",
+						runId,
+						network,
+						intent,
+					});
 					return {
 						content: [
 							{
@@ -2275,6 +2505,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							`Simulation failed: ${error ?? "unknown error"} (intent=${intent.type})`,
 						);
 					}
+					rememberWorkflowSession({
+						route: "w3rt_run_sui_cetus_farms_workflow_v0",
+						runId,
+						network,
+						intent,
+					});
 					return {
 						content: [
 							{
@@ -2282,6 +2518,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								text: formatSimulationSummary({
 									intentType: intent.type,
 									status,
+									signerAddress: sender,
 									unsignedPayload,
 								}),
 							},
@@ -2297,6 +2534,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							confirmToken,
 							artifacts: {
 								simulate: {
+									signerAddress: sender,
 									status,
 									error,
 									...artifacts,
@@ -2313,7 +2551,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							"Mainnet workflow execute is blocked. Set confirmMainnet=true.",
 						);
 					}
-					if (!params.confirmToken || params.confirmToken !== confirmToken) {
+					const providedConfirmToken = params.confirmToken?.trim();
+					if (
+						(!providedConfirmToken || providedConfirmToken !== confirmToken) &&
+						!hasSessionConfirmation
+					) {
 						throw new Error(
 							"Invalid confirmToken for mainnet execute. Run simulate first and pass returned confirmToken.",
 						);
@@ -2325,6 +2567,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					params,
 					network,
 				);
+				rememberWorkflowSession({
+					route: "w3rt_run_sui_cetus_farms_workflow_v0",
+					runId,
+					network,
+					intent,
+				});
 				return {
 					content: [
 						{
@@ -2353,7 +2601,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			name: "w3rt_run_sui_defi_workflow_v0",
 			label: "W3RT Sui DeFi Workflow v0",
 			description:
-				"Unified Sui DeFi workflow router. Automatically routes to core/swap-lp, stablelayer, or cetus-farms workflows.",
+				"Unified Sui DeFi workflow router. Automatically routes to core/swap-lp, stablelayer, or cetus-farms workflows, with signer auto-loaded from local keystore by default.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
