@@ -1,6 +1,6 @@
 # pi-chain-tools
 
-Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and EVM skeleton is scaffolded, with a chain-agnostic grouping model:
+Multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui has a minimal read/execute vertical slice, and EVM skeleton is scaffolded, with a chain-agnostic grouping model:
 
 - `read`
 - `compose`
@@ -11,6 +11,7 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 
 - `src/core`: common toolset abstractions and registration helpers
 - `src/chains/solana`: Solana runtime + grouped tools
+- `src/chains/sui`: Sui runtime + grouped tools
 - `src/chains/evm`: EVM runtime + grouped tool skeleton
 - `src/pi`: Pi-specific adapter entrypoints
 
@@ -45,12 +46,24 @@ Multi-chain-ready toolset library for Pi extensions. Solana is implemented, and 
 - no concrete EVM tools are implemented yet
 - use `createEvmToolset()` as the extension point for future chains/rpcs/wallets
 
+## Sui (Minimal)
+
+- `read`: `sui_getBalance` (SUI or custom `coinType`)
+- `execute`: `sui_transferSui` (amount in `amountMist` or `amountSui`, with mainnet safety gate `confirmMainnet=true`)
+- `compose/rpc`: scaffolded and ready for follow-up additions
+
 ## Use As Pi Extension
 
 ```ts
 import solanaExtension from "pi-chain-tools/pi/solana-extension";
 
 export default solanaExtension;
+```
+
+```ts
+import suiExtension from "pi-chain-tools/pi/sui-extension";
+
+export default suiExtension;
 ```
 
 ## Development

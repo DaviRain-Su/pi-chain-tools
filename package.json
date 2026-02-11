@@ -8,7 +8,8 @@
 		".": "./src/index.ts",
 		"./pi/solana-extension": "./src/pi/solana-extension.ts",
 		"./pi/solana-workflow-extension": "./src/pi/solana-workflow-extension.ts",
-		"./pi/evm-extension": "./src/pi/evm-extension.ts"
+		"./pi/evm-extension": "./src/pi/evm-extension.ts",
+		"./pi/sui-extension": "./src/pi/sui-extension.ts"
 	},
 	"pi": {
 		"extensions": ["./src/pi/solana-workflow-extension.ts"]
@@ -25,6 +26,7 @@
 		"@jup-ag/api": "^6.0.48",
 		"@kamino-finance/klend-sdk": "^7.3.18",
 		"@meteora-ag/dlmm": "^1.9.3",
+		"@mysten/sui": "^2.3.2",
 		"@raydium-io/raydium-sdk-v2": "^0.2.32-alpha",
 		"@sinclair/typebox": "^0.34.41",
 		"@solana/spl-token": "^0.4.11",

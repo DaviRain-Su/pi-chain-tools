@@ -96,3 +96,25 @@ export { createEvmComposeTools } from "./chains/evm/tools/compose.js";
 export { createEvmExecuteTools } from "./chains/evm/tools/execute.js";
 export { createEvmRpcTools } from "./chains/evm/tools/rpc.js";
 export { createEvmToolset } from "./chains/evm/toolset.js";
+
+export {
+	SUI_COIN_TYPE,
+	SUI_TOOL_PREFIX,
+	assertPositiveAmount as assertPositiveSuiAmount,
+	formatCoinAmount as formatSuiCoinAmount,
+	getSuiClient,
+	getSuiExplorerTransactionUrl,
+	getSuiRpcEndpoint,
+	normalizeAtPath as normalizeSuiAtPath,
+	parsePositiveBigInt as parsePositiveSuiBigInt,
+	parseSuiNetwork,
+	resolveSuiKeypair,
+	suiNetworkSchema,
+	toMist,
+} from "./chains/sui/runtime.js";
+export type { SuiNetwork } from "./chains/sui/runtime.js";
+export { createSuiReadTools } from "./chains/sui/tools/read.js";
+export { createSuiComposeTools } from "./chains/sui/tools/compose.js";
+export { createSuiExecuteTools } from "./chains/sui/tools/execute.js";
+export { createSuiRpcTools } from "./chains/sui/tools/rpc.js";
+export { createSuiToolset } from "./chains/sui/toolset.js";
