@@ -1,3 +1,4 @@
+import { AggregatorClient, Env } from "@cetusprotocol/aggregator-sdk";
 import { Transaction } from "@mysten/sui/transactions";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
@@ -39,6 +40,22 @@ type SuiTransferCoinParams = {
 	maxCoinObjectsToMerge?: number;
 };
 
+type SuiSwapCetusParams = {
+	inputCoinType: string;
+	outputCoinType: string;
+	amountRaw: string;
+	byAmountIn?: boolean;
+	slippageBps?: number;
+	providers?: string[];
+	depth?: number;
+	network?: string;
+	endpoint?: string;
+	apiKey?: string;
+	fromPrivateKey?: string;
+	waitForLocalExecution?: boolean;
+	confirmMainnet?: boolean;
+};
+
 function resolveTransferAmount(params: SuiTransferParams): bigint {
 	if (params.amountMist != null) {
 		return parsePositiveBigInt(params.amountMist, "amountMist");
@@ -47,6 +64,14 @@ function resolveTransferAmount(params: SuiTransferParams): bigint {
 		return toMist(params.amountSui);
 	}
 	throw new Error("Provide amountMist or amountSui");
+}
+
+function resolveAggregatorEnv(network: string): Env {
+	if (network === "mainnet") return Env.Mainnet;
+	if (network === "testnet") return Env.Testnet;
+	throw new Error(
+		"Sui swap currently supports network=mainnet or testnet via Cetus aggregator.",
+	);
 }
 
 function resolveRequestType(
@@ -77,6 +102,17 @@ function parseMaxCoinObjects(value: number | undefined): number {
 		throw new Error("maxCoinObjectsToMerge must be between 1 and 100");
 	}
 	return value;
+}
+
+function parseSlippageDecimal(slippageBps?: number): number {
+	const bps = slippageBps ?? 100;
+	if (!Number.isFinite(bps) || bps <= 0) {
+		throw new Error("slippageBps must be a positive number");
+	}
+	if (bps > 10_000) {
+		throw new Error("slippageBps must be <= 10000");
+	}
+	return bps / 10_000;
 }
 
 async function resolveCoinObjectIdsForAmount(
@@ -378,6 +414,179 @@ export function createSuiExecuteTools() {
 						selectedBalanceRaw: selectedBalanceRaw.toString(),
 						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
 						network,
+						rpcUrl,
+						explorer: getSuiExplorerTransactionUrl(response.digest, network),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}swapCetus`,
+			label: "Sui Swap (Cetus Aggregator)",
+			description:
+				"Find best route via Cetus aggregator and execute Sui swap (mainnet/testnet)",
+			parameters: Type.Object({
+				inputCoinType: Type.String({
+					description: "Input coin type (e.g. 0x2::sui::SUI)",
+				}),
+				outputCoinType: Type.String({
+					description: "Output coin type",
+				}),
+				amountRaw: Type.String({
+					description: "Raw integer amount for quote/swap",
+				}),
+				byAmountIn: Type.Optional(
+					Type.Boolean({
+						description:
+							"true=fixed input amount (default), false=fixed output amount",
+					}),
+				),
+				slippageBps: Type.Optional(
+					Type.Number({
+						description: "Slippage tolerance in bps (default 100 = 1%)",
+						minimum: 1,
+						maximum: 10_000,
+					}),
+				),
+				providers: Type.Optional(
+					Type.Array(Type.String(), {
+						minItems: 1,
+						maxItems: 50,
+					}),
+				),
+				depth: Type.Optional(
+					Type.Number({
+						description: "Optional route search depth",
+						minimum: 1,
+						maximum: 8,
+					}),
+				),
+				network: suiNetworkSchema(),
+				endpoint: Type.Optional(
+					Type.String({
+						description:
+							"Optional Cetus aggregator endpoint override (defaults to SDK endpoint)",
+					}),
+				),
+				apiKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional API key (falls back to CETUS_AGGREGATOR_API_KEY env)",
+					}),
+				),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Signer private key in suiprivkey format. Falls back to SUI_PRIVATE_KEY",
+					}),
+				),
+				waitForLocalExecution: Type.Optional(
+					Type.Boolean({
+						description:
+							"true: WaitForLocalExecution (default), false: WaitForEffectsCert",
+					}),
+				),
+				confirmMainnet: Type.Optional(
+					Type.Boolean({
+						description:
+							"Required as true when network=mainnet to prevent accidental broadcast",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseSuiNetwork(params.network);
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const env = resolveAggregatorEnv(network);
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const fromAddress = signer.toSuiAddress();
+				const amountRaw = parsePositiveBigInt(params.amountRaw, "amountRaw");
+				const byAmountIn = params.byAmountIn !== false;
+				const slippage = parseSlippageDecimal(params.slippageBps);
+				const endpoint = params.endpoint?.trim() || undefined;
+				const apiKey =
+					params.apiKey?.trim() || process.env.CETUS_AGGREGATOR_API_KEY?.trim();
+				const swapClient = new AggregatorClient({
+					env,
+					endpoint,
+					apiKey,
+					signer: fromAddress,
+				});
+
+				const route = await swapClient.findRouters({
+					from: params.inputCoinType.trim(),
+					target: params.outputCoinType.trim(),
+					amount: amountRaw.toString(),
+					byAmountIn,
+					providers: params.providers?.length ? params.providers : undefined,
+					depth: params.depth,
+				});
+				if (!route || route.insufficientLiquidity || route.paths.length === 0) {
+					const errorMessage = route?.error
+						? `${route.error.code}: ${route.error.msg}`
+						: "No route found";
+					throw new Error(`No swap route available (${errorMessage})`);
+				}
+
+				const tx = new Transaction();
+				await swapClient.fastRouterSwap({
+					router: route,
+					txb: tx as unknown as Parameters<
+						AggregatorClient["fastRouterSwap"]
+					>[0]["txb"],
+					slippage,
+				});
+
+				const rpcUrl = getSuiRpcEndpoint(network, undefined);
+				const client = getSuiClient(network, undefined);
+				const response = await client.signAndExecuteTransaction({
+					signer,
+					transaction: tx,
+					options: {
+						showEffects: true,
+						showEvents: true,
+						showObjectChanges: true,
+						showBalanceChanges: true,
+					},
+					requestType: resolveRequestType(params.waitForLocalExecution),
+				});
+
+				const status = response.effects?.status.status ?? "unknown";
+				const error =
+					response.effects?.status.error ?? response.errors?.[0] ?? null;
+				if (status === "failure") {
+					throw new Error(
+						`Sui swap failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+					);
+				}
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Swap submitted: digest=${response.digest} status=${status}`,
+						},
+					],
+					details: {
+						digest: response.digest,
+						status,
+						error,
+						fromAddress,
+						inputCoinType: params.inputCoinType.trim(),
+						outputCoinType: params.outputCoinType.trim(),
+						requestAmountRaw: amountRaw.toString(),
+						byAmountIn,
+						slippageBps: params.slippageBps ?? 100,
+						routeAmountIn: route.amountIn.toString(),
+						routeAmountOut: route.amountOut.toString(),
+						quoteId: route.quoteID ?? null,
+						pathCount: route.paths.length,
+						providersUsed: Array.from(
+							new Set(route.paths.map((p) => p.provider)),
+						),
+						confirmedLocalExecution: response.confirmedLocalExecution ?? null,
+						network,
+						env,
+						endpoint: endpoint ?? null,
 						rpcUrl,
 						explorer: getSuiExplorerTransactionUrl(response.digest, network),
 					},

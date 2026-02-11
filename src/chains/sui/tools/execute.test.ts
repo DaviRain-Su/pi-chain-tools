@@ -1,5 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const aggregatorMocks = vi.hoisted(() => {
+	const findRouters = vi.fn();
+	const fastRouterSwap = vi.fn();
+	const AggregatorClient = vi.fn().mockImplementation(() => ({
+		findRouters,
+		fastRouterSwap,
+	}));
+	return {
+		findRouters,
+		fastRouterSwap,
+		AggregatorClient,
+		Env: {
+			Mainnet: "Mainnet",
+			Testnet: "Testnet",
+		},
+	};
+});
+
+vi.mock("@cetusprotocol/aggregator-sdk", () => ({
+	AggregatorClient: aggregatorMocks.AggregatorClient,
+	Env: aggregatorMocks.Env,
+}));
+
 const runtimeMocks = vi.hoisted(() => ({
 	formatCoinAmount: vi.fn((value: string) => value),
 	getSuiClient: vi.fn(),
@@ -64,6 +87,8 @@ beforeEach(() => {
 		BigInt(value),
 	);
 	runtimeMocks.formatCoinAmount.mockImplementation((value: string) => value);
+	aggregatorMocks.findRouters.mockReset();
+	aggregatorMocks.fastRouterSwap.mockReset();
 });
 
 describe("sui_transferSui", () => {
@@ -248,5 +273,98 @@ describe("sui_transferCoin", () => {
 				maxCoinObjectsToMerge: 1,
 			}),
 		).rejects.toThrow("Insufficient balance");
+	});
+});
+
+describe("sui_swapCetus", () => {
+	it("executes swap via aggregator and submits transaction", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		aggregatorMocks.findRouters.mockResolvedValue({
+			quoteID: "sq-1",
+			amountIn: { toString: () => "1000000" },
+			amountOut: { toString: () => "63800000" },
+			paths: [
+				{
+					id: "p1",
+					provider: "CETUS",
+					from: "0x2::sui::SUI",
+					target: "0x...::cetus::CETUS",
+					amountIn: "1000000",
+					amountOut: "63800000",
+					feeRate: 30,
+				},
+			],
+			insufficientLiquidity: false,
+		});
+		const signAndExecuteTransaction = vi.fn().mockResolvedValue({
+			digest: "0xswap",
+			confirmedLocalExecution: true,
+			effects: {
+				status: {
+					status: "success",
+				},
+			},
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({ signAndExecuteTransaction });
+
+		const tool = getTool("sui_swapCetus");
+		const result = await tool.execute("s1", {
+			inputCoinType: "0x2::sui::SUI",
+			outputCoinType: "0x...::cetus::CETUS",
+			amountRaw: "1000000",
+			network: "mainnet",
+			confirmMainnet: true,
+		});
+
+		expect(aggregatorMocks.AggregatorClient).toHaveBeenCalledWith({
+			env: "Mainnet",
+			endpoint: undefined,
+			apiKey: undefined,
+			signer:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+		});
+		expect(aggregatorMocks.findRouters).toHaveBeenCalledWith({
+			from: "0x2::sui::SUI",
+			target: "0x...::cetus::CETUS",
+			amount: "1000000",
+			byAmountIn: true,
+			providers: undefined,
+			depth: undefined,
+		});
+		expect(aggregatorMocks.fastRouterSwap).toHaveBeenCalledTimes(1);
+		expect(signAndExecuteTransaction).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			digest: "0xswap",
+			status: "success",
+			quoteId: "sq-1",
+			pathCount: 1,
+			routeAmountIn: "1000000",
+			routeAmountOut: "63800000",
+			providersUsed: ["CETUS"],
+		});
+	});
+
+	it("throws when aggregator returns no route", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("testnet");
+		aggregatorMocks.findRouters.mockResolvedValue({
+			amountIn: { toString: () => "1000000" },
+			amountOut: { toString: () => "0" },
+			paths: [],
+			insufficientLiquidity: true,
+			error: { code: 400, msg: "no route" },
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({
+			signAndExecuteTransaction: vi.fn(),
+		});
+
+		const tool = getTool("sui_swapCetus");
+		await expect(
+			tool.execute("s2", {
+				inputCoinType: "0x2::sui::SUI",
+				outputCoinType: "0x...::usdc::USDC",
+				amountRaw: "1000000",
+				network: "testnet",
+			}),
+		).rejects.toThrow("No swap route available");
 	});
 });

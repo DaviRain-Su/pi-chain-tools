@@ -14,6 +14,8 @@ describe("suiExtension", () => {
 		expect(names.sort()).toEqual([
 			"sui_getBalance",
 			"sui_getPortfolio",
+			"sui_getSwapQuote",
+			"sui_swapCetus",
 			"sui_transferCoin",
 			"sui_transferSui",
 		]);

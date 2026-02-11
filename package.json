@@ -23,6 +23,7 @@
 		"ci": "npm run check && npm test"
 	},
 	"dependencies": {
+		"@cetusprotocol/aggregator-sdk": "^1.4.4",
 		"@jup-ag/api": "^6.0.48",
 		"@kamino-finance/klend-sdk": "^7.3.18",
 		"@meteora-ag/dlmm": "^1.9.3",

@@ -9,6 +9,26 @@ const runtimeMocks = vi.hoisted(() => ({
 	suiNetworkSchema: vi.fn(),
 }));
 
+const aggregatorMocks = vi.hoisted(() => {
+	const findRouters = vi.fn();
+	const AggregatorClient = vi.fn().mockImplementation(() => ({
+		findRouters,
+	}));
+	return {
+		findRouters,
+		AggregatorClient,
+		Env: {
+			Mainnet: "Mainnet",
+			Testnet: "Testnet",
+		},
+	};
+});
+
+vi.mock("@cetusprotocol/aggregator-sdk", () => ({
+	AggregatorClient: aggregatorMocks.AggregatorClient,
+	Env: aggregatorMocks.Env,
+}));
+
 vi.mock("../runtime.js", async () => {
 	const actual =
 		await vi.importActual<typeof import("../runtime.js")>("../runtime.js");
@@ -101,6 +121,103 @@ describe("sui_getBalance", () => {
 			coinType: "0x2::usdc::USDC",
 			totalBalance: "987654",
 			uiAmount: null,
+		});
+	});
+});
+
+describe("sui_getSwapQuote", () => {
+	it("returns routed quote details when path exists", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		aggregatorMocks.findRouters.mockResolvedValue({
+			quoteID: "q1",
+			amountIn: {
+				toString: () => "1000000",
+			},
+			amountOut: {
+				toString: () => "63800000",
+			},
+			byAmountIn: true,
+			paths: [
+				{
+					id: "path-1",
+					provider: "CETUS",
+					from: "0x2::sui::SUI",
+					target: "0x...::cetus::CETUS",
+					feeRate: 30,
+					amountIn: "1000000",
+					amountOut: "63800000",
+					version: "v3",
+					publishedAt: "0xpkg",
+				},
+			],
+			insufficientLiquidity: false,
+			deviationRatio: 0.001,
+		});
+
+		const tool = getTool("sui_getSwapQuote");
+		const result = await tool.execute("q1", {
+			fromCoinType: "0x2::sui::SUI",
+			toCoinType: "0x...::cetus::CETUS",
+			amountRaw: "1000000",
+			network: "mainnet",
+		});
+
+		expect(aggregatorMocks.AggregatorClient).toHaveBeenCalledWith({
+			env: "Mainnet",
+			endpoint: undefined,
+			apiKey: undefined,
+		});
+		expect(aggregatorMocks.findRouters).toHaveBeenCalledWith({
+			from: "0x2::sui::SUI",
+			target: "0x...::cetus::CETUS",
+			amount: "1000000",
+			byAmountIn: true,
+			providers: undefined,
+			depth: undefined,
+		});
+		expect(result.content[0]?.text).toContain("Swap quote");
+		expect(result.details).toMatchObject({
+			amountIn: "1000000",
+			amountOut: "63800000",
+			pathCount: 1,
+			quoteId: "q1",
+			network: "mainnet",
+		});
+	});
+
+	it("returns no-route result when liquidity is insufficient", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("testnet");
+		aggregatorMocks.findRouters.mockResolvedValue({
+			amountIn: {
+				toString: () => "1000000",
+			},
+			amountOut: {
+				toString: () => "0",
+			},
+			paths: [],
+			insufficientLiquidity: true,
+			error: {
+				code: 400,
+				msg: "insufficient liquidity",
+			},
+		});
+
+		const tool = getTool("sui_getSwapQuote");
+		const result = await tool.execute("q2", {
+			fromCoinType: "0x2::sui::SUI",
+			toCoinType: "0x...::usdc::USDC",
+			amountRaw: "1000000",
+			network: "testnet",
+		});
+
+		expect(result.content[0]?.text).toContain("No swap quote available");
+		expect(result.details).toMatchObject({
+			network: "testnet",
+			insufficientLiquidity: true,
+			pathCount: 0,
+			error: {
+				code: 400,
+			},
 		});
 	});
 });

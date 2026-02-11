@@ -1,3 +1,4 @@
+import { AggregatorClient, Env } from "@cetusprotocol/aggregator-sdk";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
@@ -7,6 +8,7 @@ import {
 	getSuiClient,
 	getSuiRpcEndpoint,
 	normalizeAtPath,
+	parsePositiveBigInt,
 	parseSuiNetwork,
 	suiNetworkSchema,
 } from "../runtime.js";
@@ -25,6 +27,14 @@ function parseNonNegativeBigInt(value: string): bigint {
 		throw new Error("balance must be a non-negative integer string");
 	}
 	return BigInt(normalized);
+}
+
+function resolveAggregatorEnv(network: string): Env {
+	if (network === "mainnet") return Env.Mainnet;
+	if (network === "testnet") return Env.Testnet;
+	throw new Error(
+		"sui_getSwapQuote currently supports network=mainnet or testnet.",
+	);
 }
 
 export function createSuiReadTools() {
@@ -77,6 +87,147 @@ export function createSuiReadTools() {
 						lockedBalance: balance.lockedBalance,
 						network,
 						rpcUrl,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${SUI_TOOL_PREFIX}getSwapQuote`,
+			label: "Sui Get Swap Quote",
+			description:
+				"Get Sui swap quote via Cetus aggregator (mainnet/testnet), with route/provider details",
+			parameters: Type.Object({
+				fromCoinType: Type.String({
+					description: "Input coin type, e.g. 0x2::sui::SUI",
+				}),
+				toCoinType: Type.String({
+					description: "Output coin type, e.g. 0x...::usdc::USDC",
+				}),
+				amountRaw: Type.String({
+					description: "Raw integer amount (u64-style string)",
+				}),
+				byAmountIn: Type.Optional(
+					Type.Boolean({
+						description:
+							"true=fixed input amount (default), false=fixed output amount",
+					}),
+				),
+				providers: Type.Optional(
+					Type.Array(
+						Type.String({
+							description:
+								"Optional provider filter (e.g. CETUS, TURBOS, DEEPBOOKV3)",
+						}),
+						{ minItems: 1, maxItems: 50 },
+					),
+				),
+				depth: Type.Optional(
+					Type.Number({
+						description: "Optional route search depth",
+						minimum: 1,
+						maximum: 8,
+					}),
+				),
+				network: suiNetworkSchema(),
+				endpoint: Type.Optional(
+					Type.String({
+						description:
+							"Optional Cetus aggregator endpoint override (defaults to SDK endpoint)",
+					}),
+				),
+				apiKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional API key (falls back to CETUS_AGGREGATOR_API_KEY env)",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseSuiNetwork(params.network);
+				const env = resolveAggregatorEnv(network);
+				const amountRaw = parsePositiveBigInt(params.amountRaw, "amountRaw");
+				const byAmountIn = params.byAmountIn !== false;
+				const endpoint = params.endpoint?.trim() || undefined;
+				const apiKey =
+					params.apiKey?.trim() || process.env.CETUS_AGGREGATOR_API_KEY?.trim();
+				const quoteClient = new AggregatorClient({
+					env,
+					endpoint,
+					apiKey,
+				});
+
+				const route = await quoteClient.findRouters({
+					from: params.fromCoinType.trim(),
+					target: params.toCoinType.trim(),
+					amount: amountRaw.toString(),
+					byAmountIn,
+					providers: params.providers?.length ? params.providers : undefined,
+					depth: params.depth,
+				});
+
+				if (!route || route.insufficientLiquidity || route.paths.length === 0) {
+					const errorMessage = route?.error
+						? `${route.error.code}: ${route.error.msg}`
+						: "No route found";
+					return {
+						content: [
+							{
+								type: "text",
+								text: `No swap quote available (${errorMessage})`,
+							},
+						],
+						details: {
+							network,
+							env,
+							endpoint: endpoint ?? null,
+							fromCoinType: params.fromCoinType.trim(),
+							toCoinType: params.toCoinType.trim(),
+							amountRaw: amountRaw.toString(),
+							byAmountIn,
+							insufficientLiquidity: route?.insufficientLiquidity ?? true,
+							error: route?.error ?? null,
+							pathCount: route?.paths.length ?? 0,
+						},
+					};
+				}
+
+				const amountIn = route.amountIn.toString();
+				const amountOut = route.amountOut.toString();
+				const routes = route.paths.map((path) => ({
+					id: path.id,
+					provider: path.provider,
+					from: path.from,
+					to: path.target,
+					amountIn: path.amountIn,
+					amountOut: path.amountOut,
+					feeRate: path.feeRate,
+					version: path.version ?? null,
+					publishedAt: path.publishedAt ?? null,
+				}));
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Swap quote: in=${amountIn} out=${amountOut} via ${routes.length} path(s)`,
+						},
+					],
+					details: {
+						network,
+						env,
+						endpoint: endpoint ?? null,
+						fromCoinType: params.fromCoinType.trim(),
+						toCoinType: params.toCoinType.trim(),
+						requestAmountRaw: amountRaw.toString(),
+						byAmountIn,
+						amountIn,
+						amountOut,
+						insufficientLiquidity: false,
+						deviationRatio: route.deviationRatio,
+						overlayFee: route.overlayFee ?? null,
+						quoteId: route.quoteID ?? null,
+						pathCount: routes.length,
+						routes,
 					},
 				};
 			},
