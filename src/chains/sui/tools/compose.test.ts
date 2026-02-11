@@ -1,3 +1,4 @@
+import { coinWithBalance } from "@mysten/sui/transactions";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const cetusMocks = vi.hoisted(() => {
@@ -133,6 +134,7 @@ beforeEach(() => {
 		BigInt(Math.round(value * 1_000_000_000)),
 	);
 	runtimeMocks.getSuiClient.mockReturnValue({
+		jsonRpc: true,
 		getCoins: vi.fn().mockResolvedValue({
 			data: [
 				{
@@ -289,6 +291,33 @@ describe("sui compose tools", () => {
 			pathCount: 2,
 			providersUsed: ["CETUS", "DEEPBOOKV3"],
 		});
+	});
+
+	it("resolves CoinWithBalance intent before serializing swap transaction", async () => {
+		aggregatorMocks.fastRouterSwap.mockImplementation(async ({ txb }) => {
+			const inputCoin = coinWithBalance({
+				balance: 1000n,
+				type: "0x2::sui::SUI",
+				useGasCoin: true,
+			})(txb);
+			txb.mergeCoins(txb.gas, [inputCoin]);
+		});
+
+		const tool = getTool("sui_buildSwapCetusTransaction");
+		const result = await tool.execute("sui-compose-4-intent", {
+			fromAddress:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			inputCoinType: "0x2::sui::SUI",
+			outputCoinType: "0x2::usdc::USDC",
+			amountRaw: "1000",
+			network: "mainnet",
+		});
+
+		expect(runtimeMocks.getSuiClient).toHaveBeenCalled();
+		expect(
+			typeof (result.details as { serializedTransaction?: unknown })
+				.serializedTransaction,
+		).toBe("string");
 	});
 
 	it("builds Cetus add-liquidity transaction payload", async () => {

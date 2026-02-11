@@ -56,6 +56,7 @@ type BuildSwapCetusParams = {
 	providers?: string[];
 	depth?: number;
 	network?: string;
+	rpcUrl?: string;
 	endpoint?: string;
 	apiKey?: string;
 };
@@ -239,6 +240,29 @@ function parseSlippageDecimal(slippageBps?: number): number {
 		throw new Error("slippageBps must be <= 10000");
 	}
 	return bps / 10_000;
+}
+
+async function serializeLocalTransaction(params: {
+	transaction: Transaction;
+	network: SuiNetwork;
+	rpcUrl?: string;
+}): Promise<string> {
+	try {
+		return params.transaction.serialize();
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			error.message.includes("Unknown transaction $Intent,$kind")
+		) {
+			const client = getSuiClient(params.network, params.rpcUrl);
+			await params.transaction.build({
+				client,
+				onlyTransactionKind: true,
+			});
+			return params.transaction.serialize();
+		}
+		throw error;
+	}
 }
 
 function serializeTransactionPayload(transaction: unknown): string {
@@ -493,6 +517,9 @@ export function createSuiComposeTools() {
 				),
 				depth: Type.Optional(Type.Number({ minimum: 1, maximum: 8 })),
 				network: suiNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({ description: "Optional fullnode URL override" }),
+				),
 				endpoint: Type.Optional(Type.String()),
 				apiKey: Type.Optional(Type.String()),
 			}),
@@ -537,6 +564,11 @@ export function createSuiComposeTools() {
 					>[0]["txb"],
 					slippage: parseSlippageDecimal(params.slippageBps),
 				});
+				const serializedTransaction = await serializeLocalTransaction({
+					transaction: tx,
+					network,
+					rpcUrl: params.rpcUrl,
+				});
 
 				return {
 					content: [
@@ -561,7 +593,8 @@ export function createSuiComposeTools() {
 							new Set(route.paths.map((entry) => entry.provider)),
 						),
 						endpoint: endpoint ?? null,
-						serializedTransaction: tx.serialize(),
+						rpcUrl: getSuiRpcEndpoint(network, params.rpcUrl),
+						serializedTransaction,
 					},
 				};
 			},
