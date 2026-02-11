@@ -360,6 +360,26 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("parses swap intentText with symbol pair and ui amount", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf2b", {
+			runId: "wf-sui-02b",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Sui 主网把 1.25 SUI 换成 USDC",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.swap.cetus",
+			intent: {
+				type: "sui.swap.cetus",
+				inputCoinType: "0x2::sui::SUI",
+				outputCoinType: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				amountRaw: "1250000000",
+			},
+		});
+	});
+
 	it("blocks mainnet execute when confirmMainnet is missing", async () => {
 		const tool = getTool();
 		const destination =
@@ -465,6 +485,55 @@ describe("w3rt_run_sui_workflow_v0", () => {
 				tickUpper: 5,
 				amountA: "10",
 				amountB: "20",
+			},
+		});
+	});
+
+	it("parses LP add intentText with symbol pair", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5c", {
+			runId: "wf-sui-05c",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"添加流动性 pool: 0xabc position: 0xdef SUI/USDC tick: -5 to 5 amountA: 10 amountB: 20",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				poolId: "0xabc",
+				positionId: "0xdef",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				tickLower: -5,
+				tickUpper: 5,
+				amountA: "10",
+				amountB: "20",
+			},
+		});
+	});
+
+	it("resolves symbol input/output coin types from structured params", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5d", {
+			runId: "wf-sui-05d",
+			runMode: "analysis",
+			intentType: "sui.swap.cetus",
+			network: "mainnet",
+			inputCoinType: "SUI",
+			outputCoinType: "USDC",
+			amountRaw: "1000000",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.swap.cetus",
+			intent: {
+				type: "sui.swap.cetus",
+				inputCoinType: "0x2::sui::SUI",
+				outputCoinType: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				amountRaw: "1000000",
 			},
 		});
 	});
@@ -671,6 +740,34 @@ describe("w3rt_run_sui_cetus_farms_workflow_v0", () => {
 				"SUI-",
 			),
 		).toBe(true);
+	});
+
+	it("parses farms stake intentText with symbol pair", async () => {
+		const tool = getTool("w3rt_run_sui_cetus_farms_workflow_v0");
+		const poolId =
+			"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+		const clmmPositionId =
+			"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+		const clmmPoolId =
+			"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+		const result = await tool.execute("cetus-farms-wf-1b", {
+			runId: "wf-sui-cetus-farms-01b",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: `stake farm pool: ${poolId} position: ${clmmPositionId} clmmPoolId: ${clmmPoolId} SUI/USDC`,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.cetus.farms.stake",
+			intent: {
+				type: "sui.cetus.farms.stake",
+				poolId,
+				clmmPositionId,
+				clmmPoolId,
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+			},
+		});
 	});
 
 	it("simulates farms unstake and returns artifacts", async () => {

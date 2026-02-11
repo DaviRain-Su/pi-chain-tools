@@ -1,6 +1,7 @@
 import { constants as fsConstants } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 async function exists(filePath) {
 	try {
@@ -99,7 +100,8 @@ async function ensureUtilsAliases(rootDir) {
 }
 
 async function main() {
-	const rootDir = process.cwd();
+	const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+	const rootDir = path.resolve(scriptDir, "..");
 	await ensureSuiAliases(rootDir);
 	await ensureUtilsAliases(rootDir);
 }

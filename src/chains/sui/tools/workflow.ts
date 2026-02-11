@@ -10,6 +10,7 @@ import {
 	resolveCetusV2Network,
 } from "../cetus-v2.js";
 import {
+	SUI_COIN_TYPE,
 	type SuiNetwork,
 	getSuiClient,
 	getSuiRpcEndpoint,
@@ -399,15 +400,138 @@ function parseInteger(value: string | undefined): number | undefined {
 	return Number(value.trim());
 }
 
+type KnownSuiToken = {
+	coinType: string;
+	decimals: number;
+	aliases: string[];
+};
+
+const KNOWN_SUI_TOKENS: KnownSuiToken[] = [
+	{
+		coinType: SUI_COIN_TYPE,
+		decimals: 9,
+		aliases: ["SUI", "WSUI"],
+	},
+	{
+		coinType: STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+		decimals: 6,
+		aliases: ["USDC"],
+	},
+];
+
+const KNOWN_SUI_TOKEN_BY_ALIAS = new Map<string, KnownSuiToken>(
+	KNOWN_SUI_TOKENS.flatMap((token) =>
+		token.aliases.map((alias) => [alias.toUpperCase(), token] as const),
+	),
+);
+
+const KNOWN_SUI_TOKEN_BY_COIN_TYPE = new Map<string, KnownSuiToken>(
+	KNOWN_SUI_TOKENS.map((token) => [token.coinType, token] as const),
+);
+
+function decimalUiAmountToRaw(
+	amountUi: string,
+	decimals: number,
+	fieldName: string,
+): string {
+	const trimmed = amountUi.trim();
+	const matched = trimmed.match(/^([0-9]+)(?:\.([0-9]+))?$/);
+	if (!matched) {
+		throw new Error(`${fieldName} must be a positive decimal string`);
+	}
+	const whole = matched[1] ?? "0";
+	const fraction = matched[2] ?? "";
+	if (fraction.length > decimals) {
+		throw new Error(
+			`${fieldName} has too many decimal places for token decimals=${decimals}`,
+		);
+	}
+	const base = 10n ** BigInt(decimals);
+	const wholeRaw = BigInt(whole) * base;
+	const paddedFraction = fraction.padEnd(decimals, "0");
+	const fractionRaw = paddedFraction ? BigInt(paddedFraction) : 0n;
+	const raw = wholeRaw + fractionRaw;
+	if (raw <= 0n) {
+		throw new Error(`${fieldName} must be positive`);
+	}
+	return raw.toString();
+}
+
+function resolveKnownSuiToken(input: string): KnownSuiToken | undefined {
+	const normalized = input.trim().toUpperCase();
+	if (!normalized) return undefined;
+	return KNOWN_SUI_TOKEN_BY_ALIAS.get(normalized);
+}
+
+function normalizeCoinTypeOrSymbol(value?: string): string | undefined {
+	if (!value?.trim()) return undefined;
+	const normalized = value.trim();
+	if (/^0x[a-fA-F0-9]{1,64}::[A-Za-z0-9_]+::[A-Za-z0-9_]+$/.test(normalized)) {
+		return normalized;
+	}
+	return resolveKnownSuiToken(normalized)?.coinType;
+}
+
+function collectCoinTypeCandidates(text: string): string[] {
+	const coinTypesFromTag = [
+		...text.matchAll(/0x[a-fA-F0-9]{1,64}::[A-Za-z0-9_]+::[A-Za-z0-9_]+/g),
+	].map((entry) => entry[0]);
+	const symbolMatches = [...text.matchAll(/\b[A-Za-z][A-Za-z0-9_]{1,15}\b/g)]
+		.map((entry) => entry[0])
+		.map((symbol) => resolveKnownSuiToken(symbol)?.coinType)
+		.filter((value): value is string => Boolean(value));
+
+	const merged = [...coinTypesFromTag, ...symbolMatches];
+	const deduped: string[] = [];
+	const seen = new Set<string>();
+	for (const candidate of merged) {
+		if (seen.has(candidate)) continue;
+		seen.add(candidate);
+		deduped.push(candidate);
+	}
+	return deduped;
+}
+
+function parseSwapAmountRawFromText(params: {
+	text: string;
+	inputCoinType?: string;
+	fallbackAmountRaw?: string;
+}): string | undefined {
+	const explicitRaw =
+		params.text.match(/\bamountRaw\s*[=:]\s*([0-9]+)\b/i)?.[1] ??
+		params.text.match(/\b([0-9]+)\s*raw\b/i)?.[1];
+	if (explicitRaw) return explicitRaw;
+
+	const symbolAmountMatches = [
+		...params.text.matchAll(
+			/([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9_]{1,15})\b/g,
+		),
+	];
+	for (const match of symbolAmountMatches) {
+		const amountUi = match[1];
+		const symbol = match[2];
+		if (!amountUi || !symbol) continue;
+		const token = resolveKnownSuiToken(symbol);
+		if (!token) continue;
+		if (
+			params.inputCoinType &&
+			token.coinType.toLowerCase() !== params.inputCoinType.toLowerCase()
+		) {
+			continue;
+		}
+		return decimalUiAmountToRaw(amountUi, token.decimals, "amountUi");
+	}
+
+	return params.fallbackAmountRaw;
+}
+
 function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
 	const lower = text.toLowerCase();
-	const addressMatches = [...text.matchAll(/0x[a-fA-F0-9]{1,64}/g)].map(
+	const objectIdMatches = [...text.matchAll(/0x[a-fA-F0-9]{1,64}(?!::)/g)].map(
 		(entry) => entry[0],
 	);
-	const coinTypeMatches = [
-		...text.matchAll(/0x[a-fA-F0-9]{1,64}::[A-Za-z0-9_]+::[A-Za-z0-9_]+/g),
-	].map((entry) => entry[0]);
+	const coinTypeCandidates = collectCoinTypeCandidates(text);
 	const suiAmountMatch = text.match(/(\d+(?:\.\d+)?)\s*sui\b/i);
 	const integerMatch = text.match(/\b\d+\b/);
 	const poolLabelMatch =
@@ -449,10 +573,10 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	) {
 		return {
 			intentType: "sui.lp.cetus.add",
-			poolId: poolLabelMatch?.[1] || addressMatches[0],
-			positionId: positionLabelMatch?.[1] || addressMatches[1],
-			coinTypeA: coinTypeMatches[0],
-			coinTypeB: coinTypeMatches[1],
+			poolId: poolLabelMatch?.[1] || objectIdMatches[0],
+			positionId: positionLabelMatch?.[1] || objectIdMatches[1],
+			coinTypeA: coinTypeCandidates[0],
+			coinTypeB: coinTypeCandidates[1],
 			tickLower: parseInteger(tickRangeMatch?.[1]),
 			tickUpper: parseInteger(tickRangeMatch?.[2]),
 			amountA: amountAMatch?.[1],
@@ -467,10 +591,10 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	) {
 		return {
 			intentType: "sui.lp.cetus.remove",
-			poolId: poolLabelMatch?.[1] || addressMatches[0],
-			positionId: positionLabelMatch?.[1] || addressMatches[1],
-			coinTypeA: coinTypeMatches[0],
-			coinTypeB: coinTypeMatches[1],
+			poolId: poolLabelMatch?.[1] || objectIdMatches[0],
+			positionId: positionLabelMatch?.[1] || objectIdMatches[1],
+			coinTypeA: coinTypeCandidates[0],
+			coinTypeB: coinTypeCandidates[1],
 			deltaLiquidity: deltaLiquidityMatch?.[1] || integerMatch?.[0],
 			minAmountA: minAmountAMatch?.[1],
 			minAmountB: minAmountBMatch?.[1],
@@ -478,11 +602,17 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	}
 
 	if (/(swap|兑换|换币|交易对|换成|换为|兑换成)/i.test(lower)) {
+		const inputCoinType = coinTypeCandidates[0];
+		const outputCoinType = coinTypeCandidates[1];
 		return {
 			intentType: "sui.swap.cetus",
-			inputCoinType: coinTypeMatches[0],
-			outputCoinType: coinTypeMatches[1],
-			amountRaw: integerMatch?.[0],
+			inputCoinType,
+			outputCoinType,
+			amountRaw: parseSwapAmountRawFromText({
+				text,
+				inputCoinType,
+				fallbackAmountRaw: integerMatch?.[0],
+			}),
 		};
 	}
 
@@ -490,14 +620,14 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		if (suiAmountMatch) {
 			return {
 				intentType: "sui.transfer.sui",
-				toAddress: addressMatches[0],
+				toAddress: objectIdMatches[0],
 				amountSui: Number(suiAmountMatch[1]),
 			};
 		}
 		return {
 			intentType: "sui.transfer.coin",
-			toAddress: addressMatches[0],
-			coinType: coinTypeMatches[0],
+			toAddress: objectIdMatches[0],
+			coinType: coinTypeCandidates[0],
 			amountRaw: integerMatch?.[0],
 		};
 	}
@@ -614,12 +744,10 @@ function normalizeStableLayerIntent(
 function parseCetusFarmsIntentText(text?: string): ParsedCetusFarmsIntentHints {
 	if (!text?.trim()) return {};
 	const lower = text.toLowerCase();
-	const addressMatches = [...text.matchAll(/0x[a-fA-F0-9]{1,64}/g)].map(
+	const objectIdMatches = [...text.matchAll(/0x[a-fA-F0-9]{1,64}(?!::)/g)].map(
 		(entry) => entry[0],
 	);
-	const coinTypeMatches = [
-		...text.matchAll(/0x[a-fA-F0-9]{1,64}::[A-Za-z0-9_]+::[A-Za-z0-9_]+/g),
-	].map((entry) => entry[0]);
+	const coinTypeCandidates = collectCoinTypeCandidates(text);
 
 	const poolLabelMatch =
 		text.match(
@@ -644,8 +772,8 @@ function parseCetusFarmsIntentText(text?: string): ParsedCetusFarmsIntentHints {
 	) {
 		return {
 			intentType: "sui.cetus.farms.harvest",
-			poolId: poolLabelMatch?.[1] || addressMatches[0],
-			positionNftId: positionNftLabelMatch?.[1] || addressMatches[1],
+			poolId: poolLabelMatch?.[1] || objectIdMatches[0],
+			positionNftId: positionNftLabelMatch?.[1] || objectIdMatches[1],
 		};
 	}
 
@@ -656,8 +784,8 @@ function parseCetusFarmsIntentText(text?: string): ParsedCetusFarmsIntentHints {
 	) {
 		return {
 			intentType: "sui.cetus.farms.unstake",
-			poolId: poolLabelMatch?.[1] || addressMatches[0],
-			positionNftId: positionNftLabelMatch?.[1] || addressMatches[1],
+			poolId: poolLabelMatch?.[1] || objectIdMatches[0],
+			positionNftId: positionNftLabelMatch?.[1] || objectIdMatches[1],
 		};
 	}
 
@@ -668,11 +796,11 @@ function parseCetusFarmsIntentText(text?: string): ParsedCetusFarmsIntentHints {
 	) {
 		return {
 			intentType: "sui.cetus.farms.stake",
-			poolId: poolLabelMatch?.[1] || addressMatches[0],
-			clmmPositionId: clmmPositionLabelMatch?.[1] || addressMatches[1],
-			clmmPoolId: clmmPoolLabelMatch?.[1] || addressMatches[2],
-			coinTypeA: coinTypeMatches[0],
-			coinTypeB: coinTypeMatches[1],
+			poolId: poolLabelMatch?.[1] || objectIdMatches[0],
+			clmmPositionId: clmmPositionLabelMatch?.[1] || objectIdMatches[1],
+			clmmPoolId: clmmPoolLabelMatch?.[1] || objectIdMatches[2],
+			coinTypeA: coinTypeCandidates[0],
+			coinTypeB: coinTypeCandidates[1],
 		};
 	}
 
@@ -713,8 +841,10 @@ function normalizeCetusFarmsIntent(
 		const clmmPositionId =
 			params.clmmPositionId?.trim() || parsed.clmmPositionId;
 		const clmmPoolId = params.clmmPoolId?.trim() || parsed.clmmPoolId;
-		const coinTypeA = params.coinTypeA?.trim() || parsed.coinTypeA;
-		const coinTypeB = params.coinTypeB?.trim() || parsed.coinTypeB;
+		const coinTypeA =
+			normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) || parsed.coinTypeA;
+		const coinTypeB =
+			normalizeCoinTypeOrSymbol(params.coinTypeB?.trim()) || parsed.coinTypeB;
 		if (!clmmPositionId) {
 			throw new Error(
 				"clmmPositionId is required for intentType=sui.cetus.farms.stake",
@@ -819,7 +949,8 @@ function normalizeIntent(params: WorkflowParams): SuiWorkflowIntent {
 
 	if (intentType === "sui.transfer.coin") {
 		const toAddress = params.toAddress?.trim() || parsed.toAddress;
-		const coinType = params.coinType?.trim() || parsed.coinType;
+		const coinType =
+			normalizeCoinTypeOrSymbol(params.coinType?.trim()) || parsed.coinType;
 		const amountRaw = params.amountRaw?.trim() || parsed.amountRaw;
 		if (!toAddress)
 			throw new Error("toAddress is required for sui.transfer.coin");
@@ -839,15 +970,23 @@ function normalizeIntent(params: WorkflowParams): SuiWorkflowIntent {
 	if (intentType === "sui.lp.cetus.add") {
 		const poolId = params.poolId?.trim() || parsed.poolId;
 		const positionId = params.positionId?.trim() || parsed.positionId;
-		const coinTypeA = params.coinTypeA?.trim() || parsed.coinTypeA;
-		const coinTypeB = params.coinTypeB?.trim() || parsed.coinTypeB;
+		const coinTypeA =
+			normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) || parsed.coinTypeA;
+		const coinTypeB =
+			normalizeCoinTypeOrSymbol(params.coinTypeB?.trim()) || parsed.coinTypeB;
 		const tickLower = params.tickLower ?? parsed.tickLower;
 		const tickUpper = params.tickUpper ?? parsed.tickUpper;
 		const amountA = params.amountA?.trim() || parsed.amountA;
 		const amountB = params.amountB?.trim() || parsed.amountB;
-		if (!poolId) throw new Error("poolId is required for sui.lp.cetus.add");
+		if (!poolId) {
+			throw new Error(
+				"poolId is required for sui.lp.cetus.add. Tip: first query Cetus pools and choose a poolId.",
+			);
+		}
 		if (!positionId)
-			throw new Error("positionId is required for sui.lp.cetus.add");
+			throw new Error(
+				"positionId is required for sui.lp.cetus.add. Tip: LP add currently targets an existing positionId.",
+			);
 		if (!coinTypeA)
 			throw new Error("coinTypeA is required for sui.lp.cetus.add");
 		if (!coinTypeB)
@@ -880,15 +1019,23 @@ function normalizeIntent(params: WorkflowParams): SuiWorkflowIntent {
 	if (intentType === "sui.lp.cetus.remove") {
 		const poolId = params.poolId?.trim() || parsed.poolId;
 		const positionId = params.positionId?.trim() || parsed.positionId;
-		const coinTypeA = params.coinTypeA?.trim() || parsed.coinTypeA;
-		const coinTypeB = params.coinTypeB?.trim() || parsed.coinTypeB;
+		const coinTypeA =
+			normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) || parsed.coinTypeA;
+		const coinTypeB =
+			normalizeCoinTypeOrSymbol(params.coinTypeB?.trim()) || parsed.coinTypeB;
 		const deltaLiquidity =
 			params.deltaLiquidity?.trim() || parsed.deltaLiquidity;
 		const minAmountA = params.minAmountA?.trim() || parsed.minAmountA || "0";
 		const minAmountB = params.minAmountB?.trim() || parsed.minAmountB || "0";
-		if (!poolId) throw new Error("poolId is required for sui.lp.cetus.remove");
+		if (!poolId) {
+			throw new Error(
+				"poolId is required for sui.lp.cetus.remove. Tip: first query Cetus pools and choose a poolId.",
+			);
+		}
 		if (!positionId)
-			throw new Error("positionId is required for sui.lp.cetus.remove");
+			throw new Error(
+				"positionId is required for sui.lp.cetus.remove. Tip: LP remove currently targets an existing positionId.",
+			);
 		if (!coinTypeA)
 			throw new Error("coinTypeA is required for sui.lp.cetus.remove");
 		if (!coinTypeB)
@@ -911,10 +1058,12 @@ function normalizeIntent(params: WorkflowParams): SuiWorkflowIntent {
 	}
 
 	const inputCoinType =
-		params.inputCoinType?.trim() ||
+		normalizeCoinTypeOrSymbol(params.inputCoinType?.trim()) ||
 		parsed.inputCoinType ||
-		params.coinType?.trim();
-	const outputCoinType = params.outputCoinType?.trim() || parsed.outputCoinType;
+		normalizeCoinTypeOrSymbol(params.coinType?.trim());
+	const outputCoinType =
+		normalizeCoinTypeOrSymbol(params.outputCoinType?.trim()) ||
+		parsed.outputCoinType;
 	const amountRaw = params.amountRaw?.trim() || parsed.amountRaw;
 	if (!inputCoinType)
 		throw new Error("inputCoinType is required for sui.swap.cetus");

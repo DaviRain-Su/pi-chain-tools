@@ -397,7 +397,7 @@ describe("sui_getStableLayerSupply", () => {
 });
 
 describe("sui_getCetusFarmsPools", () => {
-	it("returns farms pool summaries", async () => {
+	it("returns farms pool summaries with resolved pair symbols", async () => {
 		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
 		cetusV2Mocks.getCetusFarmsPools.mockResolvedValue({
 			pools: [
@@ -410,12 +410,39 @@ describe("sui_getCetusFarmsPools", () => {
 			hasNextPage: false,
 			nextCursor: null,
 		});
+		const multiGetObjects = vi.fn().mockResolvedValue([
+			{
+				data: {
+					type: "0x1::pool::Pool<0x2::sui::SUI,0x2::usdc::USDC>",
+				},
+			},
+		]);
+		const getCoinMetadata = vi
+			.fn()
+			.mockImplementation(async ({ coinType }: { coinType: string }) => {
+				if (coinType === "0x2::sui::SUI") return { symbol: "SUI" };
+				if (coinType === "0x2::usdc::USDC") return { symbol: "USDC" };
+				return null;
+			});
+		runtimeMocks.getSuiClient.mockReturnValue({
+			multiGetObjects,
+			getCoinMetadata,
+		});
+
 		const tool = getTool("sui_getCetusFarmsPools");
 		const result = await tool.execute("cetus-read-1", {
 			network: "mainnet",
 		});
 		expect(cetusV2Mocks.getCetusFarmsPools).toHaveBeenCalledTimes(1);
+		expect(multiGetObjects).toHaveBeenCalledWith({
+			ids: ["0xclmm1"],
+			options: { showType: true },
+		});
 		expect(result.content[0]?.text).toContain("Cetus farms pools (mainnet)");
+		expect(result.content[0]?.text).toContain("1. SUI/USDC rewards=2");
+		expect(result.content[0]?.text).toContain("pairTypes:");
+		expect(result.content[0]?.text).toContain("::sui::SUI");
+		expect(result.content[0]?.text).toContain("::usdc::USDC");
 		expect(result.content[0]?.text).toContain("poolId: 0xpool1");
 		expect(result.content[0]?.text).toContain("clmmPoolId: 0xclmm1");
 		expect(result.details).toMatchObject({
@@ -424,6 +451,9 @@ describe("sui_getCetusFarmsPools", () => {
 				{
 					poolId: "0xpool1",
 					clmmPoolId: "0xclmm1",
+					pairSymbol: "SUI/USDC",
+					coinTypeA: expect.stringContaining("::sui::SUI"),
+					coinTypeB: expect.stringContaining("::usdc::USDC"),
 					rewarderCount: 2,
 				},
 			],

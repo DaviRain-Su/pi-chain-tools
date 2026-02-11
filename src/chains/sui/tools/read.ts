@@ -1,4 +1,5 @@
 import { AggregatorClient, Env } from "@cetusprotocol/aggregator-sdk";
+import { normalizeStructTag, parseStructTag } from "@mysten/sui/utils";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
@@ -98,6 +99,9 @@ type SuiPortfolioSummary = {
 type CetusFarmsPoolSummary = {
 	poolId: string;
 	clmmPoolId: string;
+	pairSymbol: string | null;
+	coinTypeA: string | null;
+	coinTypeB: string | null;
 	rewarderCount: number;
 	effectiveTickLower: number | null;
 	effectiveTickUpper: number | null;
@@ -146,6 +150,154 @@ function shortId(value: string): string {
 	return `${value.slice(0, 10)}...${value.slice(-8)}`;
 }
 
+function fallbackCoinSymbol(coinType: string): string {
+	const segments = coinType.split("::").filter((entry) => entry.length > 0);
+	const last = segments[segments.length - 1];
+	if (last) return last;
+	return shortId(coinType);
+}
+
+function shortCoinType(coinType: string): string {
+	const segments = coinType.split("::");
+	if (segments.length !== 3) return shortId(coinType);
+	const [address, module, name] = segments;
+	const shortAddress =
+		address.length > 18
+			? `${address.slice(0, 10)}...${address.slice(-6)}`
+			: address;
+	return `${shortAddress}::${module}::${name}`;
+}
+
+function parsePoolCoinTypes(
+	value: unknown,
+): { coinTypeA: string; coinTypeB: string } | null {
+	if (typeof value !== "string" || !value.includes("::")) return null;
+	try {
+		const parsed = parseStructTag(value);
+		if (parsed.name !== "Pool" || parsed.typeParams.length < 2) {
+			return null;
+		}
+		const [coinA, coinB] = parsed.typeParams;
+		const coinTypeA =
+			typeof coinA === "string" ? coinA : normalizeStructTag(coinA);
+		const coinTypeB =
+			typeof coinB === "string" ? coinB : normalizeStructTag(coinB);
+		if (!coinTypeA.includes("::") || !coinTypeB.includes("::")) {
+			return null;
+		}
+		return { coinTypeA, coinTypeB };
+	} catch {
+		return null;
+	}
+}
+
+async function resolveCetusPoolPairMap(params: {
+	network: string;
+	rpcUrl?: string;
+	clmmPoolIds: string[];
+}): Promise<
+	Map<
+		string,
+		{
+			coinTypeA: string;
+			coinTypeB: string;
+			pairSymbol: string;
+		}
+	>
+> {
+	const pairMap = new Map<
+		string,
+		{
+			coinTypeA: string;
+			coinTypeB: string;
+			pairSymbol: string;
+		}
+	>();
+	const uniqueClmmPoolIds = [...new Set(params.clmmPoolIds)];
+	if (uniqueClmmPoolIds.length === 0) return pairMap;
+
+	try {
+		const client = getSuiClient(params.network, params.rpcUrl) as {
+			multiGetObjects?: (params: {
+				ids: string[];
+				options?: { showType?: boolean };
+			}) => Promise<unknown[]>;
+			getCoinMetadata?: (params: {
+				coinType: string;
+			}) => Promise<{ symbol?: string } | null>;
+		};
+		if (typeof client.multiGetObjects !== "function") {
+			return pairMap;
+		}
+
+		const poolObjects = await client.multiGetObjects({
+			ids: uniqueClmmPoolIds,
+			options: { showType: true },
+		});
+		const coinTypes = new Set<string>();
+		const coinTypesByClmmPoolId = new Map<
+			string,
+			{
+				coinTypeA: string;
+				coinTypeB: string;
+			}
+		>();
+
+		for (const [index, clmmPoolId] of uniqueClmmPoolIds.entries()) {
+			const objectEntry = poolObjects[index] as {
+				data?: { type?: unknown };
+			};
+			const parsed = parsePoolCoinTypes(objectEntry?.data?.type);
+			if (!parsed) continue;
+			coinTypesByClmmPoolId.set(clmmPoolId, parsed);
+			coinTypes.add(parsed.coinTypeA);
+			coinTypes.add(parsed.coinTypeB);
+		}
+
+		const symbolByCoinType = new Map<string, string>();
+		for (const coinType of coinTypes) {
+			symbolByCoinType.set(coinType, fallbackCoinSymbol(coinType));
+		}
+
+		if (typeof client.getCoinMetadata === "function") {
+			await Promise.all(
+				[...coinTypes].map(async (coinType) => {
+					try {
+						const metadata = await client.getCoinMetadata?.({ coinType });
+						const symbol = metadata?.symbol?.trim();
+						if (symbol) {
+							symbolByCoinType.set(coinType, symbol);
+						}
+					} catch {
+						// keep fallback symbol for this coin type
+					}
+				}),
+			);
+		}
+
+		for (const [
+			clmmPoolId,
+			coinTypesEntry,
+		] of coinTypesByClmmPoolId.entries()) {
+			const symbolA =
+				symbolByCoinType.get(coinTypesEntry.coinTypeA) ??
+				fallbackCoinSymbol(coinTypesEntry.coinTypeA);
+			const symbolB =
+				symbolByCoinType.get(coinTypesEntry.coinTypeB) ??
+				fallbackCoinSymbol(coinTypesEntry.coinTypeB);
+			pairMap.set(clmmPoolId, {
+				coinTypeA: coinTypesEntry.coinTypeA,
+				coinTypeB: coinTypesEntry.coinTypeB,
+				pairSymbol: `${symbolA}/${symbolB}`,
+			});
+		}
+	} catch {
+		return pairMap;
+	}
+
+	return pairMap;
+}
+
 function formatCetusPoolsText(params: {
 	network: string;
 	pools: CetusFarmsPoolSummary[];
@@ -162,9 +314,13 @@ function formatCetusPoolsText(params: {
 
 	const visible = params.pools.slice(0, HUMAN_READABLE_LIMIT);
 	for (const [index, pool] of visible.entries()) {
-		lines.push(
-			`${index + 1}. ${shortId(pool.poolId)} rewards=${pool.rewarderCount}`,
-		);
+		const pairLabel = pool.pairSymbol ?? "unknown-pair";
+		lines.push(`${index + 1}. ${pairLabel} rewards=${pool.rewarderCount}`);
+		if (pool.coinTypeA && pool.coinTypeB) {
+			lines.push(
+				`   pairTypes: ${shortCoinType(pool.coinTypeA)} / ${shortCoinType(pool.coinTypeB)}`,
+			);
+		}
 		lines.push(`   poolId: ${pool.poolId}`);
 		lines.push(`   clmmPoolId: ${pool.clmmPoolId}`);
 		if (
@@ -648,15 +804,26 @@ export function createSuiReadTools() {
 					network: cetusNetwork,
 					rpcUrl: params.rpcUrl?.trim(),
 				});
+				const pairMap = await resolveCetusPoolPairMap({
+					network,
+					rpcUrl: params.rpcUrl?.trim(),
+					clmmPoolIds: result.pools
+						.slice(0, limit)
+						.map((pool) => pool.clmm_pool_id),
+				});
 				const pools = result.pools.slice(0, limit).map((pool) => {
 					const extra = pool as {
 						effective_tick_lower?: unknown;
 						effective_tick_upper?: unknown;
 						total_share?: unknown;
 					};
+					const pair = pairMap.get(pool.clmm_pool_id);
 					return {
 						poolId: pool.id,
 						clmmPoolId: pool.clmm_pool_id,
+						pairSymbol: pair?.pairSymbol ?? null,
+						coinTypeA: pair?.coinTypeA ?? null,
+						coinTypeB: pair?.coinTypeB ?? null,
 						rewarderCount: Array.isArray(pool.rewarders)
 							? pool.rewarders.length
 							: 0,
