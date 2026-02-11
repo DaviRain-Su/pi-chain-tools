@@ -289,6 +289,9 @@ function parseSlippageDecimal(slippageBps?: number): number {
 	return bps / 10_000;
 }
 
+const SUI_SIGNER_PRIVATE_KEY_DESCRIPTION =
+	"Optional signer private key in suiprivkey format. If omitted, auto-loads SUI_PRIVATE_KEY, then local ~/.sui/sui_config/sui.keystore active_address key.";
+
 async function resolveCoinObjectIdsForAmount(
 	client: ReturnType<typeof getSuiClient>,
 	owner: string,
@@ -368,10 +371,7 @@ export function createSuiExecuteTools() {
 					Type.String({ description: "Override Sui JSON-RPC endpoint URL" }),
 				),
 				fromPrivateKey: Type.Optional(
-					Type.String({
-						description:
-							"Signer private key in suiprivkey format. Falls back to SUI_PRIVATE_KEY",
-					}),
+					Type.String({ description: SUI_SIGNER_PRIVATE_KEY_DESCRIPTION }),
 				),
 				waitForLocalExecution: Type.Optional(
 					Type.Boolean({
@@ -465,10 +465,7 @@ export function createSuiExecuteTools() {
 					Type.String({ description: "Override Sui JSON-RPC endpoint URL" }),
 				),
 				fromPrivateKey: Type.Optional(
-					Type.String({
-						description:
-							"Signer private key in suiprivkey format. Falls back to SUI_PRIVATE_KEY",
-					}),
+					Type.String({ description: SUI_SIGNER_PRIVATE_KEY_DESCRIPTION }),
 				),
 				waitForLocalExecution: Type.Optional(
 					Type.Boolean({
@@ -649,10 +646,7 @@ export function createSuiExecuteTools() {
 					}),
 				),
 				fromPrivateKey: Type.Optional(
-					Type.String({
-						description:
-							"Signer private key in suiprivkey format. Falls back to SUI_PRIVATE_KEY",
-					}),
+					Type.String({ description: SUI_SIGNER_PRIVATE_KEY_DESCRIPTION }),
 				),
 				waitForLocalExecution: Type.Optional(
 					Type.Boolean({
@@ -807,7 +801,9 @@ export function createSuiExecuteTools() {
 				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(
+					Type.String({ description: SUI_SIGNER_PRIVATE_KEY_DESCRIPTION }),
+				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 			}),
@@ -919,7 +915,9 @@ export function createSuiExecuteTools() {
 				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(
+					Type.String({ description: SUI_SIGNER_PRIVATE_KEY_DESCRIPTION }),
+				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 			}),
@@ -1012,7 +1010,9 @@ export function createSuiExecuteTools() {
 				coinTypeB: Type.String({ description: "CLMM coinTypeB" }),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(
+					Type.String({ description: SUI_SIGNER_PRIVATE_KEY_DESCRIPTION }),
+				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 			}),
@@ -1093,7 +1093,9 @@ export function createSuiExecuteTools() {
 				}),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(
+					Type.String({ description: SUI_SIGNER_PRIVATE_KEY_DESCRIPTION }),
+				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 			}),
@@ -1168,7 +1170,9 @@ export function createSuiExecuteTools() {
 				}),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(
+					Type.String({ description: SUI_SIGNER_PRIVATE_KEY_DESCRIPTION }),
+				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 			}),
@@ -1250,7 +1254,9 @@ export function createSuiExecuteTools() {
 				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(
+					Type.String({ description: SUI_SIGNER_PRIVATE_KEY_DESCRIPTION }),
+				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 			}),
@@ -1343,7 +1349,9 @@ export function createSuiExecuteTools() {
 				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(
+					Type.String({ description: SUI_SIGNER_PRIVATE_KEY_DESCRIPTION }),
+				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 			}),
@@ -1425,7 +1433,9 @@ export function createSuiExecuteTools() {
 				}),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
-				fromPrivateKey: Type.Optional(Type.String()),
+				fromPrivateKey: Type.Optional(
+					Type.String({ description: SUI_SIGNER_PRIVATE_KEY_DESCRIPTION }),
+				),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 			}),
