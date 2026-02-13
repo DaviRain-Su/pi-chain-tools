@@ -1,6 +1,6 @@
 # Gradience
 
-Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui has a minimal read/execute vertical slice, and EVM skeleton is scaffolded, with a chain-agnostic grouping model:
+Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui has a minimal read/execute vertical slice, NEAR has an initial read/rpc vertical slice, and EVM skeleton is scaffolded, with a chain-agnostic grouping model:
 
 - `read`
 - `compose`
@@ -12,6 +12,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `src/core`: common toolset abstractions and registration helpers
 - `src/chains/solana`: Solana runtime + grouped tools
 - `src/chains/sui`: Sui runtime + grouped tools
+- `src/chains/near`: NEAR runtime + grouped tools
 - `src/chains/evm`: EVM runtime + grouped tool skeleton
 - `src/pi`: Pi-specific adapter entrypoints
 
@@ -45,6 +46,17 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read/compose/execute/rpc` group files are created
 - no concrete EVM tools are implemented yet
 - use `createEvmToolset()` as the extension point for future chains/rpcs/wallets
+
+## NEAR (Initial)
+
+- `read`: `near_getBalance` (native NEAR balance, available + locked)
+- `read`: `near_getAccount` (view account state)
+- `read`: `near_getFtBalance` (NEP-141 FT balance by contract id, with metadata fallback)
+- `execute`: `near_transferNear` (local credentials/env signer, mainnet safety gate)
+- `execute`: `near_transferFt` (NEP-141 `ft_transfer`, supports custom gas/deposit, mainnet safety gate)
+- `workflow`: `w3rt_run_near_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken)
+- `rpc`: `near_rpc` (generic NEAR JSON-RPC passthrough; blocks `broadcast_tx_*` by default)
+- `compose/execute`: scaffolded for next-phase transaction + DeFi primitives
 
 ## Sui (Minimal)
 
@@ -98,6 +110,7 @@ You do **not** need `pi-mono`. Install this project as a normal Pi extension sou
 - Pi CLI installed (`pi --version`)
 - Node.js 20+ and npm
 - Sui CLI installed (`sui --version`)
+- NEAR CLI (for local credential bootstrap, optional but recommended)
 - Local Sui wallet initialized and active on mainnet
 
 Sui CLI quick init (first-time setup):
@@ -148,6 +161,7 @@ The package auto-loads one bundled extension (`src/pi/default-extension.ts`) tha
 
 - Solana workflow toolset
 - Sui full toolset (read/compose/execute/workflow/rpc)
+- NEAR initial toolset (read/rpc + compose/execute skeleton)
 
 ### 3) Reload Pi and smoke test
 
@@ -185,7 +199,30 @@ sui client active-address
 ls ~/.sui/sui_config/sui.keystore
 ```
 
-### 5) Execution allow/safety config
+### 5) NEAR signer config (no explicit private key required)
+
+NEAR execute/workflow tools can auto-load signer in this order:
+
+1. `privateKey` parameter (`ed25519:...`)
+2. `NEAR_PRIVATE_KEY`
+3. local credentials file:
+   - `~/.near-credentials/<network>/<accountId>.json`
+
+Account id resolution order:
+
+1. `fromAccountId` / `accountId` parameter
+2. `NEAR_ACCOUNT_ID`
+3. `NEAR_WALLET_ACCOUNT_ID`
+4. first account under `~/.near-credentials/<network>/`
+
+Quick checks:
+
+```bash
+ls ~/.near-credentials/mainnet
+cat ~/.near-credentials/mainnet/<your-account>.json
+```
+
+### 6) Execution allow/safety config
 
 - Mainnet execute is guarded. You must explicitly confirm (internally `confirmMainnet=true`).
 - Workflow execute on mainnet also requires the matching `confirmToken` from prior analysis/simulate.
@@ -210,7 +247,22 @@ Natural language confirmation example:
 - Portfolio (include stablecoins):
   - `帮我查一下 Sui 主网本地钱包余额（包含USDC）`
 
-### 7) Troubleshooting
+### 7) Natural language examples (NEAR)
+
+- Native balance (local/default account):
+  - `帮我查一下 NEAR 主网本地钱包余额`
+- Account state:
+  - `帮我查一下 NEAR 账户 alice.near 的状态`
+- FT balance (USDT example):
+  - `帮我查一下 alice.near 在 usdt.tether-token.near 的余额`
+- Workflow analyze:
+  - `把 0.01 NEAR 转到 bob.near，先分析`
+- Workflow simulate:
+  - `把 0.01 NEAR 转到 bob.near，先模拟`
+- Workflow execute:
+  - `继续执行刚才这笔，确认主网执行`
+
+### 8) Troubleshooting
 
 - `Cannot find module ...`: run `npm install` (or `bun install`), then `/reload`.
 - Extension conflicts in Pi: ensure duplicated tool providers are not loaded at the same time.
@@ -225,7 +277,7 @@ pi remove https://github.com/<your-org>/pi-chain-tools
 pi remove /Users/davirian/dev/pi-chain-tools
 ```
 
-### 8) Publish To npm (optional)
+### 9) Publish To npm (optional)
 
 Before publish:
 
@@ -253,7 +305,7 @@ After publish, users can install with:
 pi install npm:pi-chain-tools
 ```
 
-### 9) Optional: `pi-mono` development wiring
+### 10) Optional: `pi-mono` development wiring
 
 Only needed if you intentionally develop extensions inside `pi-mono`.
 The bundled default extension already reuses the same Solana/Sui dedupe guards, so mixed loading is safer, but keeping a single source of truth is still recommended.

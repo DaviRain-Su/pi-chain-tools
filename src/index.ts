@@ -98,6 +98,30 @@ export { createEvmRpcTools } from "./chains/evm/tools/rpc.js";
 export { createEvmToolset } from "./chains/evm/toolset.js";
 
 export {
+	NEAR_TOOL_PREFIX,
+	YOCTO_NEAR_PER_NEAR,
+	callNearRpc,
+	formatNearAmount,
+	formatTokenAmount as formatNearTokenAmount,
+	getNearExplorerAccountUrl,
+	getNearExplorerTransactionUrl,
+	getNearRpcEndpoint,
+	nearNetworkSchema,
+	parseNearNetwork,
+	resolveNearAccountId,
+	resolveNearPrivateKey,
+	resolveNearSigner,
+	toYoctoNear,
+} from "./chains/near/runtime.js";
+export type { NearNetwork } from "./chains/near/runtime.js";
+export { createNearReadTools } from "./chains/near/tools/read.js";
+export { createNearComposeTools } from "./chains/near/tools/compose.js";
+export { createNearExecuteTools } from "./chains/near/tools/execute.js";
+export { createNearRpcTools } from "./chains/near/tools/rpc.js";
+export { createNearWorkflowTools } from "./chains/near/tools/workflow.js";
+export { createNearToolset } from "./chains/near/toolset.js";
+
+export {
 	SUI_COIN_TYPE,
 	SUI_TOOL_PREFIX,
 	assertPositiveAmount as assertPositiveSuiAmount,

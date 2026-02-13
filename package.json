@@ -13,7 +13,8 @@
 		"./pi/solana-extension": "./src/pi/solana-extension.ts",
 		"./pi/solana-workflow-extension": "./src/pi/solana-workflow-extension.ts",
 		"./pi/evm-extension": "./src/pi/evm-extension.ts",
-		"./pi/sui-extension": "./src/pi/sui-extension.ts"
+		"./pi/sui-extension": "./src/pi/sui-extension.ts",
+		"./pi/near-extension": "./src/pi/near-extension.ts"
 	},
 	"pi": {
 		"extensions": ["./src/pi/default-extension.ts"]
@@ -43,6 +44,7 @@
 		"@solana/spl-token": "^0.4.11",
 		"@solana/web3.js": "^1.98.4",
 		"bs58": "^6.0.0",
+		"near-api-js": "^7.1.0",
 		"stable-layer-sdk": "^2.0.0"
 	},
 	"devDependencies": {
