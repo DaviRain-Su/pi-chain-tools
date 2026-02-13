@@ -159,6 +159,9 @@ const DEFAULT_REF_ACCOUNT_STORAGE_DEPOSIT_YOCTO_NEAR =
 	100_000_000_000_000_000_000_000n;
 const DEFAULT_REF_REGISTER_TOKENS_GAS = 40_000_000_000_000n;
 const DEFAULT_REF_DEPOSIT_TOKEN_GAS = 70_000_000_000_000n;
+const DEFAULT_NEAR_SWAP_SLIPPAGE_BPS = 50;
+const DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS = 1000;
+const HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS = 5000;
 
 function parsePositiveYocto(value: string, fieldName: string): bigint {
 	const normalized = value.trim();
@@ -249,6 +252,75 @@ function parseOptionalPoolId(value?: number | string): number | undefined {
 		throw new Error("poolId must be a non-negative integer");
 	}
 	return normalized;
+}
+
+function resolveNearSwapSlippageLimitBps(): number {
+	const raw = process.env.NEAR_SWAP_MAX_SLIPPAGE_BPS?.trim();
+	if (!raw) return DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS;
+	if (!/^\d+$/.test(raw)) return DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS;
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed)) return DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS;
+	return Math.max(
+		0,
+		Math.min(HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS, Math.floor(parsed)),
+	);
+}
+
+function resolveNearSwapSlippageBps(value?: number): number {
+	if (value == null) return DEFAULT_NEAR_SWAP_SLIPPAGE_BPS;
+	if (
+		!Number.isFinite(value) ||
+		value < 0 ||
+		value > HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS
+	) {
+		throw new Error(
+			`slippageBps must be between 0 and ${HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS}`,
+		);
+	}
+	const normalized = Math.floor(value);
+	const limit = resolveNearSwapSlippageLimitBps();
+	if (normalized > limit) {
+		throw new Error(
+			`slippageBps ${normalized} exceeds configured safety limit (${limit}).`,
+		);
+	}
+	return normalized;
+}
+
+function resolveSafeMinAmountOutRaw(params: {
+	requestedMinAmountOutRaw?: string;
+	quoteAmountOutRaw: string;
+	quoteMinAmountOutRaw: string;
+}): string {
+	const quoteAmountOutRaw = parsePositiveYocto(
+		params.quoteAmountOutRaw,
+		"quote.amountOutRaw",
+	);
+	const quoteMinAmountOutRaw = parsePositiveYocto(
+		params.quoteMinAmountOutRaw,
+		"quote.minAmountOutRaw",
+	);
+	if (quoteMinAmountOutRaw > quoteAmountOutRaw) {
+		throw new Error(
+			"Ref quote returned invalid minAmountOutRaw > amountOutRaw",
+		);
+	}
+	if (
+		typeof params.requestedMinAmountOutRaw === "string" &&
+		params.requestedMinAmountOutRaw.trim()
+	) {
+		const requested = parsePositiveYocto(
+			params.requestedMinAmountOutRaw,
+			"minAmountOutRaw",
+		);
+		if (requested < quoteMinAmountOutRaw) {
+			throw new Error(
+				`minAmountOutRaw is below safe minimum from quote (${quoteMinAmountOutRaw.toString()}).`,
+			);
+		}
+		return requested.toString();
+	}
+	return quoteMinAmountOutRaw.toString();
 }
 
 function parseShareBps(
@@ -1306,6 +1378,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					params.amountInRaw,
 					"amountInRaw",
 				);
+				const slippageBps = resolveNearSwapSlippageBps(params.slippageBps);
 				const gas = resolveRefSwapGas(params.gas);
 				const deposit = resolveAttachedDeposit(params.attachedDepositYoctoNear);
 				const autoRegisterOutput = params.autoRegisterOutput !== false;
@@ -1328,7 +1401,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					tokenOutId: tokenOutInput,
 					amountInRaw: amountInRaw.toString(),
 					poolId,
-					slippageBps: params.slippageBps,
+					slippageBps,
 				});
 				const quoteActions =
 					Array.isArray(quote.actions) && quote.actions.length > 0
@@ -1351,14 +1424,11 @@ export function createNearExecuteTools(): RegisteredTool[] {
 				if (tokenInId === tokenOutId) {
 					throw new Error("tokenInId and tokenOutId must be different");
 				}
-				const minAmountOutRaw =
-					typeof params.minAmountOutRaw === "string" &&
-					params.minAmountOutRaw.trim()
-						? parsePositiveYocto(
-								params.minAmountOutRaw,
-								"minAmountOutRaw",
-							).toString()
-						: quote.minAmountOutRaw;
+				const minAmountOutRaw = resolveSafeMinAmountOutRaw({
+					requestedMinAmountOutRaw: params.minAmountOutRaw,
+					quoteAmountOutRaw: quote.amountOutRaw,
+					quoteMinAmountOutRaw: quote.minAmountOutRaw,
+				});
 				const storageRegistration =
 					autoRegisterOutput === true
 						? await ensureFtStorageRegistered({
@@ -1424,10 +1494,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 						rawResult: tx,
 						refContractId,
 						rpcEndpoint: endpoint,
-						slippageBps:
-							typeof params.slippageBps === "number"
-								? Math.floor(params.slippageBps)
-								: 50,
+						slippageBps,
 						source: quote.source,
 						storageRegistration,
 						tokenInId,

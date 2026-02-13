@@ -189,6 +189,8 @@ type WorkflowTool = ReturnType<typeof createNearExecuteTools>[number];
 
 const WORKFLOW_SESSION_BY_RUN_ID = new Map<string, WorkflowSessionRecord>();
 let latestWorkflowSession: WorkflowSessionRecord | null = null;
+const DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS = 1000;
+const HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS = 5000;
 
 function rememberWorkflowSession(record: WorkflowSessionRecord): void {
 	WORKFLOW_SESSION_BY_RUN_ID.set(record.runId, record);
@@ -283,10 +285,71 @@ function parseOptionalSlippageBps(
 	fieldName: string,
 ): number | undefined {
 	if (value == null) return undefined;
-	if (!Number.isFinite(value) || value < 0 || value > 5000) {
-		throw new Error(`${fieldName} must be between 0 and 5000`);
+	if (
+		!Number.isFinite(value) ||
+		value < 0 ||
+		value > HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS
+	) {
+		throw new Error(
+			`${fieldName} must be between 0 and ${HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS}`,
+		);
 	}
-	return Math.floor(value);
+	const normalized = Math.floor(value);
+	const limit = resolveNearSwapSlippageLimitBps();
+	if (normalized > limit) {
+		throw new Error(
+			`${fieldName} ${normalized} exceeds configured safety limit (${limit}).`,
+		);
+	}
+	return normalized;
+}
+
+function resolveNearSwapSlippageLimitBps(): number {
+	const raw = process.env.NEAR_SWAP_MAX_SLIPPAGE_BPS?.trim();
+	if (!raw) return DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS;
+	if (!/^\d+$/.test(raw)) return DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS;
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed)) return DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS;
+	return Math.max(
+		0,
+		Math.min(HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS, Math.floor(parsed)),
+	);
+}
+
+function resolveSafeMinAmountOutRaw(params: {
+	requestedMinAmountOutRaw?: string;
+	quoteAmountOutRaw: string;
+	quoteMinAmountOutRaw: string;
+}): string {
+	const quoteAmountOutRaw = parsePositiveBigInt(
+		params.quoteAmountOutRaw,
+		"quote.amountOutRaw",
+	);
+	const quoteMinAmountOutRaw = parsePositiveBigInt(
+		params.quoteMinAmountOutRaw,
+		"quote.minAmountOutRaw",
+	);
+	if (quoteMinAmountOutRaw > quoteAmountOutRaw) {
+		throw new Error(
+			"Ref quote returned invalid minAmountOutRaw > amountOutRaw",
+		);
+	}
+	if (
+		typeof params.requestedMinAmountOutRaw === "string" &&
+		params.requestedMinAmountOutRaw.trim()
+	) {
+		const requestedMinAmountOutRaw = parsePositiveBigInt(
+			params.requestedMinAmountOutRaw,
+			"minAmountOutRaw",
+		);
+		if (requestedMinAmountOutRaw < quoteMinAmountOutRaw) {
+			throw new Error(
+				`minAmountOutRaw is below safe minimum from quote (${quoteMinAmountOutRaw.toString()}).`,
+			);
+		}
+		return requestedMinAmountOutRaw.toString();
+	}
+	return quoteMinAmountOutRaw.toString();
 }
 
 function parseOptionalShareBps(
@@ -1403,6 +1466,11 @@ async function simulateRefSwap(params: {
 		poolId: params.intent.poolId,
 		slippageBps: params.intent.slippageBps,
 	});
+	const minAmountOutRaw = resolveSafeMinAmountOutRaw({
+		requestedMinAmountOutRaw: params.intent.minAmountOutRaw,
+		quoteAmountOutRaw: quote.amountOutRaw,
+		quoteMinAmountOutRaw: quote.minAmountOutRaw,
+	});
 	const query = await callNearRpc<NearCallFunctionResult>({
 		method: "query",
 		network: params.network,
@@ -1441,7 +1509,7 @@ async function simulateRefSwap(params: {
 			tokenOutId: quote.tokenOutId,
 			amountInRaw: quote.amountInRaw,
 			amountOutRaw: quote.amountOutRaw,
-			minAmountOutRaw: params.intent.minAmountOutRaw ?? quote.minAmountOutRaw,
+			minAmountOutRaw,
 			source: quote.source,
 			actions: quote.actions,
 		},

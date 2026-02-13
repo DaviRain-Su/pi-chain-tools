@@ -114,6 +114,7 @@ function encodeJsonResult(value: unknown): number[] {
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	Reflect.deleteProperty(process.env, "NEAR_SWAP_MAX_SLIPPAGE_BPS");
 	runtimeMocks.parseNearNetwork.mockReturnValue("mainnet");
 	runtimeMocks.resolveNearAccountId.mockImplementation(
 		(accountId?: string) => accountId ?? "alice.near",
@@ -467,6 +468,39 @@ describe("w3rt_run_near_workflow_v0", () => {
 				amountInRaw: "10000000000000000000000",
 			},
 		});
+	});
+
+	it("blocks analysis when swap slippage exceeds configured safety limit", async () => {
+		process.env.NEAR_SWAP_MAX_SLIPPAGE_BPS = "100";
+		const tool = getTool();
+		await expect(
+			tool.execute("near-wf-8b", {
+				runId: "wf-near-08b",
+				runMode: "analysis",
+				network: "mainnet",
+				intentType: "near.swap.ref",
+				tokenInId: "usdt.tether-token.near",
+				tokenOutId: "usdc.fakes.near",
+				amountInRaw: "1000000",
+				slippageBps: 150,
+			}),
+		).rejects.toThrow("configured safety limit");
+	});
+
+	it("blocks simulate when minAmountOutRaw is below safe quote minimum", async () => {
+		const tool = getTool();
+		await expect(
+			tool.execute("near-wf-8c", {
+				runId: "wf-near-08c",
+				runMode: "simulate",
+				network: "mainnet",
+				intentType: "near.swap.ref",
+				tokenInId: "usdt.tether-token.near",
+				tokenOutId: "usdc.fakes.near",
+				amountInRaw: "1000000",
+				minAmountOutRaw: "990000",
+			}),
+		).rejects.toThrow("below safe minimum");
 	});
 
 	it("parses natural-language ref lp add intent", async () => {

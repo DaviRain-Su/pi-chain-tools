@@ -94,6 +94,7 @@ function getTool(name: string): ExecuteTool {
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	Reflect.deleteProperty(process.env, "NEAR_SWAP_MAX_SLIPPAGE_BPS");
 	runtimeMocks.parseNearNetwork.mockReturnValue("mainnet");
 	runtimeMocks.getNearRpcEndpoint.mockReturnValue(
 		"https://rpc.mainnet.near.org",
@@ -410,6 +411,36 @@ describe("near_swapRef", () => {
 				amountInRaw: "1000000",
 			}),
 		).rejects.toThrow("confirmMainnet=true");
+		expect(nearApiMocks.callFunction).not.toHaveBeenCalled();
+	});
+
+	it("blocks swap when slippage exceeds configured safety limit", async () => {
+		process.env.NEAR_SWAP_MAX_SLIPPAGE_BPS = "300";
+		const tool = getTool("near_swapRef");
+		await expect(
+			tool.execute("near-exec-5b", {
+				tokenInId: "usdt.tether-token.near",
+				tokenOutId: "usdc.fakes.near",
+				amountInRaw: "1000000",
+				slippageBps: 350,
+				confirmMainnet: true,
+			}),
+		).rejects.toThrow("configured safety limit");
+		expect(refMocks.getRefSwapQuote).not.toHaveBeenCalled();
+		expect(nearApiMocks.callFunction).not.toHaveBeenCalled();
+	});
+
+	it("blocks swap when minAmountOutRaw is below safe quote minimum", async () => {
+		const tool = getTool("near_swapRef");
+		await expect(
+			tool.execute("near-exec-5c", {
+				tokenInId: "usdt.tether-token.near",
+				tokenOutId: "usdc.fakes.near",
+				amountInRaw: "1000000",
+				minAmountOutRaw: "990000",
+				confirmMainnet: true,
+			}),
+		).rejects.toThrow("below safe minimum");
 		expect(nearApiMocks.callFunction).not.toHaveBeenCalled();
 	});
 
