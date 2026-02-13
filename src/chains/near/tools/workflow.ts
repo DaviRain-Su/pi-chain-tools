@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
-import { getRefSwapQuote } from "../ref.js";
+import { getRefSwapQuote, getRefTokenDecimalsHint } from "../ref.js";
 import {
 	callNearRpc,
 	nearNetworkSchema,
@@ -35,11 +35,13 @@ type NearRefSwapIntent = {
 	tokenInId: string;
 	tokenOutId: string;
 	amountInRaw: string;
+	amountInUi?: string;
 	poolId?: number;
 	slippageBps?: number;
 	refContractId?: string;
 	minAmountOutRaw?: string;
 	fromAccountId?: string;
+	autoRegisterOutput?: boolean;
 	gas?: string;
 	attachedDepositYoctoNear?: string;
 };
@@ -63,12 +65,14 @@ type WorkflowParams = {
 	ftContractId?: string;
 	amountRaw?: string;
 	amountInRaw?: string;
+	amountIn?: string | number;
 	tokenInId?: string;
 	tokenOutId?: string;
 	poolId?: number | string;
 	slippageBps?: number;
 	refContractId?: string;
 	minAmountOutRaw?: string;
+	autoRegisterOutput?: boolean;
 	gas?: string;
 	attachedDepositYoctoNear?: string;
 	confirmMainnet?: boolean;
@@ -83,6 +87,7 @@ type ParsedIntentHints = {
 	ftContractId?: string;
 	amountRaw?: string;
 	amountInRaw?: string;
+	amountInUi?: string;
 	tokenInId?: string;
 	tokenOutId?: string;
 	poolId?: number;
@@ -215,6 +220,36 @@ function parseOptionalSlippageBps(
 	return Math.floor(value);
 }
 
+function normalizeTokenInput(value: string, fieldName: string): string {
+	const normalized = value.trim().replace(/^@/, "");
+	if (!normalized) {
+		throw new Error(`${fieldName} is required`);
+	}
+	return normalized;
+}
+
+function parseScaledDecimalToRaw(
+	value: string,
+	decimals: number,
+	fieldName: string,
+): string {
+	const normalized = value.trim();
+	if (!/^\d+(\.\d+)?$/.test(normalized)) {
+		throw new Error(`${fieldName} must be a positive decimal number`);
+	}
+	if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
+		throw new Error("token decimals are invalid");
+	}
+	const [wholePart, fractionPart = ""] = normalized.split(".");
+	if (fractionPart.length > decimals) {
+		throw new Error(`${fieldName} supports up to ${decimals} decimal places`);
+	}
+	const whole = BigInt(wholePart);
+	const fraction = fractionPart.padEnd(decimals, "0");
+	const fractionValue = fraction ? BigInt(fraction) : 0n;
+	return (whole * 10n ** BigInt(decimals) + fractionValue).toString();
+}
+
 function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (!intentText || !intentText.trim()) return {};
 	const text = intentText.trim();
@@ -228,6 +263,9 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	);
 	const rawAmountMatch = text.match(
 		/(?:raw|amountRaw|数量|amount)\s*[:：]?\s*(\d+)/i,
+	);
+	const swapUiAmountMatch = text.match(
+		/(?:swap|把|将)?\s*(\d+(?:\.\d+)?)\s*([a-z][a-z0-9._-]*)\s*(?:->|to|换成|换到|兑换为|兑换成)\s*([a-z][a-z0-9._-]*)/i,
 	);
 	const swapPairMatch = text.match(
 		/([a-z0-9][a-z0-9._-]*\.near)\s*(?:->|to|换成|换到|兑换为|兑换成|到)\s*([a-z0-9][a-z0-9._-]*\.near)/i,
@@ -263,6 +301,9 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		hints.amountRaw = rawAmountMatch[1];
 		hints.amountInRaw = rawAmountMatch[1];
 	}
+	if (swapUiAmountMatch?.[1]) hints.amountInUi = swapUiAmountMatch[1];
+	if (swapUiAmountMatch?.[2]) hints.tokenInId = swapUiAmountMatch[2];
+	if (swapUiAmountMatch?.[3]) hints.tokenOutId = swapUiAmountMatch[3];
 	if (swapPairMatch?.[1]) hints.tokenInId = swapPairMatch[1];
 	if (swapPairMatch?.[2]) hints.tokenOutId = swapPairMatch[2];
 	if (poolIdMatch?.[1]) {
@@ -284,7 +325,7 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (
 		hints.tokenInId &&
 		hints.tokenOutId &&
-		(likelySwap || hints.amountInRaw)
+		(likelySwap || hints.amountInRaw || hints.amountInUi)
 	) {
 		hints.intentType = "near.swap.ref";
 		return hints;
@@ -366,23 +407,62 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 	}
 
 	if (intentType === "near.swap.ref") {
-		const tokenInId = normalizeAccountId(
+		const tokenInId = normalizeTokenInput(
 			params.tokenInId ?? hints.tokenInId ?? "",
 			"tokenInId",
 		);
-		const tokenOutId = normalizeAccountId(
+		const tokenOutId = normalizeTokenInput(
 			params.tokenOutId ?? hints.tokenOutId ?? "",
 			"tokenOutId",
 		);
 		if (tokenInId === tokenOutId) {
 			throw new Error("tokenInId and tokenOutId must be different");
 		}
-		const amountInRaw =
+		const explicitRawAmount =
 			params.amountInRaw?.trim() ??
 			params.amountRaw?.trim() ??
 			hints.amountInRaw?.trim() ??
 			hints.amountRaw?.trim() ??
 			"";
+		const amountInRaw =
+			explicitRawAmount ||
+			(() => {
+				const explicitUiAmount =
+					typeof params.amountIn === "number"
+						? params.amountIn.toString()
+						: typeof params.amountIn === "string"
+							? params.amountIn.trim()
+							: (hints.amountInUi?.trim() ?? "");
+				if (!explicitUiAmount) {
+					const nearAmountInput =
+						typeof params.amountNear === "number" ||
+						typeof params.amountNear === "string"
+							? params.amountNear
+							: hints.amountNear;
+					const nearLikeToken =
+						tokenInId.toLowerCase() === "near" ||
+						tokenInId.toLowerCase() === "wnear" ||
+						tokenInId.toLowerCase().includes("wrap.near") ||
+						tokenInId.toLowerCase().includes("wrap.testnet");
+					if (nearAmountInput != null && nearLikeToken) {
+						return toYoctoNear(nearAmountInput).toString();
+					}
+					throw new Error(
+						"amountInRaw is required for near.swap.ref (or provide decimal amount like '0.01 NEAR').",
+					);
+				}
+				const decimals =
+					getRefTokenDecimalsHint({
+						network: params.network,
+						tokenIdOrSymbol: tokenInId,
+					}) ?? null;
+				if (decimals == null) {
+					throw new Error(
+						`Cannot infer decimals for ${tokenInId}. Provide amountInRaw explicitly.`,
+					);
+				}
+				return parseScaledDecimalToRaw(explicitUiAmount, decimals, "amountIn");
+			})();
 		parsePositiveBigInt(amountInRaw, "amountInRaw");
 		const minAmountOutRaw =
 			typeof params.minAmountOutRaw === "string" &&
@@ -411,6 +491,7 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 			refContractId,
 			minAmountOutRaw,
 			fromAccountId,
+			autoRegisterOutput: params.autoRegisterOutput !== false,
 			gas:
 				typeof params.gas === "string" && params.gas.trim()
 					? params.gas.trim()
@@ -456,8 +537,20 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 	if (params.toAccountId || params.amountNear || params.amountYoctoNear)
 		return true;
 	if (params.ftContractId || params.amountRaw) return true;
-	if (params.tokenInId || params.tokenOutId || params.amountInRaw) return true;
-	if (params.poolId != null || params.refContractId || params.minAmountOutRaw) {
+	if (
+		params.tokenInId ||
+		params.tokenOutId ||
+		params.amountInRaw ||
+		params.amountIn != null
+	) {
+		return true;
+	}
+	if (
+		params.poolId != null ||
+		params.refContractId ||
+		params.minAmountOutRaw ||
+		params.autoRegisterOutput != null
+	) {
 		return true;
 	}
 	return false;
@@ -476,6 +569,122 @@ function decodeCallFunctionResult(result: NearCallFunctionResult): string {
 		throw new Error("call_function returned non-numeric balance payload");
 	}
 	return parsed.trim();
+}
+
+function encodeCallFunctionArgs(args: Record<string, unknown>): string {
+	return Buffer.from(JSON.stringify(args), "utf8").toString("base64");
+}
+
+function decodeCallFunctionJson<T>(result: NearCallFunctionResult): T {
+	if (!Array.isArray(result.result)) {
+		throw new Error("Invalid call_function result payload");
+	}
+	const utf8 = Buffer.from(Uint8Array.from(result.result)).toString("utf8");
+	if (!utf8.trim()) {
+		throw new Error("call_function returned empty payload");
+	}
+	return JSON.parse(utf8) as T;
+}
+
+function isMissingMethodError(error: unknown): boolean {
+	const text =
+		error instanceof Error && typeof error.message === "string"
+			? error.message.toLowerCase()
+			: String(error).toLowerCase();
+	return (
+		text.includes("methodnotfound") ||
+		text.includes("does not exist while viewing") ||
+		text.includes("unknown method")
+	);
+}
+
+async function queryStorageRegistrationStatus(params: {
+	network: string;
+	rpcUrl?: string;
+	ftContractId: string;
+	accountId: string;
+}): Promise<
+	| {
+			status: "registered";
+	  }
+	| {
+			status: "needs_registration";
+			estimatedDepositYoctoNear: string;
+	  }
+	| {
+			status: "unknown";
+			reason: string;
+	  }
+> {
+	try {
+		const balanceResult = await callNearRpc<NearCallFunctionResult>({
+			method: "query",
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			params: {
+				request_type: "call_function",
+				account_id: params.ftContractId,
+				method_name: "storage_balance_of",
+				args_base64: encodeCallFunctionArgs({
+					account_id: params.accountId,
+				}),
+				finality: "final",
+			},
+		});
+		const balance = decodeCallFunctionJson<{ total?: string } | null>(
+			balanceResult,
+		);
+		if (balance && typeof balance.total === "string") {
+			const total = parseNonNegativeBigInt(
+				balance.total,
+				"storageBalance.total",
+			);
+			if (total > 0n) {
+				return { status: "registered" };
+			}
+		}
+	} catch (error) {
+		if (isMissingMethodError(error)) {
+			return {
+				status: "unknown",
+				reason: "token does not expose storage_balance_of",
+			};
+		}
+		return {
+			status: "unknown",
+			reason:
+				error instanceof Error ? error.message : "storage precheck call failed",
+		};
+	}
+
+	try {
+		const boundsResult = await callNearRpc<NearCallFunctionResult>({
+			method: "query",
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			params: {
+				request_type: "call_function",
+				account_id: params.ftContractId,
+				method_name: "storage_balance_bounds",
+				args_base64: encodeCallFunctionArgs({}),
+				finality: "final",
+			},
+		});
+		const bounds = decodeCallFunctionJson<{ min?: string }>(boundsResult);
+		const min =
+			typeof bounds?.min === "string" && /^\d+$/.test(bounds.min.trim())
+				? bounds.min.trim()
+				: "1250000000000000000000";
+		return {
+			status: "needs_registration",
+			estimatedDepositYoctoNear: min,
+		};
+	} catch {
+		return {
+			status: "needs_registration",
+			estimatedDepositYoctoNear: "1250000000000000000000",
+		};
+	}
 }
 
 async function simulateNearTransfer(params: {
@@ -581,6 +790,18 @@ async function simulateRefSwap(params: {
 	requiredRaw: string;
 	blockHash: string;
 	blockHeight: number;
+	storageRegistration:
+		| {
+				status: "registered";
+		  }
+		| {
+				status: "needs_registration";
+				estimatedDepositYoctoNear: string;
+		  }
+		| {
+				status: "unknown";
+				reason: string;
+		  };
 	quote: {
 		refContractId: string;
 		poolId: number;
@@ -589,35 +810,12 @@ async function simulateRefSwap(params: {
 		amountInRaw: string;
 		amountOutRaw: string;
 		minAmountOutRaw: string;
-		source: "explicitPool" | "bestDirectSimplePool";
+		source: "explicitPool" | "bestDirectSimplePool" | "bestDirectPool";
 	};
 }> {
 	const fromAccountId = resolveNearAccountId(
 		params.intent.fromAccountId ?? params.fromAccountId,
 		params.network,
-	);
-	const query = await callNearRpc<NearCallFunctionResult>({
-		method: "query",
-		network: params.network,
-		rpcUrl: params.rpcUrl,
-		params: {
-			account_id: params.intent.tokenInId,
-			args_base64: Buffer.from(
-				JSON.stringify({ account_id: fromAccountId }),
-				"utf8",
-			).toString("base64"),
-			finality: "final",
-			method_name: "ft_balance_of",
-			request_type: "call_function",
-		},
-	});
-	const available = parseNonNegativeBigInt(
-		decodeCallFunctionResult(query),
-		"ft_balance_of",
-	);
-	const required = parsePositiveBigInt(
-		params.intent.amountInRaw,
-		"amountInRaw",
 	);
 	const quote = await getRefSwapQuote({
 		network: params.network,
@@ -629,6 +827,29 @@ async function simulateRefSwap(params: {
 		poolId: params.intent.poolId,
 		slippageBps: params.intent.slippageBps,
 	});
+	const query = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		params: {
+			account_id: quote.tokenInId,
+			args_base64: encodeCallFunctionArgs({ account_id: fromAccountId }),
+			finality: "final",
+			method_name: "ft_balance_of",
+			request_type: "call_function",
+		},
+	});
+	const available = parseNonNegativeBigInt(
+		decodeCallFunctionResult(query),
+		"ft_balance_of",
+	);
+	const required = parsePositiveBigInt(quote.amountInRaw, "amountInRaw");
+	const storageRegistration = await queryStorageRegistrationStatus({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		ftContractId: quote.tokenOutId,
+		accountId: fromAccountId,
+	});
 	return {
 		status: available >= required ? "success" : "insufficient_balance",
 		fromAccountId,
@@ -636,6 +857,7 @@ async function simulateRefSwap(params: {
 		requiredRaw: required.toString(),
 		blockHash: query.block_hash,
 		blockHeight: query.block_height,
+		storageRegistration,
 		quote: {
 			refContractId: quote.refContractId,
 			poolId: quote.poolId,
@@ -722,12 +944,14 @@ export function createNearWorkflowTools() {
 				ftContractId: Type.Optional(Type.String()),
 				amountRaw: Type.Optional(Type.String()),
 				amountInRaw: Type.Optional(Type.String()),
+				amountIn: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				tokenInId: Type.Optional(Type.String()),
 				tokenOutId: Type.Optional(Type.String()),
 				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				slippageBps: Type.Optional(Type.Number()),
 				refContractId: Type.Optional(Type.String()),
 				minAmountOutRaw: Type.Optional(Type.String()),
+				autoRegisterOutput: Type.Optional(Type.Boolean()),
 				gas: Type.Optional(Type.String()),
 				attachedDepositYoctoNear: Type.Optional(Type.String()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
@@ -876,6 +1100,7 @@ export function createNearWorkflowTools() {
 									poolId: intent.poolId,
 									slippageBps: intent.slippageBps,
 									refContractId: intent.refContractId,
+									autoRegisterOutput: intent.autoRegisterOutput,
 									gas: intent.gas,
 									attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
 								}),

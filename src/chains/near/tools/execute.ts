@@ -5,6 +5,7 @@ import { defineTool } from "../../../core/types.js";
 import { getRefContractId, getRefSwapQuote } from "../ref.js";
 import {
 	NEAR_TOOL_PREFIX,
+	callNearRpc,
 	formatNearAmount,
 	getNearExplorerTransactionUrl,
 	getNearRpcEndpoint,
@@ -46,6 +47,7 @@ type NearRefSwapParams = {
 	poolId?: number | string;
 	slippageBps?: number;
 	refContractId?: string;
+	autoRegisterOutput?: boolean;
 	fromAccountId?: string;
 	privateKey?: string;
 	network?: string;
@@ -54,6 +56,40 @@ type NearRefSwapParams = {
 	gas?: string;
 	attachedDepositYoctoNear?: string;
 };
+
+type NearCallFunctionResult = {
+	result: number[];
+	logs: string[];
+	block_height: number;
+	block_hash: string;
+};
+
+type NearStorageBalance = {
+	total: string;
+	available?: string;
+};
+
+type NearStorageBalanceBounds = {
+	min: string;
+	max?: string;
+};
+
+type StorageRegistrationResult =
+	| {
+			status: "already_registered";
+	  }
+	| {
+			status: "registered_now";
+			depositYoctoNear: string;
+			txHash: string | null;
+	  }
+	| {
+			status: "unknown";
+			reason: string;
+	  };
+
+const DEFAULT_FT_STORAGE_DEPOSIT_YOCTO_NEAR = 1_250_000_000_000_000_000_000n;
+const DEFAULT_STORAGE_DEPOSIT_GAS = 30_000_000_000_000n;
 
 function parsePositiveYocto(value: string, fieldName: string): bigint {
 	const normalized = value.trim();
@@ -121,6 +157,169 @@ function parseOptionalPoolId(value?: number | string): number | undefined {
 		throw new Error("poolId must be a non-negative integer");
 	}
 	return normalized;
+}
+
+function encodeNearCallArgs(args: Record<string, unknown>): string {
+	return Buffer.from(JSON.stringify(args), "utf8").toString("base64");
+}
+
+function decodeNearCallResultJson<T>(payload: NearCallFunctionResult): T {
+	if (!Array.isArray(payload.result)) {
+		throw new Error("Invalid call_function result payload");
+	}
+	const utf8 = Buffer.from(Uint8Array.from(payload.result)).toString("utf8");
+	if (!utf8.trim()) {
+		throw new Error("call_function returned empty payload");
+	}
+	return JSON.parse(utf8) as T;
+}
+
+function extractErrorText(error: unknown): string {
+	if (error instanceof Error && typeof error.message === "string") {
+		return error.message;
+	}
+	return String(error);
+}
+
+function isMissingMethodError(error: unknown): boolean {
+	const lower = extractErrorText(error).toLowerCase();
+	return (
+		lower.includes("methodnotfound") ||
+		lower.includes("does not exist while viewing") ||
+		lower.includes("unknown method")
+	);
+}
+
+async function queryFtStorageBalance(params: {
+	network: string;
+	rpcUrl?: string;
+	ftContractId: string;
+	accountId: string;
+}): Promise<NearStorageBalance | null | "unsupported"> {
+	try {
+		const result = await callNearRpc<NearCallFunctionResult>({
+			method: "query",
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			params: {
+				request_type: "call_function",
+				account_id: params.ftContractId,
+				method_name: "storage_balance_of",
+				args_base64: encodeNearCallArgs({
+					account_id: params.accountId,
+				}),
+				finality: "final",
+			},
+		});
+		const parsed = decodeNearCallResultJson<NearStorageBalance | null>(result);
+		if (!parsed) return null;
+		if (
+			typeof parsed === "object" &&
+			typeof parsed.total === "string" &&
+			parsed.total.trim()
+		) {
+			parseNonNegativeYocto(parsed.total, "storageBalance.total");
+			return parsed;
+		}
+		return null;
+	} catch (error) {
+		if (isMissingMethodError(error)) return "unsupported";
+		throw error;
+	}
+}
+
+async function queryFtStorageMinimumDeposit(params: {
+	network: string;
+	rpcUrl?: string;
+	ftContractId: string;
+}): Promise<bigint | null> {
+	try {
+		const result = await callNearRpc<NearCallFunctionResult>({
+			method: "query",
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			params: {
+				request_type: "call_function",
+				account_id: params.ftContractId,
+				method_name: "storage_balance_bounds",
+				args_base64: encodeNearCallArgs({}),
+				finality: "final",
+			},
+		});
+		const parsed = decodeNearCallResultJson<NearStorageBalanceBounds>(result);
+		if (
+			parsed &&
+			typeof parsed === "object" &&
+			typeof parsed.min === "string" &&
+			parsed.min.trim()
+		) {
+			return parseNonNegativeYocto(parsed.min, "storageBalanceBounds.min");
+		}
+		return null;
+	} catch (error) {
+		if (isMissingMethodError(error)) return null;
+		return null;
+	}
+}
+
+async function ensureFtStorageRegistered(params: {
+	account: Account;
+	network: string;
+	rpcUrl?: string;
+	ftContractId: string;
+	accountId: string;
+}): Promise<StorageRegistrationResult> {
+	const balance = await queryFtStorageBalance({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		ftContractId: params.ftContractId,
+		accountId: params.accountId,
+	});
+	if (balance === "unsupported") {
+		return {
+			status: "unknown",
+			reason: "token does not expose storage_balance_of",
+		};
+	}
+	if (
+		balance &&
+		parseNonNegativeYocto(balance.total, "storageBalance.total") > 0n
+	) {
+		return { status: "already_registered" };
+	}
+
+	const minDeposit =
+		(await queryFtStorageMinimumDeposit({
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			ftContractId: params.ftContractId,
+		})) ?? DEFAULT_FT_STORAGE_DEPOSIT_YOCTO_NEAR;
+
+	try {
+		const registrationTx = await params.account.callFunction({
+			contractId: params.ftContractId,
+			methodName: "storage_deposit",
+			args: {
+				account_id: params.accountId,
+				registration_only: true,
+			},
+			deposit: minDeposit,
+			gas: DEFAULT_STORAGE_DEPOSIT_GAS,
+		});
+		return {
+			status: "registered_now",
+			depositYoctoNear: minDeposit.toString(),
+			txHash: extractTxHash(registrationTx),
+		};
+	} catch (error) {
+		const message = extractErrorText(error).toLowerCase();
+		if (message.includes("already registered")) {
+			return { status: "already_registered" };
+		}
+		throw new Error(
+			`Failed to auto-register storage on ${params.ftContractId}: ${extractErrorText(error)}`,
+		);
+	}
 }
 
 function normalizeReceiverAccountId(value: string): string {
@@ -372,10 +571,10 @@ export function createNearExecuteTools(): RegisteredTool[] {
 				"Execute token swap on Ref (Rhea route) via ft_transfer_call with mainnet safety gate.",
 			parameters: Type.Object({
 				tokenInId: Type.String({
-					description: "Input token contract id (NEP-141)",
+					description: "Input token contract id or symbol (e.g. NEAR/USDC)",
 				}),
 				tokenOutId: Type.String({
-					description: "Output token contract id (NEP-141)",
+					description: "Output token contract id or symbol",
 				}),
 				amountInRaw: Type.String({
 					description: "Input amount as raw integer string",
@@ -397,6 +596,12 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					Type.String({
 						description:
 							"Ref contract id override (default mainnet v2.ref-finance.near).",
+					}),
+				),
+				autoRegisterOutput: Type.Optional(
+					Type.Boolean({
+						description:
+							"Auto-run storage_deposit for output token when receiver is not registered (default true).",
 					}),
 				),
 				fromAccountId: Type.Optional(
@@ -433,10 +638,10 @@ export function createNearExecuteTools(): RegisteredTool[] {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as NearRefSwapParams;
-				const tokenInId = normalizeReceiverAccountId(params.tokenInId);
-				const tokenOutId = normalizeReceiverAccountId(params.tokenOutId);
-				if (tokenInId === tokenOutId) {
-					throw new Error("tokenInId and tokenOutId must be different");
+				const tokenInInput = params.tokenInId.trim();
+				const tokenOutInput = params.tokenOutId.trim();
+				if (!tokenInInput || !tokenOutInput) {
+					throw new Error("tokenInId and tokenOutId are required");
 				}
 				const amountInRaw = parsePositiveYocto(
 					params.amountInRaw,
@@ -444,6 +649,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 				);
 				const gas = resolveRefSwapGas(params.gas);
 				const deposit = resolveAttachedDeposit(params.attachedDepositYoctoNear);
+				const autoRegisterOutput = params.autoRegisterOutput !== false;
 				const { account, network, endpoint, signerAccountId } =
 					createNearAccountClient({
 						accountId: params.fromAccountId,
@@ -459,12 +665,17 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					network,
 					rpcUrl: params.rpcUrl,
 					refContractId,
-					tokenInId,
-					tokenOutId,
+					tokenInId: tokenInInput,
+					tokenOutId: tokenOutInput,
 					amountInRaw: amountInRaw.toString(),
 					poolId,
 					slippageBps: params.slippageBps,
 				});
+				const tokenInId = normalizeReceiverAccountId(quote.tokenInId);
+				const tokenOutId = normalizeReceiverAccountId(quote.tokenOutId);
+				if (tokenInId === tokenOutId) {
+					throw new Error("tokenInId and tokenOutId must be different");
+				}
 				const minAmountOutRaw =
 					typeof params.minAmountOutRaw === "string" &&
 					params.minAmountOutRaw.trim()
@@ -473,6 +684,16 @@ export function createNearExecuteTools(): RegisteredTool[] {
 								"minAmountOutRaw",
 							).toString()
 						: quote.minAmountOutRaw;
+				const storageRegistration =
+					autoRegisterOutput === true
+						? await ensureFtStorageRegistered({
+								account,
+								network,
+								rpcUrl: params.rpcUrl,
+								ftContractId: tokenOutId,
+								accountId: signerAccountId,
+							})
+						: null;
 
 				const tx = await account.callFunction({
 					contractId: tokenInId,
@@ -512,6 +733,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					details: {
 						amountInRaw: amountInRaw.toString(),
 						attachedDepositYoctoNear: deposit.toString(),
+						autoRegisterOutput,
 						explorerUrl,
 						fromAccountId: signerAccountId,
 						gas: gas.toString(),
@@ -526,6 +748,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 								? Math.floor(params.slippageBps)
 								: 50,
 						source: quote.source,
+						storageRegistration,
 						tokenInId,
 						tokenOutId,
 						txHash,

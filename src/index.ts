@@ -118,6 +118,7 @@ export {
 	fetchRefPools,
 	getRefContractId,
 	getRefSwapQuote,
+	getRefTokenDecimalsHint,
 } from "./chains/near/ref.js";
 export type {
 	RefNetwork,

@@ -221,6 +221,85 @@ describe("near_getFtBalance", () => {
 	});
 });
 
+describe("near_getPortfolio", () => {
+	it("returns native + non-zero FT assets", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				amount: "1000000000000000000000000",
+				block_hash: "4441",
+				block_height: 901,
+				code_hash: "11111111111111111111111111111111",
+				locked: "100000000000000000000000",
+				storage_paid_at: 0,
+				storage_usage: 381,
+			})
+			.mockResolvedValueOnce({
+				block_hash: "4442",
+				block_height: 902,
+				logs: [],
+				result: [...Buffer.from(JSON.stringify("1234500"), "utf8")],
+			})
+			.mockResolvedValueOnce({
+				block_hash: "4443",
+				block_height: 903,
+				logs: [],
+				result: [
+					...Buffer.from(
+						JSON.stringify({
+							decimals: 6,
+							symbol: "USDC",
+						}),
+						"utf8",
+					),
+				],
+			})
+			.mockResolvedValueOnce({
+				block_hash: "4444",
+				block_height: 904,
+				logs: [],
+				result: [...Buffer.from(JSON.stringify("0"), "utf8")],
+			});
+		runtimeMocks.formatNearAmount.mockImplementation(
+			(value: string | bigint) => {
+				const normalized = typeof value === "bigint" ? value.toString() : value;
+				if (normalized === "1000000000000000000000000") return "1";
+				if (normalized === "900000000000000000000000") return "0.9";
+				if (normalized === "100000000000000000000000") return "0.1";
+				return normalized;
+			},
+		);
+		runtimeMocks.formatTokenAmount.mockReturnValue("1.2345");
+
+		const tool = getTool("near_getPortfolio");
+		const result = await tool.execute("near-read-portfolio-1", {
+			accountId: "alice.near",
+			network: "mainnet",
+			ftContractIds: ["usdc.fakes.near", "usdt.tether-token.near"],
+		});
+
+		expect(result.content[0]?.text).toContain("Portfolio: 2 assets");
+		expect(result.content[0]?.text).toContain("USDC: 1.2345");
+		expect(result.details).toMatchObject({
+			accountId: "alice.near",
+			network: "mainnet",
+			ftContractsQueried: ["usdc.fakes.near", "usdt.tether-token.near"],
+			assets: [
+				{
+					kind: "native",
+					symbol: "NEAR",
+				},
+				{
+					kind: "ft",
+					symbol: "USDC",
+					contractId: "usdc.fakes.near",
+					rawAmount: "1234500",
+					uiAmount: "1.2345",
+				},
+			],
+		});
+	});
+});
+
 describe("near_getSwapQuoteRef", () => {
 	it("returns Ref quote details", async () => {
 		const tool = getTool("near_getSwapQuoteRef");

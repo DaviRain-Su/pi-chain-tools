@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtimeMocks = vi.hoisted(() => ({
+	callNearRpc: vi.fn(),
 	formatNearAmount: vi.fn((value: string | bigint) =>
 		typeof value === "bigint" ? value.toString() : value,
 	),
@@ -47,6 +48,7 @@ vi.mock("../runtime.js", async () => {
 		await vi.importActual<typeof import("../runtime.js")>("../runtime.js");
 	return {
 		...actual,
+		callNearRpc: runtimeMocks.callNearRpc,
 		formatNearAmount: runtimeMocks.formatNearAmount,
 		getNearExplorerTransactionUrl: runtimeMocks.getNearExplorerTransactionUrl,
 		getNearRpcEndpoint: runtimeMocks.getNearRpcEndpoint,
@@ -95,6 +97,12 @@ beforeEach(() => {
 		},
 	});
 	runtimeMocks.toYoctoNear.mockReturnValue(1000n);
+	runtimeMocks.callNearRpc.mockResolvedValue({
+		block_hash: "5555",
+		block_height: 111,
+		logs: [],
+		result: [...Buffer.from(JSON.stringify({ total: "1" }), "utf8")],
+	});
 	nearApiMocks.transfer.mockResolvedValue({
 		transaction_outcome: {
 			id: "near-tx-hash-1",
@@ -202,6 +210,21 @@ describe("near_swapRef", () => {
 			poolId: undefined,
 			slippageBps: 100,
 		});
+		expect(runtimeMocks.callNearRpc).toHaveBeenCalledWith({
+			method: "query",
+			network: "mainnet",
+			rpcUrl: undefined,
+			params: {
+				request_type: "call_function",
+				account_id: "usdc.fakes.near",
+				method_name: "storage_balance_of",
+				args_base64: Buffer.from(
+					JSON.stringify({ account_id: "alice.near" }),
+					"utf8",
+				).toString("base64"),
+				finality: "final",
+			},
+		});
 		expect(nearApiMocks.callFunction).toHaveBeenCalledWith({
 			contractId: "usdt.tether-token.near",
 			methodName: "ft_transfer_call",
@@ -228,7 +251,91 @@ describe("near_swapRef", () => {
 			poolId: 3,
 			tokenInId: "usdt.tether-token.near",
 			tokenOutId: "usdc.fakes.near",
+			storageRegistration: {
+				status: "already_registered",
+			},
 			txHash: "near-tx-hash-2",
+		});
+	});
+
+	it("auto-registers output token storage when account is not registered", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "6666",
+				block_height: 112,
+				logs: [],
+				result: [...Buffer.from(JSON.stringify(null), "utf8")],
+			})
+			.mockResolvedValueOnce({
+				block_hash: "6667",
+				block_height: 113,
+				logs: [],
+				result: [
+					...Buffer.from(
+						JSON.stringify({ min: "1250000000000000000000" }),
+						"utf8",
+					),
+				],
+			});
+		nearApiMocks.callFunction
+			.mockResolvedValueOnce({
+				transaction_outcome: {
+					id: "near-storage-tx-hash",
+				},
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: {
+					id: "near-swap-tx-hash",
+				},
+			});
+
+		const tool = getTool("near_swapRef");
+		const result = await tool.execute("near-exec-4b", {
+			tokenInId: "usdt.tether-token.near",
+			tokenOutId: "usdc.fakes.near",
+			amountInRaw: "1000000",
+			confirmMainnet: true,
+		});
+
+		expect(nearApiMocks.callFunction).toHaveBeenNthCalledWith(1, {
+			contractId: "usdc.fakes.near",
+			methodName: "storage_deposit",
+			args: {
+				account_id: "alice.near",
+				registration_only: true,
+			},
+			deposit: 1_250_000_000_000_000_000_000n,
+			gas: 30_000_000_000_000n,
+		});
+		expect(nearApiMocks.callFunction).toHaveBeenNthCalledWith(2, {
+			contractId: "usdt.tether-token.near",
+			methodName: "ft_transfer_call",
+			args: {
+				receiver_id: "v2.ref-finance.near",
+				amount: "1000000",
+				msg: JSON.stringify({
+					force: 0,
+					actions: [
+						{
+							pool_id: 3,
+							token_in: "usdt.tether-token.near",
+							amount_in: "1000000",
+							token_out: "usdc.fakes.near",
+							min_amount_out: "992015",
+						},
+					],
+				}),
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			storageRegistration: {
+				status: "registered_now",
+				depositYoctoNear: "1250000000000000000000",
+				txHash: "near-storage-tx-hash",
+			},
+			txHash: "near-swap-tx-hash",
 		});
 	});
 

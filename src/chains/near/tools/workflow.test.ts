@@ -20,6 +20,7 @@ const executeMocks = vi.hoisted(() => ({
 
 const refMocks = vi.hoisted(() => ({
 	getRefSwapQuote: vi.fn(),
+	getRefTokenDecimalsHint: vi.fn(),
 }));
 
 vi.mock("../runtime.js", async () => {
@@ -63,6 +64,7 @@ vi.mock("./execute.js", () => ({
 
 vi.mock("../ref.js", () => ({
 	getRefSwapQuote: refMocks.getRefSwapQuote,
+	getRefTokenDecimalsHint: refMocks.getRefTokenDecimalsHint,
 }));
 
 import { createNearWorkflowTools } from "./workflow.js";
@@ -124,6 +126,26 @@ beforeEach(() => {
 		feeBps: 30,
 		source: "bestDirectSimplePool",
 	});
+	refMocks.getRefTokenDecimalsHint.mockImplementation(
+		({
+			tokenIdOrSymbol,
+		}: {
+			tokenIdOrSymbol: string;
+		}) => {
+			const normalized = tokenIdOrSymbol.toLowerCase();
+			if (
+				normalized === "near" ||
+				normalized === "wnear" ||
+				normalized.includes("wrap.near")
+			) {
+				return 24;
+			}
+			if (normalized === "usdc" || normalized === "usdt") {
+				return 6;
+			}
+			return null;
+		},
+	);
 });
 
 describe("w3rt_run_near_workflow_v0", () => {
@@ -258,12 +280,19 @@ describe("w3rt_run_near_workflow_v0", () => {
 	});
 
 	it("simulates ref swap and returns quote artifact", async () => {
-		runtimeMocks.callNearRpc.mockResolvedValueOnce({
-			block_hash: "4444",
-			block_height: 321,
-			logs: [],
-			result: [...Buffer.from(JSON.stringify("1200000"), "utf8")],
-		});
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "4444",
+				block_height: 321,
+				logs: [],
+				result: [...Buffer.from(JSON.stringify("1200000"), "utf8")],
+			})
+			.mockResolvedValueOnce({
+				block_hash: "4445",
+				block_height: 322,
+				logs: [],
+				result: [...Buffer.from(JSON.stringify({ total: "1" }), "utf8")],
+			});
 		const tool = getTool();
 		const result = await tool.execute("near-wf-6", {
 			runId: "wf-near-06",
@@ -282,6 +311,9 @@ describe("w3rt_run_near_workflow_v0", () => {
 			artifacts: {
 				simulate: {
 					status: "success",
+					storageRegistration: {
+						status: "registered",
+					},
 					quote: {
 						poolId: 3,
 					},
@@ -320,6 +352,7 @@ describe("w3rt_run_near_workflow_v0", () => {
 				tokenOutId: "usdc.fakes.near",
 				amountInRaw: "1000000",
 				confirmMainnet: true,
+				autoRegisterOutput: true,
 			}),
 		);
 		expect(result.details).toMatchObject({
@@ -328,6 +361,26 @@ describe("w3rt_run_near_workflow_v0", () => {
 				execute: {
 					txHash: "near-exec-swap-hash",
 				},
+			},
+		});
+	});
+
+	it("parses natural-language near/usdc swap amount", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-8", {
+			runId: "wf-near-08",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "把 0.01 NEAR 换成 USDC，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.ref",
+			intent: {
+				type: "near.swap.ref",
+				tokenInId: "NEAR",
+				tokenOutId: "USDC",
+				amountInRaw: "10000000000000000000000",
 			},
 		});
 	});

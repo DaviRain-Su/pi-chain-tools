@@ -19,7 +19,7 @@ export type RefSwapQuote = {
 	amountOutRaw: string;
 	minAmountOutRaw: string;
 	feeBps: number;
-	source: "explicitPool" | "bestDirectSimplePool";
+	source: "explicitPool" | "bestDirectSimplePool" | "bestDirectPool";
 };
 
 type NearCallFunctionResult = {
@@ -37,6 +37,65 @@ const DEFAULT_REF_CONTRACT_BY_NETWORK: Record<RefNetwork, string> = {
 const REF_CONTRACT_ENV_BY_NETWORK: Record<RefNetwork, string> = {
 	mainnet: "NEAR_REF_MAINNET_CONTRACT_ID",
 	testnet: "NEAR_REF_TESTNET_CONTRACT_ID",
+};
+
+const REF_TOKEN_MAP_ENV_BY_NETWORK: Record<RefNetwork, string> = {
+	mainnet: "NEAR_REF_TOKEN_MAP_MAINNET",
+	testnet: "NEAR_REF_TOKEN_MAP_TESTNET",
+};
+
+const REF_TOKEN_DECIMALS_ENV_BY_NETWORK: Record<RefNetwork, string> = {
+	mainnet: "NEAR_REF_TOKEN_DECIMALS_MAINNET",
+	testnet: "NEAR_REF_TOKEN_DECIMALS_TESTNET",
+};
+
+const DEFAULT_REF_TOKEN_MAP_BY_NETWORK: Record<
+	RefNetwork,
+	Record<string, string[]>
+> = {
+	mainnet: {
+		NEAR: ["wrap.near"],
+		WNEAR: ["wrap.near"],
+		USDT: ["usdt.tether-token.near"],
+		USDC: [
+			"a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
+			"usdc.tether-token.near",
+			"usdc.fakes.near",
+		],
+	},
+	testnet: {
+		NEAR: ["wrap.testnet"],
+		WNEAR: ["wrap.testnet"],
+		USDT: ["usdt.fakes.near", "usdt.tether-token.testnet"],
+		USDC: ["usdc.fakes.near"],
+	},
+};
+
+const DEFAULT_REF_TOKEN_DECIMALS_BY_NETWORK: Record<
+	RefNetwork,
+	Record<string, number>
+> = {
+	mainnet: {
+		NEAR: 24,
+		WNEAR: 24,
+		"wrap.near": 24,
+		USDT: 6,
+		"usdt.tether-token.near": 6,
+		USDC: 6,
+		"usdc.tether-token.near": 6,
+		"usdc.fakes.near": 6,
+		"a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near": 6,
+	},
+	testnet: {
+		NEAR: 24,
+		WNEAR: 24,
+		"wrap.testnet": 24,
+		USDT: 6,
+		"usdt.fakes.near": 6,
+		"usdt.tether-token.testnet": 6,
+		USDC: 6,
+		"usdc.fakes.near": 6,
+	},
 };
 
 const FEE_DIVISOR = 10_000n;
@@ -151,6 +210,159 @@ function applySlippage(amountOutRaw: bigint, slippageBps: number): bigint {
 	const numerator = FEE_DIVISOR - bps;
 	if (numerator <= 0n) return 0n;
 	return (amountOutRaw * numerator) / FEE_DIVISOR;
+}
+
+function normalizeTokenLookupKey(value: string): string {
+	const normalized = value.trim();
+	if (!normalized) return "";
+	return normalized.includes(".")
+		? normalized.toLowerCase()
+		: normalized.toUpperCase();
+}
+
+function isAccountLikeTokenId(value: string): boolean {
+	return value.includes(".");
+}
+
+function parseTokenMapEnv(value: string | undefined): Record<string, string[]> {
+	const normalized = value?.trim();
+	if (!normalized) return {};
+	try {
+		const parsed = JSON.parse(normalized) as unknown;
+		if (!parsed || typeof parsed !== "object") return {};
+		const map: Record<string, string[]> = {};
+		for (const [rawKey, rawValue] of Object.entries(parsed)) {
+			if (typeof rawKey !== "string") continue;
+			const key = normalizeTokenLookupKey(rawKey);
+			if (!key) continue;
+			if (typeof rawValue === "string" && rawValue.trim()) {
+				map[key] = [rawValue.trim()];
+				continue;
+			}
+			if (Array.isArray(rawValue)) {
+				const values = rawValue
+					.filter((entry): entry is string => typeof entry === "string")
+					.map((entry) => entry.trim())
+					.filter(Boolean);
+				if (values.length > 0) {
+					map[key] = values;
+				}
+			}
+		}
+		return map;
+	} catch {
+		return {};
+	}
+}
+
+function parseTokenDecimalsEnv(
+	value: string | undefined,
+): Record<string, number> {
+	const normalized = value?.trim();
+	if (!normalized) return {};
+	try {
+		const parsed = JSON.parse(normalized) as unknown;
+		if (!parsed || typeof parsed !== "object") return {};
+		const map: Record<string, number> = {};
+		for (const [rawKey, rawValue] of Object.entries(parsed)) {
+			if (typeof rawKey !== "string") continue;
+			const key = normalizeTokenLookupKey(rawKey);
+			if (!key) continue;
+			const parsedValue =
+				typeof rawValue === "number" ? rawValue : Number(rawValue);
+			if (
+				Number.isFinite(parsedValue) &&
+				Number.isInteger(parsedValue) &&
+				parsedValue >= 0 &&
+				parsedValue <= 255
+			) {
+				map[key] = parsedValue;
+			}
+		}
+		return map;
+	} catch {
+		return {};
+	}
+}
+
+function resolveTokenMap(network: RefNetwork): Record<string, string[]> {
+	const globalMap = parseTokenMapEnv(process.env.NEAR_REF_TOKEN_MAP);
+	const networkMap = parseTokenMapEnv(
+		process.env[REF_TOKEN_MAP_ENV_BY_NETWORK[network]],
+	);
+	return {
+		...DEFAULT_REF_TOKEN_MAP_BY_NETWORK[network],
+		...globalMap,
+		...networkMap,
+	};
+}
+
+function resolveTokenDecimalsMap(network: RefNetwork): Record<string, number> {
+	const globalMap = parseTokenDecimalsEnv(process.env.NEAR_REF_TOKEN_DECIMALS);
+	const networkMap = parseTokenDecimalsEnv(
+		process.env[REF_TOKEN_DECIMALS_ENV_BY_NETWORK[network]],
+	);
+	return {
+		...DEFAULT_REF_TOKEN_DECIMALS_BY_NETWORK[network],
+		...globalMap,
+		...networkMap,
+	};
+}
+
+function dedupeStrings(values: string[]): string[] {
+	return [...new Set(values)];
+}
+
+function collectPoolTokenIds(pools: RefPoolView[]): Set<string> {
+	const tokenIds = new Set<string>();
+	for (const pool of pools) {
+		for (const tokenId of pool.token_account_ids) {
+			tokenIds.add(tokenId);
+		}
+	}
+	return tokenIds;
+}
+
+function resolveTokenCandidates(params: {
+	network: RefNetwork;
+	tokenInput: string;
+	poolTokenIds?: Set<string>;
+}): string[] {
+	const rawInput = params.tokenInput.trim();
+	if (!rawInput) {
+		throw new Error("token input is required");
+	}
+	if (isAccountLikeTokenId(rawInput)) {
+		return [rawInput.toLowerCase()];
+	}
+
+	const tokenMap = resolveTokenMap(params.network);
+	const key = normalizeTokenLookupKey(rawInput);
+	const candidates = dedupeStrings(
+		(tokenMap[key] ?? []).map((tokenId) => tokenId.toLowerCase()),
+	);
+	if (candidates.length === 0) {
+		throw new Error(
+			`Unknown token symbol: ${rawInput}. Provide contract id directly or configure ${REF_TOKEN_MAP_ENV_BY_NETWORK[params.network]}.`,
+		);
+	}
+
+	if (!params.poolTokenIds) return candidates;
+	const poolTokenIds = params.poolTokenIds;
+	const filtered = candidates.filter((tokenId) => poolTokenIds.has(tokenId));
+	if (filtered.length > 0) return filtered;
+	return candidates;
+}
+
+export function getRefTokenDecimalsHint(params: {
+	network?: string;
+	tokenIdOrSymbol: string;
+}): number | null {
+	const network = parseNearNetwork(params.network);
+	const key = normalizeTokenLookupKey(params.tokenIdOrSymbol);
+	if (!key) return null;
+	const decimalsMap = resolveTokenDecimalsMap(network);
+	return Number.isInteger(decimalsMap[key]) ? decimalsMap[key] : null;
 }
 
 export function getRefContractId(
@@ -271,7 +483,7 @@ async function queryRefReturn(params: {
 		},
 	});
 	const amountOutRaw = decodeNearCallResult<string>(result);
-	parsePositiveBigInt(amountOutRaw, "amountOutRaw");
+	parseNonNegativeBigInt(amountOutRaw, "amountOutRaw");
 	return amountOutRaw;
 }
 
@@ -287,22 +499,27 @@ export async function getRefSwapQuote(params: {
 }): Promise<RefSwapQuote> {
 	const network = parseNearNetwork(params.network);
 	const refContractId = getRefContractId(network, params.refContractId);
-	const tokenInId = params.tokenInId.trim();
-	const tokenOutId = params.tokenOutId.trim();
-	if (!tokenInId || !tokenOutId) {
+	const tokenInInput = params.tokenInId.trim();
+	const tokenOutInput = params.tokenOutId.trim();
+	if (!tokenInInput || !tokenOutInput) {
 		throw new Error("tokenInId and tokenOutId are required");
 	}
 	const amountInRaw = parsePositiveBigInt(params.amountInRaw, "amountInRaw");
 	const slippageBps = parseSlippageBps(params.slippageBps);
+	const hasSymbolInput =
+		!isAccountLikeTokenId(tokenInInput) || !isAccountLikeTokenId(tokenOutInput);
+	const explicitPoolId =
+		params.poolId != null ? parsePoolId(params.poolId) : undefined;
 
-	if (params.poolId != null) {
-		const poolId = parsePoolId(params.poolId);
+	if (explicitPoolId != null && !hasSymbolInput) {
+		const tokenInId = tokenInInput.toLowerCase();
+		const tokenOutId = tokenOutInput.toLowerCase();
 		const amountOutRaw = parsePositiveBigInt(
 			await queryRefReturn({
 				network,
 				rpcUrl: params.rpcUrl,
 				refContractId,
-				poolId,
+				poolId: explicitPoolId,
 				tokenInId,
 				tokenOutId,
 				amountInRaw: amountInRaw.toString(),
@@ -312,7 +529,7 @@ export async function getRefSwapQuote(params: {
 		const minAmountOutRaw = applySlippage(amountOutRaw, slippageBps);
 		return {
 			refContractId,
-			poolId,
+			poolId: explicitPoolId,
 			tokenInId,
 			tokenOutId,
 			amountInRaw: amountInRaw.toString(),
@@ -328,51 +545,162 @@ export async function getRefSwapQuote(params: {
 		rpcUrl: params.rpcUrl,
 		refContractId,
 	});
-	const candidates = pools.filter(
-		(pool) =>
-			isSimplePool(pool) &&
-			pool.token_account_ids.includes(tokenInId) &&
-			pool.token_account_ids.includes(tokenOutId),
-	);
-	if (candidates.length === 0) {
-		throw new Error(
-			`No direct simple pools found for ${tokenInId} -> ${tokenOutId} on ${refContractId}.`,
-		);
-	}
+	const poolTokenIds = collectPoolTokenIds(pools);
+	const tokenInCandidates = resolveTokenCandidates({
+		network,
+		tokenInput: tokenInInput,
+		poolTokenIds,
+	});
+	const tokenOutCandidates = resolveTokenCandidates({
+		network,
+		tokenInput: tokenOutInput,
+		poolTokenIds,
+	});
 
-	let best: { pool: RefPoolView; amountOutRaw: bigint } | null = null;
-	for (const pool of candidates) {
-		const estimatedOut = estimateSimplePoolSwap({
-			pool,
+	if (explicitPoolId != null) {
+		const explicitPool = pools.find((pool) => pool.id === explicitPoolId);
+		if (!explicitPool) {
+			throw new Error(`Pool ${explicitPoolId} not found on ${refContractId}.`);
+		}
+		const tokenInId = tokenInCandidates.find((candidate) =>
+			explicitPool.token_account_ids.includes(candidate),
+		);
+		const tokenOutId = tokenOutCandidates.find((candidate) =>
+			explicitPool.token_account_ids.includes(candidate),
+		);
+		if (!tokenInId || !tokenOutId || tokenInId === tokenOutId) {
+			throw new Error(
+				`Pool ${explicitPoolId} does not support token pair ${tokenInInput} -> ${tokenOutInput}.`,
+			);
+		}
+		const amountOutRaw = parsePositiveBigInt(
+			await queryRefReturn({
+				network,
+				rpcUrl: params.rpcUrl,
+				refContractId,
+				poolId: explicitPoolId,
+				tokenInId,
+				tokenOutId,
+				amountInRaw: amountInRaw.toString(),
+			}),
+			"amountOutRaw",
+		);
+		const minAmountOutRaw = applySlippage(amountOutRaw, slippageBps);
+		return {
+			refContractId,
+			poolId: explicitPoolId,
 			tokenInId,
 			tokenOutId,
-			amountInRaw,
-		});
-		if (estimatedOut <= 0n) continue;
-		if (!best || estimatedOut > best.amountOutRaw) {
-			best = {
-				pool,
-				amountOutRaw: estimatedOut,
-			};
+			amountInRaw: amountInRaw.toString(),
+			amountOutRaw: amountOutRaw.toString(),
+			minAmountOutRaw: minAmountOutRaw.toString(),
+			feeBps: Number(parseFeeBps(explicitPool.total_fee)),
+			source: "explicitPool",
+		};
+	}
+
+	let bestSimple: {
+		pool: RefPoolView;
+		tokenInId: string;
+		tokenOutId: string;
+		amountOutRaw: bigint;
+	} | null = null;
+
+	for (const pool of pools) {
+		if (!isSimplePool(pool)) continue;
+		for (const tokenInId of tokenInCandidates) {
+			if (!pool.token_account_ids.includes(tokenInId)) continue;
+			for (const tokenOutId of tokenOutCandidates) {
+				if (tokenInId === tokenOutId) continue;
+				if (!pool.token_account_ids.includes(tokenOutId)) continue;
+				const estimatedOut = estimateSimplePoolSwap({
+					pool,
+					tokenInId,
+					tokenOutId,
+					amountInRaw,
+				});
+				if (estimatedOut <= 0n) continue;
+				if (!bestSimple || estimatedOut > bestSimple.amountOutRaw) {
+					bestSimple = {
+						pool,
+						tokenInId,
+						tokenOutId,
+						amountOutRaw: estimatedOut,
+					};
+				}
+			}
 		}
 	}
 
-	if (!best) {
+	if (bestSimple) {
+		const minAmountOutRaw = applySlippage(bestSimple.amountOutRaw, slippageBps);
+		return {
+			refContractId,
+			poolId: bestSimple.pool.id,
+			tokenInId: bestSimple.tokenInId,
+			tokenOutId: bestSimple.tokenOutId,
+			amountInRaw: amountInRaw.toString(),
+			amountOutRaw: bestSimple.amountOutRaw.toString(),
+			minAmountOutRaw: minAmountOutRaw.toString(),
+			feeBps: Number(parseFeeBps(bestSimple.pool.total_fee)),
+			source: "bestDirectSimplePool",
+		};
+	}
+
+	let bestDirect: {
+		pool: RefPoolView;
+		tokenInId: string;
+		tokenOutId: string;
+		amountOutRaw: bigint;
+	} | null = null;
+
+	for (const pool of pools) {
+		for (const tokenInId of tokenInCandidates) {
+			if (!pool.token_account_ids.includes(tokenInId)) continue;
+			for (const tokenOutId of tokenOutCandidates) {
+				if (tokenInId === tokenOutId) continue;
+				if (!pool.token_account_ids.includes(tokenOutId)) continue;
+				const quoted = parseNonNegativeBigInt(
+					(await queryRefReturn({
+						network,
+						rpcUrl: params.rpcUrl,
+						refContractId,
+						poolId: pool.id,
+						tokenInId,
+						tokenOutId,
+						amountInRaw: amountInRaw.toString(),
+					})) || "0",
+					"amountOutRaw",
+				);
+				if (quoted <= 0n) continue;
+				if (!bestDirect || quoted > bestDirect.amountOutRaw) {
+					bestDirect = {
+						pool,
+						tokenInId,
+						tokenOutId,
+						amountOutRaw: quoted,
+					};
+				}
+			}
+		}
+	}
+
+	if (!bestDirect) {
 		throw new Error(
-			`No valid quote for ${tokenInId} -> ${tokenOutId}; all candidate pools returned zero output.`,
+			`No direct pool route found for ${tokenInInput} -> ${tokenOutInput} on ${refContractId}.`,
 		);
 	}
 
-	const minAmountOutRaw = applySlippage(best.amountOutRaw, slippageBps);
+	const minAmountOutRaw = applySlippage(bestDirect.amountOutRaw, slippageBps);
 	return {
 		refContractId,
-		poolId: best.pool.id,
-		tokenInId,
-		tokenOutId,
+		poolId: bestDirect.pool.id,
+		tokenInId: bestDirect.tokenInId,
+		tokenOutId: bestDirect.tokenOutId,
 		amountInRaw: amountInRaw.toString(),
-		amountOutRaw: best.amountOutRaw.toString(),
+		amountOutRaw: bestDirect.amountOutRaw.toString(),
 		minAmountOutRaw: minAmountOutRaw.toString(),
-		feeBps: Number(parseFeeBps(best.pool.total_fee)),
-		source: "bestDirectSimplePool",
+		feeBps: Number(parseFeeBps(bestDirect.pool.total_fee)),
+		source: "bestDirectPool",
 	};
 }
