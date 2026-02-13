@@ -4,6 +4,7 @@ import type { RegisteredTool } from "../../../core/types.js";
 import { defineTool } from "../../../core/types.js";
 import {
 	fetchRefPoolById,
+	findRefPoolForPair,
 	getRefContractId,
 	getRefSwapQuote,
 	getRefTokenDecimalsHint,
@@ -64,7 +65,7 @@ type NearRefSwapParams = {
 };
 
 type NearRefAddLiquidityParams = {
-	poolId: number | string;
+	poolId?: number | string;
 	amountsRaw?: string[];
 	amountARaw?: string;
 	amountBRaw?: string;
@@ -1167,7 +1168,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 			description:
 				"Add liquidity to a Ref pool via deposit + add_liquidity, with optional auto-registration steps.",
 			parameters: Type.Object({
-				poolId: Type.Union([Type.String(), Type.Number()]),
+				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				amountsRaw: Type.Optional(
 					Type.Array(Type.String(), {
 						description:
@@ -1260,7 +1261,6 @@ export function createNearExecuteTools(): RegisteredTool[] {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as NearRefAddLiquidityParams;
-				const poolId = requirePoolId(params.poolId);
 				const addLiquidityGas = resolveRefSwapGas(params.gas);
 				const addLiquidityDeposit = resolveAttachedDeposit(
 					params.attachedDepositYoctoNear,
@@ -1277,12 +1277,51 @@ export function createNearExecuteTools(): RegisteredTool[] {
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 
 				const refContractId = getRefContractId(network, params.refContractId);
-				const pool = await fetchRefPoolById({
-					network,
-					rpcUrl: params.rpcUrl,
-					refContractId,
-					poolId,
-				});
+				let poolId = parseOptionalPoolId(params.poolId);
+				let poolSelectionSource: "explicitPool" | "bestLiquidityPool" =
+					"explicitPool";
+				let inferredPair:
+					| {
+							tokenAId: string;
+							tokenBId: string;
+							liquidityScore: string;
+					  }
+					| undefined;
+				const pool =
+					poolId != null
+						? await fetchRefPoolById({
+								network,
+								rpcUrl: params.rpcUrl,
+								refContractId,
+								poolId,
+							})
+						: await (async () => {
+								const tokenAInput = params.tokenAId?.trim() ?? "";
+								const tokenBInput = params.tokenBId?.trim() ?? "";
+								if (!tokenAInput || !tokenBInput) {
+									throw new Error(
+										"poolId is required when tokenAId/tokenBId are not both provided",
+									);
+								}
+								const selection = await findRefPoolForPair({
+									network,
+									rpcUrl: params.rpcUrl,
+									refContractId,
+									tokenAId: tokenAInput,
+									tokenBId: tokenBInput,
+								});
+								poolId = selection.poolId;
+								poolSelectionSource = selection.source;
+								inferredPair = {
+									tokenAId: selection.tokenAId,
+									tokenBId: selection.tokenBId,
+									liquidityScore: selection.liquidityScore,
+								};
+								return selection.pool;
+							})();
+				if (poolId == null) {
+					throw new Error("Failed to resolve poolId for add liquidity");
+				}
 				const poolTokenIds = normalizeTokenIdList(pool.token_account_ids);
 				const { amountsRaw, tokenAId, tokenBId } = resolveAddLiquidityAmounts({
 					network,
@@ -1292,8 +1331,8 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					amountBRaw: params.amountBRaw,
 					amountA: params.amountA,
 					amountB: params.amountB,
-					tokenAId: params.tokenAId,
-					tokenBId: params.tokenBId,
+					tokenAId: params.tokenAId ?? inferredPair?.tokenAId,
+					tokenBId: params.tokenBId ?? inferredPair?.tokenBId,
 				});
 
 				const activeTokenRows = poolTokenIds
@@ -1402,10 +1441,12 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					],
 					details: {
 						poolId,
+						poolSelectionSource,
 						poolTokenIds,
 						amountsRaw,
 						tokenAId,
 						tokenBId,
+						inferredPair,
 						refContractId,
 						network,
 						fromAccountId: signerAccountId,

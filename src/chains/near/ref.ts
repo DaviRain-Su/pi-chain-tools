@@ -34,6 +34,17 @@ export type RefSwapQuote = {
 	actions: RefSwapAction[];
 };
 
+export type RefPoolPairSelection = {
+	refContractId: string;
+	poolId: number;
+	poolKind?: string;
+	tokenAId: string;
+	tokenBId: string;
+	liquidityScore: string;
+	source: "explicitPool" | "bestLiquidityPool";
+	pool: RefPoolView;
+};
+
 type NearCallFunctionResult = {
 	result: number[];
 	logs: string[];
@@ -349,6 +360,62 @@ function collectPoolsByTokenId(
 	return map;
 }
 
+function readPoolReserve(pool: RefPoolView, tokenId: string): bigint | null {
+	const index = pool.token_account_ids.findIndex(
+		(candidate) => candidate === tokenId,
+	);
+	if (index < 0 || index >= pool.amounts.length) return null;
+	return parseNonNegativeBigInt(pool.amounts[index] ?? "0", "reserve");
+}
+
+function estimatePairLiquidityScore(params: {
+	pool: RefPoolView;
+	tokenAId: string;
+	tokenBId: string;
+}): bigint | null {
+	const reserveA = readPoolReserve(params.pool, params.tokenAId);
+	const reserveB = readPoolReserve(params.pool, params.tokenBId);
+	if (reserveA == null || reserveB == null) return null;
+	return reserveA * reserveB;
+}
+
+function resolveBestPairInPool(params: {
+	pool: RefPoolView;
+	tokenACandidates: string[];
+	tokenBCandidates: string[];
+}): {
+	tokenAId: string;
+	tokenBId: string;
+	liquidityScore: bigint;
+} | null {
+	let best: {
+		tokenAId: string;
+		tokenBId: string;
+		liquidityScore: bigint;
+	} | null = null;
+	for (const tokenAId of params.tokenACandidates) {
+		if (!params.pool.token_account_ids.includes(tokenAId)) continue;
+		for (const tokenBId of params.tokenBCandidates) {
+			if (tokenAId === tokenBId) continue;
+			if (!params.pool.token_account_ids.includes(tokenBId)) continue;
+			const score = estimatePairLiquidityScore({
+				pool: params.pool,
+				tokenAId,
+				tokenBId,
+			});
+			if (score == null) continue;
+			if (!best || score > best.liquidityScore) {
+				best = {
+					tokenAId,
+					tokenBId,
+					liquidityScore: score,
+				};
+			}
+		}
+	}
+	return best;
+}
+
 function resolveTokenCandidates(params: {
 	network: RefNetwork;
 	tokenInput: string;
@@ -557,6 +624,123 @@ export async function fetchRefPoolById(params: {
 				: 0,
 		pool_kind:
 			typeof rawPool.pool_kind === "string" ? rawPool.pool_kind : undefined,
+	};
+}
+
+export async function findRefPoolForPair(params: {
+	network?: string;
+	rpcUrl?: string;
+	refContractId?: string;
+	tokenAId: string;
+	tokenBId: string;
+	poolId?: number | string;
+}): Promise<RefPoolPairSelection> {
+	const network = parseNearNetwork(params.network);
+	const refContractId = getRefContractId(network, params.refContractId);
+	const tokenAInput = params.tokenAId.trim();
+	const tokenBInput = params.tokenBId.trim();
+	if (!tokenAInput || !tokenBInput) {
+		throw new Error("tokenAId and tokenBId are required");
+	}
+	const explicitPoolId =
+		params.poolId != null ? parsePoolId(params.poolId) : undefined;
+
+	if (explicitPoolId != null) {
+		const pool = await fetchRefPoolById({
+			network,
+			rpcUrl: params.rpcUrl,
+			refContractId,
+			poolId: explicitPoolId,
+		});
+		const poolTokenIds = new Set(
+			pool.token_account_ids.map((tokenId) => tokenId.toLowerCase()),
+		);
+		const tokenACandidates = resolveTokenCandidates({
+			network,
+			tokenInput: tokenAInput,
+			poolTokenIds,
+		});
+		const tokenBCandidates = resolveTokenCandidates({
+			network,
+			tokenInput: tokenBInput,
+			poolTokenIds,
+		});
+		const pair = resolveBestPairInPool({
+			pool,
+			tokenACandidates,
+			tokenBCandidates,
+		});
+		if (!pair) {
+			throw new Error(
+				`Pool ${explicitPoolId} does not support token pair ${tokenAInput} / ${tokenBInput}.`,
+			);
+		}
+		return {
+			refContractId,
+			poolId: explicitPoolId,
+			poolKind: pool.pool_kind,
+			tokenAId: pair.tokenAId,
+			tokenBId: pair.tokenBId,
+			liquidityScore: pair.liquidityScore.toString(),
+			source: "explicitPool",
+			pool,
+		};
+	}
+
+	const pools = await fetchRefPools({
+		network,
+		rpcUrl: params.rpcUrl,
+		refContractId,
+	});
+	const poolTokenIds = collectPoolTokenIds(pools);
+	const tokenACandidates = resolveTokenCandidates({
+		network,
+		tokenInput: tokenAInput,
+		poolTokenIds,
+	});
+	const tokenBCandidates = resolveTokenCandidates({
+		network,
+		tokenInput: tokenBInput,
+		poolTokenIds,
+	});
+
+	let best: {
+		pool: RefPoolView;
+		tokenAId: string;
+		tokenBId: string;
+		liquidityScore: bigint;
+	} | null = null;
+
+	for (const pool of pools) {
+		const pair = resolveBestPairInPool({
+			pool,
+			tokenACandidates,
+			tokenBCandidates,
+		});
+		if (!pair) continue;
+		if (!best || pair.liquidityScore > best.liquidityScore) {
+			best = {
+				pool,
+				tokenAId: pair.tokenAId,
+				tokenBId: pair.tokenBId,
+				liquidityScore: pair.liquidityScore,
+			};
+		}
+	}
+	if (!best) {
+		throw new Error(
+			`No Ref pool found for token pair ${tokenAInput} / ${tokenBInput}.`,
+		);
+	}
+	return {
+		refContractId,
+		poolId: best.pool.id,
+		poolKind: best.pool.pool_kind,
+		tokenAId: best.tokenAId,
+		tokenBId: best.tokenBId,
+		liquidityScore: best.liquidityScore.toString(),
+		source: "bestLiquidityPool",
+		pool: best.pool,
 	};
 }
 

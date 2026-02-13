@@ -117,6 +117,7 @@ export type { NearNetwork } from "./chains/near/runtime.js";
 export {
 	fetchRefPoolById,
 	fetchRefPools,
+	findRefPoolForPair,
 	getRefContractId,
 	getRefSwapQuote,
 	getRefTokenDecimalsHint,
@@ -124,6 +125,7 @@ export {
 } from "./chains/near/ref.js";
 export type {
 	RefNetwork,
+	RefPoolPairSelection,
 	RefPoolView,
 	RefSwapAction,
 	RefSwapQuote,

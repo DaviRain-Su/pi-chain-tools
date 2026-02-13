@@ -19,6 +19,7 @@ vi.mock("./runtime.js", async () => {
 
 import {
 	fetchRefPoolById,
+	findRefPoolForPair,
 	getRefSwapQuote,
 	getRefTokenDecimalsHint,
 	resolveRefTokenIds,
@@ -101,6 +102,67 @@ describe("fetchRefPoolById", () => {
 				finality: "final",
 			},
 		});
+	});
+});
+
+describe("findRefPoolForPair", () => {
+	it("selects best-liquidity pool for a token pair when poolId is omitted", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			block_hash: "300",
+			block_height: 20,
+			logs: [],
+			result: encodeJsonResult([
+				{
+					id: 5,
+					token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+					amounts: ["10", "10"],
+					total_fee: 30,
+					pool_kind: "SIMPLE_POOL",
+				},
+				{
+					id: 6,
+					token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+					amounts: ["100", "200"],
+					total_fee: 30,
+					pool_kind: "SIMPLE_POOL",
+				},
+			]),
+		});
+
+		const selected = await findRefPoolForPair({
+			network: "mainnet",
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+		});
+		expect(selected).toMatchObject({
+			poolId: 6,
+			source: "bestLiquidityPool",
+			tokenAId: "wrap.near",
+			tokenBId: "usdc.tether-token.near",
+		});
+	});
+
+	it("validates explicit pool contains the requested pair", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			block_hash: "301",
+			block_height: 21,
+			logs: [],
+			result: encodeJsonResult({
+				token_account_ids: ["wrap.near", "usdt.tether-token.near"],
+				amounts: ["10", "10"],
+				total_fee: 30,
+				pool_kind: "SIMPLE_POOL",
+			}),
+		});
+
+		await expect(
+			findRefPoolForPair({
+				network: "mainnet",
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+				poolId: 9,
+			}),
+		).rejects.toThrow("does not support token pair");
 	});
 });
 

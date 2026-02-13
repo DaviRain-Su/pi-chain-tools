@@ -3,6 +3,7 @@ import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
 	fetchRefPoolById,
+	findRefPoolForPair,
 	getRefContractId,
 	getRefSwapQuote,
 	getRefTokenDecimalsHint,
@@ -54,7 +55,7 @@ type NearRefSwapIntent = {
 
 type NearRefAddLiquidityIntent = {
 	type: "near.lp.ref.add";
-	poolId: number;
+	poolId?: number;
 	amountARaw: string;
 	amountBRaw: string;
 	tokenAId?: string;
@@ -605,11 +606,17 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 
 	if (intentType === "near.lp.ref.add") {
 		const poolId = parseOptionalPoolId(params.poolId ?? hints.poolId, "poolId");
-		if (poolId == null) {
-			throw new Error("poolId is required for near.lp.ref.add");
-		}
 		const tokenAInput = params.tokenAId ?? hints.tokenAId;
 		const tokenBInput = params.tokenBId ?? hints.tokenBId;
+		if (
+			poolId == null &&
+			(!(typeof tokenAInput === "string" && tokenAInput.trim()) ||
+				!(typeof tokenBInput === "string" && tokenBInput.trim()))
+		) {
+			throw new Error(
+				"near.lp.ref.add requires poolId, or both tokenAId/tokenBId for automatic pool selection",
+			);
+		}
 		const amountARaw = parseRefLpAmountRaw({
 			valueRaw: params.amountARaw ?? hints.amountARaw,
 			valueUi: params.amountA ?? hints.amountAUi,
@@ -1299,6 +1306,7 @@ async function simulateRefAddLiquidity(params: {
 	fromAccountId: string;
 	refContractId: string;
 	poolId: number;
+	poolSelectionSource: "explicitPool" | "bestLiquidityPool";
 	poolTokenIds: string[];
 	tokenAId: string;
 	tokenBId: string;
@@ -1340,22 +1348,49 @@ async function simulateRefAddLiquidity(params: {
 		params.intent.fromAccountId ?? params.fromAccountId,
 		params.network,
 	);
-	const pool = await fetchRefPoolById({
-		network: params.network,
-		rpcUrl: params.rpcUrl,
-		refContractId: params.intent.refContractId,
-		poolId: params.intent.poolId,
-	});
+	const refContractId = getRefContractId(
+		params.network,
+		params.intent.refContractId,
+	);
+	let poolId = params.intent.poolId;
+	let poolSelectionSource: "explicitPool" | "bestLiquidityPool" =
+		"explicitPool";
+	const pool =
+		typeof poolId === "number"
+			? await fetchRefPoolById({
+					network: params.network,
+					rpcUrl: params.rpcUrl,
+					refContractId,
+					poolId,
+				})
+			: await (async () => {
+					const tokenAInput = params.intent.tokenAId?.trim() ?? "";
+					const tokenBInput = params.intent.tokenBId?.trim() ?? "";
+					if (!tokenAInput || !tokenBInput) {
+						throw new Error(
+							"near.lp.ref.add simulate requires poolId, or tokenAId/tokenBId for automatic pool selection",
+						);
+					}
+					const selection = await findRefPoolForPair({
+						network: params.network,
+						rpcUrl: params.rpcUrl,
+						refContractId,
+						tokenAId: tokenAInput,
+						tokenBId: tokenBInput,
+					});
+					poolId = selection.poolId;
+					poolSelectionSource = selection.source;
+					return selection.pool;
+				})();
+	if (typeof poolId !== "number") {
+		throw new Error("Failed to resolve poolId for near.lp.ref.add simulate");
+	}
 	const poolTokenIds = normalizePoolTokenIds(pool.token_account_ids);
 	const mapping = resolveLpIntentTokenMapping({
 		intent: params.intent,
 		network: params.network,
 		poolTokenIds,
 	});
-	const refContractId = getRefContractId(
-		params.network,
-		params.intent.refContractId,
-	);
 
 	const balanceChecks: Array<{
 		tokenId: string;
@@ -1422,7 +1457,8 @@ async function simulateRefAddLiquidity(params: {
 		status: sufficient ? "success" : "insufficient_balance",
 		fromAccountId,
 		refContractId,
-		poolId: params.intent.poolId,
+		poolId,
+		poolSelectionSource,
 		poolTokenIds,
 		tokenAId: mapping.tokenAId,
 		tokenBId: mapping.tokenBId,
@@ -1712,11 +1748,28 @@ export function createNearWorkflowTools() {
 												rpcUrl: params.rpcUrl,
 												fromAccountId: params.fromAccountId,
 											});
+					const sessionIntent: NearWorkflowIntent =
+						intent.type === "near.lp.ref.add" &&
+						intent.poolId == null &&
+						typeof (simulateArtifact as { poolId?: unknown }).poolId ===
+							"number"
+							? {
+									...intent,
+									poolId: (simulateArtifact as { poolId: number }).poolId,
+								}
+							: intent;
+					const sessionConfirmToken = approvalRequired
+						? createConfirmToken({
+								runId,
+								network,
+								intent: sessionIntent,
+							})
+						: null;
 					rememberWorkflowSession({
 						runId,
 						network,
-						intent,
-						confirmToken,
+						intent: sessionIntent,
+						confirmToken: sessionConfirmToken,
 					});
 					return {
 						content: [
@@ -1729,10 +1782,10 @@ export function createNearWorkflowTools() {
 							runId,
 							runMode,
 							network,
-							intentType: intent.type,
-							intent,
+							intentType: sessionIntent.type,
+							intent: sessionIntent,
 							approvalRequired,
-							confirmToken,
+							confirmToken: sessionConfirmToken,
 							artifacts: {
 								simulate: simulateArtifact,
 							},

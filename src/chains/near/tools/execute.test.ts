@@ -40,6 +40,7 @@ const nearApiMocks = vi.hoisted(() => {
 
 const refMocks = vi.hoisted(() => ({
 	fetchRefPoolById: vi.fn(),
+	findRefPoolForPair: vi.fn(),
 	getRefContractId: vi.fn(() => "v2.ref-finance.near"),
 	getRefSwapQuote: vi.fn(),
 	getRefTokenDecimalsHint: vi.fn(),
@@ -69,6 +70,7 @@ vi.mock("near-api-js", () => ({
 
 vi.mock("../ref.js", () => ({
 	fetchRefPoolById: refMocks.fetchRefPoolById,
+	findRefPoolForPair: refMocks.findRefPoolForPair,
 	getRefContractId: refMocks.getRefContractId,
 	getRefSwapQuote: refMocks.getRefSwapQuote,
 	getRefTokenDecimalsHint: refMocks.getRefTokenDecimalsHint,
@@ -137,6 +139,21 @@ beforeEach(() => {
 		amounts: ["1", "1"],
 		total_fee: 30,
 		pool_kind: "SIMPLE_POOL",
+	});
+	refMocks.findRefPoolForPair.mockResolvedValue({
+		refContractId: "v2.ref-finance.near",
+		poolId: 7,
+		tokenAId: "wrap.near",
+		tokenBId: "usdc.tether-token.near",
+		liquidityScore: "1",
+		source: "bestLiquidityPool",
+		pool: {
+			id: 7,
+			token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+			amounts: ["1", "1"],
+			total_fee: 30,
+			pool_kind: "SIMPLE_POOL",
+		},
 	});
 	refMocks.getRefTokenDecimalsHint.mockImplementation(
 		({
@@ -602,6 +619,47 @@ describe("near_addLiquidityRef", () => {
 			},
 			deposit: 1n,
 			gas: 180_000_000_000_000n,
+		});
+	});
+
+	it("auto-selects pool by pair when poolId is omitted", async () => {
+		nearApiMocks.callFunction
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-register-tx-hash-3" },
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-deposit-near-hash-3" },
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-deposit-usdc-hash-3" },
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-add-liquidity-hash-3" },
+			});
+		const tool = getTool("near_addLiquidityRef");
+		const result = await tool.execute("near-exec-8b", {
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+			amountA: "0.01",
+			amountB: "1.23",
+			confirmMainnet: true,
+		});
+
+		expect(refMocks.findRefPoolForPair).toHaveBeenCalledWith({
+			network: "mainnet",
+			rpcUrl: undefined,
+			refContractId: "v2.ref-finance.near",
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+		});
+		expect(result.details).toMatchObject({
+			poolId: 7,
+			poolSelectionSource: "bestLiquidityPool",
+			inferredPair: {
+				tokenAId: "wrap.near",
+				tokenBId: "usdc.tether-token.near",
+			},
+			txHash: "near-add-liquidity-hash-3",
 		});
 	});
 });
