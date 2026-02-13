@@ -380,6 +380,34 @@ describe("w3rt_run_near_workflow_v0", () => {
 		});
 	});
 
+	it("supports follow-up execute by intentText without re-sending structured params", async () => {
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-5b-sim", {
+			runId: "wf-near-05b",
+			runMode: "simulate",
+			intentType: "near.transfer.near",
+			network: "mainnet",
+			toAccountId: "bob.near",
+			amountYoctoNear: "1000",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		await tool.execute("near-wf-5b-exec", {
+			runMode: "execute",
+			intentText: "继续执行刚才那笔",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.transferNearExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				toAccountId: "bob.near",
+				amountYoctoNear: "1000",
+				confirmMainnet: true,
+			}),
+		);
+	});
+
 	it("simulates ref swap and returns quote artifact", async () => {
 		runtimeMocks.callNearRpc
 			.mockResolvedValueOnce({
@@ -768,6 +796,134 @@ describe("w3rt_run_near_workflow_v0", () => {
 				confirmMainnet: true,
 			}),
 		);
+	});
+
+	it("supports ref lp add follow-up execute by candidate index intentText", async () => {
+		runtimeMocks.parseNearNetwork.mockImplementation((value?: string) =>
+			value === "testnet" ? "testnet" : "mainnet",
+		);
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "611",
+				block_height: 611,
+				logs: [],
+				result: encodeJsonResult("20000000000000000000000"),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "612",
+				block_height: 612,
+				logs: [],
+				result: encodeJsonResult("5000000"),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "613",
+				block_height: 613,
+				logs: [],
+				result: encodeJsonResult({ total: "1" }),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "614",
+				block_height: 614,
+				logs: [],
+				result: encodeJsonResult({ total: "1" }),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "615",
+				block_height: 615,
+				logs: [],
+				result: encodeJsonResult({ total: "1" }),
+			});
+		const tool = getTool();
+		await tool.execute("near-wf-10c-sim", {
+			runId: "wf-near-10c",
+			runMode: "simulate",
+			intentType: "near.lp.ref.add",
+			network: "testnet",
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+			amountARaw: "10000000000000000000000",
+			amountBRaw: "1200000",
+		});
+
+		const result = await tool.execute("near-wf-10c-exec", {
+			runId: "wf-near-10c",
+			runMode: "execute",
+			intentText: "继续执行，用第2个池子",
+		});
+
+		expect(executeMocks.addLiquidityRefExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				network: "testnet",
+				poolId: 8,
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.add",
+			intent: {
+				type: "near.lp.ref.add",
+				poolId: 8,
+			},
+		});
+	});
+
+	it("returns clear error when poolCandidateIndex is out of range", async () => {
+		runtimeMocks.parseNearNetwork.mockImplementation((value?: string) =>
+			value === "testnet" ? "testnet" : "mainnet",
+		);
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "621",
+				block_height: 621,
+				logs: [],
+				result: encodeJsonResult("20000000000000000000000"),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "622",
+				block_height: 622,
+				logs: [],
+				result: encodeJsonResult("5000000"),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "623",
+				block_height: 623,
+				logs: [],
+				result: encodeJsonResult({ total: "1" }),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "624",
+				block_height: 624,
+				logs: [],
+				result: encodeJsonResult({ total: "1" }),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "625",
+				block_height: 625,
+				logs: [],
+				result: encodeJsonResult({ total: "1" }),
+			});
+		const tool = getTool();
+		await tool.execute("near-wf-10d-sim", {
+			runId: "wf-near-10d",
+			runMode: "simulate",
+			intentType: "near.lp.ref.add",
+			network: "testnet",
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+			amountARaw: "10000000000000000000000",
+			amountBRaw: "1200000",
+		});
+
+		await expect(
+			tool.execute("near-wf-10d-exec", {
+				runId: "wf-near-10d",
+				runMode: "execute",
+				poolCandidateIndex: 3,
+			}),
+		).rejects.toThrow("out of range");
+		expect(executeMocks.addLiquidityRefExecute).not.toHaveBeenCalled();
 	});
 
 	it("executes ref lp add after confirm token validation", async () => {

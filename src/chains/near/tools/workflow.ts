@@ -114,6 +114,7 @@ type WorkflowParams = {
 	tokenAId?: string;
 	tokenBId?: string;
 	poolId?: number | string;
+	poolCandidateIndex?: number | string;
 	slippageBps?: number;
 	refContractId?: string;
 	minAmountOutRaw?: string;
@@ -160,6 +161,7 @@ type ParsedIntentHints = {
 	minAmountARaw?: string;
 	minAmountBRaw?: string;
 	poolId?: number;
+	poolCandidateIndex?: number;
 	slippageBps?: number;
 	refContractId?: string;
 	autoWithdraw?: boolean;
@@ -184,6 +186,7 @@ type WorkflowSessionRecord = {
 	network: "mainnet" | "testnet";
 	intent: NearWorkflowIntent;
 	confirmToken: string | null;
+	poolCandidates: RefPoolCandidateSummary[];
 };
 
 type RefPoolCandidateSummary = RefPoolPairCandidate;
@@ -279,6 +282,23 @@ function parseOptionalPoolId(
 		normalized < 0
 	) {
 		throw new Error(`${fieldName} must be a non-negative integer`);
+	}
+	return normalized;
+}
+
+function parseOptionalPoolCandidateIndex(
+	value: number | string | undefined,
+	fieldName: string,
+): number | undefined {
+	if (value == null) return undefined;
+	if (typeof value === "string" && !value.trim()) return undefined;
+	const normalized = typeof value === "number" ? value : Number(value.trim());
+	if (
+		!Number.isFinite(normalized) ||
+		!Number.isInteger(normalized) ||
+		normalized <= 0
+	) {
+		throw new Error(`${fieldName} must be an integer >= 1`);
 	}
 	return normalized;
 }
@@ -580,6 +600,10 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		/([a-z][a-z0-9._-]*)\s*\/\s*([a-z][a-z0-9._-]*)/i,
 	);
 	const poolIdMatch = text.match(/(?:pool|池子|池)\s*[:：]?\s*(\d+)/i);
+	const poolCandidateIndexMatch =
+		text.match(
+			/(?:第\s*(\d+)\s*个\s*(?:候选)?(?:池子|池|pool)|(?:候选|candidate)\s*(?:pool)?\s*#?\s*(\d+))/i,
+		) ?? null;
 	const slippageMatch = text.match(
 		/(?:slippage|滑点)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(?:bps)?/i,
 	);
@@ -705,6 +729,14 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		const parsed = Number(poolIdMatch[1]);
 		if (Number.isInteger(parsed) && parsed >= 0) {
 			hints.poolId = parsed;
+		}
+	}
+	if (poolCandidateIndexMatch) {
+		const parsed = Number(
+			poolCandidateIndexMatch[1] ?? poolCandidateIndexMatch[2],
+		);
+		if (Number.isInteger(parsed) && parsed >= 1) {
+			hints.poolCandidateIndex = parsed;
 		}
 	}
 	if (slippageMatch?.[1]) {
@@ -1186,6 +1218,163 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 		return true;
 	}
 	return false;
+}
+
+function hasCoreIntentInputs(params: WorkflowParams): boolean {
+	if (params.intentType) return true;
+	if (params.toAccountId || params.amountNear || params.amountYoctoNear)
+		return true;
+	if (params.ftContractId || params.amountRaw) return true;
+	if (
+		params.tokenInId ||
+		params.tokenOutId ||
+		params.tokenAId ||
+		params.tokenBId ||
+		params.amountInRaw ||
+		params.amountARaw ||
+		params.amountBRaw ||
+		params.amountA != null ||
+		params.amountB != null ||
+		params.shares ||
+		params.shareBps != null ||
+		params.sharePercent != null ||
+		params.amountIn != null
+	) {
+		return true;
+	}
+	if (
+		params.refContractId ||
+		params.minAmountOutRaw ||
+		(Array.isArray(params.minAmountsRaw) && params.minAmountsRaw.length > 0) ||
+		params.minAmountARaw ||
+		params.minAmountBRaw ||
+		params.autoWithdraw != null ||
+		params.autoRegisterReceiver != null ||
+		params.autoRegisterOutput != null
+	) {
+		return true;
+	}
+	return false;
+}
+
+function hintsContainActionableIntentFields(hints: ParsedIntentHints): boolean {
+	return Boolean(
+		hints.intentType ||
+			hints.toAccountId ||
+			hints.amountNear ||
+			hints.ftContractId ||
+			hints.amountRaw ||
+			hints.amountInRaw ||
+			hints.amountInUi ||
+			hints.tokenInId ||
+			hints.tokenOutId ||
+			hints.tokenAId ||
+			hints.tokenBId ||
+			hints.amountAUi ||
+			hints.amountBUi ||
+			hints.amountARaw ||
+			hints.amountBRaw ||
+			hints.shares ||
+			hints.shareBps != null ||
+			hints.minAmountARaw ||
+			hints.minAmountBRaw ||
+			hints.slippageBps != null ||
+			hints.refContractId ||
+			hints.autoWithdraw != null,
+	);
+}
+
+function normalizeRefPoolCandidates(value: unknown): RefPoolCandidateSummary[] {
+	if (!Array.isArray(value)) return [];
+	const normalized: RefPoolCandidateSummary[] = [];
+	for (const candidate of value) {
+		if (!isObjectRecord(candidate)) continue;
+		if (
+			typeof candidate.poolId !== "number" ||
+			!Number.isInteger(candidate.poolId) ||
+			candidate.poolId < 0
+		) {
+			continue;
+		}
+		if (
+			typeof candidate.tokenAId !== "string" ||
+			typeof candidate.tokenBId !== "string" ||
+			typeof candidate.liquidityScore !== "string"
+		) {
+			continue;
+		}
+		normalized.push({
+			poolId: candidate.poolId,
+			poolKind:
+				typeof candidate.poolKind === "string" ? candidate.poolKind : undefined,
+			tokenAId: candidate.tokenAId,
+			tokenBId: candidate.tokenBId,
+			liquidityScore: candidate.liquidityScore,
+		});
+	}
+	return normalized;
+}
+
+function resolvePoolIdFromCandidateIndex(params: {
+	index: number;
+	poolCandidates: RefPoolCandidateSummary[];
+}): number {
+	if (params.poolCandidates.length === 0) {
+		throw new Error(
+			"No poolCandidates available in prior session. Run simulate first to get candidate pools.",
+		);
+	}
+	if (params.index > params.poolCandidates.length) {
+		throw new Error(
+			`poolCandidateIndex ${params.index} is out of range (1-${params.poolCandidates.length}).`,
+		);
+	}
+	const candidate = params.poolCandidates[params.index - 1];
+	if (!candidate) {
+		throw new Error(
+			`poolCandidateIndex ${params.index} is out of range (1-${params.poolCandidates.length}).`,
+		);
+	}
+	return candidate.poolId;
+}
+
+function applyPoolFollowUpSelection(params: {
+	intent: NearWorkflowIntent;
+	poolId?: number;
+	poolCandidateIndex?: number;
+	poolCandidates: RefPoolCandidateSummary[];
+}): NearWorkflowIntent {
+	const selectedPoolIdFromIndex =
+		params.poolCandidateIndex == null
+			? undefined
+			: resolvePoolIdFromCandidateIndex({
+					index: params.poolCandidateIndex,
+					poolCandidates: params.poolCandidates,
+				});
+	const selectedPoolId =
+		params.poolId != null ? params.poolId : selectedPoolIdFromIndex;
+	if (selectedPoolIdFromIndex != null && params.poolId != null) {
+		if (selectedPoolIdFromIndex !== params.poolId) {
+			throw new Error(
+				`poolId ${params.poolId} conflicts with poolCandidateIndex ${params.poolCandidateIndex} (poolId=${selectedPoolIdFromIndex}).`,
+			);
+		}
+	}
+	if (selectedPoolId == null) {
+		return params.intent;
+	}
+	if (
+		params.intent.type !== "near.lp.ref.add" &&
+		params.intent.type !== "near.lp.ref.remove"
+	) {
+		throw new Error(
+			"Pool selection follow-up is only supported for near.lp.ref.add and near.lp.ref.remove.",
+		);
+	}
+	return {
+		...params.intent,
+		poolId: selectedPoolId,
+	};
 }
 
 function decodeCallFunctionResult(result: NearCallFunctionResult): string {
@@ -2055,6 +2244,9 @@ export function createNearWorkflowTools() {
 				tokenAId: Type.Optional(Type.String()),
 				tokenBId: Type.Optional(Type.String()),
 				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				poolCandidateIndex: Type.Optional(
+					Type.Union([Type.String(), Type.Number()]),
+				),
 				slippageBps: Type.Optional(Type.Number()),
 				refContractId: Type.Optional(Type.String()),
 				minAmountOutRaw: Type.Optional(Type.String()),
@@ -2082,22 +2274,58 @@ export function createNearWorkflowTools() {
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as WorkflowParams;
 				const runMode = parseRunMode(params.runMode);
-				const network = parseNearNetwork(params.network);
-				let runId = createRunId(params.runId);
-				let intent: NearWorkflowIntent;
-
-				if (runMode === "execute" && !hasIntentInputs(params)) {
-					const session = readWorkflowSession(params.runId);
-					if (!session) {
-						throw new Error(
-							"No prior workflow session found. Provide intent parameters or run analysis/simulate first.",
-						);
-					}
-					runId = session.runId;
-					intent = session.intent;
-				} else {
-					intent = normalizeIntent(params);
+				const session =
+					runMode === "execute" ? readWorkflowSession(params.runId) : null;
+				const hints = parseIntentHints(params.intentText);
+				const poolCandidateIndex =
+					runMode === "execute"
+						? parseOptionalPoolCandidateIndex(
+								params.poolCandidateIndex ?? hints.poolCandidateIndex,
+								"poolCandidateIndex",
+							)
+						: undefined;
+				const poolIdFollowUp =
+					runMode === "execute"
+						? parseOptionalPoolId(
+								params.poolId ??
+									(poolCandidateIndex == null ? hints.poolId : undefined),
+								"poolId",
+							)
+						: undefined;
+				const followUpByIntentText =
+					runMode === "execute" &&
+					!hasCoreIntentInputs(params) &&
+					!hintsContainActionableIntentFields(hints);
+				if (
+					runMode === "execute" &&
+					!session &&
+					(!hasIntentInputs(params) || followUpByIntentText)
+				) {
+					throw new Error(
+						"No prior workflow session found. Provide intent parameters or run analysis/simulate first.",
+					);
 				}
+				const useSessionIntent =
+					runMode === "execute" &&
+					session != null &&
+					(!hasIntentInputs(params) || followUpByIntentText);
+				const network = parseNearNetwork(
+					params.network ?? (useSessionIntent ? session?.network : undefined),
+				);
+				const runId = createRunId(
+					params.runId ?? (useSessionIntent ? session?.runId : undefined),
+				);
+				const intent =
+					useSessionIntent && session != null
+						? applyPoolFollowUpSelection({
+								intent: session.intent,
+								poolId: poolIdFollowUp,
+								poolCandidateIndex,
+								poolCandidates: normalizeRefPoolCandidates(
+									session.poolCandidates,
+								),
+							})
+						: normalizeIntent(params);
 
 				const approvalRequired = network === "mainnet";
 				const confirmToken = approvalRequired
@@ -2114,6 +2342,7 @@ export function createNearWorkflowTools() {
 						network,
 						intent,
 						confirmToken,
+						poolCandidates: [],
 					});
 					return {
 						content: [
@@ -2190,11 +2419,20 @@ export function createNearWorkflowTools() {
 								intent: sessionIntent,
 							})
 						: null;
+					const sessionPoolCandidates =
+						sessionIntent.type === "near.lp.ref.add" ||
+						sessionIntent.type === "near.lp.ref.remove"
+							? normalizeRefPoolCandidates(
+									(simulateArtifact as { poolCandidates?: unknown })
+										.poolCandidates,
+								)
+							: [];
 					rememberWorkflowSession({
 						runId,
 						network,
 						intent: sessionIntent,
 						confirmToken: sessionConfirmToken,
+						poolCandidates: sessionPoolCandidates,
 					});
 					return {
 						content: [

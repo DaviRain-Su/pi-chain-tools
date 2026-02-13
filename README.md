@@ -64,6 +64,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `near_removeLiquidityRef` (Ref LP remove-liquidity; supports auto pool selection by token pair when `poolId` is omitted, plus `autoWithdraw=true` to auto-withdraw pool tokens)
 - `workflow`: `w3rt_run_near_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken; supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks)
 - `LP auto-selection UX`: when pair-based selection has multiple candidate pools, simulate returns concise alternatives (`poolCandidates`) and text summary (`alternatives=...`)
+- `LP follow-up execute`: after simulate, execute can reuse the session and switch pool by natural language (`继续执行，用第2个池子`) or structured `poolCandidateIndex`
 - `swap safety rails`: `slippageBps` is safety-limited (default max `1000` bps via `NEAR_SWAP_MAX_SLIPPAGE_BPS`), and custom `minAmountOutRaw` cannot be lower than quote-safe minimum
 - `rpc`: `near_rpc` (generic NEAR JSON-RPC passthrough; blocks `broadcast_tx_*` by default)
 - `Ref defaults`: mainnet `v2.ref-finance.near`, testnet `ref-finance-101.testnet` (env override supported)
@@ -79,6 +80,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `intentText: "在 Ref 添加 LP，NEAR/USDC，amountA 0.01，amountB 1.2，先分析"`
 - LP Add (analysis, plain NL token amounts):
   - `intentText: "在 Ref 添加 LP，投入 0.02 NEAR 和 2 USDC，先分析"`
+- LP Add (execute follow-up, choose another candidate pool):
+  - `intentText: "继续执行，用第2个池子"` (with same `runId`, `runMode=execute`, after a prior simulate that returned `poolCandidates`)
 - LP Remove (simulate):
   - `intentText: "在 Ref 移除 LP，pool 7，shares 100000，minA 1，minB 1，先模拟"`
 - LP Remove (simulate, auto-pool by pair):
