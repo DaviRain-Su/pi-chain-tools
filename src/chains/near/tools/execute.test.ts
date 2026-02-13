@@ -148,6 +148,22 @@ beforeEach(() => {
 		tokenBId: "usdc.tether-token.near",
 		liquidityScore: "1",
 		source: "bestLiquidityPool",
+		candidates: [
+			{
+				poolId: 7,
+				poolKind: "SIMPLE_POOL",
+				tokenAId: "wrap.near",
+				tokenBId: "usdc.tether-token.near",
+				liquidityScore: "1",
+			},
+			{
+				poolId: 8,
+				poolKind: "SIMPLE_POOL",
+				tokenAId: "wrap.near",
+				tokenBId: "usdc.tether-token.near",
+				liquidityScore: "0",
+			},
+		],
 		pool: {
 			id: 7,
 			token_account_ids: ["wrap.near", "usdc.tether-token.near"],
@@ -739,6 +755,14 @@ describe("near_addLiquidityRef", () => {
 		expect(result.details).toMatchObject({
 			poolId: 7,
 			poolSelectionSource: "bestLiquidityPool",
+			poolCandidates: [
+				{
+					poolId: 7,
+				},
+				{
+					poolId: 8,
+				},
+			],
 			inferredPair: {
 				tokenAId: "wrap.near",
 				tokenBId: "usdc.tether-token.near",
@@ -814,6 +838,14 @@ describe("near_removeLiquidityRef", () => {
 		expect(result.details).toMatchObject({
 			poolId: 7,
 			poolSelectionSource: "bestLiquidityPool",
+			poolCandidates: [
+				{
+					poolId: 7,
+				},
+				{
+					poolId: 8,
+				},
+			],
 			tokenAId: "wrap.near",
 			tokenBId: "usdc.tether-token.near",
 			txHash: "near-remove-liquidity-hash-2",

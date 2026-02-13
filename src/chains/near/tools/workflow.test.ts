@@ -203,6 +203,22 @@ beforeEach(() => {
 		tokenBId: "usdc.tether-token.near",
 		liquidityScore: "1",
 		source: "bestLiquidityPool",
+		candidates: [
+			{
+				poolId: 7,
+				poolKind: "SIMPLE_POOL",
+				tokenAId: "wrap.near",
+				tokenBId: "usdc.tether-token.near",
+				liquidityScore: "1",
+			},
+			{
+				poolId: 8,
+				poolKind: "SIMPLE_POOL",
+				tokenAId: "wrap.near",
+				tokenBId: "usdc.tether-token.near",
+				liquidityScore: "0",
+			},
+		],
 		pool: {
 			id: 7,
 			token_account_ids: ["wrap.near", "usdc.tether-token.near"],
@@ -724,9 +740,18 @@ describe("w3rt_run_near_workflow_v0", () => {
 				simulate: {
 					poolId: 7,
 					poolSelectionSource: "bestLiquidityPool",
+					poolCandidates: [
+						{
+							poolId: 7,
+						},
+						{
+							poolId: 8,
+						},
+					],
 				},
 			},
 		});
+		expect(simulated.content[0]?.text).toContain("alternatives=8");
 
 		await tool.execute("near-wf-10b-exec", {
 			runMode: "execute",
@@ -914,9 +939,18 @@ describe("w3rt_run_near_workflow_v0", () => {
 				simulate: {
 					poolId: 7,
 					poolSelectionSource: "bestLiquidityPool",
+					poolCandidates: [
+						{
+							poolId: 7,
+						},
+						{
+							poolId: 8,
+						},
+					],
 				},
 			},
 		});
+		expect(simulated.content[0]?.text).toContain("alternatives=8");
 
 		await tool.execute("near-wf-11d-exec", {
 			runMode: "execute",

@@ -139,7 +139,62 @@ describe("findRefPoolForPair", () => {
 			source: "bestLiquidityPool",
 			tokenAId: "wrap.near",
 			tokenBId: "usdc.tether-token.near",
+			candidates: [
+				{
+					poolId: 6,
+					tokenAId: "wrap.near",
+					tokenBId: "usdc.tether-token.near",
+				},
+				{
+					poolId: 5,
+					tokenAId: "wrap.near",
+					tokenBId: "usdc.tether-token.near",
+				},
+			],
 		});
+	});
+
+	it("limits returned candidate pools with maxCandidates", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			block_hash: "302",
+			block_height: 22,
+			logs: [],
+			result: encodeJsonResult([
+				{
+					id: 11,
+					token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+					amounts: ["5", "5"],
+					total_fee: 30,
+					pool_kind: "SIMPLE_POOL",
+				},
+				{
+					id: 12,
+					token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+					amounts: ["10", "10"],
+					total_fee: 30,
+					pool_kind: "SIMPLE_POOL",
+				},
+				{
+					id: 13,
+					token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+					amounts: ["20", "20"],
+					total_fee: 30,
+					pool_kind: "SIMPLE_POOL",
+				},
+			]),
+		});
+
+		const selected = await findRefPoolForPair({
+			network: "mainnet",
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+			maxCandidates: 2,
+		});
+
+		expect(selected.poolId).toBe(13);
+		expect(selected.candidates).toHaveLength(2);
+		expect(selected.candidates[0]?.poolId).toBe(13);
+		expect(selected.candidates[1]?.poolId).toBe(12);
 	});
 
 	it("validates explicit pool contains the requested pair", async () => {

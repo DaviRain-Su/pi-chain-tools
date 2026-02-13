@@ -43,6 +43,15 @@ export type RefPoolPairSelection = {
 	liquidityScore: string;
 	source: "explicitPool" | "bestLiquidityPool";
 	pool: RefPoolView;
+	candidates: RefPoolPairCandidate[];
+};
+
+export type RefPoolPairCandidate = {
+	poolId: number;
+	poolKind?: string;
+	tokenAId: string;
+	tokenBId: string;
+	liquidityScore: string;
 };
 
 type NearCallFunctionResult = {
@@ -122,6 +131,8 @@ const DEFAULT_REF_TOKEN_DECIMALS_BY_NETWORK: Record<
 };
 
 const FEE_DIVISOR = 10_000n;
+const DEFAULT_REF_POOL_PAIR_CANDIDATES = 3;
+const MAX_REF_POOL_PAIR_CANDIDATES = 10;
 
 function encodeNearCallArgs(args: Record<string, unknown>): string {
 	return Buffer.from(JSON.stringify(args), "utf8").toString("base64");
@@ -168,6 +179,14 @@ function parsePoolId(poolId: number | string): number {
 		throw new Error("poolId must be a non-negative integer");
 	}
 	return normalized;
+}
+
+function parseMaxCandidates(maxCandidates?: number): number {
+	if (maxCandidates == null) return DEFAULT_REF_POOL_PAIR_CANDIDATES;
+	if (!Number.isFinite(maxCandidates) || maxCandidates <= 0) {
+		throw new Error("maxCandidates must be a positive number");
+	}
+	return Math.min(MAX_REF_POOL_PAIR_CANDIDATES, Math.floor(maxCandidates));
 }
 
 function parseSlippageBps(slippageBps?: number): number {
@@ -634,9 +653,11 @@ export async function findRefPoolForPair(params: {
 	tokenAId: string;
 	tokenBId: string;
 	poolId?: number | string;
+	maxCandidates?: number;
 }): Promise<RefPoolPairSelection> {
 	const network = parseNearNetwork(params.network);
 	const refContractId = getRefContractId(network, params.refContractId);
+	const maxCandidates = parseMaxCandidates(params.maxCandidates);
 	const tokenAInput = params.tokenAId.trim();
 	const tokenBInput = params.tokenBId.trim();
 	if (!tokenAInput || !tokenBInput) {
@@ -684,6 +705,15 @@ export async function findRefPoolForPair(params: {
 			liquidityScore: pair.liquidityScore.toString(),
 			source: "explicitPool",
 			pool,
+			candidates: [
+				{
+					poolId: explicitPoolId,
+					poolKind: pool.pool_kind,
+					tokenAId: pair.tokenAId,
+					tokenBId: pair.tokenBId,
+					liquidityScore: pair.liquidityScore.toString(),
+				},
+			],
 		};
 	}
 
@@ -704,12 +734,12 @@ export async function findRefPoolForPair(params: {
 		poolTokenIds,
 	});
 
-	let best: {
+	const candidates: Array<{
 		pool: RefPoolView;
 		tokenAId: string;
 		tokenBId: string;
 		liquidityScore: bigint;
-	} | null = null;
+	}> = [];
 
 	for (const pool of pools) {
 		const pair = resolveBestPairInPool({
@@ -718,20 +748,34 @@ export async function findRefPoolForPair(params: {
 			tokenBCandidates,
 		});
 		if (!pair) continue;
-		if (!best || pair.liquidityScore > best.liquidityScore) {
-			best = {
-				pool,
-				tokenAId: pair.tokenAId,
-				tokenBId: pair.tokenBId,
-				liquidityScore: pair.liquidityScore,
-			};
-		}
+		candidates.push({
+			pool,
+			tokenAId: pair.tokenAId,
+			tokenBId: pair.tokenBId,
+			liquidityScore: pair.liquidityScore,
+		});
 	}
-	if (!best) {
+	if (candidates.length === 0) {
 		throw new Error(
 			`No Ref pool found for token pair ${tokenAInput} / ${tokenBInput}.`,
 		);
 	}
+	candidates.sort((left, right) => {
+		if (left.liquidityScore === right.liquidityScore) {
+			return left.pool.id - right.pool.id;
+		}
+		return left.liquidityScore > right.liquidityScore ? -1 : 1;
+	});
+	const best = candidates[0];
+	const summarizedCandidates = candidates
+		.slice(0, maxCandidates)
+		.map((candidate) => ({
+			poolId: candidate.pool.id,
+			poolKind: candidate.pool.pool_kind,
+			tokenAId: candidate.tokenAId,
+			tokenBId: candidate.tokenBId,
+			liquidityScore: candidate.liquidityScore.toString(),
+		}));
 	return {
 		refContractId,
 		poolId: best.pool.id,
@@ -741,6 +785,7 @@ export async function findRefPoolForPair(params: {
 		liquidityScore: best.liquidityScore.toString(),
 		source: "bestLiquidityPool",
 		pool: best.pool,
+		candidates: summarizedCandidates,
 	};
 }
 

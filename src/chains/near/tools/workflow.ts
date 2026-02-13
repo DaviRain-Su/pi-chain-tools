@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
+	type RefPoolPairCandidate,
 	fetchRefPoolById,
 	findRefPoolForPair,
 	getRefContractId,
@@ -184,6 +185,8 @@ type WorkflowSessionRecord = {
 	intent: NearWorkflowIntent;
 	confirmToken: string | null;
 };
+
+type RefPoolCandidateSummary = RefPoolPairCandidate;
 
 type WorkflowTool = ReturnType<typeof createNearExecuteTools>[number];
 
@@ -1605,6 +1608,7 @@ async function simulateRefAddLiquidity(params: {
 	refContractId: string;
 	poolId: number;
 	poolSelectionSource: "explicitPool" | "bestLiquidityPool";
+	poolCandidates: RefPoolCandidateSummary[];
 	poolTokenIds: string[];
 	tokenAId: string;
 	tokenBId: string;
@@ -1653,6 +1657,7 @@ async function simulateRefAddLiquidity(params: {
 	let poolId = params.intent.poolId;
 	let poolSelectionSource: "explicitPool" | "bestLiquidityPool" =
 		"explicitPool";
+	let poolCandidates: RefPoolCandidateSummary[] = [];
 	const pool =
 		typeof poolId === "number"
 			? await fetchRefPoolById({
@@ -1678,6 +1683,9 @@ async function simulateRefAddLiquidity(params: {
 					});
 					poolId = selection.poolId;
 					poolSelectionSource = selection.source;
+					poolCandidates = Array.isArray(selection.candidates)
+						? selection.candidates
+						: [];
 					return selection.pool;
 				})();
 	if (typeof poolId !== "number") {
@@ -1757,6 +1765,7 @@ async function simulateRefAddLiquidity(params: {
 		refContractId,
 		poolId,
 		poolSelectionSource,
+		poolCandidates,
 		poolTokenIds,
 		tokenAId: mapping.tokenAId,
 		tokenBId: mapping.tokenBId,
@@ -1778,6 +1787,7 @@ async function simulateRefRemoveLiquidity(params: {
 	refContractId: string;
 	poolId: number;
 	poolSelectionSource: "explicitPool" | "bestLiquidityPool";
+	poolCandidates: RefPoolCandidateSummary[];
 	poolTokenIds: string[];
 	tokenAId: string | null;
 	tokenBId: string | null;
@@ -1797,6 +1807,7 @@ async function simulateRefRemoveLiquidity(params: {
 	let poolId = params.intent.poolId;
 	let poolSelectionSource: "explicitPool" | "bestLiquidityPool" =
 		"explicitPool";
+	let poolCandidates: RefPoolCandidateSummary[] = [];
 	let selectedTokenAId: string | null = null;
 	let selectedTokenBId: string | null = null;
 	const pool =
@@ -1824,6 +1835,9 @@ async function simulateRefRemoveLiquidity(params: {
 					});
 					poolId = selection.poolId;
 					poolSelectionSource = selection.source;
+					poolCandidates = Array.isArray(selection.candidates)
+						? selection.candidates
+						: [];
 					selectedTokenAId = selection.tokenAId;
 					selectedTokenBId = selection.tokenBId;
 					return selection.pool;
@@ -1895,6 +1909,7 @@ async function simulateRefRemoveLiquidity(params: {
 		refContractId,
 		poolId,
 		poolSelectionSource,
+		poolCandidates,
 		poolTokenIds,
 		tokenAId: selectedTokenAId,
 		tokenBId: selectedTokenBId,
@@ -1946,6 +1961,53 @@ function buildExecuteResultSummary(executeResult: unknown): string {
 			? `txHash=${candidate.txHash}`
 			: "txHash=unknown";
 	return hashText;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object";
+}
+
+function buildSimulateResultSummary(
+	intentType: NearWorkflowIntent["type"],
+	simulateResult: unknown,
+): string {
+	if (!isObjectRecord(simulateResult)) {
+		return `Workflow simulated: ${intentType}`;
+	}
+	const statusText =
+		typeof simulateResult.status === "string"
+			? simulateResult.status
+			: "unknown";
+	if (
+		(intentType === "near.lp.ref.add" || intentType === "near.lp.ref.remove") &&
+		simulateResult.poolSelectionSource === "bestLiquidityPool"
+	) {
+		const selectedPoolId =
+			typeof simulateResult.poolId === "number"
+				? simulateResult.poolId
+				: typeof simulateResult.poolId === "string"
+					? Number(simulateResult.poolId)
+					: null;
+		const poolCandidates = Array.isArray(simulateResult.poolCandidates)
+			? simulateResult.poolCandidates
+			: [];
+		const alternativePoolIds = poolCandidates
+			.map((candidate) =>
+				isObjectRecord(candidate) && typeof candidate.poolId === "number"
+					? candidate.poolId
+					: null,
+			)
+			.filter(
+				(poolId): poolId is number =>
+					poolId != null &&
+					(selectedPoolId == null || poolId !== selectedPoolId),
+			)
+			.slice(0, 3);
+		if (selectedPoolId != null && alternativePoolIds.length > 0) {
+			return `Workflow simulated: ${intentType} status=${statusText} pool=${selectedPoolId} alternatives=${alternativePoolIds.join(",")}`;
+		}
+	}
+	return `Workflow simulated: ${intentType} status=${statusText}`;
 }
 
 function workflowRunModeSchema() {
@@ -2138,7 +2200,7 @@ export function createNearWorkflowTools() {
 						content: [
 							{
 								type: "text",
-								text: `Workflow simulated: ${intent.type} status=${simulateArtifact.status}`,
+								text: buildSimulateResultSummary(intent.type, simulateArtifact),
 							},
 						],
 						details: {

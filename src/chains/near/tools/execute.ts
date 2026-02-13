@@ -3,6 +3,7 @@ import { Account, JsonRpcProvider } from "near-api-js";
 import type { RegisteredTool } from "../../../core/types.js";
 import { defineTool } from "../../../core/types.js";
 import {
+	type RefPoolPairCandidate,
 	fetchRefPoolById,
 	findRefPoolForPair,
 	getRefContractId,
@@ -1714,6 +1715,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 				let poolId = parseOptionalPoolId(params.poolId);
 				let poolSelectionSource: "explicitPool" | "bestLiquidityPool" =
 					"explicitPool";
+				let poolCandidates: RefPoolPairCandidate[] = [];
 				let inferredPair:
 					| {
 							tokenAId: string;
@@ -1746,6 +1748,9 @@ export function createNearExecuteTools(): RegisteredTool[] {
 								});
 								poolId = selection.poolId;
 								poolSelectionSource = selection.source;
+								poolCandidates = Array.isArray(selection.candidates)
+									? selection.candidates
+									: [];
 								inferredPair = {
 									tokenAId: selection.tokenAId,
 									tokenBId: selection.tokenBId,
@@ -1876,6 +1881,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					details: {
 						poolId,
 						poolSelectionSource,
+						poolCandidates,
 						poolTokenIds,
 						amountsRaw,
 						tokenAId,
@@ -2010,6 +2016,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 				let poolId = parseOptionalPoolId(params.poolId);
 				let poolSelectionSource: "explicitPool" | "bestLiquidityPool" =
 					"explicitPool";
+				let poolCandidates: RefPoolPairCandidate[] = [];
 				let inferredPair:
 					| {
 							tokenAId: string;
@@ -2042,6 +2049,9 @@ export function createNearExecuteTools(): RegisteredTool[] {
 								});
 								poolId = selection.poolId;
 								poolSelectionSource = selection.source;
+								poolCandidates = Array.isArray(selection.candidates)
+									? selection.candidates
+									: [];
 								inferredPair = {
 									tokenAId: selection.tokenAId,
 									tokenBId: selection.tokenBId,
@@ -2165,6 +2175,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					details: {
 						poolId,
 						poolSelectionSource,
+						poolCandidates,
 						poolTokenIds,
 						shares,
 						minAmountsRaw,
