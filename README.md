@@ -63,6 +63,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `near_addLiquidityRef` (Ref LP add-liquidity, includes optional auto register + token deposit to Ref exchange; supports auto pool selection by token pair when `poolId` is omitted)
 - `execute`: `near_removeLiquidityRef` (Ref LP remove-liquidity; supports auto pool selection by token pair when `poolId` is omitted, plus `autoWithdraw=true` to auto-withdraw pool tokens)
 - `workflow`: `w3rt_run_near_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken; supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks)
+- `swap safety rails`: `slippageBps` is safety-limited (default max `1000` bps via `NEAR_SWAP_MAX_SLIPPAGE_BPS`), and custom `minAmountOutRaw` cannot be lower than quote-safe minimum
 - `rpc`: `near_rpc` (generic NEAR JSON-RPC passthrough; blocks `broadcast_tx_*` by default)
 - `Ref defaults`: mainnet `v2.ref-finance.near`, testnet `ref-finance-101.testnet` (env override supported)
 - `Token symbol map`: configurable via `NEAR_REF_TOKEN_MAP(_MAINNET/_TESTNET)` and decimals via `NEAR_REF_TOKEN_DECIMALS(_MAINNET/_TESTNET)`
@@ -75,12 +76,16 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `intentText: "在 Ref 添加 LP，pool 7，tokenA NEAR amountA 0.01，tokenB USDC amountB 1.2，先分析"`
 - LP Add (analysis, auto-pool by pair):
   - `intentText: "在 Ref 添加 LP，NEAR/USDC，amountA 0.01，amountB 1.2，先分析"`
+- LP Add (analysis, plain NL token amounts):
+  - `intentText: "在 Ref 添加 LP，投入 0.02 NEAR 和 2 USDC，先分析"`
 - LP Remove (simulate):
   - `intentText: "在 Ref 移除 LP，pool 7，shares 100000，minA 1，minB 1，先模拟"`
 - LP Remove (simulate, auto-pool by pair):
   - `intentText: "在 Ref 移除 LP，NEAR/USDC，shares 100000，minA 1，minB 1，先模拟"`
 - LP Remove (simulate, by percentage):
   - `intentText: "在 Ref 移除 LP，NEAR/USDC，50%，先模拟"`
+- LP Remove (simulate, full position):
+  - `intentText: "在 Ref 移除 LP，NEAR/USDC，全部撤出，先模拟"`
 - LP Remove + Auto Withdraw (execute intent):
   - `intentText: "在 Ref 移除 LP，NEAR/USDC，50%，提回钱包，确认主网执行"`
 - Ref Deposits (read):
@@ -166,6 +171,9 @@ ls ~/.sui/sui_config/client.yaml
 ```
 
 ### 2) Install once (GitHub source recommended)
+
+This package is designed to be installed directly into Pi.
+You do not need to clone or run `pi-mono`.
 
 Install directly from GitHub:
 
@@ -257,6 +265,10 @@ cat ~/.near-credentials/mainnet/<your-account>.json
 - Mainnet execute is guarded. You must explicitly confirm (internally `confirmMainnet=true`).
 - Workflow execute on mainnet also requires the matching `confirmToken` from prior analysis/simulate.
 - `sui_rpc` blocks dangerous methods by default; only use `allowDangerous=true` when you know exactly what you are doing.
+- NEAR Ref swap safety defaults:
+  - `NEAR_SWAP_MAX_SLIPPAGE_BPS` default `1000` (10%)
+  - hard cap `5000` (50%)
+  - provided `minAmountOutRaw` must be `>=` quote safe minimum
 
 Natural language confirmation example:
 
@@ -264,7 +276,7 @@ Natural language confirmation example:
 继续执行刚才这笔，确认主网执行
 ```
 
-### 6) Natural language examples (Sui)
+### 7) Natural language examples (Sui)
 
 - Swap simulate:
   - `把 0.01 SUI 换成 USDC，先模拟。`
@@ -277,7 +289,7 @@ Natural language confirmation example:
 - Portfolio (include stablecoins):
   - `帮我查一下 Sui 主网本地钱包余额（包含USDC）`
 
-### 7) Natural language examples (NEAR)
+### 8) Natural language examples (NEAR)
 
 - Native balance (local/default account):
   - `帮我查一下 NEAR 主网本地钱包余额`
@@ -308,11 +320,46 @@ Natural language confirmation example:
 - Ref LP positions:
   - `帮我查一下 NEAR 主网 Ref LP 持仓`
 
-### 8) Troubleshooting
+### 9) Quick self-check
 
-- `Cannot find module ...`: run `npm install` (or `bun install`), then `/reload`.
-- Extension conflicts in Pi: ensure duplicated tool providers are not loaded at the same time.
-- Wallet/signing issues: verify `sui client active-address` and keystore path, then restart Pi once.
+```bash
+# 1) verify extension is installed
+pi list
+
+# 2) reload runtime
+# (in Pi chat)
+/reload
+
+# 3) verify Sui wallet context
+sui client active-env
+sui client active-address
+
+# 4) verify NEAR local credentials
+ls ~/.near-credentials/mainnet
+```
+
+Then run these prompts:
+
+- `帮我查一下 Sui 主网本地钱包余额（包含USDC）`
+- `帮我查一下 NEAR 主网 Ref 存款（deposits）`
+- `帮我查一下 NEAR 主网 Ref LP 持仓`
+
+### 10) Troubleshooting
+
+- `Cannot find module ...` (for example `@mysten/utils` / `@cetusprotocol/common-sdk`):
+  - run `npm install` (or `bun install`) in this repo, then `/reload`
+  - if still failing after dependency changes, restart Pi once
+- `Failed to load extension: import_bn.default is not a constructor`:
+  - dependency tree mismatch; reinstall deps (`rm -rf node_modules && npm install`) then `/reload`
+- tool conflicts (`Tool "xxx" conflicts with ...`):
+  - keep one provider only; remove duplicated chain extension or uninstall old local temp extension
+- Sui balance only shows SUI but not USDC:
+  - use `sui_getPortfolio` or `sui_getBalance` without forcing `coinType`
+  - confirm the wallet actually has that `coinType` on current network
+- Sui client warning `Client/Server api version mismatch`:
+  - warning only; read calls usually work, but update Sui CLI for best compatibility
+- NEAR signer not found:
+  - check `fromAccountId` / `NEAR_ACCOUNT_ID` and local file `~/.near-credentials/<network>/<account>.json`
 
 Useful extension management commands:
 
@@ -323,7 +370,7 @@ pi remove https://github.com/<your-org>/pi-chain-tools
 pi remove /Users/davirian/dev/pi-chain-tools
 ```
 
-### 9) Publish To npm (optional)
+### 11) Publish To npm (optional)
 
 Before publish:
 
@@ -351,7 +398,7 @@ After publish, users can install with:
 pi install npm:pi-chain-tools
 ```
 
-### 10) Optional: `pi-mono` development wiring
+### 12) Optional: `pi-mono` development wiring
 
 Only needed if you intentionally develop extensions inside `pi-mono`.
 The bundled default extension already reuses the same Solana/Sui dedupe guards, so mixed loading is safer, but keeping a single source of truth is still recommended.
