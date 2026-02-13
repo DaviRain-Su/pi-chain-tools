@@ -696,4 +696,80 @@ describe("near_removeLiquidityRef", () => {
 			txHash: "near-remove-liquidity-hash",
 		});
 	});
+
+	it("auto-selects remove pool by pair when poolId is omitted", async () => {
+		nearApiMocks.callFunction.mockResolvedValueOnce({
+			transaction_outcome: { id: "near-remove-liquidity-hash-2" },
+		});
+		const tool = getTool("near_removeLiquidityRef");
+		const result = await tool.execute("near-exec-10", {
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+			shares: "200000",
+			confirmMainnet: true,
+		});
+
+		expect(refMocks.findRefPoolForPair).toHaveBeenCalledWith({
+			network: "mainnet",
+			rpcUrl: undefined,
+			refContractId: "v2.ref-finance.near",
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+		});
+		expect(nearApiMocks.callFunction).toHaveBeenCalledWith({
+			contractId: "v2.ref-finance.near",
+			methodName: "remove_liquidity",
+			args: {
+				pool_id: 7,
+				shares: "200000",
+				min_amounts: ["0", "0"],
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			poolId: 7,
+			poolSelectionSource: "bestLiquidityPool",
+			tokenAId: "wrap.near",
+			tokenBId: "usdc.tether-token.near",
+			txHash: "near-remove-liquidity-hash-2",
+		});
+	});
+
+	it("supports sharePercent for remove liquidity", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			block_hash: "901",
+			block_height: 901,
+			logs: [],
+			result: [...Buffer.from(JSON.stringify("400000"), "utf8")],
+		});
+		nearApiMocks.callFunction.mockResolvedValueOnce({
+			transaction_outcome: { id: "near-remove-liquidity-hash-3" },
+		});
+		const tool = getTool("near_removeLiquidityRef");
+		const result = await tool.execute("near-exec-11", {
+			poolId: 7,
+			sharePercent: 50,
+			confirmMainnet: true,
+		});
+
+		expect(nearApiMocks.callFunction).toHaveBeenCalledWith({
+			contractId: "v2.ref-finance.near",
+			methodName: "remove_liquidity",
+			args: {
+				pool_id: 7,
+				shares: "200000",
+				min_amounts: ["0", "0"],
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			poolId: 7,
+			shares: "200000",
+			shareBpsUsed: 5000,
+			availableShares: "400000",
+			txHash: "near-remove-liquidity-hash-3",
+		});
+	});
 });

@@ -86,11 +86,15 @@ type NearRefAddLiquidityParams = {
 };
 
 type NearRefRemoveLiquidityParams = {
-	poolId: number | string;
-	shares: string;
+	poolId?: number | string;
+	shares?: string;
+	shareBps?: number;
+	sharePercent?: string | number;
 	minAmountsRaw?: string[];
 	minAmountARaw?: string;
 	minAmountBRaw?: string;
+	tokenAId?: string;
+	tokenBId?: string;
 	refContractId?: string;
 	fromAccountId?: string;
 	privateKey?: string;
@@ -230,6 +234,30 @@ function parseOptionalPoolId(value?: number | string): number | undefined {
 	return normalized;
 }
 
+function parseShareBps(
+	value: number | undefined,
+	fieldName: string,
+): number | undefined {
+	if (value == null) return undefined;
+	if (!Number.isFinite(value) || value <= 0 || value > 10_000) {
+		throw new Error(`${fieldName} must be between 1 and 10000`);
+	}
+	return Math.floor(value);
+}
+
+function parseSharePercent(
+	value: string | number | undefined,
+	fieldName: string,
+): number | undefined {
+	if (value == null) return undefined;
+	const normalized =
+		typeof value === "number" ? value : Number(value.trim().replace("%", ""));
+	if (!Number.isFinite(normalized) || normalized <= 0 || normalized > 100) {
+		throw new Error(`${fieldName} must be between 0 and 100`);
+	}
+	return Math.floor(normalized * 100);
+}
+
 function encodeNearCallArgs(args: Record<string, unknown>): string {
 	return Buffer.from(JSON.stringify(args), "utf8").toString("base64");
 }
@@ -243,6 +271,32 @@ function decodeNearCallResultJson<T>(payload: NearCallFunctionResult): T {
 		throw new Error("call_function returned empty payload");
 	}
 	return JSON.parse(utf8) as T;
+}
+
+async function queryRefPoolShares(params: {
+	network: string;
+	rpcUrl?: string;
+	refContractId: string;
+	poolId: number;
+	accountId: string;
+}): Promise<string> {
+	const result = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		params: {
+			request_type: "call_function",
+			account_id: params.refContractId,
+			method_name: "get_pool_shares",
+			args_base64: encodeNearCallArgs({
+				pool_id: params.poolId,
+				account_id: params.accountId,
+			}),
+			finality: "final",
+		},
+	});
+	const parsed = decodeNearCallResultJson<string>(result);
+	return parseNonNegativeYocto(parsed, "poolShares").toString();
 }
 
 function extractErrorText(error: unknown): string {
@@ -488,14 +542,6 @@ async function registerTokensOnRefExchange(params: {
 	}
 }
 
-function requirePoolId(value: number | string | undefined): number {
-	const poolId = parseOptionalPoolId(value);
-	if (poolId == null) {
-		throw new Error("poolId is required");
-	}
-	return poolId;
-}
-
 function normalizeTokenIdList(tokenIds: string[]): string[] {
 	return tokenIds
 		.map((tokenId) => tokenId.trim().toLowerCase())
@@ -704,6 +750,55 @@ function resolveRemoveLiquidityMinAmounts(params: {
 		).toString();
 	}
 	return result;
+}
+
+async function resolveRemoveLiquidityShares(params: {
+	network: string;
+	rpcUrl?: string;
+	refContractId: string;
+	poolId: number;
+	accountId: string;
+	shares?: string;
+	shareBps?: number;
+	sharePercent?: string | number;
+}): Promise<{
+	shares: string;
+	availableShares: string | null;
+	shareBpsUsed: number | null;
+}> {
+	if (typeof params.shares === "string" && params.shares.trim()) {
+		return {
+			shares: parsePositiveYocto(params.shares, "shares").toString(),
+			availableShares: null,
+			shareBpsUsed: null,
+		};
+	}
+
+	const shareBps =
+		parseShareBps(params.shareBps, "shareBps") ??
+		parseSharePercent(params.sharePercent, "sharePercent");
+	if (shareBps == null) {
+		throw new Error("Provide shares, shareBps, or sharePercent");
+	}
+	const availableShares = await queryRefPoolShares({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		refContractId: params.refContractId,
+		poolId: params.poolId,
+		accountId: params.accountId,
+	});
+	const available = parseNonNegativeYocto(availableShares, "poolShares");
+	const computed = (available * BigInt(shareBps)) / 10_000n;
+	if (computed <= 0n) {
+		throw new Error(
+			`shareBps/sharePercent resolves to 0 shares (available=${availableShares})`,
+		);
+	}
+	return {
+		shares: computed.toString(),
+		availableShares,
+		shareBpsUsed: shareBps,
+	};
 }
 
 function normalizeReceiverAccountId(value: string): string {
@@ -1471,10 +1566,30 @@ export function createNearExecuteTools(): RegisteredTool[] {
 			label: "NEAR Ref Remove Liquidity",
 			description: "Remove liquidity from a Ref pool via remove_liquidity.",
 			parameters: Type.Object({
-				poolId: Type.Union([Type.String(), Type.Number()]),
-				shares: Type.String({
-					description: "LP shares to remove, raw integer string.",
-				}),
+				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				shares: Type.Optional(
+					Type.String({
+						description: "LP shares to remove, raw integer string.",
+					}),
+				),
+				shareBps: Type.Optional(
+					Type.Number({
+						description:
+							"Alternative to shares: remove by basis points of current LP shares (1-10000).",
+					}),
+				),
+				sharePercent: Type.Optional(
+					Type.Union([
+						Type.String({
+							description:
+								"Alternative to shares: remove by percentage of current LP shares (e.g. '50').",
+						}),
+						Type.Number({
+							description:
+								"Alternative to shares: remove by percentage of current LP shares (e.g. 50).",
+						}),
+					]),
+				),
 				minAmountsRaw: Type.Optional(
 					Type.Array(Type.String(), {
 						description:
@@ -1491,6 +1606,18 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					Type.String({
 						description:
 							"Optional second token min amount when minAmountsRaw is omitted.",
+					}),
+				),
+				tokenAId: Type.Optional(
+					Type.String({
+						description:
+							"Token A id/symbol used for automatic pool selection when poolId is omitted.",
+					}),
+				),
+				tokenBId: Type.Optional(
+					Type.String({
+						description:
+							"Token B id/symbol used for automatic pool selection when poolId is omitted.",
 					}),
 				),
 				refContractId: Type.Optional(Type.String()),
@@ -1514,8 +1641,6 @@ export function createNearExecuteTools(): RegisteredTool[] {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as NearRefRemoveLiquidityParams;
-				const poolId = requirePoolId(params.poolId);
-				const shares = parsePositiveYocto(params.shares, "shares").toString();
 				const removeLiquidityGas = resolveRefSwapGas(params.gas);
 				const removeLiquidityDeposit = resolveAttachedDeposit(
 					params.attachedDepositYoctoNear,
@@ -1530,12 +1655,51 @@ export function createNearExecuteTools(): RegisteredTool[] {
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 
 				const refContractId = getRefContractId(network, params.refContractId);
-				const pool = await fetchRefPoolById({
-					network,
-					rpcUrl: params.rpcUrl,
-					refContractId,
-					poolId,
-				});
+				let poolId = parseOptionalPoolId(params.poolId);
+				let poolSelectionSource: "explicitPool" | "bestLiquidityPool" =
+					"explicitPool";
+				let inferredPair:
+					| {
+							tokenAId: string;
+							tokenBId: string;
+							liquidityScore: string;
+					  }
+					| undefined;
+				const pool =
+					poolId != null
+						? await fetchRefPoolById({
+								network,
+								rpcUrl: params.rpcUrl,
+								refContractId,
+								poolId,
+							})
+						: await (async () => {
+								const tokenAInput = params.tokenAId?.trim() ?? "";
+								const tokenBInput = params.tokenBId?.trim() ?? "";
+								if (!tokenAInput || !tokenBInput) {
+									throw new Error(
+										"poolId is required when tokenAId/tokenBId are not both provided",
+									);
+								}
+								const selection = await findRefPoolForPair({
+									network,
+									rpcUrl: params.rpcUrl,
+									refContractId,
+									tokenAId: tokenAInput,
+									tokenBId: tokenBInput,
+								});
+								poolId = selection.poolId;
+								poolSelectionSource = selection.source;
+								inferredPair = {
+									tokenAId: selection.tokenAId,
+									tokenBId: selection.tokenBId,
+									liquidityScore: selection.liquidityScore,
+								};
+								return selection.pool;
+							})();
+				if (poolId == null) {
+					throw new Error("Failed to resolve poolId for remove liquidity");
+				}
 				const poolTokenIds = normalizeTokenIdList(pool.token_account_ids);
 				const minAmountsRaw = resolveRemoveLiquidityMinAmounts({
 					poolTokenIds,
@@ -1543,6 +1707,17 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					minAmountARaw: params.minAmountARaw,
 					minAmountBRaw: params.minAmountBRaw,
 				});
+				const shareResolution = await resolveRemoveLiquidityShares({
+					network,
+					rpcUrl: params.rpcUrl,
+					refContractId,
+					poolId,
+					accountId: signerAccountId,
+					shares: params.shares,
+					shareBps: params.shareBps,
+					sharePercent: params.sharePercent,
+				});
+				const shares = shareResolution.shares;
 
 				const removeTx = await account.callFunction({
 					contractId: refContractId,
@@ -1569,9 +1744,15 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					],
 					details: {
 						poolId,
+						poolSelectionSource,
 						poolTokenIds,
 						shares,
 						minAmountsRaw,
+						shareBpsUsed: shareResolution.shareBpsUsed,
+						availableShares: shareResolution.availableShares,
+						tokenAId: inferredPair?.tokenAId ?? null,
+						tokenBId: inferredPair?.tokenBId ?? null,
+						inferredPair,
 						refContractId,
 						network,
 						fromAccountId: signerAccountId,

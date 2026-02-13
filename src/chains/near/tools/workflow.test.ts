@@ -706,6 +706,143 @@ describe("w3rt_run_near_workflow_v0", () => {
 		});
 	});
 
+	it("parses natural-language ref lp remove intent without explicit poolId", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-11c", {
+			runId: "wf-near-11c",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"在 Ref 移除 LP，NEAR/USDC，shares 100000，minA 1，minB 2，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.remove",
+			intent: {
+				type: "near.lp.ref.remove",
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+				shares: "100000",
+				minAmountARaw: "1",
+				minAmountBRaw: "2",
+			},
+		});
+	});
+
+	it("parses natural-language ref lp remove percentage intent", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-11e", {
+			runId: "wf-near-11e",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Ref 移除 LP，NEAR/USDC，50%，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.remove",
+			intent: {
+				type: "near.lp.ref.remove",
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+				shareBps: 5000,
+			},
+		});
+	});
+
+	it("simulates ref lp remove without poolId and reuses resolved pool on execute", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			block_hash: "701",
+			block_height: 701,
+			logs: [],
+			result: encodeJsonResult("500000"),
+		});
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-11d-sim", {
+			runId: "wf-near-11d",
+			runMode: "simulate",
+			intentType: "near.lp.ref.remove",
+			network: "mainnet",
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+			shares: "100000",
+			minAmountARaw: "1",
+			minAmountBRaw: "2",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+
+		expect(refMocks.findRefPoolForPair).toHaveBeenCalledWith({
+			network: "mainnet",
+			rpcUrl: undefined,
+			refContractId: "v2.ref-finance.near",
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+		});
+		expect(simulated.details).toMatchObject({
+			intentType: "near.lp.ref.remove",
+			intent: {
+				type: "near.lp.ref.remove",
+				poolId: 7,
+			},
+			artifacts: {
+				simulate: {
+					poolId: 7,
+					poolSelectionSource: "bestLiquidityPool",
+				},
+			},
+		});
+
+		await tool.execute("near-wf-11d-exec", {
+			runMode: "execute",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.removeLiquidityRefExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				poolId: 7,
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+				shares: "100000",
+				confirmMainnet: true,
+			}),
+		);
+	});
+
+	it("simulates ref lp remove by sharePercent", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			block_hash: "702",
+			block_height: 702,
+			logs: [],
+			result: encodeJsonResult("500000"),
+		});
+		const tool = getTool();
+		const result = await tool.execute("near-wf-11f", {
+			runId: "wf-near-11f",
+			runMode: "simulate",
+			intentType: "near.lp.ref.remove",
+			network: "mainnet",
+			poolId: 7,
+			sharePercent: 50,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.remove",
+			intent: {
+				type: "near.lp.ref.remove",
+				poolId: 7,
+				shareBps: 5000,
+			},
+			artifacts: {
+				simulate: {
+					availableShares: "500000",
+					requiredShares: "250000",
+					shareBpsUsed: 5000,
+				},
+			},
+		});
+	});
+
 	it("executes ref lp remove after confirm token validation", async () => {
 		const tool = getTool();
 		const analysis = await tool.execute("near-wf-12-analysis", {
