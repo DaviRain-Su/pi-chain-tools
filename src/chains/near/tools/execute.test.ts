@@ -350,4 +350,80 @@ describe("near_swapRef", () => {
 		).rejects.toThrow("confirmMainnet=true");
 		expect(nearApiMocks.callFunction).not.toHaveBeenCalled();
 	});
+
+	it("builds multi-hop swap actions when quote contains route actions", async () => {
+		refMocks.getRefSwapQuote.mockResolvedValueOnce({
+			refContractId: "v2.ref-finance.near",
+			poolId: 11,
+			tokenInId: "wrap.near",
+			tokenOutId: "usdc.tether-token.near",
+			amountInRaw: "10000000000000000000000",
+			amountOutRaw: "2050000",
+			minAmountOutRaw: "2039750",
+			feeBps: 60,
+			source: "bestTwoHopPoolRoute",
+			actions: [
+				{
+					poolId: 11,
+					tokenInId: "wrap.near",
+					tokenOutId: "usdt.tether-token.near",
+					amountInRaw: "10000000000000000000000",
+				},
+				{
+					poolId: 12,
+					tokenInId: "usdt.tether-token.near",
+					tokenOutId: "usdc.tether-token.near",
+					amountInRaw: "2100000",
+				},
+			],
+		});
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			block_hash: "7777",
+			block_height: 120,
+			logs: [],
+			result: [...Buffer.from(JSON.stringify({ total: "1" }), "utf8")],
+		});
+		const tool = getTool("near_swapRef");
+		const result = await tool.execute("near-exec-6", {
+			tokenInId: "NEAR",
+			tokenOutId: "USDC",
+			amountInRaw: "10000000000000000000000",
+			confirmMainnet: true,
+		});
+
+		expect(nearApiMocks.callFunction).toHaveBeenCalledWith({
+			contractId: "wrap.near",
+			methodName: "ft_transfer_call",
+			args: {
+				receiver_id: "v2.ref-finance.near",
+				amount: "10000000000000000000000",
+				msg: JSON.stringify({
+					force: 0,
+					actions: [
+						{
+							pool_id: 11,
+							token_in: "wrap.near",
+							amount_in: "10000000000000000000000",
+							token_out: "usdt.tether-token.near",
+							min_amount_out: "0",
+						},
+						{
+							pool_id: 12,
+							token_in: "usdt.tether-token.near",
+							token_out: "usdc.tether-token.near",
+							min_amount_out: "2039750",
+						},
+					],
+				}),
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			tokenInId: "wrap.near",
+			tokenOutId: "usdc.tether-token.near",
+			poolId: 11,
+			source: "bestTwoHopPoolRoute",
+		});
+	});
 });

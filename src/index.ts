@@ -123,6 +123,7 @@ export {
 export type {
 	RefNetwork,
 	RefPoolView,
+	RefSwapAction,
 	RefSwapQuote,
 } from "./chains/near/ref.js";
 export { createNearReadTools } from "./chains/near/tools/read.js";

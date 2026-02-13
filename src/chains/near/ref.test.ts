@@ -119,4 +119,70 @@ describe("getRefSwapQuote", () => {
 		expect(quote.tokenOutId).toBe("usdt.tether-token.near");
 		expect(quote.source).toBe("bestDirectSimplePool");
 	});
+
+	it("falls back to best two-hop route when direct route is missing", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "131",
+				block_height: 4,
+				logs: [],
+				result: encodeJsonResult([
+					{
+						id: 11,
+						token_account_ids: ["wrap.near", "usdt.tether-token.near"],
+						amounts: ["1000000000000000000000000", "2500000000000"],
+						total_fee: 30,
+						pool_kind: "STABLE_SWAP",
+					},
+					{
+						id: 12,
+						token_account_ids: [
+							"usdt.tether-token.near",
+							"usdc.tether-token.near",
+						],
+						amounts: ["2000000000000", "2000000000000"],
+						total_fee: 30,
+						pool_kind: "STABLE_SWAP",
+					},
+				]),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "132",
+				block_height: 5,
+				logs: [],
+				result: encodeJsonResult("2100000"),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "133",
+				block_height: 6,
+				logs: [],
+				result: encodeJsonResult("2050000"),
+			});
+
+		const quote = await getRefSwapQuote({
+			network: "mainnet",
+			tokenInId: "NEAR",
+			tokenOutId: "USDC",
+			amountInRaw: "10000000000000000000000",
+		});
+
+		expect(quote.source).toBe("bestTwoHopPoolRoute");
+		expect(quote.poolId).toBe(11);
+		expect(quote.tokenInId).toBe("wrap.near");
+		expect(quote.tokenOutId).toBe("usdc.tether-token.near");
+		expect(quote.actions).toEqual([
+			{
+				poolId: 11,
+				tokenInId: "wrap.near",
+				tokenOutId: "usdt.tether-token.near",
+				amountInRaw: "10000000000000000000000",
+			},
+			{
+				poolId: 12,
+				tokenInId: "usdt.tether-token.near",
+				tokenOutId: "usdc.tether-token.near",
+				amountInRaw: "2100000",
+			},
+		]);
+	});
 });

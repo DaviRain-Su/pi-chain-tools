@@ -671,8 +671,24 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					poolId,
 					slippageBps: params.slippageBps,
 				});
-				const tokenInId = normalizeReceiverAccountId(quote.tokenInId);
-				const tokenOutId = normalizeReceiverAccountId(quote.tokenOutId);
+				const quoteActions =
+					Array.isArray(quote.actions) && quote.actions.length > 0
+						? quote.actions
+						: [
+								{
+									poolId: quote.poolId,
+									tokenInId: quote.tokenInId,
+									tokenOutId: quote.tokenOutId,
+									amountInRaw: quote.amountInRaw,
+								},
+							];
+				const firstAction = quoteActions[0];
+				const lastAction = quoteActions[quoteActions.length - 1];
+				if (!firstAction || !lastAction) {
+					throw new Error("Ref quote returned an empty action list");
+				}
+				const tokenInId = normalizeReceiverAccountId(firstAction.tokenInId);
+				const tokenOutId = normalizeReceiverAccountId(lastAction.tokenOutId);
 				if (tokenInId === tokenOutId) {
 					throw new Error("tokenInId and tokenOutId must be different");
 				}
@@ -694,6 +710,19 @@ export function createNearExecuteTools(): RegisteredTool[] {
 								accountId: signerAccountId,
 							})
 						: null;
+				const swapActionsPayload = quoteActions.map((action, index) => {
+					const tokenIn = normalizeReceiverAccountId(action.tokenInId);
+					const tokenOut = normalizeReceiverAccountId(action.tokenOutId);
+					const amountIn = action.amountInRaw?.trim() || amountInRaw.toString();
+					return {
+						pool_id: action.poolId,
+						token_in: tokenIn,
+						...(index === 0 ? { amount_in: amountIn } : {}),
+						token_out: tokenOut,
+						min_amount_out:
+							index === quoteActions.length - 1 ? minAmountOutRaw : "0",
+					};
+				});
 
 				const tx = await account.callFunction({
 					contractId: tokenInId,
@@ -703,15 +732,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 						amount: amountInRaw.toString(),
 						msg: JSON.stringify({
 							force: 0,
-							actions: [
-								{
-									pool_id: quote.poolId,
-									token_in: tokenInId,
-									amount_in: amountInRaw.toString(),
-									token_out: tokenOutId,
-									min_amount_out: minAmountOutRaw,
-								},
-							],
+							actions: swapActionsPayload,
 						}),
 					},
 					deposit,
@@ -727,7 +748,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					content: [
 						{
 							type: "text",
-							text: `Ref swap submitted: ${amountInRaw.toString()} raw ${tokenInId} -> ${tokenOutId} (pool ${quote.poolId})`,
+							text: `Ref swap submitted: ${amountInRaw.toString()} raw ${tokenInId} -> ${tokenOutId} (${quoteActions.length} hop(s))`,
 						},
 					],
 					details: {
@@ -740,6 +761,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 						minAmountOutRaw,
 						network,
 						poolId: quote.poolId,
+						routeActions: quoteActions,
 						rawResult: tx,
 						refContractId,
 						rpcEndpoint: endpoint,

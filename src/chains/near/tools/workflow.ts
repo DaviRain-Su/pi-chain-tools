@@ -810,7 +810,17 @@ async function simulateRefSwap(params: {
 		amountInRaw: string;
 		amountOutRaw: string;
 		minAmountOutRaw: string;
-		source: "explicitPool" | "bestDirectSimplePool" | "bestDirectPool";
+		source:
+			| "explicitPool"
+			| "bestDirectSimplePool"
+			| "bestDirectPool"
+			| "bestTwoHopPoolRoute";
+		actions: Array<{
+			poolId: number;
+			tokenInId: string;
+			tokenOutId: string;
+			amountInRaw?: string;
+		}>;
 	};
 }> {
 	const fromAccountId = resolveNearAccountId(
@@ -867,6 +877,7 @@ async function simulateRefSwap(params: {
 			amountOutRaw: quote.amountOutRaw,
 			minAmountOutRaw: params.intent.minAmountOutRaw ?? quote.minAmountOutRaw,
 			source: quote.source,
+			actions: quote.actions,
 		},
 	};
 }

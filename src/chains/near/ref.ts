@@ -10,6 +10,13 @@ export type RefPoolView = {
 	pool_kind?: string;
 };
 
+export type RefSwapAction = {
+	poolId: number;
+	tokenInId: string;
+	tokenOutId: string;
+	amountInRaw?: string;
+};
+
 export type RefSwapQuote = {
 	refContractId: string;
 	poolId: number;
@@ -19,7 +26,12 @@ export type RefSwapQuote = {
 	amountOutRaw: string;
 	minAmountOutRaw: string;
 	feeBps: number;
-	source: "explicitPool" | "bestDirectSimplePool" | "bestDirectPool";
+	source:
+		| "explicitPool"
+		| "bestDirectSimplePool"
+		| "bestDirectPool"
+		| "bestTwoHopPoolRoute";
+	actions: RefSwapAction[];
 };
 
 type NearCallFunctionResult = {
@@ -323,6 +335,20 @@ function collectPoolTokenIds(pools: RefPoolView[]): Set<string> {
 	return tokenIds;
 }
 
+function collectPoolsByTokenId(
+	pools: RefPoolView[],
+): Map<string, RefPoolView[]> {
+	const map = new Map<string, RefPoolView[]>();
+	for (const pool of pools) {
+		for (const tokenId of pool.token_account_ids) {
+			const list = map.get(tokenId) ?? [];
+			list.push(pool);
+			map.set(tokenId, list);
+		}
+	}
+	return map;
+}
+
 function resolveTokenCandidates(params: {
 	network: RefNetwork;
 	tokenInput: string;
@@ -537,6 +563,14 @@ export async function getRefSwapQuote(params: {
 			minAmountOutRaw: minAmountOutRaw.toString(),
 			feeBps: 0,
 			source: "explicitPool",
+			actions: [
+				{
+					poolId: explicitPoolId,
+					tokenInId,
+					tokenOutId,
+					amountInRaw: amountInRaw.toString(),
+				},
+			],
 		};
 	}
 
@@ -596,6 +630,14 @@ export async function getRefSwapQuote(params: {
 			minAmountOutRaw: minAmountOutRaw.toString(),
 			feeBps: Number(parseFeeBps(explicitPool.total_fee)),
 			source: "explicitPool",
+			actions: [
+				{
+					poolId: explicitPoolId,
+					tokenInId,
+					tokenOutId,
+					amountInRaw: amountInRaw.toString(),
+				},
+			],
 		};
 	}
 
@@ -644,6 +686,14 @@ export async function getRefSwapQuote(params: {
 			minAmountOutRaw: minAmountOutRaw.toString(),
 			feeBps: Number(parseFeeBps(bestSimple.pool.total_fee)),
 			source: "bestDirectSimplePool",
+			actions: [
+				{
+					poolId: bestSimple.pool.id,
+					tokenInId: bestSimple.tokenInId,
+					tokenOutId: bestSimple.tokenOutId,
+					amountInRaw: amountInRaw.toString(),
+				},
+			],
 		};
 	}
 
@@ -685,22 +735,131 @@ export async function getRefSwapQuote(params: {
 		}
 	}
 
-	if (!bestDirect) {
+	if (bestDirect) {
+		const minAmountOutRaw = applySlippage(bestDirect.amountOutRaw, slippageBps);
+		return {
+			refContractId,
+			poolId: bestDirect.pool.id,
+			tokenInId: bestDirect.tokenInId,
+			tokenOutId: bestDirect.tokenOutId,
+			amountInRaw: amountInRaw.toString(),
+			amountOutRaw: bestDirect.amountOutRaw.toString(),
+			minAmountOutRaw: minAmountOutRaw.toString(),
+			feeBps: Number(parseFeeBps(bestDirect.pool.total_fee)),
+			source: "bestDirectPool",
+			actions: [
+				{
+					poolId: bestDirect.pool.id,
+					tokenInId: bestDirect.tokenInId,
+					tokenOutId: bestDirect.tokenOutId,
+					amountInRaw: amountInRaw.toString(),
+				},
+			],
+		};
+	}
+
+	const poolsByTokenId = collectPoolsByTokenId(pools);
+	let bestTwoHop: {
+		firstPool: RefPoolView;
+		secondPool: RefPoolView;
+		tokenInId: string;
+		tokenMidId: string;
+		tokenOutId: string;
+		amountMidRaw: bigint;
+		amountOutRaw: bigint;
+	} | null = null;
+
+	for (const tokenInId of tokenInCandidates) {
+		const firstPools = poolsByTokenId.get(tokenInId) ?? [];
+		for (const firstPool of firstPools) {
+			for (const tokenMidId of firstPool.token_account_ids) {
+				if (tokenMidId === tokenInId) continue;
+				const secondPools = poolsByTokenId.get(tokenMidId) ?? [];
+				if (secondPools.length === 0) continue;
+
+				const amountMidRaw = parseNonNegativeBigInt(
+					await queryRefReturn({
+						network,
+						rpcUrl: params.rpcUrl,
+						refContractId,
+						poolId: firstPool.id,
+						tokenInId,
+						tokenOutId: tokenMidId,
+						amountInRaw: amountInRaw.toString(),
+					}),
+					"amountMidRaw",
+				);
+				if (amountMidRaw <= 0n) continue;
+
+				for (const secondPool of secondPools) {
+					if (secondPool.id === firstPool.id) continue;
+					for (const tokenOutId of tokenOutCandidates) {
+						if (tokenOutId === tokenMidId || tokenOutId === tokenInId) continue;
+						if (!secondPool.token_account_ids.includes(tokenOutId)) continue;
+						const amountOutRaw = parseNonNegativeBigInt(
+							await queryRefReturn({
+								network,
+								rpcUrl: params.rpcUrl,
+								refContractId,
+								poolId: secondPool.id,
+								tokenInId: tokenMidId,
+								tokenOutId,
+								amountInRaw: amountMidRaw.toString(),
+							}),
+							"amountOutRaw",
+						);
+						if (amountOutRaw <= 0n) continue;
+						if (!bestTwoHop || amountOutRaw > bestTwoHop.amountOutRaw) {
+							bestTwoHop = {
+								firstPool,
+								secondPool,
+								tokenInId,
+								tokenMidId,
+								tokenOutId,
+								amountMidRaw,
+								amountOutRaw,
+							};
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (!bestTwoHop) {
 		throw new Error(
-			`No direct pool route found for ${tokenInInput} -> ${tokenOutInput} on ${refContractId}.`,
+			`No pool route found for ${tokenInInput} -> ${tokenOutInput} on ${refContractId}.`,
 		);
 	}
 
-	const minAmountOutRaw = applySlippage(bestDirect.amountOutRaw, slippageBps);
+	const minAmountOutRaw = applySlippage(bestTwoHop.amountOutRaw, slippageBps);
+	const combinedFeeBps = Number(
+		parseFeeBps(bestTwoHop.firstPool.total_fee) +
+			parseFeeBps(bestTwoHop.secondPool.total_fee),
+	);
 	return {
 		refContractId,
-		poolId: bestDirect.pool.id,
-		tokenInId: bestDirect.tokenInId,
-		tokenOutId: bestDirect.tokenOutId,
+		poolId: bestTwoHop.firstPool.id,
+		tokenInId: bestTwoHop.tokenInId,
+		tokenOutId: bestTwoHop.tokenOutId,
 		amountInRaw: amountInRaw.toString(),
-		amountOutRaw: bestDirect.amountOutRaw.toString(),
+		amountOutRaw: bestTwoHop.amountOutRaw.toString(),
 		minAmountOutRaw: minAmountOutRaw.toString(),
-		feeBps: Number(parseFeeBps(bestDirect.pool.total_fee)),
-		source: "bestDirectPool",
+		feeBps: combinedFeeBps,
+		source: "bestTwoHopPoolRoute",
+		actions: [
+			{
+				poolId: bestTwoHop.firstPool.id,
+				tokenInId: bestTwoHop.tokenInId,
+				tokenOutId: bestTwoHop.tokenMidId,
+				amountInRaw: amountInRaw.toString(),
+			},
+			{
+				poolId: bestTwoHop.secondPool.id,
+				tokenInId: bestTwoHop.tokenMidId,
+				tokenOutId: bestTwoHop.tokenOutId,
+				amountInRaw: bestTwoHop.amountMidRaw.toString(),
+			},
+		],
 	};
 }
