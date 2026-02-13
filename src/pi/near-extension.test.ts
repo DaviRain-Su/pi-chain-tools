@@ -25,6 +25,7 @@ describe("nearExtension", () => {
 			"near_swapRef",
 			"near_transferFt",
 			"near_transferNear",
+			"near_withdrawRefToken",
 			"w3rt_run_near_workflow_v0",
 		]);
 	});

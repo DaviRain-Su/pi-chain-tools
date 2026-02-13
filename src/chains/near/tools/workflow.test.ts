@@ -729,6 +729,24 @@ describe("w3rt_run_near_workflow_v0", () => {
 		});
 	});
 
+	it("parses natural-language ref lp remove with auto-withdraw hint", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-11ca", {
+			runId: "wf-near-11ca",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Ref 移除 LP，NEAR/USDC，shares 100000，提回钱包，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.remove",
+			intent: {
+				type: "near.lp.ref.remove",
+				autoWithdraw: true,
+			},
+		});
+	});
+
 	it("parses natural-language ref lp remove percentage intent", async () => {
 		const tool = getTool();
 		const result = await tool.execute("near-wf-11e", {
@@ -886,5 +904,37 @@ describe("w3rt_run_near_workflow_v0", () => {
 				},
 			},
 		});
+	});
+
+	it("passes autoWithdraw params to remove execute tool", async () => {
+		const tool = getTool();
+		const analysis = await tool.execute("near-wf-12b-analysis", {
+			runId: "wf-near-12b",
+			runMode: "analysis",
+			intentType: "near.lp.ref.remove",
+			network: "mainnet",
+			poolId: 7,
+			shares: "100000",
+			autoWithdraw: true,
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		await tool.execute("near-wf-12b-execute", {
+			runId: "wf-near-12b",
+			runMode: "execute",
+			network: "mainnet",
+			poolId: 7,
+			shares: "100000",
+			autoWithdraw: true,
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.removeLiquidityRefExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				autoWithdraw: true,
+				autoRegisterReceiver: true,
+			}),
+		);
 	});
 });

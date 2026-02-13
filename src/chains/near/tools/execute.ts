@@ -96,6 +96,23 @@ type NearRefRemoveLiquidityParams = {
 	tokenAId?: string;
 	tokenBId?: string;
 	refContractId?: string;
+	autoWithdraw?: boolean;
+	autoRegisterReceiver?: boolean;
+	fromAccountId?: string;
+	privateKey?: string;
+	network?: string;
+	rpcUrl?: string;
+	confirmMainnet?: boolean;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearRefWithdrawParams = {
+	tokenId: string;
+	amountRaw?: string;
+	withdrawAll?: boolean;
+	refContractId?: string;
+	autoRegisterReceiver?: boolean;
 	fromAccountId?: string;
 	privateKey?: string;
 	network?: string;
@@ -297,6 +314,43 @@ async function queryRefPoolShares(params: {
 	});
 	const parsed = decodeNearCallResultJson<string>(result);
 	return parseNonNegativeYocto(parsed, "poolShares").toString();
+}
+
+async function queryRefUserDeposits(params: {
+	network: string;
+	rpcUrl?: string;
+	refContractId: string;
+	accountId: string;
+}): Promise<Record<string, string>> {
+	const result = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		params: {
+			request_type: "call_function",
+			account_id: params.refContractId,
+			method_name: "get_deposits",
+			args_base64: encodeNearCallArgs({
+				account_id: params.accountId,
+			}),
+			finality: "final",
+		},
+	});
+	const parsed = decodeNearCallResultJson<Record<string, string>>(result);
+	if (!parsed || typeof parsed !== "object") {
+		return {};
+	}
+	const deposits: Record<string, string> = {};
+	for (const [tokenId, rawAmount] of Object.entries(parsed)) {
+		if (typeof tokenId !== "string" || typeof rawAmount !== "string") continue;
+		const normalizedToken = tokenId.trim().toLowerCase();
+		if (!normalizedToken) continue;
+		deposits[normalizedToken] = parseNonNegativeYocto(
+			rawAmount,
+			`deposits[${normalizedToken}]`,
+		).toString();
+	}
+	return deposits;
 }
 
 function extractErrorText(error: unknown): string {
@@ -801,6 +855,132 @@ async function resolveRemoveLiquidityShares(params: {
 	};
 }
 
+function resolveWithdrawTokenId(params: {
+	network: string;
+	tokenInput: string;
+	availableTokenIds: string[];
+}): string {
+	const tokenInput = params.tokenInput.trim();
+	if (!tokenInput) {
+		throw new Error("tokenId is required");
+	}
+	const availableTokenIds = params.availableTokenIds.map((tokenId) =>
+		tokenId.toLowerCase(),
+	);
+	const matches = resolveRefTokenIds({
+		network: params.network,
+		tokenIdOrSymbol: tokenInput,
+		availableTokenIds,
+	});
+	if (matches[0]) return matches[0];
+	if (tokenInput.includes(".")) return tokenInput.toLowerCase();
+	const fallback = resolveRefTokenIds({
+		network: params.network,
+		tokenIdOrSymbol: tokenInput,
+	});
+	if (fallback[0]) return fallback[0];
+	throw new Error(`Cannot resolve tokenId: ${tokenInput}`);
+}
+
+async function executeRefWithdraw(params: {
+	account: Account;
+	network: string;
+	rpcUrl?: string;
+	refContractId: string;
+	signerAccountId: string;
+	tokenInput: string;
+	amountRaw?: string;
+	withdrawAll?: boolean;
+	autoRegisterReceiver?: boolean;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+}): Promise<{
+	tokenId: string;
+	amountRaw: string;
+	depositBeforeRaw: string;
+	storageRegistration: StorageRegistrationResult | null;
+	txHash: string | null;
+	explorerUrl: string | null;
+}> {
+	const deposits = await queryRefUserDeposits({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		refContractId: params.refContractId,
+		accountId: params.signerAccountId,
+	});
+	const tokenId = resolveWithdrawTokenId({
+		network: params.network,
+		tokenInput: params.tokenInput,
+		availableTokenIds: Object.keys(deposits),
+	});
+	const depositBeforeRaw = parseNonNegativeYocto(
+		deposits[tokenId] ?? "0",
+		`deposits[${tokenId}]`,
+	).toString();
+	const requestedAmountRaw =
+		typeof params.amountRaw === "string" && params.amountRaw.trim()
+			? parsePositiveYocto(params.amountRaw, "amountRaw").toString()
+			: null;
+	const withdrawAll = params.withdrawAll !== false;
+	const amountRaw =
+		requestedAmountRaw ??
+		(withdrawAll
+			? depositBeforeRaw
+			: (() => {
+					throw new Error("Provide amountRaw or set withdrawAll=true");
+				})());
+	if (parseNonNegativeYocto(amountRaw, "amountRaw") <= 0n) {
+		throw new Error(
+			`No withdrawable deposit for ${tokenId} on ${params.refContractId}`,
+		);
+	}
+	if (
+		parseNonNegativeYocto(amountRaw, "amountRaw") >
+		parseNonNegativeYocto(depositBeforeRaw, "depositBeforeRaw")
+	) {
+		throw new Error(
+			`Withdraw amount exceeds Ref deposit for ${tokenId}: ${amountRaw} > ${depositBeforeRaw}`,
+		);
+	}
+
+	const autoRegisterReceiver = params.autoRegisterReceiver !== false;
+	const storageRegistration =
+		autoRegisterReceiver === true
+			? await ensureFtStorageRegistered({
+					account: params.account,
+					network: params.network,
+					rpcUrl: params.rpcUrl,
+					ftContractId: tokenId,
+					accountId: params.signerAccountId,
+				})
+			: null;
+	const withdrawGas = resolveRefSwapGas(params.gas);
+	const withdrawDeposit = resolveAttachedDeposit(
+		params.attachedDepositYoctoNear,
+	);
+	const withdrawTx = await params.account.callFunction({
+		contractId: params.refContractId,
+		methodName: "withdraw",
+		args: {
+			token_id: tokenId,
+			amount: amountRaw,
+		},
+		deposit: withdrawDeposit,
+		gas: withdrawGas,
+	});
+	const txHash = extractTxHash(withdrawTx);
+	return {
+		tokenId,
+		amountRaw,
+		depositBeforeRaw,
+		storageRegistration,
+		txHash,
+		explorerUrl: txHash
+			? getNearExplorerTransactionUrl(txHash, params.network)
+			: null,
+	};
+}
+
 function normalizeReceiverAccountId(value: string): string {
 	const normalized = value.trim();
 	if (!normalized) {
@@ -1258,6 +1438,98 @@ export function createNearExecuteTools(): RegisteredTool[] {
 			},
 		}),
 		defineTool({
+			name: `${NEAR_TOOL_PREFIX}withdrawRefToken`,
+			label: "NEAR Ref Withdraw Token",
+			description:
+				"Withdraw deposited token from Ref exchange back to signer account.",
+			parameters: Type.Object({
+				tokenId: Type.String({
+					description: "Token contract id or symbol to withdraw from Ref.",
+				}),
+				amountRaw: Type.Optional(
+					Type.String({
+						description:
+							"Withdraw amount in raw units. If omitted, withdrawAll=true withdraws all deposit.",
+					}),
+				),
+				withdrawAll: Type.Optional(
+					Type.Boolean({
+						description:
+							"If true and amountRaw is omitted, withdraw full deposited balance (default true).",
+					}),
+				),
+				refContractId: Type.Optional(
+					Type.String({
+						description:
+							"Ref contract id override (default mainnet v2.ref-finance.near).",
+					}),
+				),
+				autoRegisterReceiver: Type.Optional(
+					Type.Boolean({
+						description:
+							"Auto-run storage_deposit on token for signer before withdraw (default true).",
+					}),
+				),
+				fromAccountId: Type.Optional(Type.String()),
+				privateKey: Type.Optional(Type.String()),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+				gas: Type.Optional(
+					Type.String({
+						description:
+							"Gas for withdraw call in yoctoGas (default 180000000000000 / 180 Tgas).",
+					}),
+				),
+				attachedDepositYoctoNear: Type.Optional(
+					Type.String({
+						description: "Attached deposit for withdraw (default 1 yoctoNEAR).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as NearRefWithdrawParams;
+				const { account, network, endpoint, signerAccountId } =
+					createNearAccountClient({
+						accountId: params.fromAccountId,
+						privateKey: params.privateKey,
+						network: params.network,
+						rpcUrl: params.rpcUrl,
+					});
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const refContractId = getRefContractId(network, params.refContractId);
+				const withdraw = await executeRefWithdraw({
+					account,
+					network,
+					rpcUrl: params.rpcUrl,
+					refContractId,
+					signerAccountId,
+					tokenInput: params.tokenId,
+					amountRaw: params.amountRaw,
+					withdrawAll: params.withdrawAll,
+					autoRegisterReceiver: params.autoRegisterReceiver,
+					gas: params.gas,
+					attachedDepositYoctoNear: params.attachedDepositYoctoNear,
+				});
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Ref withdraw submitted: ${withdraw.amountRaw} raw ${withdraw.tokenId}`,
+						},
+					],
+					details: {
+						...withdraw,
+						refContractId,
+						network,
+						fromAccountId: signerAccountId,
+						rpcEndpoint: endpoint,
+					},
+				};
+			},
+		}),
+		defineTool({
 			name: `${NEAR_TOOL_PREFIX}addLiquidityRef`,
 			label: "NEAR Ref Add Liquidity",
 			description:
@@ -1620,6 +1892,18 @@ export function createNearExecuteTools(): RegisteredTool[] {
 							"Token B id/symbol used for automatic pool selection when poolId is omitted.",
 					}),
 				),
+				autoWithdraw: Type.Optional(
+					Type.Boolean({
+						description:
+							"After remove_liquidity succeeds, auto-withdraw pool tokens from Ref to wallet (default false).",
+					}),
+				),
+				autoRegisterReceiver: Type.Optional(
+					Type.Boolean({
+						description:
+							"When autoWithdraw=true, auto-run storage_deposit on receiver token accounts (default true).",
+					}),
+				),
 				refContractId: Type.Optional(Type.String()),
 				fromAccountId: Type.Optional(Type.String()),
 				privateKey: Type.Optional(Type.String()),
@@ -1645,6 +1929,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 				const removeLiquidityDeposit = resolveAttachedDeposit(
 					params.attachedDepositYoctoNear,
 				);
+				const autoWithdraw = params.autoWithdraw === true;
 				const { account, network, endpoint, signerAccountId } =
 					createNearAccountClient({
 						accountId: params.fromAccountId,
@@ -1718,6 +2003,8 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					sharePercent: params.sharePercent,
 				});
 				const shares = shareResolution.shares;
+				const withdrawGas = params.gas;
+				const withdrawDeposit = params.attachedDepositYoctoNear;
 
 				const removeTx = await account.callFunction({
 					contractId: refContractId,
@@ -1734,12 +2021,78 @@ export function createNearExecuteTools(): RegisteredTool[] {
 				const explorerUrl = txHash
 					? getNearExplorerTransactionUrl(txHash, network)
 					: null;
+				const autoWithdrawResults: Array<{
+					tokenId: string;
+					amountRaw: string;
+					depositBeforeRaw: string;
+					storageRegistration: StorageRegistrationResult | null;
+					txHash: string | null;
+					explorerUrl: string | null;
+				}> = [];
+				if (autoWithdraw) {
+					const refDeposits = await queryRefUserDeposits({
+						network,
+						rpcUrl: params.rpcUrl,
+						refContractId,
+						accountId: signerAccountId,
+					});
+					for (const tokenId of poolTokenIds) {
+						const depositBeforeRaw = parseNonNegativeYocto(
+							refDeposits[tokenId] ?? "0",
+							`deposits[${tokenId}]`,
+						).toString();
+						if (
+							parseNonNegativeYocto(depositBeforeRaw, "depositBeforeRaw") <= 0n
+						) {
+							autoWithdrawResults.push({
+								tokenId,
+								amountRaw: "0",
+								depositBeforeRaw,
+								storageRegistration: null,
+								txHash: null,
+								explorerUrl: null,
+							});
+							continue;
+						}
+						const storageRegistration =
+							params.autoRegisterReceiver === false
+								? null
+								: await ensureFtStorageRegistered({
+										account,
+										network,
+										rpcUrl: params.rpcUrl,
+										ftContractId: tokenId,
+										accountId: signerAccountId,
+									});
+						const withdrawTx = await account.callFunction({
+							contractId: refContractId,
+							methodName: "withdraw",
+							args: {
+								token_id: tokenId,
+								amount: depositBeforeRaw,
+							},
+							deposit: resolveAttachedDeposit(withdrawDeposit),
+							gas: resolveRefSwapGas(withdrawGas),
+						});
+						const withdrawTxHash = extractTxHash(withdrawTx);
+						autoWithdrawResults.push({
+							tokenId,
+							amountRaw: depositBeforeRaw,
+							depositBeforeRaw,
+							storageRegistration,
+							txHash: withdrawTxHash,
+							explorerUrl: withdrawTxHash
+								? getNearExplorerTransactionUrl(withdrawTxHash, network)
+								: null,
+						});
+					}
+				}
 
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Ref remove_liquidity submitted: pool=${poolId} shares=${shares}`,
+							text: `Ref remove_liquidity submitted: pool=${poolId} shares=${shares}${autoWithdraw ? ` (autoWithdraw ${autoWithdrawResults.filter((entry) => entry.txHash).length}/${poolTokenIds.length})` : ""}`,
 						},
 					],
 					details: {
@@ -1753,6 +2106,8 @@ export function createNearExecuteTools(): RegisteredTool[] {
 						tokenAId: inferredPair?.tokenAId ?? null,
 						tokenBId: inferredPair?.tokenBId ?? null,
 						inferredPair,
+						autoWithdraw,
+						autoWithdrawResults,
 						refContractId,
 						network,
 						fromAccountId: signerAccountId,

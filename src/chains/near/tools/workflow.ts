@@ -79,6 +79,8 @@ type NearRefRemoveLiquidityIntent = {
 	tokenAId?: string;
 	tokenBId?: string;
 	refContractId?: string;
+	autoWithdraw?: boolean;
+	autoRegisterReceiver?: boolean;
 	fromAccountId?: string;
 	gas?: string;
 	attachedDepositYoctoNear?: string;
@@ -127,6 +129,8 @@ type WorkflowParams = {
 	autoRegisterOutput?: boolean;
 	autoRegisterExchange?: boolean;
 	autoRegisterTokens?: boolean;
+	autoWithdraw?: boolean;
+	autoRegisterReceiver?: boolean;
 	gas?: string;
 	attachedDepositYoctoNear?: string;
 	confirmMainnet?: boolean;
@@ -157,6 +161,7 @@ type ParsedIntentHints = {
 	poolId?: number;
 	slippageBps?: number;
 	refContractId?: string;
+	autoWithdraw?: boolean;
 };
 
 type NearAccountQueryResult = {
@@ -529,6 +534,17 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (refContractMatch?.[1]) {
 		hints.refContractId = refContractMatch[1];
 	}
+	if (
+		likelyLpRemove &&
+		(lower.includes("提回") ||
+			lower.includes("提到钱包") ||
+			lower.includes("转回钱包") ||
+			lower.includes("auto withdraw") ||
+			lower.includes("自动提现") ||
+			lower.includes("自动提回"))
+	) {
+		hints.autoWithdraw = true;
+	}
 
 	if (
 		likelyLpRemove &&
@@ -811,6 +827,8 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 					? normalizeTokenInput(tokenBInput, "tokenBId")
 					: undefined,
 			refContractId,
+			autoWithdraw: params.autoWithdraw ?? hints.autoWithdraw ?? false,
+			autoRegisterReceiver: params.autoRegisterReceiver !== false,
 			fromAccountId,
 			gas:
 				typeof params.gas === "string" && params.gas.trim()
@@ -979,6 +997,8 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 		(Array.isArray(params.minAmountsRaw) && params.minAmountsRaw.length > 0) ||
 		params.minAmountARaw ||
 		params.minAmountBRaw ||
+		params.autoWithdraw != null ||
+		params.autoRegisterReceiver != null ||
 		params.autoRegisterOutput != null
 	) {
 		return true;
@@ -1805,6 +1825,8 @@ export function createNearWorkflowTools() {
 				autoRegisterOutput: Type.Optional(Type.Boolean()),
 				autoRegisterExchange: Type.Optional(Type.Boolean()),
 				autoRegisterTokens: Type.Optional(Type.Boolean()),
+				autoWithdraw: Type.Optional(Type.Boolean()),
+				autoRegisterReceiver: Type.Optional(Type.Boolean()),
 				gas: Type.Optional(Type.String()),
 				attachedDepositYoctoNear: Type.Optional(Type.String()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
@@ -2017,6 +2039,8 @@ export function createNearWorkflowTools() {
 											tokenAId: intent.tokenAId,
 											tokenBId: intent.tokenBId,
 											refContractId: intent.refContractId,
+											autoWithdraw: intent.autoWithdraw,
+											autoRegisterReceiver: intent.autoRegisterReceiver,
 											gas: intent.gas,
 											attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
 										}),

@@ -490,6 +490,59 @@ describe("near_swapRef", () => {
 	});
 });
 
+describe("near_withdrawRefToken", () => {
+	it("withdraws all deposited balance from Ref by token symbol", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "811",
+				block_height: 811,
+				logs: [],
+				result: [
+					...Buffer.from(
+						JSON.stringify({
+							"usdc.tether-token.near": "2500000",
+						}),
+						"utf8",
+					),
+				],
+			})
+			.mockResolvedValueOnce({
+				block_hash: "812",
+				block_height: 812,
+				logs: [],
+				result: [...Buffer.from(JSON.stringify({ total: "1" }), "utf8")],
+			});
+		nearApiMocks.callFunction.mockResolvedValueOnce({
+			transaction_outcome: {
+				id: "near-withdraw-tx-hash",
+			},
+		});
+		const tool = getTool("near_withdrawRefToken");
+		const result = await tool.execute("near-exec-6b", {
+			tokenId: "USDC",
+			withdrawAll: true,
+			confirmMainnet: true,
+		});
+
+		expect(nearApiMocks.callFunction).toHaveBeenCalledWith({
+			contractId: "v2.ref-finance.near",
+			methodName: "withdraw",
+			args: {
+				token_id: "usdc.tether-token.near",
+				amount: "2500000",
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "2500000",
+			depositBeforeRaw: "2500000",
+			txHash: "near-withdraw-tx-hash",
+		});
+	});
+});
+
 describe("near_addLiquidityRef", () => {
 	it("deposits tokens then calls add_liquidity", async () => {
 		nearApiMocks.callFunction
@@ -770,6 +823,101 @@ describe("near_removeLiquidityRef", () => {
 			shareBpsUsed: 5000,
 			availableShares: "400000",
 			txHash: "near-remove-liquidity-hash-3",
+		});
+	});
+
+	it("auto-withdraws pool tokens after remove liquidity when enabled", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "821",
+				block_height: 821,
+				logs: [],
+				result: [
+					...Buffer.from(
+						JSON.stringify({
+							"wrap.near": "100000000000000000000",
+							"usdc.tether-token.near": "2000000",
+						}),
+						"utf8",
+					),
+				],
+			})
+			.mockResolvedValueOnce({
+				block_hash: "822",
+				block_height: 822,
+				logs: [],
+				result: [...Buffer.from(JSON.stringify({ total: "1" }), "utf8")],
+			})
+			.mockResolvedValueOnce({
+				block_hash: "823",
+				block_height: 823,
+				logs: [],
+				result: [...Buffer.from(JSON.stringify({ total: "1" }), "utf8")],
+			});
+		nearApiMocks.callFunction
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-remove-liquidity-hash-4" },
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-withdraw-near-hash" },
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-withdraw-usdc-hash" },
+			});
+		const tool = getTool("near_removeLiquidityRef");
+		const result = await tool.execute("near-exec-12", {
+			poolId: 7,
+			shares: "100000",
+			autoWithdraw: true,
+			confirmMainnet: true,
+		});
+
+		expect(nearApiMocks.callFunction).toHaveBeenNthCalledWith(1, {
+			contractId: "v2.ref-finance.near",
+			methodName: "remove_liquidity",
+			args: {
+				pool_id: 7,
+				shares: "100000",
+				min_amounts: ["0", "0"],
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(nearApiMocks.callFunction).toHaveBeenNthCalledWith(2, {
+			contractId: "v2.ref-finance.near",
+			methodName: "withdraw",
+			args: {
+				token_id: "wrap.near",
+				amount: "100000000000000000000",
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(nearApiMocks.callFunction).toHaveBeenNthCalledWith(3, {
+			contractId: "v2.ref-finance.near",
+			methodName: "withdraw",
+			args: {
+				token_id: "usdc.tether-token.near",
+				amount: "2000000",
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			poolId: 7,
+			autoWithdraw: true,
+			autoWithdrawResults: [
+				{
+					tokenId: "wrap.near",
+					amountRaw: "100000000000000000000",
+					txHash: "near-withdraw-near-hash",
+				},
+				{
+					tokenId: "usdc.tether-token.near",
+					amountRaw: "2000000",
+					txHash: "near-withdraw-usdc-hash",
+				},
+			],
 		});
 	});
 });
