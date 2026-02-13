@@ -19,6 +19,8 @@ describe("nearExtension", () => {
 			"near_getBalance",
 			"near_getFtBalance",
 			"near_getPortfolio",
+			"near_getRefDeposits",
+			"near_getRefLpPositions",
 			"near_getSwapQuoteRef",
 			"near_removeLiquidityRef",
 			"near_rpc",

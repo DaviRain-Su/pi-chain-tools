@@ -355,8 +355,12 @@ function parseRefLpAmountRaw(params: {
 		return parsePositiveBigInt(params.valueRaw, params.fieldRaw).toString();
 	}
 	if (params.valueUi == null) {
+		const tokenHint =
+			typeof params.tokenInput === "string" && params.tokenInput.trim()
+				? ` for ${params.tokenInput.trim()}`
+				: "";
 		throw new Error(
-			`Missing ${params.fieldRaw}. Provide ${params.fieldRaw} or ${params.fieldUi}.`,
+			`Missing ${params.fieldRaw}. Provide ${params.fieldRaw} or ${params.fieldUi}${tokenHint}.`,
 		);
 	}
 	const uiValue =
@@ -386,10 +390,110 @@ function parseRefLpAmountRaw(params: {
 	return parsePositiveBigInt(rawAmount, params.fieldUi).toString();
 }
 
+const LP_TOKEN_AMOUNT_STOP_WORDS = new Set([
+	"pool",
+	"lp",
+	"ref",
+	"mainnet",
+	"testnet",
+	"slippage",
+	"bps",
+	"amount",
+	"raw",
+	"shares",
+	"share",
+	"mina",
+	"minb",
+	"tokena",
+	"tokenb",
+]);
+
+type ParsedTokenAmountPair = {
+	token: string;
+	amount: string;
+};
+
+function collectTokenAmountPairs(intentText: string): ParsedTokenAmountPair[] {
+	const candidates: ParsedTokenAmountPair[] = [];
+	const addCandidate = (token: string, amount: string) => {
+		const normalizedToken = token.trim().toLowerCase();
+		if (!normalizedToken) return;
+		if (LP_TOKEN_AMOUNT_STOP_WORDS.has(normalizedToken)) return;
+		if (!/^\d+(\.\d+)?$/.test(amount.trim())) return;
+		candidates.push({
+			token: token.trim(),
+			amount: amount.trim(),
+		});
+	};
+
+	for (const match of intentText.matchAll(
+		/(\d+(?:\.\d+)?)\s*([a-z][a-z0-9._-]*)/gi,
+	)) {
+		if (!match[1] || !match[2]) continue;
+		addCandidate(match[2], match[1]);
+	}
+	for (const match of intentText.matchAll(
+		/([a-z][a-z0-9._-]*)\s*(\d+(?:\.\d+)?)/gi,
+	)) {
+		if (!match[1] || !match[2]) continue;
+		addCandidate(match[1], match[2]);
+	}
+
+	const deduped = new Map<string, ParsedTokenAmountPair>();
+	for (const candidate of candidates) {
+		const key = `${candidate.token.toLowerCase()}::${candidate.amount}`;
+		if (!deduped.has(key)) {
+			deduped.set(key, candidate);
+		}
+	}
+	return [...deduped.values()];
+}
+
+function applyLpTokenAmountHints(params: {
+	hints: ParsedIntentHints;
+	tokenAmountPairs: ParsedTokenAmountPair[];
+	likelyLpAdd: boolean;
+}): void {
+	const { hints, tokenAmountPairs, likelyLpAdd } = params;
+	if (tokenAmountPairs.length === 0) return;
+
+	if (
+		likelyLpAdd &&
+		(!hints.tokenAId || !hints.tokenBId) &&
+		tokenAmountPairs.length >= 2
+	) {
+		if (!hints.tokenAId) hints.tokenAId = tokenAmountPairs[0]?.token;
+		if (!hints.tokenBId) {
+			const firstTokenLower = tokenAmountPairs[0]?.token.toLowerCase();
+			const second = tokenAmountPairs.find(
+				(entry) => entry.token.toLowerCase() !== firstTokenLower,
+			);
+			hints.tokenBId = second?.token ?? tokenAmountPairs[1]?.token;
+		}
+	}
+
+	const amountByToken = new Map<string, string>();
+	for (const pair of tokenAmountPairs) {
+		const key = pair.token.toLowerCase();
+		if (!amountByToken.has(key)) {
+			amountByToken.set(key, pair.amount);
+		}
+	}
+	if (hints.tokenAId && !hints.amountARaw && !hints.amountAUi) {
+		const matched = amountByToken.get(hints.tokenAId.toLowerCase());
+		if (matched) hints.amountAUi = matched;
+	}
+	if (hints.tokenBId && !hints.amountBRaw && !hints.amountBUi) {
+		const matched = amountByToken.get(hints.tokenBId.toLowerCase());
+		if (matched) hints.amountBUi = matched;
+	}
+}
+
 function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (!intentText || !intentText.trim()) return {};
 	const text = intentText.trim();
 	const lower = text.toLowerCase();
+	const tokenAmountPairs = collectTokenAmountPairs(text);
 	const toMatch = text.match(
 		/(?:to|给|到)\s*([a-z0-9][a-z0-9._-]*(?:\.near)?)/i,
 	);
@@ -500,6 +604,11 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		hints.amountAUi = amountAUiMatch[1];
 	if (!hints.amountBRaw && amountBUiMatch?.[1])
 		hints.amountBUi = amountBUiMatch[1];
+	applyLpTokenAmountHints({
+		hints,
+		tokenAmountPairs,
+		likelyLpAdd,
+	});
 	if (sharesMatch?.[1]) hints.shares = sharesMatch[1];
 	if (
 		likelyLpRemove &&
@@ -515,6 +624,13 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (likelyLpRemove && !hints.shares && !hints.shareBps) {
 		if (lower.includes("half") || lower.includes("一半")) {
 			hints.shareBps = 5000;
+		} else if (
+			lower.includes("all") ||
+			lower.includes("全部") ||
+			lower.includes("全部移除") ||
+			lower.includes("全部撤出")
+		) {
+			hints.shareBps = 10_000;
 		}
 	}
 	if (minAmountARawMatch?.[1]) hints.minAmountARaw = minAmountARawMatch[1];

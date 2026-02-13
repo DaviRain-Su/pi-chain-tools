@@ -514,6 +514,61 @@ describe("w3rt_run_near_workflow_v0", () => {
 		});
 	});
 
+	it("parses natural-language ref lp add intent with token amounts", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-9c", {
+			runId: "wf-near-09c",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"在 Ref 添加 LP，NEAR/USDC，投入 0.01 NEAR 和 1.2 USDC，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.add",
+			intent: {
+				type: "near.lp.ref.add",
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+				amountARaw: "10000000000000000000000",
+				amountBRaw: "1200000",
+			},
+		});
+	});
+
+	it("infers lp token pair from token amounts when pair text is omitted", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-9d", {
+			runId: "wf-near-09d",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Ref 添加 LP，投入 0.02 NEAR 和 2 USDC，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.add",
+			intent: {
+				type: "near.lp.ref.add",
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+				amountARaw: "20000000000000000000000",
+				amountBRaw: "2000000",
+			},
+		});
+	});
+
+	it("returns clear error when lp add only provides one side amount", async () => {
+		const tool = getTool();
+		await expect(
+			tool.execute("near-wf-9e", {
+				runId: "wf-near-09e",
+				runMode: "analysis",
+				network: "mainnet",
+				intentText: "在 Ref 添加 LP，USDC/NEAR，把 1 NEAR 加到 LP，先分析",
+			}),
+		).rejects.toThrow("Missing amountARaw");
+	});
+
 	it("simulates ref lp add and returns balance/storage artifacts", async () => {
 		runtimeMocks.callNearRpc
 			.mockResolvedValueOnce({
@@ -763,6 +818,26 @@ describe("w3rt_run_near_workflow_v0", () => {
 				tokenAId: "NEAR",
 				tokenBId: "USDC",
 				shareBps: 5000,
+			},
+		});
+	});
+
+	it("parses natural-language ref lp remove all intent", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-11f", {
+			runId: "wf-near-11f",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Ref 移除 LP，NEAR/USDC，全部撤出，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.remove",
+			intent: {
+				type: "near.lp.ref.remove",
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+				shareBps: 10000,
 			},
 		});
 	});

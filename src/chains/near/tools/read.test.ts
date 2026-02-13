@@ -15,6 +15,8 @@ const runtimeMocks = vi.hoisted(() => ({
 }));
 
 const refMocks = vi.hoisted(() => ({
+	fetchRefPoolById: vi.fn(),
+	getRefContractId: vi.fn(),
 	getRefSwapQuote: vi.fn(),
 }));
 
@@ -33,9 +35,15 @@ vi.mock("../runtime.js", async () => {
 	};
 });
 
-vi.mock("../ref.js", () => ({
-	getRefSwapQuote: refMocks.getRefSwapQuote,
-}));
+vi.mock("../ref.js", async () => {
+	const actual = await vi.importActual<typeof import("../ref.js")>("../ref.js");
+	return {
+		...actual,
+		fetchRefPoolById: refMocks.fetchRefPoolById,
+		getRefContractId: refMocks.getRefContractId,
+		getRefSwapQuote: refMocks.getRefSwapQuote,
+	};
+});
 
 import { createNearReadTools } from "./read.js";
 
@@ -50,6 +58,12 @@ function getTool(name: string): ReadTool {
 	const tool = createNearReadTools().find((entry) => entry.name === name);
 	if (!tool) throw new Error(`${name} not found`);
 	return tool as unknown as ReadTool;
+}
+
+function decodeArgsBase64(argsBase64: string): Record<string, unknown> {
+	return JSON.parse(
+		Buffer.from(argsBase64, "base64").toString("utf8"),
+	) as Record<string, unknown>;
 }
 
 beforeEach(() => {
@@ -75,6 +89,17 @@ beforeEach(() => {
 		minAmountOutRaw: "993010",
 		feeBps: 30,
 		source: "bestDirectSimplePool",
+	});
+	refMocks.getRefContractId.mockImplementation(
+		(_network?: string, refContractId?: string) =>
+			refContractId ?? "v2.ref-finance.near",
+	);
+	refMocks.fetchRefPoolById.mockResolvedValue({
+		id: 0,
+		token_account_ids: ["wrap.near", "usdc.fakes.near"],
+		amounts: ["1", "1"],
+		total_fee: 30,
+		pool_kind: "SIMPLE_POOL",
 	});
 });
 
@@ -294,6 +319,230 @@ describe("near_getPortfolio", () => {
 					contractId: "usdc.fakes.near",
 					rawAmount: "1234500",
 					uiAmount: "1.2345",
+				},
+			],
+		});
+	});
+});
+
+describe("near_getRefDeposits", () => {
+	it("returns readable Ref deposit balances", async () => {
+		runtimeMocks.callNearRpc.mockImplementation(async ({ params }) => {
+			if (
+				!params ||
+				typeof params !== "object" ||
+				typeof params.method_name !== "string"
+			) {
+				throw new Error("invalid params");
+			}
+			if (params.method_name === "get_deposits") {
+				return {
+					block_hash: "5551",
+					block_height: 1001,
+					logs: [],
+					result: [
+						...Buffer.from(
+							JSON.stringify({
+								"wrap.near": "1000000000000000000000000",
+								"usdc.fakes.near": "1234500",
+							}),
+							"utf8",
+						),
+					],
+				};
+			}
+			if (params.method_name === "ft_metadata") {
+				if (params.account_id === "wrap.near") {
+					return {
+						block_hash: "5552",
+						block_height: 1002,
+						logs: [],
+						result: [
+							...Buffer.from(
+								JSON.stringify({
+									decimals: 24,
+									symbol: "wNEAR",
+								}),
+								"utf8",
+							),
+						],
+					};
+				}
+				return {
+					block_hash: "5553",
+					block_height: 1003,
+					logs: [],
+					result: [
+						...Buffer.from(
+							JSON.stringify({
+								decimals: 6,
+								symbol: "USDC",
+							}),
+							"utf8",
+						),
+					],
+				};
+			}
+			throw new Error(`unexpected method ${params.method_name}`);
+		});
+		runtimeMocks.formatTokenAmount.mockImplementation(
+			(value: string, decimals?: number) => {
+				if (value === "1000000000000000000000000" && decimals === 24)
+					return "1";
+				if (value === "1234500" && decimals === 6) return "1.2345";
+				return value;
+			},
+		);
+
+		const tool = getTool("near_getRefDeposits");
+		const result = await tool.execute("near-read-ref-deposits-1", {
+			accountId: "alice.near",
+			network: "mainnet",
+		});
+
+		expect(refMocks.getRefContractId).toHaveBeenCalledWith(
+			"mainnet",
+			undefined,
+		);
+		expect(result.content[0]?.text).toContain("Ref deposits: 2 token(s)");
+		expect(result.content[0]?.text).toContain("wNEAR: 1");
+		expect(result.content[0]?.text).toContain("USDC: 1.2345");
+		expect(result.details).toMatchObject({
+			accountId: "alice.near",
+			network: "mainnet",
+			refContractId: "v2.ref-finance.near",
+			assets: [
+				{
+					tokenId: "wrap.near",
+					symbol: "wNEAR",
+					rawAmount: "1000000000000000000000000",
+					uiAmount: "1",
+				},
+				{
+					tokenId: "usdc.fakes.near",
+					symbol: "USDC",
+					rawAmount: "1234500",
+					uiAmount: "1.2345",
+				},
+			],
+		});
+	});
+});
+
+describe("near_getRefLpPositions", () => {
+	it("scans pools and returns non-zero LP shares with remove hints", async () => {
+		runtimeMocks.callNearRpc.mockImplementation(async ({ params }) => {
+			if (
+				!params ||
+				typeof params !== "object" ||
+				typeof params.method_name !== "string"
+			) {
+				throw new Error("invalid params");
+			}
+
+			if (params.method_name === "get_pools") {
+				return {
+					block_hash: "6661",
+					block_height: 1101,
+					logs: [],
+					result: [
+						...Buffer.from(
+							JSON.stringify([
+								{
+									token_account_ids: ["wrap.near", "usdc.fakes.near"],
+									amounts: ["1", "1"],
+									total_fee: 30,
+									pool_kind: "SIMPLE_POOL",
+								},
+								{
+									token_account_ids: ["wrap.near", "usdt.tether-token.near"],
+									amounts: ["1", "1"],
+									total_fee: 30,
+									pool_kind: "SIMPLE_POOL",
+								},
+								{
+									token_account_ids: ["wrap.near", "aurora"],
+									amounts: ["1", "1"],
+									total_fee: 30,
+									pool_kind: "SIMPLE_POOL",
+								},
+							]),
+							"utf8",
+						),
+					],
+				};
+			}
+
+			if (params.method_name === "get_pool_shares") {
+				const args = decodeArgsBase64(String(params.args_base64));
+				const poolId = Number(args.pool_id);
+				const byPoolId: Record<number, string> = {
+					0: "0",
+					1: "550000",
+					2: "100",
+				};
+				return {
+					block_hash: "6662",
+					block_height: 1102,
+					logs: [],
+					result: [
+						...Buffer.from(JSON.stringify(byPoolId[poolId] ?? "0"), "utf8"),
+					],
+				};
+			}
+
+			if (params.method_name === "ft_metadata") {
+				const byToken: Record<string, { symbol: string; decimals: number }> = {
+					"wrap.near": { symbol: "wNEAR", decimals: 24 },
+					"usdt.tether-token.near": { symbol: "USDT", decimals: 6 },
+					aurora: { symbol: "AURORA", decimals: 18 },
+				};
+				const entry = byToken[String(params.account_id)];
+				return {
+					block_hash: "6663",
+					block_height: 1103,
+					logs: [],
+					result: [
+						...Buffer.from(
+							JSON.stringify(entry ?? { symbol: "UNKNOWN", decimals: 18 }),
+							"utf8",
+						),
+					],
+				};
+			}
+
+			throw new Error(`unexpected method ${params.method_name}`);
+		});
+
+		const tool = getTool("near_getRefLpPositions");
+		const result = await tool.execute("near-read-ref-lp-1", {
+			accountId: "alice.near",
+			network: "mainnet",
+			maxPools: 3,
+		});
+
+		expect(result.content[0]?.text).toContain("Ref LP positions: 2 pool(s)");
+		expect(result.content[0]?.text).toContain(
+			"Pool 1 (wNEAR/USDT): shares 550000",
+		);
+		expect(result.content[0]?.text).toContain(
+			"Hint: 在 Ref 移除 LP，pool 1，shares 550000，minA 0，minB 0，先模拟",
+		);
+		expect(result.details).toMatchObject({
+			accountId: "alice.near",
+			network: "mainnet",
+			refContractId: "v2.ref-finance.near",
+			scannedPoolCount: 3,
+			positions: [
+				{
+					poolId: 1,
+					pairLabel: "wNEAR/USDT",
+					sharesRaw: "550000",
+				},
+				{
+					poolId: 2,
+					pairLabel: "wNEAR/AURORA",
+					sharesRaw: "100",
 				},
 			],
 		});

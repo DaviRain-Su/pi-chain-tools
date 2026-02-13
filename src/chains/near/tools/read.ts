@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
-import { getRefSwapQuote } from "../ref.js";
+import { fetchRefPoolById, getRefContractId, getRefSwapQuote } from "../ref.js";
 import {
 	NEAR_TOOL_PREFIX,
 	callNearRpc,
@@ -50,6 +50,41 @@ type NearPortfolioAsset = {
 
 type NearPortfolioFailure = {
 	ftContractId: string;
+	error: string;
+};
+
+type NearRefDepositAsset = {
+	tokenId: string;
+	symbol: string;
+	rawAmount: string;
+	uiAmount: string | null;
+	decimals: number | null;
+	metadata: NearFtMetadata | null;
+};
+
+type NearRefDepositFailure = {
+	tokenId: string;
+	error: string;
+};
+
+type NearRefPoolView = {
+	id: number;
+	tokenIds: string[];
+	poolKind?: string;
+};
+
+type NearRefLpPosition = {
+	poolId: number;
+	poolKind?: string;
+	tokenIds: string[];
+	tokenSymbols: string[];
+	pairLabel: string;
+	sharesRaw: string;
+	removeHint: string;
+};
+
+type NearRefLpFailure = {
+	poolId: number;
 	error: string;
 };
 
@@ -244,6 +279,221 @@ function parseOptionalPoolId(value?: number | string): number | undefined {
 		throw new Error("poolId must be a non-negative integer");
 	}
 	return normalized;
+}
+
+function parsePoolIdList(values?: (number | string)[]): number[] {
+	if (!Array.isArray(values) || values.length === 0) return [];
+	return [...new Set(values.map((value) => parseOptionalPoolId(value)))].filter(
+		(value): value is number => value != null,
+	);
+}
+
+function parseMaxPools(value?: number): number {
+	if (value == null) return 200;
+	if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+		throw new Error("maxPools must be a positive integer");
+	}
+	return Math.min(value, 1_000);
+}
+
+function normalizeTokenFilterList(values?: string[]): string[] {
+	if (!Array.isArray(values) || values.length === 0) return [];
+	return dedupeStrings(
+		values.map((entry) => entry.trim().toLowerCase()).filter(Boolean),
+	);
+}
+
+function formatRefAssetAmount(params: {
+	rawAmount: string;
+	decimals: number | null;
+}): string | null {
+	if (params.decimals == null) return null;
+	try {
+		return formatTokenAmount(params.rawAmount, params.decimals, 8);
+	} catch {
+		return null;
+	}
+}
+
+function resolveRefAssetText(asset: NearRefDepositAsset): string {
+	const amountText =
+		asset.uiAmount == null
+			? `${asset.rawAmount} raw`
+			: `${asset.uiAmount} (raw ${asset.rawAmount})`;
+	return `${asset.symbol}: ${amountText} on ${asset.tokenId}`;
+}
+
+function resolveRefPoolPositionText(position: NearRefLpPosition): string[] {
+	return [
+		`Pool ${position.poolId} (${position.pairLabel}): shares ${position.sharesRaw}`,
+		`Tokens: ${position.tokenIds.join(" / ")}`,
+		`Hint: ${position.removeHint}`,
+	];
+}
+
+async function queryRefDeposits(params: {
+	accountId: string;
+	network: string;
+	refContractId: string;
+	rpcUrl?: string;
+}): Promise<Record<string, string>> {
+	const result = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		params: buildCallFunctionParams({
+			accountId: params.refContractId,
+			methodName: "get_deposits",
+			args: {
+				account_id: params.accountId,
+			},
+		}),
+	});
+	const decoded = decodeNearCallFunctionJson<Record<string, string>>(result);
+	if (!decoded || typeof decoded !== "object") {
+		return {};
+	}
+	const deposits: Record<string, string> = {};
+	for (const [tokenId, rawAmount] of Object.entries(decoded)) {
+		if (typeof tokenId !== "string" || typeof rawAmount !== "string") continue;
+		const normalizedTokenId = tokenId.trim().toLowerCase();
+		if (!normalizedTokenId) continue;
+		deposits[normalizedTokenId] = parseUnsignedBigInt(
+			rawAmount,
+			`deposits[${normalizedTokenId}]`,
+		).toString();
+	}
+	return deposits;
+}
+
+async function queryRefPoolShares(params: {
+	accountId: string;
+	network: string;
+	refContractId: string;
+	poolId: number;
+	rpcUrl?: string;
+}): Promise<string> {
+	const result = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		params: buildCallFunctionParams({
+			accountId: params.refContractId,
+			methodName: "get_pool_shares",
+			args: {
+				pool_id: params.poolId,
+				account_id: params.accountId,
+			},
+		}),
+	});
+	const shares = decodeNearCallFunctionJson<string>(result);
+	if (typeof shares !== "string") {
+		throw new Error("get_pool_shares returned invalid payload");
+	}
+	return parseUnsignedBigInt(shares, "poolShares").toString();
+}
+
+async function queryRefPoolsPage(params: {
+	network: string;
+	refContractId: string;
+	fromIndex: number;
+	limit: number;
+	rpcUrl?: string;
+}): Promise<{ pools: NearRefPoolView[]; rawCount: number }> {
+	const result = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		params: buildCallFunctionParams({
+			accountId: params.refContractId,
+			methodName: "get_pools",
+			args: {
+				from_index: params.fromIndex,
+				limit: params.limit,
+			},
+		}),
+	});
+	const decoded = decodeNearCallFunctionJson<unknown[]>(result);
+	if (!Array.isArray(decoded)) {
+		throw new Error("get_pools returned invalid payload");
+	}
+	const pools: NearRefPoolView[] = [];
+	for (const [index, entry] of decoded.entries()) {
+		if (!entry || typeof entry !== "object") continue;
+		const rawPool = entry as {
+			id?: number;
+			token_account_ids?: unknown;
+			pool_kind?: unknown;
+		};
+		const tokenIds = Array.isArray(rawPool.token_account_ids)
+			? rawPool.token_account_ids
+					.filter((tokenId): tokenId is string => typeof tokenId === "string")
+					.map((tokenId) => tokenId.toLowerCase())
+			: [];
+		if (tokenIds.length < 2) continue;
+		const poolId =
+			typeof rawPool.id === "number" &&
+			Number.isInteger(rawPool.id) &&
+			rawPool.id >= 0
+				? rawPool.id
+				: params.fromIndex + index;
+		pools.push({
+			id: poolId,
+			tokenIds,
+			poolKind:
+				typeof rawPool.pool_kind === "string" ? rawPool.pool_kind : undefined,
+		});
+	}
+	return {
+		pools,
+		rawCount: decoded.length,
+	};
+}
+
+async function mapConcurrently<T, U>(
+	inputs: T[],
+	concurrency: number,
+	mapper: (input: T, index: number) => Promise<U>,
+): Promise<U[]> {
+	if (inputs.length === 0) return [];
+	const workers = Math.max(1, Math.min(concurrency, inputs.length));
+	const output = new Array<U>(inputs.length);
+	let cursor = 0;
+	await Promise.all(
+		Array.from({ length: workers }, async () => {
+			while (true) {
+				const index = cursor;
+				cursor += 1;
+				if (index >= inputs.length) return;
+				output[index] = await mapper(inputs[index], index);
+			}
+		}),
+	);
+	return output;
+}
+
+async function resolveTokenMetadataCached(
+	tokenId: string,
+	cache: Map<string, Promise<NearFtMetadata | null>>,
+	params: {
+		network: string;
+		rpcUrl?: string;
+	},
+): Promise<NearFtMetadata | null> {
+	const normalized = tokenId.toLowerCase();
+	if (!cache.has(normalized)) {
+		cache.set(
+			normalized,
+			queryFtMetadata({
+				ftContractId: normalized,
+				network: params.network,
+				rpcUrl: params.rpcUrl,
+			}),
+		);
+	}
+	const metadataPromise = cache.get(normalized);
+	if (!metadataPromise) return null;
+	return await metadataPromise;
 }
 
 export function createNearReadTools() {
@@ -578,6 +828,400 @@ export function createNearReadTools() {
 						totalYoctoNear: totalYoctoNear.toString(),
 						availableYoctoNear: availableYoctoNear.toString(),
 						lockedYoctoNear: lockedYoctoNear.toString(),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}getRefDeposits`,
+			label: "NEAR Ref Deposits",
+			description:
+				"Get deposited token balances on Ref exchange for an account.",
+			parameters: Type.Object({
+				accountId: Type.Optional(
+					Type.String({
+						description:
+							"NEAR account id. If omitted, resolve from env/credentials.",
+					}),
+				),
+				refContractId: Type.Optional(
+					Type.String({
+						description:
+							"Ref exchange contract id override (default mainnet v2.ref-finance.near).",
+					}),
+				),
+				tokenIds: Type.Optional(
+					Type.Array(
+						Type.String({
+							description:
+								"Optional token contract ids to filter (case-insensitive).",
+						}),
+					),
+				),
+				includeZeroBalances: Type.Optional(
+					Type.Boolean({
+						description: "Include zero deposits (default false).",
+					}),
+				),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({ description: "Override NEAR JSON-RPC endpoint URL" }),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNearNetwork(params.network);
+				const accountId = resolveNearAccountId(params.accountId, network);
+				const endpoint = getNearRpcEndpoint(network, params.rpcUrl);
+				const refContractId = getRefContractId(network, params.refContractId);
+				const includeZero = params.includeZeroBalances === true;
+				const tokenFilters = new Set(normalizeTokenFilterList(params.tokenIds));
+				const metadataCache = new Map<string, Promise<NearFtMetadata | null>>();
+				const deposits = await queryRefDeposits({
+					accountId,
+					network,
+					refContractId,
+					rpcUrl: params.rpcUrl,
+				});
+
+				const assets: NearRefDepositAsset[] = [];
+				const failures: NearRefDepositFailure[] = [];
+				const sortedEntries = Object.entries(deposits).sort((left, right) => {
+					const leftValue = parseUnsignedBigInt(
+						left[1],
+						`deposits[${left[0]}]`,
+					);
+					const rightValue = parseUnsignedBigInt(
+						right[1],
+						`deposits[${right[0]}]`,
+					);
+					if (leftValue === rightValue) return left[0].localeCompare(right[0]);
+					return leftValue > rightValue ? -1 : 1;
+				});
+				for (const [tokenId, rawAmount] of sortedEntries) {
+					const rawAmountValue = parseUnsignedBigInt(
+						rawAmount,
+						`deposits[${tokenId}]`,
+					);
+					if (tokenFilters.size > 0 && !tokenFilters.has(tokenId)) {
+						continue;
+					}
+					if (!includeZero && rawAmountValue === 0n) {
+						continue;
+					}
+					try {
+						const metadata = await resolveTokenMetadataCached(
+							tokenId,
+							metadataCache,
+							{
+								network,
+								rpcUrl: params.rpcUrl,
+							},
+						);
+						const decimals =
+							typeof metadata?.decimals === "number" ? metadata.decimals : null;
+						const symbol =
+							typeof metadata?.symbol === "string" && metadata.symbol.trim()
+								? metadata.symbol.trim()
+								: shortAccountId(tokenId);
+						assets.push({
+							tokenId,
+							symbol,
+							rawAmount: rawAmountValue.toString(),
+							uiAmount: formatRefAssetAmount({
+								rawAmount: rawAmountValue.toString(),
+								decimals,
+							}),
+							decimals,
+							metadata: metadata ?? null,
+						});
+					} catch (error) {
+						failures.push({
+							tokenId,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+				}
+
+				const lines = [
+					`Ref deposits: ${assets.length} token(s) on ${refContractId} (account ${accountId})`,
+				];
+				if (assets.length === 0) {
+					lines.push("No deposited token balances found.");
+				}
+				for (const asset of assets) {
+					lines.push(resolveRefAssetText(asset));
+				}
+				if (failures.length > 0) {
+					lines.push(
+						`Skipped ${failures.length} token(s) due to metadata/query errors.`,
+					);
+				}
+
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						accountId,
+						network,
+						rpcEndpoint: endpoint,
+						refContractId,
+						assets,
+						failures,
+						tokenFilters: [...tokenFilters],
+						includeZeroBalances: includeZero,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}getRefLpPositions`,
+			label: "NEAR Ref LP Positions",
+			description:
+				"Get Ref LP share positions for an account (by explicit pool ids or scanned pools).",
+			parameters: Type.Object({
+				accountId: Type.Optional(
+					Type.String({
+						description:
+							"NEAR account id. If omitted, resolve from env/credentials.",
+					}),
+				),
+				poolId: Type.Optional(
+					Type.Union([Type.Number(), Type.String()], {
+						description: "Optional single pool id.",
+					}),
+				),
+				poolIds: Type.Optional(
+					Type.Array(
+						Type.Union([Type.Number(), Type.String()], {
+							description: "Optional pool ids.",
+						}),
+					),
+				),
+				maxPools: Type.Optional(
+					Type.Number({
+						description:
+							"When poolId/poolIds are omitted, scan up to this many pools (default 200).",
+					}),
+				),
+				includeZeroBalances: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include zero-share pools in the response (default false).",
+					}),
+				),
+				refContractId: Type.Optional(
+					Type.String({
+						description:
+							"Ref exchange contract id override (default mainnet v2.ref-finance.near).",
+					}),
+				),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({ description: "Override NEAR JSON-RPC endpoint URL" }),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNearNetwork(params.network);
+				const accountId = resolveNearAccountId(params.accountId, network);
+				const endpoint = getNearRpcEndpoint(network, params.rpcUrl);
+				const refContractId = getRefContractId(network, params.refContractId);
+				const includeZero = params.includeZeroBalances === true;
+				const maxPools = parseMaxPools(params.maxPools);
+				const poolIds = dedupeStrings(
+					[
+						parseOptionalPoolId(params.poolId),
+						...parsePoolIdList(params.poolIds),
+					]
+						.filter((value): value is number => value != null)
+						.map((value) => value.toString()),
+				).map((value) => Number(value));
+				const metadataCache = new Map<string, Promise<NearFtMetadata | null>>();
+
+				let scannedPoolCount = 0;
+				const pools: NearRefPoolView[] = [];
+
+				if (poolIds.length > 0) {
+					const resolvedPools = await Promise.all(
+						poolIds.map(async (poolId) => {
+							const pool = await fetchRefPoolById({
+								network,
+								rpcUrl: params.rpcUrl,
+								refContractId,
+								poolId,
+							});
+							return {
+								id: pool.id,
+								tokenIds: pool.token_account_ids.map((tokenId) =>
+									tokenId.toLowerCase(),
+								),
+								poolKind: pool.pool_kind,
+							} satisfies NearRefPoolView;
+						}),
+					);
+					pools.push(...resolvedPools);
+					scannedPoolCount = resolvedPools.length;
+				} else {
+					let fromIndex = 0;
+					while (pools.length < maxPools) {
+						const pageLimit = Math.min(100, maxPools - pools.length);
+						const page = await queryRefPoolsPage({
+							network,
+							refContractId,
+							fromIndex,
+							limit: pageLimit,
+							rpcUrl: params.rpcUrl,
+						});
+						if (page.rawCount === 0) break;
+						pools.push(...page.pools);
+						scannedPoolCount += page.rawCount;
+						if (page.rawCount < pageLimit) break;
+						fromIndex += page.rawCount;
+					}
+					if (pools.length > maxPools) {
+						pools.length = maxPools;
+					}
+				}
+
+				const shareResults = await mapConcurrently(
+					pools,
+					8,
+					async (
+						pool,
+					): Promise<
+						| {
+								status: "ok";
+								position: NearRefLpPosition;
+								sharesRawValue: bigint;
+						  }
+						| {
+								status: "error";
+								failure: NearRefLpFailure;
+						  }
+					> => {
+						try {
+							const sharesRaw = await queryRefPoolShares({
+								accountId,
+								network,
+								refContractId,
+								poolId: pool.id,
+								rpcUrl: params.rpcUrl,
+							});
+							const sharesRawValue = parseUnsignedBigInt(
+								sharesRaw,
+								`poolShares[${pool.id}]`,
+							);
+							if (!includeZero && sharesRawValue === 0n) {
+								return {
+									status: "ok",
+									position: {
+										poolId: pool.id,
+										poolKind: pool.poolKind,
+										tokenIds: pool.tokenIds,
+										tokenSymbols: [],
+										pairLabel: pool.tokenIds.join("/"),
+										sharesRaw: sharesRawValue.toString(),
+										removeHint: `在 Ref 移除 LP，pool ${pool.id}，shares ${sharesRawValue.toString()}，minA 0，minB 0，先模拟`,
+									},
+									sharesRawValue,
+								};
+							}
+
+							const tokenSymbols = await Promise.all(
+								pool.tokenIds.map(async (tokenId) => {
+									const metadata = await resolveTokenMetadataCached(
+										tokenId,
+										metadataCache,
+										{
+											network,
+											rpcUrl: params.rpcUrl,
+										},
+									);
+									return typeof metadata?.symbol === "string" &&
+										metadata.symbol.trim()
+										? metadata.symbol.trim()
+										: shortAccountId(tokenId);
+								}),
+							);
+							const pairLabel = tokenSymbols.join("/");
+							return {
+								status: "ok",
+								position: {
+									poolId: pool.id,
+									poolKind: pool.poolKind,
+									tokenIds: pool.tokenIds,
+									tokenSymbols,
+									pairLabel,
+									sharesRaw: sharesRawValue.toString(),
+									removeHint: `在 Ref 移除 LP，pool ${pool.id}，shares ${sharesRawValue.toString()}，minA 0，minB 0，先模拟`,
+								},
+								sharesRawValue,
+							};
+						} catch (error) {
+							return {
+								status: "error",
+								failure: {
+									poolId: pool.id,
+									error: error instanceof Error ? error.message : String(error),
+								},
+							};
+						}
+					},
+				);
+
+				const failures: NearRefLpFailure[] = [];
+				const positions: NearRefLpPosition[] = [];
+				for (const entry of shareResults) {
+					if (entry.status === "error") {
+						failures.push(entry.failure);
+						continue;
+					}
+					if (!includeZero && entry.sharesRawValue === 0n) {
+						continue;
+					}
+					positions.push(entry.position);
+				}
+				positions.sort((left, right) => {
+					const leftShares = parseUnsignedBigInt(
+						left.sharesRaw,
+						`shares[${left.poolId}]`,
+					);
+					const rightShares = parseUnsignedBigInt(
+						right.sharesRaw,
+						`shares[${right.poolId}]`,
+					);
+					if (leftShares === rightShares) return left.poolId - right.poolId;
+					return leftShares > rightShares ? -1 : 1;
+				});
+
+				const lines = [
+					`Ref LP positions: ${positions.length} pool(s) on ${refContractId} (account ${accountId})`,
+					`Scanned pools: ${scannedPoolCount}${poolIds.length > 0 ? " (explicit)" : ""}`,
+				];
+				if (positions.length === 0) {
+					lines.push("No LP shares found in scanned pools.");
+				}
+				for (const [index, position] of positions.entries()) {
+					const block = resolveRefPoolPositionText(position);
+					lines.push(`${index + 1}. ${block[0]}`);
+					lines.push(`   ${block[1]}`);
+					lines.push(`   ${block[2]}`);
+				}
+				if (failures.length > 0) {
+					lines.push(`Skipped ${failures.length} pool(s) due to query errors.`);
+				}
+
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						accountId,
+						network,
+						rpcEndpoint: endpoint,
+						refContractId,
+						poolIdsExplicit: poolIds.length > 0 ? poolIds : undefined,
+						maxPoolsScanned: maxPools,
+						scannedPoolCount,
+						includeZeroBalances: includeZero,
+						positions,
+						failures,
 					},
 				};
 			},

@@ -53,6 +53,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `near_getAccount` (view account state)
 - `read`: `near_getFtBalance` (NEP-141 FT balance by contract id, with metadata fallback)
 - `read`: `near_getPortfolio` (native + common FT portfolio snapshot, readable output)
+- `read`: `near_getRefDeposits` (Ref exchange deposited balances, readable token symbols + raw/ui amounts)
+- `read`: `near_getRefLpPositions` (Ref LP share positions, pool pair labels + remove hints)
 - `read`: `near_getSwapQuoteRef` (Ref/Rhea quote: explicit pool/direct/two-hop route; supports token symbols like `NEAR`/`USDC`)
 - `execute`: `near_transferNear` (local credentials/env signer, mainnet safety gate)
 - `execute`: `near_transferFt` (NEP-141 `ft_transfer`, supports custom gas/deposit, mainnet safety gate)
@@ -81,6 +83,10 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `intentText: "在 Ref 移除 LP，NEAR/USDC，50%，先模拟"`
 - LP Remove + Auto Withdraw (execute intent):
   - `intentText: "在 Ref 移除 LP，NEAR/USDC，50%，提回钱包，确认主网执行"`
+- Ref Deposits (read):
+  - `帮我查一下 NEAR 主网 Ref 里我存了哪些币`
+- Ref LP Positions (read):
+  - `帮我查一下 NEAR 主网 Ref LP 持仓（扫描前 200 个池子）`
 
 ## Sui (Minimal)
 
@@ -297,6 +303,10 @@ Natural language confirmation example:
   - `把 0.01 NEAR 换成 USDC，先模拟`
 - Ref swap execute:
   - `继续执行刚才这笔，确认主网执行`
+- Ref deposits:
+  - `帮我查一下 NEAR 主网 Ref 存款（deposits）`
+- Ref LP positions:
+  - `帮我查一下 NEAR 主网 Ref LP 持仓`
 
 ### 8) Troubleshooting
 
