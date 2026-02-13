@@ -14,11 +14,13 @@ describe("nearExtension", () => {
 		nearExtension(registrar);
 
 		expect(names.sort()).toEqual([
+			"near_addLiquidityRef",
 			"near_getAccount",
 			"near_getBalance",
 			"near_getFtBalance",
 			"near_getPortfolio",
 			"near_getSwapQuoteRef",
+			"near_removeLiquidityRef",
 			"near_rpc",
 			"near_swapRef",
 			"near_transferFt",

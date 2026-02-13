@@ -16,11 +16,16 @@ const executeMocks = vi.hoisted(() => ({
 	transferNearExecute: vi.fn(),
 	transferFtExecute: vi.fn(),
 	swapRefExecute: vi.fn(),
+	addLiquidityRefExecute: vi.fn(),
+	removeLiquidityRefExecute: vi.fn(),
 }));
 
 const refMocks = vi.hoisted(() => ({
+	fetchRefPoolById: vi.fn(),
+	getRefContractId: vi.fn(() => "v2.ref-finance.near"),
 	getRefSwapQuote: vi.fn(),
 	getRefTokenDecimalsHint: vi.fn(),
+	resolveRefTokenIds: vi.fn(),
 }));
 
 vi.mock("../runtime.js", async () => {
@@ -59,12 +64,29 @@ vi.mock("./execute.js", () => ({
 			parameters: {},
 			execute: executeMocks.swapRefExecute,
 		},
+		{
+			name: "near_addLiquidityRef",
+			label: "ref add liquidity",
+			description: "ref add liquidity",
+			parameters: {},
+			execute: executeMocks.addLiquidityRefExecute,
+		},
+		{
+			name: "near_removeLiquidityRef",
+			label: "ref remove liquidity",
+			description: "ref remove liquidity",
+			parameters: {},
+			execute: executeMocks.removeLiquidityRefExecute,
+		},
 	],
 }));
 
 vi.mock("../ref.js", () => ({
+	fetchRefPoolById: refMocks.fetchRefPoolById,
+	getRefContractId: refMocks.getRefContractId,
 	getRefSwapQuote: refMocks.getRefSwapQuote,
 	getRefTokenDecimalsHint: refMocks.getRefTokenDecimalsHint,
+	resolveRefTokenIds: refMocks.resolveRefTokenIds,
 }));
 
 import { createNearWorkflowTools } from "./workflow.js";
@@ -82,6 +104,10 @@ function getTool(): WorkflowTool {
 	);
 	if (!tool) throw new Error("w3rt_run_near_workflow_v0 not found");
 	return tool as unknown as WorkflowTool;
+}
+
+function encodeJsonResult(value: unknown): number[] {
+	return [...Buffer.from(JSON.stringify(value), "utf8")];
 }
 
 beforeEach(() => {
@@ -115,6 +141,19 @@ beforeEach(() => {
 			txHash: "near-exec-swap-hash",
 		},
 	});
+	executeMocks.addLiquidityRefExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			txHash: "near-exec-add-liquidity-hash",
+		},
+	});
+	executeMocks.removeLiquidityRefExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			txHash: "near-exec-remove-liquidity-hash",
+		},
+	});
+	refMocks.getRefContractId.mockReturnValue("v2.ref-finance.near");
 	refMocks.getRefSwapQuote.mockResolvedValue({
 		refContractId: "v2.ref-finance.near",
 		poolId: 3,
@@ -133,6 +172,9 @@ beforeEach(() => {
 			tokenIdOrSymbol: string;
 		}) => {
 			const normalized = tokenIdOrSymbol.toLowerCase();
+			if (normalized === "usdc" || normalized === "usdt") {
+				return 6;
+			}
 			if (
 				normalized === "near" ||
 				normalized === "wnear" ||
@@ -140,10 +182,34 @@ beforeEach(() => {
 			) {
 				return 24;
 			}
-			if (normalized === "usdc" || normalized === "usdt") {
-				return 6;
-			}
 			return null;
+		},
+	);
+	refMocks.fetchRefPoolById.mockResolvedValue({
+		id: 7,
+		token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+		amounts: ["1", "1"],
+		total_fee: 30,
+		pool_kind: "SIMPLE_POOL",
+	});
+	refMocks.resolveRefTokenIds.mockImplementation(
+		({
+			tokenIdOrSymbol,
+			availableTokenIds,
+		}: {
+			tokenIdOrSymbol: string;
+			availableTokenIds?: string[];
+		}) => {
+			const normalized = tokenIdOrSymbol.toLowerCase();
+			const candidates =
+				availableTokenIds?.map((tokenId) => tokenId.toLowerCase()) ?? [];
+			if (normalized === "near" || normalized === "wnear") {
+				return candidates.filter((tokenId) => tokenId.includes("wrap."));
+			}
+			if (normalized === "usdc") {
+				return candidates.filter((tokenId) => tokenId.includes("usdc"));
+			}
+			return candidates.filter((tokenId) => tokenId === normalized);
 		},
 	);
 });
@@ -381,6 +447,182 @@ describe("w3rt_run_near_workflow_v0", () => {
 				tokenInId: "NEAR",
 				tokenOutId: "USDC",
 				amountInRaw: "10000000000000000000000",
+			},
+		});
+	});
+
+	it("parses natural-language ref lp add intent", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-9", {
+			runId: "wf-near-09",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"在 Ref 添加 LP，pool 7，tokenA NEAR amountA 0.01，tokenB USDC amountB 1.2，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.add",
+			intent: {
+				type: "near.lp.ref.add",
+				poolId: 7,
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+				amountARaw: "10000000000000000000000",
+				amountBRaw: "1200000",
+			},
+		});
+	});
+
+	it("simulates ref lp add and returns balance/storage artifacts", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "501",
+				block_height: 501,
+				logs: [],
+				result: encodeJsonResult("20000000000000000000000"),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "502",
+				block_height: 502,
+				logs: [],
+				result: encodeJsonResult("5000000"),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "503",
+				block_height: 503,
+				logs: [],
+				result: encodeJsonResult({ total: "1" }),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "504",
+				block_height: 504,
+				logs: [],
+				result: encodeJsonResult({ total: "1" }),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "505",
+				block_height: 505,
+				logs: [],
+				result: encodeJsonResult({ total: "1" }),
+			});
+		const tool = getTool();
+		const result = await tool.execute("near-wf-10", {
+			runId: "wf-near-10",
+			runMode: "simulate",
+			intentType: "near.lp.ref.add",
+			network: "mainnet",
+			poolId: 7,
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+			amountARaw: "10000000000000000000000",
+			amountBRaw: "1200000",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.add",
+			artifacts: {
+				simulate: {
+					status: "success",
+					poolId: 7,
+					tokenAId: "wrap.near",
+					tokenBId: "usdc.tether-token.near",
+				},
+			},
+		});
+	});
+
+	it("executes ref lp add after confirm token validation", async () => {
+		const tool = getTool();
+		const analysis = await tool.execute("near-wf-11-analysis", {
+			runId: "wf-near-11",
+			runMode: "analysis",
+			intentType: "near.lp.ref.add",
+			network: "mainnet",
+			poolId: 7,
+			amountARaw: "10000000000000000000000",
+			amountBRaw: "1200000",
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		const result = await tool.execute("near-wf-11-execute", {
+			runId: "wf-near-11",
+			runMode: "execute",
+			network: "mainnet",
+			poolId: 7,
+			amountARaw: "10000000000000000000000",
+			amountBRaw: "1200000",
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.addLiquidityRefExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				poolId: 7,
+				amountARaw: "10000000000000000000000",
+				amountBRaw: "1200000",
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+				autoRegisterExchange: true,
+				autoRegisterTokens: true,
+				confirmMainnet: true,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.add",
+			artifacts: {
+				execute: {
+					txHash: "near-exec-add-liquidity-hash",
+				},
+			},
+		});
+	});
+
+	it("executes ref lp remove after confirm token validation", async () => {
+		const tool = getTool();
+		const analysis = await tool.execute("near-wf-12-analysis", {
+			runId: "wf-near-12",
+			runMode: "analysis",
+			intentType: "near.lp.ref.remove",
+			network: "mainnet",
+			poolId: 7,
+			shares: "100000",
+			minAmountARaw: "1",
+			minAmountBRaw: "2",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		const result = await tool.execute("near-wf-12-execute", {
+			runId: "wf-near-12",
+			runMode: "execute",
+			network: "mainnet",
+			poolId: 7,
+			shares: "100000",
+			minAmountARaw: "1",
+			minAmountBRaw: "2",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.removeLiquidityRefExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				poolId: 7,
+				shares: "100000",
+				minAmountARaw: "1",
+				minAmountBRaw: "2",
+				confirmMainnet: true,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.remove",
+			artifacts: {
+				execute: {
+					txHash: "near-exec-remove-liquidity-hash",
+				},
 			},
 		});
 	});

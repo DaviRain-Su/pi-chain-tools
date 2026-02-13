@@ -1,7 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
-import { getRefSwapQuote, getRefTokenDecimalsHint } from "../ref.js";
+import {
+	fetchRefPoolById,
+	getRefContractId,
+	getRefSwapQuote,
+	getRefTokenDecimalsHint,
+	resolveRefTokenIds,
+} from "../ref.js";
 import {
 	callNearRpc,
 	nearNetworkSchema,
@@ -46,10 +52,40 @@ type NearRefSwapIntent = {
 	attachedDepositYoctoNear?: string;
 };
 
+type NearRefAddLiquidityIntent = {
+	type: "near.lp.ref.add";
+	poolId: number;
+	amountARaw: string;
+	amountBRaw: string;
+	tokenAId?: string;
+	tokenBId?: string;
+	refContractId?: string;
+	fromAccountId?: string;
+	autoRegisterExchange?: boolean;
+	autoRegisterTokens?: boolean;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearRefRemoveLiquidityIntent = {
+	type: "near.lp.ref.remove";
+	poolId: number;
+	shares: string;
+	minAmountsRaw?: string[];
+	minAmountARaw?: string;
+	minAmountBRaw?: string;
+	refContractId?: string;
+	fromAccountId?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
 type NearWorkflowIntent =
 	| NearTransferIntent
 	| NearFtTransferIntent
-	| NearRefSwapIntent;
+	| NearRefSwapIntent
+	| NearRefAddLiquidityIntent
+	| NearRefRemoveLiquidityIntent;
 
 type WorkflowParams = {
 	runId?: string;
@@ -68,11 +104,23 @@ type WorkflowParams = {
 	amountIn?: string | number;
 	tokenInId?: string;
 	tokenOutId?: string;
+	tokenAId?: string;
+	tokenBId?: string;
 	poolId?: number | string;
 	slippageBps?: number;
 	refContractId?: string;
 	minAmountOutRaw?: string;
+	amountA?: string | number;
+	amountB?: string | number;
+	amountARaw?: string;
+	amountBRaw?: string;
+	shares?: string;
+	minAmountsRaw?: string[];
+	minAmountARaw?: string;
+	minAmountBRaw?: string;
 	autoRegisterOutput?: boolean;
+	autoRegisterExchange?: boolean;
+	autoRegisterTokens?: boolean;
 	gas?: string;
 	attachedDepositYoctoNear?: string;
 	confirmMainnet?: boolean;
@@ -90,6 +138,15 @@ type ParsedIntentHints = {
 	amountInUi?: string;
 	tokenInId?: string;
 	tokenOutId?: string;
+	tokenAId?: string;
+	tokenBId?: string;
+	amountAUi?: string;
+	amountBUi?: string;
+	amountARaw?: string;
+	amountBRaw?: string;
+	shares?: string;
+	minAmountARaw?: string;
+	minAmountBRaw?: string;
 	poolId?: number;
 	slippageBps?: number;
 	refContractId?: string;
@@ -250,6 +307,49 @@ function parseScaledDecimalToRaw(
 	return (whole * 10n ** BigInt(decimals) + fractionValue).toString();
 }
 
+function parseRefLpAmountRaw(params: {
+	valueRaw?: string;
+	valueUi?: string | number;
+	tokenInput?: string;
+	network?: string;
+	fieldRaw: string;
+	fieldUi: string;
+}): string {
+	if (typeof params.valueRaw === "string" && params.valueRaw.trim()) {
+		return parsePositiveBigInt(params.valueRaw, params.fieldRaw).toString();
+	}
+	if (params.valueUi == null) {
+		throw new Error(
+			`Missing ${params.fieldRaw}. Provide ${params.fieldRaw} or ${params.fieldUi}.`,
+		);
+	}
+	const uiValue =
+		typeof params.valueUi === "number"
+			? params.valueUi.toString()
+			: params.valueUi.trim();
+	if (!uiValue) {
+		throw new Error(
+			`Missing ${params.fieldRaw}. Provide ${params.fieldRaw} or ${params.fieldUi}.`,
+		);
+	}
+	if (!params.tokenInput || !params.tokenInput.trim()) {
+		throw new Error(
+			`${params.fieldUi} requires token id/symbol (${params.fieldRaw} can be used instead).`,
+		);
+	}
+	const decimals = getRefTokenDecimalsHint({
+		network: params.network,
+		tokenIdOrSymbol: params.tokenInput,
+	});
+	if (decimals == null) {
+		throw new Error(
+			`Cannot infer decimals for ${params.tokenInput}. Provide ${params.fieldRaw}.`,
+		);
+	}
+	const rawAmount = parseScaledDecimalToRaw(uiValue, decimals, params.fieldUi);
+	return parsePositiveBigInt(rawAmount, params.fieldUi).toString();
+}
+
 function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (!intentText || !intentText.trim()) return {};
 	const text = intentText.trim();
@@ -270,12 +370,42 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	const swapPairMatch = text.match(
 		/([a-z0-9][a-z0-9._-]*\.near)\s*(?:->|to|换成|换到|兑换为|兑换成|到)\s*([a-z0-9][a-z0-9._-]*\.near)/i,
 	);
+	const lpPairMatch = text.match(
+		/([a-z][a-z0-9._-]*)\s*\/\s*([a-z][a-z0-9._-]*)/i,
+	);
 	const poolIdMatch = text.match(/(?:pool|池子|池)\s*[:：]?\s*(\d+)/i);
 	const slippageMatch = text.match(
 		/(?:slippage|滑点)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(?:bps)?/i,
 	);
 	const refContractMatch = text.match(
 		/(?:ref\s*contract|ref合约|交易所合约)\s*[:：]?\s*([a-z0-9][a-z0-9._-]*(?:\.near)?)/i,
+	);
+	const amountARawMatch = text.match(
+		/(?:amounta[_\s-]*raw|amountaraw|rawa)\s*[:：]?\s*(\d+)/i,
+	);
+	const amountBRawMatch = text.match(
+		/(?:amountb[_\s-]*raw|amountbraw|rawb)\s*[:：]?\s*(\d+)/i,
+	);
+	const amountAUiMatch = text.match(
+		/(?:amounta|tokena|数量a|金额a)\s*[:：]?\s*(\d+(?:\.\d+)?)/i,
+	);
+	const amountBUiMatch = text.match(
+		/(?:amountb|tokenb|数量b|金额b)\s*[:：]?\s*(\d+(?:\.\d+)?)/i,
+	);
+	const sharesMatch = text.match(
+		/(?:shares?|lp\s*shares|份额)\s*[:：]?\s*(\d+)/i,
+	);
+	const minAmountARawMatch = text.match(
+		/(?:minamounta[_\s-]*raw|minamountaraw|mina)\s*[:：]?\s*(\d+)/i,
+	);
+	const minAmountBRawMatch = text.match(
+		/(?:minamountb[_\s-]*raw|minamountbraw|minb)\s*[:：]?\s*(\d+)/i,
+	);
+	const tokenAMatch = text.match(
+		/(?:tokena|币a|代币a|token_a)\s*[:：]?\s*([a-z][a-z0-9._-]*)/i,
+	);
+	const tokenBMatch = text.match(
+		/(?:tokenb|币b|代币b|token_b)\s*[:：]?\s*([a-z][a-z0-9._-]*)/i,
 	);
 
 	const likelyFt =
@@ -291,6 +421,23 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		lower.includes("兑换") ||
 		lower.includes("换成") ||
 		lower.includes("换到");
+	const hasLpKeyword =
+		lower.includes("lp") ||
+		lower.includes("liquidity") ||
+		lower.includes("流动性");
+	const likelyLpAdd =
+		hasLpKeyword &&
+		(lower.includes("add") ||
+			lower.includes("provide") ||
+			lower.includes("添加") ||
+			lower.includes("增加"));
+	const likelyLpRemove =
+		hasLpKeyword &&
+		(lower.includes("remove") ||
+			lower.includes("withdraw") ||
+			lower.includes("撤出") ||
+			lower.includes("移除") ||
+			lower.includes("减少"));
 	const hasNearAmount = nearAmountMatch != null;
 
 	const hints: ParsedIntentHints = {};
@@ -306,6 +453,19 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (swapUiAmountMatch?.[3]) hints.tokenOutId = swapUiAmountMatch[3];
 	if (swapPairMatch?.[1]) hints.tokenInId = swapPairMatch[1];
 	if (swapPairMatch?.[2]) hints.tokenOutId = swapPairMatch[2];
+	if (lpPairMatch?.[1]) hints.tokenAId = lpPairMatch[1];
+	if (lpPairMatch?.[2]) hints.tokenBId = lpPairMatch[2];
+	if (tokenAMatch?.[1]) hints.tokenAId = tokenAMatch[1];
+	if (tokenBMatch?.[1]) hints.tokenBId = tokenBMatch[1];
+	if (amountARawMatch?.[1]) hints.amountARaw = amountARawMatch[1];
+	if (amountBRawMatch?.[1]) hints.amountBRaw = amountBRawMatch[1];
+	if (!hints.amountARaw && amountAUiMatch?.[1])
+		hints.amountAUi = amountAUiMatch[1];
+	if (!hints.amountBRaw && amountBUiMatch?.[1])
+		hints.amountBUi = amountBUiMatch[1];
+	if (sharesMatch?.[1]) hints.shares = sharesMatch[1];
+	if (minAmountARawMatch?.[1]) hints.minAmountARaw = minAmountARawMatch[1];
+	if (minAmountBRawMatch?.[1]) hints.minAmountBRaw = minAmountBRawMatch[1];
 	if (poolIdMatch?.[1]) {
 		const parsed = Number(poolIdMatch[1]);
 		if (Number.isInteger(parsed) && parsed >= 0) {
@@ -320,6 +480,27 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	}
 	if (refContractMatch?.[1]) {
 		hints.refContractId = refContractMatch[1];
+	}
+
+	if (
+		likelyLpRemove &&
+		(hints.poolId != null ||
+			(typeof hints.shares === "string" && hints.shares.trim().length > 0))
+	) {
+		hints.intentType = "near.lp.ref.remove";
+		return hints;
+	}
+
+	if (
+		likelyLpAdd &&
+		(hints.poolId != null ||
+			typeof hints.amountARaw === "string" ||
+			typeof hints.amountBRaw === "string" ||
+			typeof hints.amountAUi === "string" ||
+			typeof hints.amountBUi === "string")
+	) {
+		hints.intentType = "near.lp.ref.add";
+		return hints;
 	}
 
 	if (
@@ -349,10 +530,26 @@ function inferIntentType(
 	params: WorkflowParams,
 	hints: ParsedIntentHints,
 ): NearWorkflowIntent["type"] {
+	if (params.intentType === "near.lp.ref.add") return params.intentType;
+	if (params.intentType === "near.lp.ref.remove") return params.intentType;
 	if (params.intentType === "near.swap.ref") return params.intentType;
 	if (params.intentType === "near.transfer.near") return params.intentType;
 	if (params.intentType === "near.transfer.ft") return params.intentType;
 	if (hints.intentType) return hints.intentType;
+	if (params.poolId != null && params.shares) {
+		return "near.lp.ref.remove";
+	}
+	if (
+		params.poolId != null &&
+		(params.amountARaw ||
+			params.amountBRaw ||
+			params.amountA != null ||
+			params.amountB != null ||
+			params.tokenAId ||
+			params.tokenBId)
+	) {
+		return "near.lp.ref.add";
+	}
 	if (
 		params.tokenInId ||
 		params.tokenOutId ||
@@ -403,6 +600,128 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 			toAccountId,
 			amountYoctoNear: amountYoctoNear.toString(),
 			fromAccountId,
+		};
+	}
+
+	if (intentType === "near.lp.ref.add") {
+		const poolId = parseOptionalPoolId(params.poolId ?? hints.poolId, "poolId");
+		if (poolId == null) {
+			throw new Error("poolId is required for near.lp.ref.add");
+		}
+		const tokenAInput = params.tokenAId ?? hints.tokenAId;
+		const tokenBInput = params.tokenBId ?? hints.tokenBId;
+		const amountARaw = parseRefLpAmountRaw({
+			valueRaw: params.amountARaw ?? hints.amountARaw,
+			valueUi: params.amountA ?? hints.amountAUi,
+			tokenInput: tokenAInput,
+			network: params.network,
+			fieldRaw: "amountARaw",
+			fieldUi: "amountA",
+		});
+		const amountBRaw = parseRefLpAmountRaw({
+			valueRaw: params.amountBRaw ?? hints.amountBRaw,
+			valueUi: params.amountB ?? hints.amountBUi,
+			tokenInput: tokenBInput,
+			network: params.network,
+			fieldRaw: "amountBRaw",
+			fieldUi: "amountB",
+		});
+		const refContractId =
+			typeof params.refContractId === "string" && params.refContractId.trim()
+				? normalizeAccountId(params.refContractId, "refContractId")
+				: typeof hints.refContractId === "string" && hints.refContractId.trim()
+					? normalizeAccountId(hints.refContractId, "refContractId")
+					: undefined;
+		return {
+			type: "near.lp.ref.add",
+			poolId,
+			amountARaw,
+			amountBRaw,
+			tokenAId:
+				typeof tokenAInput === "string" && tokenAInput.trim()
+					? normalizeTokenInput(tokenAInput, "tokenAId")
+					: undefined,
+			tokenBId:
+				typeof tokenBInput === "string" && tokenBInput.trim()
+					? normalizeTokenInput(tokenBInput, "tokenBId")
+					: undefined,
+			refContractId,
+			fromAccountId,
+			autoRegisterExchange: params.autoRegisterExchange !== false,
+			autoRegisterTokens: params.autoRegisterTokens !== false,
+			gas:
+				typeof params.gas === "string" && params.gas.trim()
+					? params.gas.trim()
+					: undefined,
+			attachedDepositYoctoNear:
+				typeof params.attachedDepositYoctoNear === "string" &&
+				params.attachedDepositYoctoNear.trim()
+					? params.attachedDepositYoctoNear.trim()
+					: undefined,
+		};
+	}
+
+	if (intentType === "near.lp.ref.remove") {
+		const poolId = parseOptionalPoolId(params.poolId ?? hints.poolId, "poolId");
+		if (poolId == null) {
+			throw new Error("poolId is required for near.lp.ref.remove");
+		}
+		const sharesInput = params.shares ?? hints.shares ?? "";
+		const shares = parsePositiveBigInt(sharesInput, "shares").toString();
+		const minAmountsRaw =
+			Array.isArray(params.minAmountsRaw) && params.minAmountsRaw.length > 0
+				? params.minAmountsRaw.map((value, index) =>
+						parseNonNegativeBigInt(value, `minAmountsRaw[${index}]`).toString(),
+					)
+				: undefined;
+		const minAmountARaw =
+			typeof params.minAmountARaw === "string" && params.minAmountARaw.trim()
+				? parseNonNegativeBigInt(
+						params.minAmountARaw,
+						"minAmountARaw",
+					).toString()
+				: typeof hints.minAmountARaw === "string" && hints.minAmountARaw.trim()
+					? parseNonNegativeBigInt(
+							hints.minAmountARaw,
+							"minAmountARaw",
+						).toString()
+					: undefined;
+		const minAmountBRaw =
+			typeof params.minAmountBRaw === "string" && params.minAmountBRaw.trim()
+				? parseNonNegativeBigInt(
+						params.minAmountBRaw,
+						"minAmountBRaw",
+					).toString()
+				: typeof hints.minAmountBRaw === "string" && hints.minAmountBRaw.trim()
+					? parseNonNegativeBigInt(
+							hints.minAmountBRaw,
+							"minAmountBRaw",
+						).toString()
+					: undefined;
+		const refContractId =
+			typeof params.refContractId === "string" && params.refContractId.trim()
+				? normalizeAccountId(params.refContractId, "refContractId")
+				: typeof hints.refContractId === "string" && hints.refContractId.trim()
+					? normalizeAccountId(hints.refContractId, "refContractId")
+					: undefined;
+		return {
+			type: "near.lp.ref.remove",
+			poolId,
+			shares,
+			minAmountsRaw,
+			minAmountARaw,
+			minAmountBRaw,
+			refContractId,
+			fromAccountId,
+			gas:
+				typeof params.gas === "string" && params.gas.trim()
+					? params.gas.trim()
+					: undefined,
+			attachedDepositYoctoNear:
+				typeof params.attachedDepositYoctoNear === "string" &&
+				params.attachedDepositYoctoNear.trim()
+					? params.attachedDepositYoctoNear.trim()
+					: undefined,
 		};
 	}
 
@@ -540,7 +859,14 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 	if (
 		params.tokenInId ||
 		params.tokenOutId ||
+		params.tokenAId ||
+		params.tokenBId ||
 		params.amountInRaw ||
+		params.amountARaw ||
+		params.amountBRaw ||
+		params.amountA != null ||
+		params.amountB != null ||
+		params.shares ||
 		params.amountIn != null
 	) {
 		return true;
@@ -549,6 +875,9 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 		params.poolId != null ||
 		params.refContractId ||
 		params.minAmountOutRaw ||
+		(Array.isArray(params.minAmountsRaw) && params.minAmountsRaw.length > 0) ||
+		params.minAmountARaw ||
+		params.minAmountBRaw ||
 		params.autoRegisterOutput != null
 	) {
 		return true;
@@ -882,8 +1211,315 @@ async function simulateRefSwap(params: {
 	};
 }
 
+function normalizePoolTokenIds(tokenIds: string[]): string[] {
+	return tokenIds
+		.map((tokenId) => tokenId.trim().toLowerCase())
+		.filter(Boolean);
+}
+
+function resolveLpIntentTokenMapping(params: {
+	intent: NearRefAddLiquidityIntent;
+	network: string;
+	poolTokenIds: string[];
+}): {
+	tokenAId: string;
+	tokenBId: string;
+	amountsRawByPool: string[];
+} {
+	const poolTokenIds = normalizePoolTokenIds(params.poolTokenIds);
+	const resolveToken = (
+		tokenInput: string | undefined,
+		fallback: string,
+	): string => {
+		if (!tokenInput || !tokenInput.trim()) return fallback;
+		const candidates = resolveRefTokenIds({
+			network: params.network,
+			tokenIdOrSymbol: tokenInput,
+			availableTokenIds: poolTokenIds,
+		});
+		if (!candidates[0]) {
+			throw new Error(`Token ${tokenInput} is not in selected pool`);
+		}
+		return candidates[0];
+	};
+
+	const tokenAId = resolveToken(params.intent.tokenAId, poolTokenIds[0] ?? "");
+	const tokenBId = resolveToken(params.intent.tokenBId, poolTokenIds[1] ?? "");
+	let resolvedTokenAId = tokenAId;
+	let resolvedTokenBId = tokenBId;
+	if (
+		resolvedTokenAId === resolvedTokenBId &&
+		typeof params.intent.tokenAId === "string" &&
+		params.intent.tokenAId.trim() &&
+		(!params.intent.tokenBId || !params.intent.tokenBId.trim())
+	) {
+		resolvedTokenBId =
+			poolTokenIds.find((tokenId) => tokenId !== resolvedTokenAId) ?? "";
+	}
+	if (
+		resolvedTokenAId === resolvedTokenBId &&
+		typeof params.intent.tokenBId === "string" &&
+		params.intent.tokenBId.trim() &&
+		(!params.intent.tokenAId || !params.intent.tokenAId.trim())
+	) {
+		resolvedTokenAId =
+			poolTokenIds.find((tokenId) => tokenId !== resolvedTokenBId) ?? "";
+	}
+	if (
+		!resolvedTokenAId ||
+		!resolvedTokenBId ||
+		resolvedTokenAId === resolvedTokenBId
+	) {
+		throw new Error(
+			"tokenAId/tokenBId must resolve to two distinct pool tokens",
+		);
+	}
+	const tokenAIndex = poolTokenIds.indexOf(resolvedTokenAId);
+	const tokenBIndex = poolTokenIds.indexOf(resolvedTokenBId);
+	if (tokenAIndex < 0 || tokenBIndex < 0) {
+		throw new Error("tokenAId/tokenBId are not in selected pool");
+	}
+	const amountsRawByPool = poolTokenIds.map(() => "0");
+	amountsRawByPool[tokenAIndex] = params.intent.amountARaw;
+	amountsRawByPool[tokenBIndex] = params.intent.amountBRaw;
+	return {
+		tokenAId: resolvedTokenAId,
+		tokenBId: resolvedTokenBId,
+		amountsRawByPool,
+	};
+}
+
+async function simulateRefAddLiquidity(params: {
+	intent: NearRefAddLiquidityIntent;
+	network: string;
+	rpcUrl?: string;
+	fromAccountId?: string;
+}): Promise<{
+	status: "success" | "insufficient_balance";
+	fromAccountId: string;
+	refContractId: string;
+	poolId: number;
+	poolTokenIds: string[];
+	tokenAId: string;
+	tokenBId: string;
+	amountsRawByPool: string[];
+	balanceChecks: Array<{
+		tokenId: string;
+		requiredRaw: string;
+		availableRaw: string;
+	}>;
+	exchangeStorageRegistration:
+		| {
+				status: "registered";
+		  }
+		| {
+				status: "needs_registration";
+				estimatedDepositYoctoNear: string;
+		  }
+		| {
+				status: "unknown";
+				reason: string;
+		  };
+	tokenStorageRegistrations: Array<{
+		tokenId: string;
+		registration:
+			| {
+					status: "registered";
+			  }
+			| {
+					status: "needs_registration";
+					estimatedDepositYoctoNear: string;
+			  }
+			| {
+					status: "unknown";
+					reason: string;
+			  };
+	}>;
+}> {
+	const fromAccountId = resolveNearAccountId(
+		params.intent.fromAccountId ?? params.fromAccountId,
+		params.network,
+	);
+	const pool = await fetchRefPoolById({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		refContractId: params.intent.refContractId,
+		poolId: params.intent.poolId,
+	});
+	const poolTokenIds = normalizePoolTokenIds(pool.token_account_ids);
+	const mapping = resolveLpIntentTokenMapping({
+		intent: params.intent,
+		network: params.network,
+		poolTokenIds,
+	});
+	const refContractId = getRefContractId(
+		params.network,
+		params.intent.refContractId,
+	);
+
+	const balanceChecks: Array<{
+		tokenId: string;
+		requiredRaw: string;
+		availableRaw: string;
+	}> = [];
+	let sufficient = true;
+	for (const [index, tokenId] of poolTokenIds.entries()) {
+		const requiredRaw = mapping.amountsRawByPool[index] ?? "0";
+		if (parseNonNegativeBigInt(requiredRaw, "amountsRawByPool") <= 0n) continue;
+		const query = await callNearRpc<NearCallFunctionResult>({
+			method: "query",
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			params: {
+				account_id: tokenId,
+				args_base64: encodeCallFunctionArgs({ account_id: fromAccountId }),
+				finality: "final",
+				method_name: "ft_balance_of",
+				request_type: "call_function",
+			},
+		});
+		const availableRaw = decodeCallFunctionResult(query);
+		if (
+			parseNonNegativeBigInt(availableRaw, "availableRaw") <
+			parseNonNegativeBigInt(requiredRaw, "requiredRaw")
+		) {
+			sufficient = false;
+		}
+		balanceChecks.push({
+			tokenId,
+			requiredRaw,
+			availableRaw,
+		});
+	}
+
+	const exchangeStorageRegistration = await queryStorageRegistrationStatus({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		ftContractId: refContractId,
+		accountId: fromAccountId,
+	});
+	const tokenStorageRegistrations = await Promise.all(
+		poolTokenIds
+			.filter(
+				(tokenId, index) =>
+					parseNonNegativeBigInt(
+						mapping.amountsRawByPool[index] ?? "0",
+						"amountsRawByPool",
+					) > 0n,
+			)
+			.map(async (tokenId) => ({
+				tokenId,
+				registration: await queryStorageRegistrationStatus({
+					network: params.network,
+					rpcUrl: params.rpcUrl,
+					ftContractId: tokenId,
+					accountId: refContractId,
+				}),
+			})),
+	);
+
+	return {
+		status: sufficient ? "success" : "insufficient_balance",
+		fromAccountId,
+		refContractId,
+		poolId: params.intent.poolId,
+		poolTokenIds,
+		tokenAId: mapping.tokenAId,
+		tokenBId: mapping.tokenBId,
+		amountsRawByPool: mapping.amountsRawByPool,
+		balanceChecks,
+		exchangeStorageRegistration,
+		tokenStorageRegistrations,
+	};
+}
+
+async function simulateRefRemoveLiquidity(params: {
+	intent: NearRefRemoveLiquidityIntent;
+	network: string;
+	rpcUrl?: string;
+	fromAccountId?: string;
+}): Promise<{
+	status: "success" | "insufficient_balance";
+	fromAccountId: string;
+	refContractId: string;
+	poolId: number;
+	poolTokenIds: string[];
+	availableShares: string;
+	requiredShares: string;
+	minAmountsRaw: string[];
+}> {
+	const fromAccountId = resolveNearAccountId(
+		params.intent.fromAccountId ?? params.fromAccountId,
+		params.network,
+	);
+	const pool = await fetchRefPoolById({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		refContractId: params.intent.refContractId,
+		poolId: params.intent.poolId,
+	});
+	const poolTokenIds = normalizePoolTokenIds(pool.token_account_ids);
+	const refContractId = getRefContractId(
+		params.network,
+		params.intent.refContractId,
+	);
+	const minAmountsRaw =
+		Array.isArray(params.intent.minAmountsRaw) &&
+		params.intent.minAmountsRaw.length > 0
+			? params.intent.minAmountsRaw
+			: (() => {
+					const values = poolTokenIds.map(() => "0");
+					if (params.intent.minAmountARaw)
+						values[0] = params.intent.minAmountARaw;
+					if (params.intent.minAmountBRaw)
+						values[1] = params.intent.minAmountBRaw;
+					return values;
+				})();
+	const sharesResult = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		params: {
+			account_id: refContractId,
+			args_base64: encodeCallFunctionArgs({
+				pool_id: params.intent.poolId,
+				account_id: fromAccountId,
+			}),
+			finality: "final",
+			method_name: "get_pool_shares",
+			request_type: "call_function",
+		},
+	});
+	const availableShares = decodeCallFunctionResult(sharesResult);
+	const requiredShares = parsePositiveBigInt(
+		params.intent.shares,
+		"shares",
+	).toString();
+	return {
+		status:
+			parseNonNegativeBigInt(availableShares, "availableShares") >=
+			parseNonNegativeBigInt(requiredShares, "requiredShares")
+				? "success"
+				: "insufficient_balance",
+		fromAccountId,
+		refContractId,
+		poolId: params.intent.poolId,
+		poolTokenIds,
+		availableShares,
+		requiredShares,
+		minAmountsRaw: minAmountsRaw.map((entry) =>
+			parseNonNegativeBigInt(entry, "minAmountsRaw").toString(),
+		),
+	};
+}
+
 function resolveExecuteTool(
-	name: "near_transferNear" | "near_transferFt" | "near_swapRef",
+	name:
+		| "near_transferNear"
+		| "near_transferFt"
+		| "near_swapRef"
+		| "near_addLiquidityRef"
+		| "near_removeLiquidityRef",
 ): WorkflowTool {
 	const tool = createNearExecuteTools().find((entry) => entry.name === name);
 	if (!tool) {
@@ -934,7 +1570,7 @@ export function createNearWorkflowTools() {
 			name: "w3rt_run_near_workflow_v0",
 			label: "W3RT NEAR Workflow",
 			description:
-				"Run NEAR workflow in three phases: analysis -> simulate -> execute for native transfer, FT transfer, and Ref swap.",
+				"Run NEAR workflow in three phases: analysis -> simulate -> execute for native transfer, FT transfer, Ref swap, and Ref LP add/remove.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -943,6 +1579,8 @@ export function createNearWorkflowTools() {
 						Type.Literal("near.transfer.near"),
 						Type.Literal("near.transfer.ft"),
 						Type.Literal("near.swap.ref"),
+						Type.Literal("near.lp.ref.add"),
+						Type.Literal("near.lp.ref.remove"),
 					]),
 				),
 				intentText: Type.Optional(Type.String()),
@@ -958,11 +1596,23 @@ export function createNearWorkflowTools() {
 				amountIn: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				tokenInId: Type.Optional(Type.String()),
 				tokenOutId: Type.Optional(Type.String()),
+				tokenAId: Type.Optional(Type.String()),
+				tokenBId: Type.Optional(Type.String()),
 				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				slippageBps: Type.Optional(Type.Number()),
 				refContractId: Type.Optional(Type.String()),
 				minAmountOutRaw: Type.Optional(Type.String()),
+				amountA: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				amountB: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				amountARaw: Type.Optional(Type.String()),
+				amountBRaw: Type.Optional(Type.String()),
+				shares: Type.Optional(Type.String()),
+				minAmountsRaw: Type.Optional(Type.Array(Type.String())),
+				minAmountARaw: Type.Optional(Type.String()),
+				minAmountBRaw: Type.Optional(Type.String()),
 				autoRegisterOutput: Type.Optional(Type.Boolean()),
+				autoRegisterExchange: Type.Optional(Type.Boolean()),
+				autoRegisterTokens: Type.Optional(Type.Boolean()),
 				gas: Type.Optional(Type.String()),
 				attachedDepositYoctoNear: Type.Optional(Type.String()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
@@ -1042,12 +1692,26 @@ export function createNearWorkflowTools() {
 										rpcUrl: params.rpcUrl,
 										fromAccountId: params.fromAccountId,
 									})
-								: await simulateRefSwap({
-										intent,
-										network,
-										rpcUrl: params.rpcUrl,
-										fromAccountId: params.fromAccountId,
-									});
+								: intent.type === "near.swap.ref"
+									? await simulateRefSwap({
+											intent,
+											network,
+											rpcUrl: params.rpcUrl,
+											fromAccountId: params.fromAccountId,
+										})
+									: intent.type === "near.lp.ref.add"
+										? await simulateRefAddLiquidity({
+												intent,
+												network,
+												rpcUrl: params.rpcUrl,
+												fromAccountId: params.fromAccountId,
+											})
+										: await simulateRefRemoveLiquidity({
+												intent,
+												network,
+												rpcUrl: params.rpcUrl,
+												fromAccountId: params.fromAccountId,
+											});
 					rememberWorkflowSession({
 						runId,
 						network,
@@ -1088,7 +1752,11 @@ export function createNearWorkflowTools() {
 						? resolveExecuteTool("near_transferNear")
 						: intent.type === "near.transfer.ft"
 							? resolveExecuteTool("near_transferFt")
-							: resolveExecuteTool("near_swapRef");
+							: intent.type === "near.swap.ref"
+								? resolveExecuteTool("near_swapRef")
+								: intent.type === "near.lp.ref.add"
+									? resolveExecuteTool("near_addLiquidityRef")
+									: resolveExecuteTool("near_removeLiquidityRef");
 				const executeResult = await executeTool.execute("near-wf-exec", {
 					...(intent.type === "near.transfer.near"
 						? {
@@ -1103,18 +1771,42 @@ export function createNearWorkflowTools() {
 									gas: intent.gas,
 									attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
 								}
-							: {
-									tokenInId: intent.tokenInId,
-									tokenOutId: intent.tokenOutId,
-									amountInRaw: intent.amountInRaw,
-									minAmountOutRaw: intent.minAmountOutRaw,
-									poolId: intent.poolId,
-									slippageBps: intent.slippageBps,
-									refContractId: intent.refContractId,
-									autoRegisterOutput: intent.autoRegisterOutput,
-									gas: intent.gas,
-									attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
-								}),
+							: intent.type === "near.swap.ref"
+								? {
+										tokenInId: intent.tokenInId,
+										tokenOutId: intent.tokenOutId,
+										amountInRaw: intent.amountInRaw,
+										minAmountOutRaw: intent.minAmountOutRaw,
+										poolId: intent.poolId,
+										slippageBps: intent.slippageBps,
+										refContractId: intent.refContractId,
+										autoRegisterOutput: intent.autoRegisterOutput,
+										gas: intent.gas,
+										attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+									}
+								: intent.type === "near.lp.ref.add"
+									? {
+											poolId: intent.poolId,
+											amountARaw: intent.amountARaw,
+											amountBRaw: intent.amountBRaw,
+											tokenAId: intent.tokenAId,
+											tokenBId: intent.tokenBId,
+											refContractId: intent.refContractId,
+											autoRegisterExchange: intent.autoRegisterExchange,
+											autoRegisterTokens: intent.autoRegisterTokens,
+											gas: intent.gas,
+											attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+										}
+									: {
+											poolId: intent.poolId,
+											shares: intent.shares,
+											minAmountsRaw: intent.minAmountsRaw,
+											minAmountARaw: intent.minAmountARaw,
+											minAmountBRaw: intent.minAmountBRaw,
+											refContractId: intent.refContractId,
+											gas: intent.gas,
+											attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+										}),
 					network,
 					rpcUrl: params.rpcUrl,
 					fromAccountId: intent.fromAccountId ?? params.fromAccountId,

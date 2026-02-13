@@ -380,6 +380,28 @@ function resolveTokenCandidates(params: {
 	return candidates;
 }
 
+export function resolveRefTokenIds(params: {
+	network?: string;
+	tokenIdOrSymbol: string;
+	availableTokenIds?: string[] | Set<string>;
+}): string[] {
+	const network = parseNearNetwork(params.network);
+	const availableTokenIds = params.availableTokenIds
+		? Array.isArray(params.availableTokenIds)
+			? new Set(
+					params.availableTokenIds.map((tokenId) => tokenId.toLowerCase()),
+				)
+			: new Set(
+					[...params.availableTokenIds].map((tokenId) => tokenId.toLowerCase()),
+				)
+		: undefined;
+	return resolveTokenCandidates({
+		network,
+		tokenInput: params.tokenIdOrSymbol,
+		poolTokenIds: availableTokenIds,
+	});
+}
+
 export function getRefTokenDecimalsHint(params: {
 	network?: string;
 	tokenIdOrSymbol: string;
@@ -478,6 +500,64 @@ export async function fetchRefPools(params: {
 	}
 
 	return pools;
+}
+
+export async function fetchRefPoolById(params: {
+	network?: string;
+	rpcUrl?: string;
+	refContractId?: string;
+	poolId: number | string;
+}): Promise<RefPoolView> {
+	const network = parseNearNetwork(params.network);
+	const refContractId = getRefContractId(network, params.refContractId);
+	const poolId = parsePoolId(params.poolId);
+
+	const result = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network,
+		rpcUrl: params.rpcUrl,
+		params: {
+			request_type: "call_function",
+			account_id: refContractId,
+			method_name: "get_pool",
+			args_base64: encodeNearCallArgs({
+				pool_id: poolId,
+			}),
+			finality: "final",
+		},
+	});
+
+	const rawPool = decodeNearCallResult<Partial<RefPoolView> | null>(result);
+	if (!rawPool || typeof rawPool !== "object") {
+		throw new Error(`Pool ${poolId} not found on ${refContractId}.`);
+	}
+
+	const tokenIds = Array.isArray(rawPool.token_account_ids)
+		? rawPool.token_account_ids.filter(
+				(entry): entry is string => typeof entry === "string",
+			)
+		: [];
+	const amounts = Array.isArray(rawPool.amounts)
+		? rawPool.amounts.filter(
+				(entry): entry is string => typeof entry === "string",
+			)
+		: [];
+	if (tokenIds.length < 2 || amounts.length < 2) {
+		throw new Error(`Pool ${poolId} is missing token/amount metadata.`);
+	}
+
+	return {
+		id: poolId,
+		token_account_ids: tokenIds.map((tokenId) => tokenId.toLowerCase()),
+		amounts,
+		total_fee:
+			typeof rawPool.total_fee === "number" &&
+			Number.isFinite(rawPool.total_fee)
+				? rawPool.total_fee
+				: 0,
+		pool_kind:
+			typeof rawPool.pool_kind === "string" ? rawPool.pool_kind : undefined,
+	};
 }
 
 async function queryRefReturn(params: {

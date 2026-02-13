@@ -2,7 +2,13 @@ import { Type } from "@sinclair/typebox";
 import { Account, JsonRpcProvider } from "near-api-js";
 import type { RegisteredTool } from "../../../core/types.js";
 import { defineTool } from "../../../core/types.js";
-import { getRefContractId, getRefSwapQuote } from "../ref.js";
+import {
+	fetchRefPoolById,
+	getRefContractId,
+	getRefSwapQuote,
+	getRefTokenDecimalsHint,
+	resolveRefTokenIds,
+} from "../ref.js";
 import {
 	NEAR_TOOL_PREFIX,
 	callNearRpc,
@@ -57,6 +63,43 @@ type NearRefSwapParams = {
 	attachedDepositYoctoNear?: string;
 };
 
+type NearRefAddLiquidityParams = {
+	poolId: number | string;
+	amountsRaw?: string[];
+	amountARaw?: string;
+	amountBRaw?: string;
+	amountA?: string | number;
+	amountB?: string | number;
+	tokenAId?: string;
+	tokenBId?: string;
+	refContractId?: string;
+	autoRegisterExchange?: boolean;
+	autoRegisterTokens?: boolean;
+	fromAccountId?: string;
+	privateKey?: string;
+	network?: string;
+	rpcUrl?: string;
+	confirmMainnet?: boolean;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearRefRemoveLiquidityParams = {
+	poolId: number | string;
+	shares: string;
+	minAmountsRaw?: string[];
+	minAmountARaw?: string;
+	minAmountBRaw?: string;
+	refContractId?: string;
+	fromAccountId?: string;
+	privateKey?: string;
+	network?: string;
+	rpcUrl?: string;
+	confirmMainnet?: boolean;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
 type NearCallFunctionResult = {
 	result: number[];
 	logs: string[];
@@ -90,6 +133,10 @@ type StorageRegistrationResult =
 
 const DEFAULT_FT_STORAGE_DEPOSIT_YOCTO_NEAR = 1_250_000_000_000_000_000_000n;
 const DEFAULT_STORAGE_DEPOSIT_GAS = 30_000_000_000_000n;
+const DEFAULT_REF_ACCOUNT_STORAGE_DEPOSIT_YOCTO_NEAR =
+	100_000_000_000_000_000_000_000n;
+const DEFAULT_REF_REGISTER_TOKENS_GAS = 40_000_000_000_000n;
+const DEFAULT_REF_DEPOSIT_TOKEN_GAS = 70_000_000_000_000n;
 
 function parsePositiveYocto(value: string, fieldName: string): bigint {
 	const normalized = value.trim();
@@ -109,6 +156,29 @@ function parseNonNegativeYocto(value: string, fieldName: string): bigint {
 		throw new Error(`${fieldName} must be an unsigned integer string`);
 	}
 	return BigInt(normalized);
+}
+
+function parseScaledDecimalToRaw(
+	value: string | number,
+	decimals: number,
+	fieldName: string,
+): string {
+	const normalized =
+		typeof value === "number" ? value.toString() : value.trim();
+	if (!/^\d+(\.\d+)?$/.test(normalized)) {
+		throw new Error(`${fieldName} must be a positive decimal number`);
+	}
+	if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
+		throw new Error("token decimals are invalid");
+	}
+	const [wholePart, fractionPart = ""] = normalized.split(".");
+	if (fractionPart.length > decimals) {
+		throw new Error(`${fieldName} supports up to ${decimals} decimal places`);
+	}
+	const whole = BigInt(wholePart);
+	const fraction = fractionPart.padEnd(decimals, "0");
+	const fractionValue = fraction ? BigInt(fraction) : 0n;
+	return (whole * 10n ** BigInt(decimals) + fractionValue).toString();
 }
 
 function resolveNearTransferAmount(params: NearTransferParams): bigint {
@@ -190,10 +260,10 @@ function isMissingMethodError(error: unknown): boolean {
 	);
 }
 
-async function queryFtStorageBalance(params: {
+async function queryContractStorageBalance(params: {
 	network: string;
 	rpcUrl?: string;
-	ftContractId: string;
+	contractId: string;
 	accountId: string;
 }): Promise<NearStorageBalance | null | "unsupported"> {
 	try {
@@ -203,7 +273,7 @@ async function queryFtStorageBalance(params: {
 			rpcUrl: params.rpcUrl,
 			params: {
 				request_type: "call_function",
-				account_id: params.ftContractId,
+				account_id: params.contractId,
 				method_name: "storage_balance_of",
 				args_base64: encodeNearCallArgs({
 					account_id: params.accountId,
@@ -228,10 +298,10 @@ async function queryFtStorageBalance(params: {
 	}
 }
 
-async function queryFtStorageMinimumDeposit(params: {
+async function queryContractStorageMinimumDeposit(params: {
 	network: string;
 	rpcUrl?: string;
-	ftContractId: string;
+	contractId: string;
 }): Promise<bigint | null> {
 	try {
 		const result = await callNearRpc<NearCallFunctionResult>({
@@ -240,7 +310,7 @@ async function queryFtStorageMinimumDeposit(params: {
 			rpcUrl: params.rpcUrl,
 			params: {
 				request_type: "call_function",
-				account_id: params.ftContractId,
+				account_id: params.contractId,
 				method_name: "storage_balance_bounds",
 				args_base64: encodeNearCallArgs({}),
 				finality: "final",
@@ -269,10 +339,10 @@ async function ensureFtStorageRegistered(params: {
 	ftContractId: string;
 	accountId: string;
 }): Promise<StorageRegistrationResult> {
-	const balance = await queryFtStorageBalance({
+	const balance = await queryContractStorageBalance({
 		network: params.network,
 		rpcUrl: params.rpcUrl,
-		ftContractId: params.ftContractId,
+		contractId: params.ftContractId,
 		accountId: params.accountId,
 	});
 	if (balance === "unsupported") {
@@ -289,10 +359,10 @@ async function ensureFtStorageRegistered(params: {
 	}
 
 	const minDeposit =
-		(await queryFtStorageMinimumDeposit({
+		(await queryContractStorageMinimumDeposit({
 			network: params.network,
 			rpcUrl: params.rpcUrl,
-			ftContractId: params.ftContractId,
+			contractId: params.ftContractId,
 		})) ?? DEFAULT_FT_STORAGE_DEPOSIT_YOCTO_NEAR;
 
 	try {
@@ -320,6 +390,319 @@ async function ensureFtStorageRegistered(params: {
 			`Failed to auto-register storage on ${params.ftContractId}: ${extractErrorText(error)}`,
 		);
 	}
+}
+
+function isAlreadyRegisteredError(error: unknown): boolean {
+	const message = extractErrorText(error).toLowerCase();
+	return (
+		message.includes("already registered") ||
+		message.includes("already whitelisted") ||
+		message.includes("already added")
+	);
+}
+
+async function ensureRefAccountStorageRegistered(params: {
+	account: Account;
+	network: string;
+	rpcUrl?: string;
+	refContractId: string;
+	accountId: string;
+}): Promise<StorageRegistrationResult> {
+	const balance = await queryContractStorageBalance({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		contractId: params.refContractId,
+		accountId: params.accountId,
+	});
+	if (balance === "unsupported") {
+		return {
+			status: "unknown",
+			reason: "ref contract does not expose storage_balance_of",
+		};
+	}
+	if (
+		balance &&
+		parseNonNegativeYocto(balance.total, "storageBalance.total") > 0n
+	) {
+		return { status: "already_registered" };
+	}
+
+	const minDeposit =
+		(await queryContractStorageMinimumDeposit({
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			contractId: params.refContractId,
+		})) ?? DEFAULT_REF_ACCOUNT_STORAGE_DEPOSIT_YOCTO_NEAR;
+	try {
+		const registrationTx = await params.account.callFunction({
+			contractId: params.refContractId,
+			methodName: "storage_deposit",
+			args: {
+				account_id: params.accountId,
+			},
+			deposit: minDeposit,
+			gas: DEFAULT_STORAGE_DEPOSIT_GAS,
+		});
+		return {
+			status: "registered_now",
+			depositYoctoNear: minDeposit.toString(),
+			txHash: extractTxHash(registrationTx),
+		};
+	} catch (error) {
+		if (isAlreadyRegisteredError(error)) {
+			return { status: "already_registered" };
+		}
+		throw new Error(
+			`Failed to auto-register exchange storage on ${params.refContractId}: ${extractErrorText(error)}`,
+		);
+	}
+}
+
+async function registerTokensOnRefExchange(params: {
+	account: Account;
+	refContractId: string;
+	tokenIds: string[];
+}): Promise<"registered_now" | "already_registered"> {
+	if (params.tokenIds.length === 0) {
+		return "already_registered";
+	}
+	try {
+		await params.account.callFunction({
+			contractId: params.refContractId,
+			methodName: "register_tokens",
+			args: {
+				token_ids: params.tokenIds,
+			},
+			deposit: 0n,
+			gas: DEFAULT_REF_REGISTER_TOKENS_GAS,
+		});
+		return "registered_now";
+	} catch (error) {
+		if (isAlreadyRegisteredError(error)) {
+			return "already_registered";
+		}
+		throw new Error(
+			`Failed to register tokens on ${params.refContractId}: ${extractErrorText(error)}`,
+		);
+	}
+}
+
+function requirePoolId(value: number | string | undefined): number {
+	const poolId = parseOptionalPoolId(value);
+	if (poolId == null) {
+		throw new Error("poolId is required");
+	}
+	return poolId;
+}
+
+function normalizeTokenIdList(tokenIds: string[]): string[] {
+	return tokenIds
+		.map((tokenId) => tokenId.trim().toLowerCase())
+		.filter(Boolean);
+}
+
+function resolvePoolTokenId(params: {
+	network: string;
+	tokenInput?: string;
+	poolTokenIds: string[];
+	defaultTokenId: string;
+	fieldName: string;
+}): string {
+	if (!params.tokenInput || !params.tokenInput.trim()) {
+		return params.defaultTokenId;
+	}
+	const matches = resolveRefTokenIds({
+		network: params.network,
+		tokenIdOrSymbol: params.tokenInput,
+		availableTokenIds: params.poolTokenIds,
+	});
+	if (!matches[0]) {
+		throw new Error(
+			`${params.fieldName} does not match pool tokens: ${params.tokenInput}`,
+		);
+	}
+	return matches[0];
+}
+
+function resolveRawAmountByToken(params: {
+	network: string;
+	rawValue?: string;
+	uiValue?: string | number;
+	tokenInput: string;
+	fieldRaw: string;
+	fieldUi: string;
+}): string {
+	if (typeof params.rawValue === "string" && params.rawValue.trim()) {
+		return parsePositiveYocto(params.rawValue, params.fieldRaw).toString();
+	}
+	if (params.uiValue == null) {
+		throw new Error(`Provide ${params.fieldRaw} or ${params.fieldUi}`);
+	}
+	const decimals = getRefTokenDecimalsHint({
+		network: params.network,
+		tokenIdOrSymbol: params.tokenInput,
+	});
+	if (decimals == null) {
+		throw new Error(
+			`Cannot infer decimals for ${params.tokenInput}. Provide ${params.fieldRaw}.`,
+		);
+	}
+	const rawAmount = parseScaledDecimalToRaw(
+		params.uiValue,
+		decimals,
+		params.fieldUi,
+	);
+	parsePositiveYocto(rawAmount, params.fieldUi);
+	return rawAmount;
+}
+
+function resolveAddLiquidityAmounts(params: {
+	network: string;
+	poolTokenIds: string[];
+	amountsRaw?: string[];
+	amountARaw?: string;
+	amountBRaw?: string;
+	amountA?: string | number;
+	amountB?: string | number;
+	tokenAId?: string;
+	tokenBId?: string;
+}): {
+	amountsRaw: string[];
+	tokenAId: string;
+	tokenBId: string;
+} {
+	const poolTokenIds = normalizeTokenIdList(params.poolTokenIds);
+	if (poolTokenIds.length < 2) {
+		throw new Error("Ref pool must include at least 2 tokens");
+	}
+	if (Array.isArray(params.amountsRaw) && params.amountsRaw.length > 0) {
+		if (params.amountsRaw.length !== poolTokenIds.length) {
+			throw new Error(
+				`amountsRaw must include ${poolTokenIds.length} entries for pool token order`,
+			);
+		}
+		const normalized = params.amountsRaw.map((value, index) =>
+			parseNonNegativeYocto(value, `amountsRaw[${index}]`).toString(),
+		);
+		const hasPositive = normalized.some((value) => BigInt(value) > 0n);
+		if (!hasPositive) {
+			throw new Error("amountsRaw must include at least one positive amount");
+		}
+		return {
+			amountsRaw: normalized,
+			tokenAId: poolTokenIds[0] ?? "",
+			tokenBId: poolTokenIds[1] ?? "",
+		};
+	}
+
+	const tokenAId = resolvePoolTokenId({
+		network: params.network,
+		tokenInput: params.tokenAId,
+		poolTokenIds,
+		defaultTokenId: poolTokenIds[0] ?? "",
+		fieldName: "tokenAId",
+	});
+	const tokenBId = resolvePoolTokenId({
+		network: params.network,
+		tokenInput: params.tokenBId,
+		poolTokenIds,
+		defaultTokenId: poolTokenIds[1] ?? "",
+		fieldName: "tokenBId",
+	});
+	let resolvedTokenAId = tokenAId;
+	let resolvedTokenBId = tokenBId;
+	if (
+		resolvedTokenAId === resolvedTokenBId &&
+		typeof params.tokenAId === "string" &&
+		params.tokenAId.trim() &&
+		(!params.tokenBId || !params.tokenBId.trim())
+	) {
+		resolvedTokenBId =
+			poolTokenIds.find((tokenId) => tokenId !== resolvedTokenAId) ?? "";
+	}
+	if (
+		resolvedTokenAId === resolvedTokenBId &&
+		typeof params.tokenBId === "string" &&
+		params.tokenBId.trim() &&
+		(!params.tokenAId || !params.tokenAId.trim())
+	) {
+		resolvedTokenAId =
+			poolTokenIds.find((tokenId) => tokenId !== resolvedTokenBId) ?? "";
+	}
+	if (
+		!resolvedTokenAId ||
+		!resolvedTokenBId ||
+		resolvedTokenAId === resolvedTokenBId
+	) {
+		throw new Error(
+			"tokenAId and tokenBId must resolve to two distinct tokens",
+		);
+	}
+	const amountA = resolveRawAmountByToken({
+		network: params.network,
+		rawValue: params.amountARaw,
+		uiValue: params.amountA,
+		tokenInput: resolvedTokenAId,
+		fieldRaw: "amountARaw",
+		fieldUi: "amountA",
+	});
+	const amountB = resolveRawAmountByToken({
+		network: params.network,
+		rawValue: params.amountBRaw,
+		uiValue: params.amountB,
+		tokenInput: resolvedTokenBId,
+		fieldRaw: "amountBRaw",
+		fieldUi: "amountB",
+	});
+	const amountsRaw = poolTokenIds.map(() => "0");
+	const tokenAIndex = poolTokenIds.indexOf(resolvedTokenAId);
+	const tokenBIndex = poolTokenIds.indexOf(resolvedTokenBId);
+	if (tokenAIndex < 0 || tokenBIndex < 0) {
+		throw new Error("tokenAId/tokenBId are not part of the selected pool");
+	}
+	amountsRaw[tokenAIndex] = amountA;
+	amountsRaw[tokenBIndex] = amountB;
+	return {
+		amountsRaw,
+		tokenAId: resolvedTokenAId,
+		tokenBId: resolvedTokenBId,
+	};
+}
+
+function resolveRemoveLiquidityMinAmounts(params: {
+	poolTokenIds: string[];
+	minAmountsRaw?: string[];
+	minAmountARaw?: string;
+	minAmountBRaw?: string;
+}): string[] {
+	const poolTokenIds = normalizeTokenIdList(params.poolTokenIds);
+	if (poolTokenIds.length < 2) {
+		throw new Error("Ref pool must include at least 2 tokens");
+	}
+	if (Array.isArray(params.minAmountsRaw) && params.minAmountsRaw.length > 0) {
+		if (params.minAmountsRaw.length !== poolTokenIds.length) {
+			throw new Error(
+				`minAmountsRaw must include ${poolTokenIds.length} entries for pool token order`,
+			);
+		}
+		return params.minAmountsRaw.map((value, index) =>
+			parseNonNegativeYocto(value, `minAmountsRaw[${index}]`).toString(),
+		);
+	}
+	const result = poolTokenIds.map(() => "0");
+	if (typeof params.minAmountARaw === "string" && params.minAmountARaw.trim()) {
+		result[0] = parseNonNegativeYocto(
+			params.minAmountARaw,
+			"minAmountARaw",
+		).toString();
+	}
+	if (typeof params.minAmountBRaw === "string" && params.minAmountBRaw.trim()) {
+		result[1] = parseNonNegativeYocto(
+			params.minAmountBRaw,
+			"minAmountBRaw",
+		).toString();
+	}
+	return result;
 }
 
 function normalizeReceiverAccountId(value: string): string {
@@ -774,6 +1157,389 @@ export function createNearExecuteTools(): RegisteredTool[] {
 						tokenInId,
 						tokenOutId,
 						txHash,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}addLiquidityRef`,
+			label: "NEAR Ref Add Liquidity",
+			description:
+				"Add liquidity to a Ref pool via deposit + add_liquidity, with optional auto-registration steps.",
+			parameters: Type.Object({
+				poolId: Type.Union([Type.String(), Type.Number()]),
+				amountsRaw: Type.Optional(
+					Type.Array(Type.String(), {
+						description:
+							"Pool-order raw amounts array. If provided, overrides amountA/amountB.",
+					}),
+				),
+				amountARaw: Type.Optional(
+					Type.String({
+						description:
+							"Token A amount in raw units. Used when amountsRaw is omitted.",
+					}),
+				),
+				amountBRaw: Type.Optional(
+					Type.String({
+						description:
+							"Token B amount in raw units. Used when amountsRaw is omitted.",
+					}),
+				),
+				amountA: Type.Optional(
+					Type.Union([
+						Type.String({
+							description:
+								"Token A amount in decimal units (requires known decimals).",
+						}),
+						Type.Number({
+							description:
+								"Token A amount in decimal units (requires known decimals).",
+						}),
+					]),
+				),
+				amountB: Type.Optional(
+					Type.Union([
+						Type.String({
+							description:
+								"Token B amount in decimal units (requires known decimals).",
+						}),
+						Type.Number({
+							description:
+								"Token B amount in decimal units (requires known decimals).",
+						}),
+					]),
+				),
+				tokenAId: Type.Optional(
+					Type.String({
+						description:
+							"Token A id/symbol for amountA mapping (default pool token[0]).",
+					}),
+				),
+				tokenBId: Type.Optional(
+					Type.String({
+						description:
+							"Token B id/symbol for amountB mapping (default pool token[1]).",
+					}),
+				),
+				refContractId: Type.Optional(
+					Type.String({
+						description:
+							"Ref contract id override (default mainnet v2.ref-finance.near).",
+					}),
+				),
+				autoRegisterExchange: Type.Optional(
+					Type.Boolean({
+						description:
+							"Auto storage_deposit signer account on Ref exchange (default true).",
+					}),
+				),
+				autoRegisterTokens: Type.Optional(
+					Type.Boolean({
+						description:
+							"Auto register/deposit token storage for Ref exchange + register_tokens (default true).",
+					}),
+				),
+				fromAccountId: Type.Optional(Type.String()),
+				privateKey: Type.Optional(Type.String()),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+				gas: Type.Optional(
+					Type.String({
+						description:
+							"Gas for add_liquidity call in yoctoGas (default 180000000000000 / 180 Tgas)",
+					}),
+				),
+				attachedDepositYoctoNear: Type.Optional(
+					Type.String({
+						description:
+							"Attached deposit for add_liquidity (default 1 yoctoNEAR).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as NearRefAddLiquidityParams;
+				const poolId = requirePoolId(params.poolId);
+				const addLiquidityGas = resolveRefSwapGas(params.gas);
+				const addLiquidityDeposit = resolveAttachedDeposit(
+					params.attachedDepositYoctoNear,
+				);
+				const autoRegisterExchange = params.autoRegisterExchange !== false;
+				const autoRegisterTokens = params.autoRegisterTokens !== false;
+				const { account, network, endpoint, signerAccountId } =
+					createNearAccountClient({
+						accountId: params.fromAccountId,
+						privateKey: params.privateKey,
+						network: params.network,
+						rpcUrl: params.rpcUrl,
+					});
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+
+				const refContractId = getRefContractId(network, params.refContractId);
+				const pool = await fetchRefPoolById({
+					network,
+					rpcUrl: params.rpcUrl,
+					refContractId,
+					poolId,
+				});
+				const poolTokenIds = normalizeTokenIdList(pool.token_account_ids);
+				const { amountsRaw, tokenAId, tokenBId } = resolveAddLiquidityAmounts({
+					network,
+					poolTokenIds,
+					amountsRaw: params.amountsRaw,
+					amountARaw: params.amountARaw,
+					amountBRaw: params.amountBRaw,
+					amountA: params.amountA,
+					amountB: params.amountB,
+					tokenAId: params.tokenAId,
+					tokenBId: params.tokenBId,
+				});
+
+				const activeTokenRows = poolTokenIds
+					.map((tokenId, index) => ({
+						tokenId,
+						amountRaw: amountsRaw[index] ?? "0",
+					}))
+					.filter(
+						(entry) => parseNonNegativeYocto(entry.amountRaw, "amountRaw") > 0n,
+					);
+				if (activeTokenRows.length === 0) {
+					throw new Error(
+						"No positive token amount provided for add liquidity",
+					);
+				}
+
+				const exchangeStorageRegistration =
+					autoRegisterExchange === true
+						? await ensureRefAccountStorageRegistered({
+								account,
+								network,
+								rpcUrl: params.rpcUrl,
+								refContractId,
+								accountId: signerAccountId,
+							})
+						: null;
+
+				const tokenStorageRegistrations: Array<{
+					tokenId: string;
+					registration: StorageRegistrationResult;
+				}> = [];
+				if (autoRegisterTokens) {
+					for (const row of activeTokenRows) {
+						const registration = await ensureFtStorageRegistered({
+							account,
+							network,
+							rpcUrl: params.rpcUrl,
+							ftContractId: row.tokenId,
+							accountId: refContractId,
+						});
+						tokenStorageRegistrations.push({
+							tokenId: row.tokenId,
+							registration,
+						});
+					}
+				}
+				const tokenRegistrationStatus =
+					autoRegisterTokens === true
+						? await registerTokensOnRefExchange({
+								account,
+								refContractId,
+								tokenIds: activeTokenRows.map((row) => row.tokenId),
+							})
+						: null;
+
+				const depositTxs: Array<{
+					tokenId: string;
+					amountRaw: string;
+					txHash: string | null;
+					explorerUrl: string | null;
+				}> = [];
+				for (const row of activeTokenRows) {
+					const depositTx = await account.callFunction({
+						contractId: row.tokenId,
+						methodName: "ft_transfer_call",
+						args: {
+							receiver_id: refContractId,
+							amount: row.amountRaw,
+							msg: "",
+						},
+						deposit: 1n,
+						gas: DEFAULT_REF_DEPOSIT_TOKEN_GAS,
+					});
+					const txHash = extractTxHash(depositTx);
+					depositTxs.push({
+						tokenId: row.tokenId,
+						amountRaw: row.amountRaw,
+						txHash,
+						explorerUrl: txHash
+							? getNearExplorerTransactionUrl(txHash, network)
+							: null,
+					});
+				}
+
+				const addLiquidityTx = await account.callFunction({
+					contractId: refContractId,
+					methodName: "add_liquidity",
+					args: {
+						pool_id: poolId,
+						amounts: amountsRaw,
+					},
+					deposit: addLiquidityDeposit,
+					gas: addLiquidityGas,
+				});
+				const txHash = extractTxHash(addLiquidityTx);
+				const explorerUrl = txHash
+					? getNearExplorerTransactionUrl(txHash, network)
+					: null;
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Ref add_liquidity submitted: pool=${poolId} tokens=${poolTokenIds.join("/")}`,
+						},
+					],
+					details: {
+						poolId,
+						poolTokenIds,
+						amountsRaw,
+						tokenAId,
+						tokenBId,
+						refContractId,
+						network,
+						fromAccountId: signerAccountId,
+						rpcEndpoint: endpoint,
+						autoRegisterExchange,
+						autoRegisterTokens,
+						exchangeStorageRegistration,
+						tokenStorageRegistrations,
+						tokenRegistrationStatus,
+						depositTxs,
+						addLiquidityGas: addLiquidityGas.toString(),
+						attachedDepositYoctoNear: addLiquidityDeposit.toString(),
+						txHash,
+						explorerUrl,
+						rawResult: addLiquidityTx,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}removeLiquidityRef`,
+			label: "NEAR Ref Remove Liquidity",
+			description: "Remove liquidity from a Ref pool via remove_liquidity.",
+			parameters: Type.Object({
+				poolId: Type.Union([Type.String(), Type.Number()]),
+				shares: Type.String({
+					description: "LP shares to remove, raw integer string.",
+				}),
+				minAmountsRaw: Type.Optional(
+					Type.Array(Type.String(), {
+						description:
+							"Pool-order min amounts array. If omitted, defaults to [0, 0, ...].",
+					}),
+				),
+				minAmountARaw: Type.Optional(
+					Type.String({
+						description:
+							"Optional first token min amount when minAmountsRaw is omitted.",
+					}),
+				),
+				minAmountBRaw: Type.Optional(
+					Type.String({
+						description:
+							"Optional second token min amount when minAmountsRaw is omitted.",
+					}),
+				),
+				refContractId: Type.Optional(Type.String()),
+				fromAccountId: Type.Optional(Type.String()),
+				privateKey: Type.Optional(Type.String()),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+				gas: Type.Optional(
+					Type.String({
+						description:
+							"Gas for remove_liquidity call in yoctoGas (default 180000000000000 / 180 Tgas).",
+					}),
+				),
+				attachedDepositYoctoNear: Type.Optional(
+					Type.String({
+						description:
+							"Attached deposit for remove_liquidity (default 1 yoctoNEAR).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as NearRefRemoveLiquidityParams;
+				const poolId = requirePoolId(params.poolId);
+				const shares = parsePositiveYocto(params.shares, "shares").toString();
+				const removeLiquidityGas = resolveRefSwapGas(params.gas);
+				const removeLiquidityDeposit = resolveAttachedDeposit(
+					params.attachedDepositYoctoNear,
+				);
+				const { account, network, endpoint, signerAccountId } =
+					createNearAccountClient({
+						accountId: params.fromAccountId,
+						privateKey: params.privateKey,
+						network: params.network,
+						rpcUrl: params.rpcUrl,
+					});
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+
+				const refContractId = getRefContractId(network, params.refContractId);
+				const pool = await fetchRefPoolById({
+					network,
+					rpcUrl: params.rpcUrl,
+					refContractId,
+					poolId,
+				});
+				const poolTokenIds = normalizeTokenIdList(pool.token_account_ids);
+				const minAmountsRaw = resolveRemoveLiquidityMinAmounts({
+					poolTokenIds,
+					minAmountsRaw: params.minAmountsRaw,
+					minAmountARaw: params.minAmountARaw,
+					minAmountBRaw: params.minAmountBRaw,
+				});
+
+				const removeTx = await account.callFunction({
+					contractId: refContractId,
+					methodName: "remove_liquidity",
+					args: {
+						pool_id: poolId,
+						shares,
+						min_amounts: minAmountsRaw,
+					},
+					deposit: removeLiquidityDeposit,
+					gas: removeLiquidityGas,
+				});
+				const txHash = extractTxHash(removeTx);
+				const explorerUrl = txHash
+					? getNearExplorerTransactionUrl(txHash, network)
+					: null;
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Ref remove_liquidity submitted: pool=${poolId} shares=${shares}`,
+						},
+					],
+					details: {
+						poolId,
+						poolTokenIds,
+						shares,
+						minAmountsRaw,
+						refContractId,
+						network,
+						fromAccountId: signerAccountId,
+						rpcEndpoint: endpoint,
+						gas: removeLiquidityGas.toString(),
+						attachedDepositYoctoNear: removeLiquidityDeposit.toString(),
+						txHash,
+						explorerUrl,
+						rawResult: removeTx,
 					},
 				};
 			},

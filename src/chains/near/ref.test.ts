@@ -17,7 +17,12 @@ vi.mock("./runtime.js", async () => {
 	};
 });
 
-import { getRefSwapQuote, getRefTokenDecimalsHint } from "./ref.js";
+import {
+	fetchRefPoolById,
+	getRefSwapQuote,
+	getRefTokenDecimalsHint,
+	resolveRefTokenIds,
+} from "./ref.js";
 
 function encodeJsonResult(value: unknown): number[] {
 	return [...Buffer.from(JSON.stringify(value), "utf8")];
@@ -38,6 +43,64 @@ describe("getRefTokenDecimalsHint", () => {
 		expect(
 			getRefTokenDecimalsHint({ network: "mainnet", tokenIdOrSymbol: "USDC" }),
 		).toBe(6);
+	});
+});
+
+describe("resolveRefTokenIds", () => {
+	it("maps symbol to token ids and applies optional pool filter", () => {
+		const all = resolveRefTokenIds({
+			network: "mainnet",
+			tokenIdOrSymbol: "USDC",
+		});
+		expect(all).toContain("usdc.tether-token.near");
+
+		const filtered = resolveRefTokenIds({
+			network: "mainnet",
+			tokenIdOrSymbol: "USDC",
+			availableTokenIds: ["wrap.near", "usdc.tether-token.near"],
+		});
+		expect(filtered).toEqual(["usdc.tether-token.near"]);
+	});
+});
+
+describe("fetchRefPoolById", () => {
+	it("fetches a single pool using get_pool", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			block_hash: "200",
+			block_height: 10,
+			logs: [],
+			result: encodeJsonResult({
+				token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+				amounts: ["1000000000000000000000", "1000000"],
+				total_fee: 30,
+				pool_kind: "SIMPLE_POOL",
+			}),
+		});
+
+		const pool = await fetchRefPoolById({
+			network: "mainnet",
+			poolId: 88,
+		});
+		expect(pool).toMatchObject({
+			id: 88,
+			token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+			amounts: ["1000000000000000000000", "1000000"],
+		});
+		expect(runtimeMocks.callNearRpc).toHaveBeenCalledWith({
+			method: "query",
+			network: "mainnet",
+			rpcUrl: undefined,
+			params: {
+				request_type: "call_function",
+				account_id: "v2.ref-finance.near",
+				method_name: "get_pool",
+				args_base64: Buffer.from(
+					JSON.stringify({ pool_id: 88 }),
+					"utf8",
+				).toString("base64"),
+				finality: "final",
+			},
+		});
 	});
 });
 

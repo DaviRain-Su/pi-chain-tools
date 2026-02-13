@@ -115,10 +115,12 @@ export {
 } from "./chains/near/runtime.js";
 export type { NearNetwork } from "./chains/near/runtime.js";
 export {
+	fetchRefPoolById,
 	fetchRefPools,
 	getRefContractId,
 	getRefSwapQuote,
 	getRefTokenDecimalsHint,
+	resolveRefTokenIds,
 } from "./chains/near/ref.js";
 export type {
 	RefNetwork,

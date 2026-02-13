@@ -39,8 +39,11 @@ const nearApiMocks = vi.hoisted(() => {
 });
 
 const refMocks = vi.hoisted(() => ({
+	fetchRefPoolById: vi.fn(),
 	getRefContractId: vi.fn(() => "v2.ref-finance.near"),
 	getRefSwapQuote: vi.fn(),
+	getRefTokenDecimalsHint: vi.fn(),
+	resolveRefTokenIds: vi.fn(),
 }));
 
 vi.mock("../runtime.js", async () => {
@@ -65,8 +68,11 @@ vi.mock("near-api-js", () => ({
 }));
 
 vi.mock("../ref.js", () => ({
+	fetchRefPoolById: refMocks.fetchRefPoolById,
 	getRefContractId: refMocks.getRefContractId,
 	getRefSwapQuote: refMocks.getRefSwapQuote,
+	getRefTokenDecimalsHint: refMocks.getRefTokenDecimalsHint,
+	resolveRefTokenIds: refMocks.resolveRefTokenIds,
 }));
 
 import { createNearExecuteTools } from "./execute.js";
@@ -125,6 +131,45 @@ beforeEach(() => {
 		feeBps: 30,
 		source: "bestDirectSimplePool",
 	});
+	refMocks.fetchRefPoolById.mockResolvedValue({
+		id: 7,
+		token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+		amounts: ["1", "1"],
+		total_fee: 30,
+		pool_kind: "SIMPLE_POOL",
+	});
+	refMocks.getRefTokenDecimalsHint.mockImplementation(
+		({
+			tokenIdOrSymbol,
+		}: {
+			tokenIdOrSymbol: string;
+		}) => {
+			const normalized = tokenIdOrSymbol.toLowerCase();
+			if (normalized.includes("usdc")) return 6;
+			if (normalized.includes("near")) return 24;
+			return null;
+		},
+	);
+	refMocks.resolveRefTokenIds.mockImplementation(
+		({
+			tokenIdOrSymbol,
+			availableTokenIds,
+		}: {
+			tokenIdOrSymbol: string;
+			availableTokenIds?: string[];
+		}) => {
+			const normalized = tokenIdOrSymbol.toLowerCase();
+			const candidates =
+				availableTokenIds?.map((tokenId) => tokenId.toLowerCase()) ?? [];
+			if (normalized === "near" || normalized === "wnear") {
+				return candidates.filter((tokenId) => tokenId.includes("wrap."));
+			}
+			if (normalized === "usdc") {
+				return candidates.filter((tokenId) => tokenId.includes("usdc"));
+			}
+			return candidates.filter((tokenId) => tokenId === normalized);
+		},
+	);
 });
 
 describe("near_transferNear", () => {
@@ -424,6 +469,173 @@ describe("near_swapRef", () => {
 			tokenOutId: "usdc.tether-token.near",
 			poolId: 11,
 			source: "bestTwoHopPoolRoute",
+		});
+	});
+});
+
+describe("near_addLiquidityRef", () => {
+	it("deposits tokens then calls add_liquidity", async () => {
+		nearApiMocks.callFunction
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-register-tx-hash" },
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-deposit-a-hash" },
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-deposit-b-hash" },
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-add-liquidity-hash" },
+			});
+		const tool = getTool("near_addLiquidityRef");
+		const result = await tool.execute("near-exec-7", {
+			poolId: 7,
+			amountARaw: "10000000000000000000000",
+			amountBRaw: "2500000",
+			confirmMainnet: true,
+		});
+
+		expect(refMocks.fetchRefPoolById).toHaveBeenCalledWith({
+			network: "mainnet",
+			rpcUrl: undefined,
+			refContractId: "v2.ref-finance.near",
+			poolId: 7,
+		});
+		expect(nearApiMocks.callFunction).toHaveBeenNthCalledWith(1, {
+			contractId: "v2.ref-finance.near",
+			methodName: "register_tokens",
+			args: {
+				token_ids: ["wrap.near", "usdc.tether-token.near"],
+			},
+			deposit: 0n,
+			gas: 40_000_000_000_000n,
+		});
+		expect(nearApiMocks.callFunction).toHaveBeenNthCalledWith(2, {
+			contractId: "wrap.near",
+			methodName: "ft_transfer_call",
+			args: {
+				receiver_id: "v2.ref-finance.near",
+				amount: "10000000000000000000000",
+				msg: "",
+			},
+			deposit: 1n,
+			gas: 70_000_000_000_000n,
+		});
+		expect(nearApiMocks.callFunction).toHaveBeenNthCalledWith(3, {
+			contractId: "usdc.tether-token.near",
+			methodName: "ft_transfer_call",
+			args: {
+				receiver_id: "v2.ref-finance.near",
+				amount: "2500000",
+				msg: "",
+			},
+			deposit: 1n,
+			gas: 70_000_000_000_000n,
+		});
+		expect(nearApiMocks.callFunction).toHaveBeenNthCalledWith(4, {
+			contractId: "v2.ref-finance.near",
+			methodName: "add_liquidity",
+			args: {
+				pool_id: 7,
+				amounts: ["10000000000000000000000", "2500000"],
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			poolId: 7,
+			tokenAId: "wrap.near",
+			tokenBId: "usdc.tether-token.near",
+			txHash: "near-add-liquidity-hash",
+		});
+	});
+
+	it("maps symbol amounts into pool token order", async () => {
+		refMocks.fetchRefPoolById.mockResolvedValueOnce({
+			id: 9,
+			token_account_ids: ["usdc.tether-token.near", "wrap.near"],
+			amounts: ["1", "1"],
+			total_fee: 30,
+			pool_kind: "SIMPLE_POOL",
+		});
+		nearApiMocks.callFunction
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-register-tx-hash-2" },
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-deposit-usdc-hash" },
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-deposit-near-hash" },
+			})
+			.mockResolvedValueOnce({
+				transaction_outcome: { id: "near-add-liquidity-hash-2" },
+			});
+
+		const tool = getTool("near_addLiquidityRef");
+		await tool.execute("near-exec-8", {
+			poolId: 9,
+			tokenAId: "NEAR",
+			tokenBId: "USDC",
+			amountA: "0.01",
+			amountB: "1.23",
+			confirmMainnet: true,
+		});
+
+		expect(refMocks.resolveRefTokenIds).toHaveBeenNthCalledWith(1, {
+			network: "mainnet",
+			tokenIdOrSymbol: "NEAR",
+			availableTokenIds: ["usdc.tether-token.near", "wrap.near"],
+		});
+		expect(refMocks.resolveRefTokenIds).toHaveBeenNthCalledWith(2, {
+			network: "mainnet",
+			tokenIdOrSymbol: "USDC",
+			availableTokenIds: ["usdc.tether-token.near", "wrap.near"],
+		});
+		expect(nearApiMocks.callFunction).toHaveBeenLastCalledWith({
+			contractId: "v2.ref-finance.near",
+			methodName: "add_liquidity",
+			args: {
+				pool_id: 9,
+				amounts: ["1230000", "10000000000000000000000"],
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+	});
+});
+
+describe("near_removeLiquidityRef", () => {
+	it("calls remove_liquidity with min amounts", async () => {
+		nearApiMocks.callFunction.mockResolvedValueOnce({
+			transaction_outcome: { id: "near-remove-liquidity-hash" },
+		});
+		const tool = getTool("near_removeLiquidityRef");
+		const result = await tool.execute("near-exec-9", {
+			poolId: 7,
+			shares: "100000",
+			minAmountARaw: "1",
+			minAmountBRaw: "2",
+			confirmMainnet: true,
+		});
+
+		expect(nearApiMocks.callFunction).toHaveBeenCalledWith({
+			contractId: "v2.ref-finance.near",
+			methodName: "remove_liquidity",
+			args: {
+				pool_id: 7,
+				shares: "100000",
+				min_amounts: ["1", "2"],
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			poolId: 7,
+			shares: "100000",
+			minAmountsRaw: ["1", "2"],
+			txHash: "near-remove-liquidity-hash",
 		});
 	});
 });
