@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
+import { getRefSwapQuote } from "../ref.js";
 import {
 	callNearRpc,
 	nearNetworkSchema,
@@ -29,7 +30,24 @@ type NearFtTransferIntent = {
 	attachedDepositYoctoNear?: string;
 };
 
-type NearWorkflowIntent = NearTransferIntent | NearFtTransferIntent;
+type NearRefSwapIntent = {
+	type: "near.swap.ref";
+	tokenInId: string;
+	tokenOutId: string;
+	amountInRaw: string;
+	poolId?: number;
+	slippageBps?: number;
+	refContractId?: string;
+	minAmountOutRaw?: string;
+	fromAccountId?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearWorkflowIntent =
+	| NearTransferIntent
+	| NearFtTransferIntent
+	| NearRefSwapIntent;
 
 type WorkflowParams = {
 	runId?: string;
@@ -44,6 +62,13 @@ type WorkflowParams = {
 	amountYoctoNear?: string;
 	ftContractId?: string;
 	amountRaw?: string;
+	amountInRaw?: string;
+	tokenInId?: string;
+	tokenOutId?: string;
+	poolId?: number | string;
+	slippageBps?: number;
+	refContractId?: string;
+	minAmountOutRaw?: string;
 	gas?: string;
 	attachedDepositYoctoNear?: string;
 	confirmMainnet?: boolean;
@@ -57,6 +82,12 @@ type ParsedIntentHints = {
 	amountNear?: string;
 	ftContractId?: string;
 	amountRaw?: string;
+	amountInRaw?: string;
+	tokenInId?: string;
+	tokenOutId?: string;
+	poolId?: number;
+	slippageBps?: number;
+	refContractId?: string;
 };
 
 type NearAccountQueryResult = {
@@ -156,6 +187,34 @@ function createConfirmToken(params: {
 	return `NEAR-${digest}`;
 }
 
+function parseOptionalPoolId(
+	value: number | string | undefined,
+	fieldName: string,
+): number | undefined {
+	if (value == null) return undefined;
+	if (typeof value === "string" && !value.trim()) return undefined;
+	const normalized = typeof value === "number" ? value : Number(value.trim());
+	if (
+		!Number.isFinite(normalized) ||
+		!Number.isInteger(normalized) ||
+		normalized < 0
+	) {
+		throw new Error(`${fieldName} must be a non-negative integer`);
+	}
+	return normalized;
+}
+
+function parseOptionalSlippageBps(
+	value: number | undefined,
+	fieldName: string,
+): number | undefined {
+	if (value == null) return undefined;
+	if (!Number.isFinite(value) || value < 0 || value > 5000) {
+		throw new Error(`${fieldName} must be between 0 and 5000`);
+	}
+	return Math.floor(value);
+}
+
 function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (!intentText || !intentText.trim()) return {};
 	const text = intentText.trim();
@@ -170,20 +229,66 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	const rawAmountMatch = text.match(
 		/(?:raw|amountRaw|数量|amount)\s*[:：]?\s*(\d+)/i,
 	);
+	const swapPairMatch = text.match(
+		/([a-z0-9][a-z0-9._-]*\.near)\s*(?:->|to|换成|换到|兑换为|兑换成|到)\s*([a-z0-9][a-z0-9._-]*\.near)/i,
+	);
+	const poolIdMatch = text.match(/(?:pool|池子|池)\s*[:：]?\s*(\d+)/i);
+	const slippageMatch = text.match(
+		/(?:slippage|滑点)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(?:bps)?/i,
+	);
+	const refContractMatch = text.match(
+		/(?:ref\s*contract|ref合约|交易所合约)\s*[:：]?\s*([a-z0-9][a-z0-9._-]*(?:\.near)?)/i,
+	);
 
 	const likelyFt =
-		lower.includes("ft") ||
-		lower.includes("token") ||
-		lower.includes("代币") ||
-		/\btransfer\b/.test(lower) ||
-		/\bsend\b/.test(lower);
+		(lower.includes("ft") ||
+			lower.includes("token") ||
+			lower.includes("代币") ||
+			/\btransfer\b/.test(lower) ||
+			/\bsend\b/.test(lower)) &&
+		!lower.includes("swap") &&
+		!lower.includes("兑换");
+	const likelySwap =
+		lower.includes("swap") ||
+		lower.includes("兑换") ||
+		lower.includes("换成") ||
+		lower.includes("换到");
 	const hasNearAmount = nearAmountMatch != null;
 
 	const hints: ParsedIntentHints = {};
 	if (toMatch?.[1]) hints.toAccountId = toMatch[1];
 	if (nearAmountMatch?.[1]) hints.amountNear = nearAmountMatch[1];
 	if (ftContractMatch?.[1]) hints.ftContractId = ftContractMatch[1];
-	if (rawAmountMatch?.[1]) hints.amountRaw = rawAmountMatch[1];
+	if (rawAmountMatch?.[1]) {
+		hints.amountRaw = rawAmountMatch[1];
+		hints.amountInRaw = rawAmountMatch[1];
+	}
+	if (swapPairMatch?.[1]) hints.tokenInId = swapPairMatch[1];
+	if (swapPairMatch?.[2]) hints.tokenOutId = swapPairMatch[2];
+	if (poolIdMatch?.[1]) {
+		const parsed = Number(poolIdMatch[1]);
+		if (Number.isInteger(parsed) && parsed >= 0) {
+			hints.poolId = parsed;
+		}
+	}
+	if (slippageMatch?.[1]) {
+		const parsed = Number(slippageMatch[1]);
+		if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 5000) {
+			hints.slippageBps = Math.floor(parsed);
+		}
+	}
+	if (refContractMatch?.[1]) {
+		hints.refContractId = refContractMatch[1];
+	}
+
+	if (
+		hints.tokenInId &&
+		hints.tokenOutId &&
+		(likelySwap || hints.amountInRaw)
+	) {
+		hints.intentType = "near.swap.ref";
+		return hints;
+	}
 
 	if (
 		hints.ftContractId ||
@@ -203,10 +308,21 @@ function inferIntentType(
 	params: WorkflowParams,
 	hints: ParsedIntentHints,
 ): NearWorkflowIntent["type"] {
+	if (params.intentType === "near.swap.ref") return params.intentType;
 	if (params.intentType === "near.transfer.near") return params.intentType;
 	if (params.intentType === "near.transfer.ft") return params.intentType;
 	if (hints.intentType) return hints.intentType;
-	if (params.ftContractId || params.amountRaw) return "near.transfer.ft";
+	if (
+		params.tokenInId ||
+		params.tokenOutId ||
+		params.amountInRaw ||
+		params.poolId != null
+	) {
+		return "near.swap.ref";
+	}
+	if (params.ftContractId || (params.amountRaw && params.toAccountId)) {
+		return "near.transfer.ft";
+	}
 	return "near.transfer.near";
 }
 
@@ -249,6 +365,64 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 		};
 	}
 
+	if (intentType === "near.swap.ref") {
+		const tokenInId = normalizeAccountId(
+			params.tokenInId ?? hints.tokenInId ?? "",
+			"tokenInId",
+		);
+		const tokenOutId = normalizeAccountId(
+			params.tokenOutId ?? hints.tokenOutId ?? "",
+			"tokenOutId",
+		);
+		if (tokenInId === tokenOutId) {
+			throw new Error("tokenInId and tokenOutId must be different");
+		}
+		const amountInRaw =
+			params.amountInRaw?.trim() ??
+			params.amountRaw?.trim() ??
+			hints.amountInRaw?.trim() ??
+			hints.amountRaw?.trim() ??
+			"";
+		parsePositiveBigInt(amountInRaw, "amountInRaw");
+		const minAmountOutRaw =
+			typeof params.minAmountOutRaw === "string" &&
+			params.minAmountOutRaw.trim()
+				? parsePositiveBigInt(
+						params.minAmountOutRaw,
+						"minAmountOutRaw",
+					).toString()
+				: undefined;
+		const refContractId =
+			typeof params.refContractId === "string" && params.refContractId.trim()
+				? normalizeAccountId(params.refContractId, "refContractId")
+				: typeof hints.refContractId === "string" && hints.refContractId.trim()
+					? normalizeAccountId(hints.refContractId, "refContractId")
+					: undefined;
+		return {
+			type: "near.swap.ref",
+			tokenInId,
+			tokenOutId,
+			amountInRaw,
+			poolId: parseOptionalPoolId(params.poolId ?? hints.poolId, "poolId"),
+			slippageBps: parseOptionalSlippageBps(
+				params.slippageBps ?? hints.slippageBps,
+				"slippageBps",
+			),
+			refContractId,
+			minAmountOutRaw,
+			fromAccountId,
+			gas:
+				typeof params.gas === "string" && params.gas.trim()
+					? params.gas.trim()
+					: undefined,
+			attachedDepositYoctoNear:
+				typeof params.attachedDepositYoctoNear === "string" &&
+				params.attachedDepositYoctoNear.trim()
+					? params.attachedDepositYoctoNear.trim()
+					: undefined,
+		};
+	}
+
 	const toAccountId = normalizeAccountId(
 		params.toAccountId ?? hints.toAccountId ?? "",
 		"toAccountId",
@@ -282,6 +456,10 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 	if (params.toAccountId || params.amountNear || params.amountYoctoNear)
 		return true;
 	if (params.ftContractId || params.amountRaw) return true;
+	if (params.tokenInId || params.tokenOutId || params.amountInRaw) return true;
+	if (params.poolId != null || params.refContractId || params.minAmountOutRaw) {
+		return true;
+	}
 	return false;
 }
 
@@ -391,8 +569,88 @@ async function simulateFtTransfer(params: {
 	};
 }
 
+async function simulateRefSwap(params: {
+	intent: NearRefSwapIntent;
+	network: string;
+	rpcUrl?: string;
+	fromAccountId?: string;
+}): Promise<{
+	status: "success" | "insufficient_balance";
+	fromAccountId: string;
+	availableRaw: string;
+	requiredRaw: string;
+	blockHash: string;
+	blockHeight: number;
+	quote: {
+		refContractId: string;
+		poolId: number;
+		tokenInId: string;
+		tokenOutId: string;
+		amountInRaw: string;
+		amountOutRaw: string;
+		minAmountOutRaw: string;
+		source: "explicitPool" | "bestDirectSimplePool";
+	};
+}> {
+	const fromAccountId = resolveNearAccountId(
+		params.intent.fromAccountId ?? params.fromAccountId,
+		params.network,
+	);
+	const query = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		params: {
+			account_id: params.intent.tokenInId,
+			args_base64: Buffer.from(
+				JSON.stringify({ account_id: fromAccountId }),
+				"utf8",
+			).toString("base64"),
+			finality: "final",
+			method_name: "ft_balance_of",
+			request_type: "call_function",
+		},
+	});
+	const available = parseNonNegativeBigInt(
+		decodeCallFunctionResult(query),
+		"ft_balance_of",
+	);
+	const required = parsePositiveBigInt(
+		params.intent.amountInRaw,
+		"amountInRaw",
+	);
+	const quote = await getRefSwapQuote({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		refContractId: params.intent.refContractId,
+		tokenInId: params.intent.tokenInId,
+		tokenOutId: params.intent.tokenOutId,
+		amountInRaw: params.intent.amountInRaw,
+		poolId: params.intent.poolId,
+		slippageBps: params.intent.slippageBps,
+	});
+	return {
+		status: available >= required ? "success" : "insufficient_balance",
+		fromAccountId,
+		availableRaw: available.toString(),
+		requiredRaw: required.toString(),
+		blockHash: query.block_hash,
+		blockHeight: query.block_height,
+		quote: {
+			refContractId: quote.refContractId,
+			poolId: quote.poolId,
+			tokenInId: quote.tokenInId,
+			tokenOutId: quote.tokenOutId,
+			amountInRaw: quote.amountInRaw,
+			amountOutRaw: quote.amountOutRaw,
+			minAmountOutRaw: params.intent.minAmountOutRaw ?? quote.minAmountOutRaw,
+			source: quote.source,
+		},
+	};
+}
+
 function resolveExecuteTool(
-	name: "near_transferNear" | "near_transferFt",
+	name: "near_transferNear" | "near_transferFt" | "near_swapRef",
 ): WorkflowTool {
 	const tool = createNearExecuteTools().find((entry) => entry.name === name);
 	if (!tool) {
@@ -443,7 +701,7 @@ export function createNearWorkflowTools() {
 			name: "w3rt_run_near_workflow_v0",
 			label: "W3RT NEAR Workflow",
 			description:
-				"Run NEAR workflow in three phases: analysis -> simulate -> execute for native and FT transfers.",
+				"Run NEAR workflow in three phases: analysis -> simulate -> execute for native transfer, FT transfer, and Ref swap.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -451,6 +709,7 @@ export function createNearWorkflowTools() {
 					Type.Union([
 						Type.Literal("near.transfer.near"),
 						Type.Literal("near.transfer.ft"),
+						Type.Literal("near.swap.ref"),
 					]),
 				),
 				intentText: Type.Optional(Type.String()),
@@ -462,6 +721,13 @@ export function createNearWorkflowTools() {
 				amountYoctoNear: Type.Optional(Type.String()),
 				ftContractId: Type.Optional(Type.String()),
 				amountRaw: Type.Optional(Type.String()),
+				amountInRaw: Type.Optional(Type.String()),
+				tokenInId: Type.Optional(Type.String()),
+				tokenOutId: Type.Optional(Type.String()),
+				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				slippageBps: Type.Optional(Type.Number()),
+				refContractId: Type.Optional(Type.String()),
+				minAmountOutRaw: Type.Optional(Type.String()),
 				gas: Type.Optional(Type.String()),
 				attachedDepositYoctoNear: Type.Optional(Type.String()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
@@ -534,12 +800,19 @@ export function createNearWorkflowTools() {
 									rpcUrl: params.rpcUrl,
 									fromAccountId: params.fromAccountId,
 								})
-							: await simulateFtTransfer({
-									intent,
-									network,
-									rpcUrl: params.rpcUrl,
-									fromAccountId: params.fromAccountId,
-								});
+							: intent.type === "near.transfer.ft"
+								? await simulateFtTransfer({
+										intent,
+										network,
+										rpcUrl: params.rpcUrl,
+										fromAccountId: params.fromAccountId,
+									})
+								: await simulateRefSwap({
+										intent,
+										network,
+										rpcUrl: params.rpcUrl,
+										fromAccountId: params.fromAccountId,
+									});
 					rememberWorkflowSession({
 						runId,
 						network,
@@ -578,20 +851,34 @@ export function createNearWorkflowTools() {
 				const executeTool =
 					intent.type === "near.transfer.near"
 						? resolveExecuteTool("near_transferNear")
-						: resolveExecuteTool("near_transferFt");
+						: intent.type === "near.transfer.ft"
+							? resolveExecuteTool("near_transferFt")
+							: resolveExecuteTool("near_swapRef");
 				const executeResult = await executeTool.execute("near-wf-exec", {
 					...(intent.type === "near.transfer.near"
 						? {
 								toAccountId: intent.toAccountId,
 								amountYoctoNear: intent.amountYoctoNear,
 							}
-						: {
-								ftContractId: intent.ftContractId,
-								toAccountId: intent.toAccountId,
-								amountRaw: intent.amountRaw,
-								gas: intent.gas,
-								attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
-							}),
+						: intent.type === "near.transfer.ft"
+							? {
+									ftContractId: intent.ftContractId,
+									toAccountId: intent.toAccountId,
+									amountRaw: intent.amountRaw,
+									gas: intent.gas,
+									attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+								}
+							: {
+									tokenInId: intent.tokenInId,
+									tokenOutId: intent.tokenOutId,
+									amountInRaw: intent.amountInRaw,
+									minAmountOutRaw: intent.minAmountOutRaw,
+									poolId: intent.poolId,
+									slippageBps: intent.slippageBps,
+									refContractId: intent.refContractId,
+									gas: intent.gas,
+									attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+								}),
 					network,
 					rpcUrl: params.rpcUrl,
 					fromAccountId: intent.fromAccountId ?? params.fromAccountId,

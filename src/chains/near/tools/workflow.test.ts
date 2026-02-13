@@ -15,6 +15,11 @@ const runtimeMocks = vi.hoisted(() => ({
 const executeMocks = vi.hoisted(() => ({
 	transferNearExecute: vi.fn(),
 	transferFtExecute: vi.fn(),
+	swapRefExecute: vi.fn(),
+}));
+
+const refMocks = vi.hoisted(() => ({
+	getRefSwapQuote: vi.fn(),
 }));
 
 vi.mock("../runtime.js", async () => {
@@ -46,7 +51,18 @@ vi.mock("./execute.js", () => ({
 			parameters: {},
 			execute: executeMocks.transferFtExecute,
 		},
+		{
+			name: "near_swapRef",
+			label: "ref swap",
+			description: "ref swap",
+			parameters: {},
+			execute: executeMocks.swapRefExecute,
+		},
 	],
+}));
+
+vi.mock("../ref.js", () => ({
+	getRefSwapQuote: refMocks.getRefSwapQuote,
 }));
 
 import { createNearWorkflowTools } from "./workflow.js";
@@ -90,6 +106,23 @@ beforeEach(() => {
 		details: {
 			txHash: "near-exec-ft-hash",
 		},
+	});
+	executeMocks.swapRefExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			txHash: "near-exec-swap-hash",
+		},
+	});
+	refMocks.getRefSwapQuote.mockResolvedValue({
+		refContractId: "v2.ref-finance.near",
+		poolId: 3,
+		tokenInId: "usdt.tether-token.near",
+		tokenOutId: "usdc.fakes.near",
+		amountInRaw: "1000000",
+		amountOutRaw: "998000",
+		minAmountOutRaw: "993010",
+		feeBps: 30,
+		source: "bestDirectSimplePool",
 	});
 });
 
@@ -221,6 +254,81 @@ describe("w3rt_run_near_workflow_v0", () => {
 		expect(executed.details).toMatchObject({
 			intentType: "near.transfer.near",
 			runId: "wf-near-05",
+		});
+	});
+
+	it("simulates ref swap and returns quote artifact", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			block_hash: "4444",
+			block_height: 321,
+			logs: [],
+			result: [...Buffer.from(JSON.stringify("1200000"), "utf8")],
+		});
+		const tool = getTool();
+		const result = await tool.execute("near-wf-6", {
+			runId: "wf-near-06",
+			runMode: "simulate",
+			intentType: "near.swap.ref",
+			network: "mainnet",
+			tokenInId: "usdt.tether-token.near",
+			tokenOutId: "usdc.fakes.near",
+			amountInRaw: "1000000",
+		});
+
+		expect(refMocks.getRefSwapQuote).toHaveBeenCalledTimes(1);
+		expect(result.content[0]?.text).toContain("Workflow simulated");
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.ref",
+			artifacts: {
+				simulate: {
+					status: "success",
+					quote: {
+						poolId: 3,
+					},
+				},
+			},
+		});
+	});
+
+	it("executes ref swap after confirm token validation", async () => {
+		const tool = getTool();
+		const analysis = await tool.execute("near-wf-7-analysis", {
+			runId: "wf-near-07",
+			runMode: "analysis",
+			intentType: "near.swap.ref",
+			network: "mainnet",
+			tokenInId: "usdt.tether-token.near",
+			tokenOutId: "usdc.fakes.near",
+			amountInRaw: "1000000",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		const result = await tool.execute("near-wf-7-execute", {
+			runId: "wf-near-07",
+			runMode: "execute",
+			network: "mainnet",
+			tokenInId: "usdt.tether-token.near",
+			tokenOutId: "usdc.fakes.near",
+			amountInRaw: "1000000",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.swapRefExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				tokenInId: "usdt.tether-token.near",
+				tokenOutId: "usdc.fakes.near",
+				amountInRaw: "1000000",
+				confirmMainnet: true,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.ref",
+			artifacts: {
+				execute: {
+					txHash: "near-exec-swap-hash",
+				},
+			},
 		});
 	});
 });

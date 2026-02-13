@@ -37,6 +37,11 @@ const nearApiMocks = vi.hoisted(() => {
 	};
 });
 
+const refMocks = vi.hoisted(() => ({
+	getRefContractId: vi.fn(() => "v2.ref-finance.near"),
+	getRefSwapQuote: vi.fn(),
+}));
+
 vi.mock("../runtime.js", async () => {
 	const actual =
 		await vi.importActual<typeof import("../runtime.js")>("../runtime.js");
@@ -55,6 +60,11 @@ vi.mock("../runtime.js", async () => {
 vi.mock("near-api-js", () => ({
 	Account: nearApiMocks.Account,
 	JsonRpcProvider: nearApiMocks.JsonRpcProvider,
+}));
+
+vi.mock("../ref.js", () => ({
+	getRefContractId: refMocks.getRefContractId,
+	getRefSwapQuote: refMocks.getRefSwapQuote,
 }));
 
 import { createNearExecuteTools } from "./execute.js";
@@ -94,6 +104,18 @@ beforeEach(() => {
 		transaction_outcome: {
 			id: "near-tx-hash-2",
 		},
+	});
+	refMocks.getRefContractId.mockReturnValue("v2.ref-finance.near");
+	refMocks.getRefSwapQuote.mockResolvedValue({
+		refContractId: "v2.ref-finance.near",
+		poolId: 3,
+		tokenInId: "usdt.tether-token.near",
+		tokenOutId: "usdc.fakes.near",
+		amountInRaw: "1000000",
+		amountOutRaw: "997000",
+		minAmountOutRaw: "992015",
+		feeBps: 30,
+		source: "bestDirectSimplePool",
 	});
 });
 
@@ -156,5 +178,69 @@ describe("near_transferFt", () => {
 			amountRaw: "1000000",
 			txHash: "near-tx-hash-2",
 		});
+	});
+});
+
+describe("near_swapRef", () => {
+	it("calls ft_transfer_call with Ref swap message", async () => {
+		const tool = getTool("near_swapRef");
+		const result = await tool.execute("near-exec-4", {
+			tokenInId: "usdt.tether-token.near",
+			tokenOutId: "usdc.fakes.near",
+			amountInRaw: "1000000",
+			slippageBps: 100,
+			confirmMainnet: true,
+		});
+
+		expect(refMocks.getRefSwapQuote).toHaveBeenCalledWith({
+			network: "mainnet",
+			rpcUrl: undefined,
+			refContractId: "v2.ref-finance.near",
+			tokenInId: "usdt.tether-token.near",
+			tokenOutId: "usdc.fakes.near",
+			amountInRaw: "1000000",
+			poolId: undefined,
+			slippageBps: 100,
+		});
+		expect(nearApiMocks.callFunction).toHaveBeenCalledWith({
+			contractId: "usdt.tether-token.near",
+			methodName: "ft_transfer_call",
+			args: {
+				receiver_id: "v2.ref-finance.near",
+				amount: "1000000",
+				msg: JSON.stringify({
+					force: 0,
+					actions: [
+						{
+							pool_id: 3,
+							token_in: "usdt.tether-token.near",
+							amount_in: "1000000",
+							token_out: "usdc.fakes.near",
+							min_amount_out: "992015",
+						},
+					],
+				}),
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			poolId: 3,
+			tokenInId: "usdt.tether-token.near",
+			tokenOutId: "usdc.fakes.near",
+			txHash: "near-tx-hash-2",
+		});
+	});
+
+	it("blocks mainnet swap without explicit confirmation", async () => {
+		const tool = getTool("near_swapRef");
+		await expect(
+			tool.execute("near-exec-5", {
+				tokenInId: "usdt.tether-token.near",
+				tokenOutId: "usdc.fakes.near",
+				amountInRaw: "1000000",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+		expect(nearApiMocks.callFunction).not.toHaveBeenCalled();
 	});
 });

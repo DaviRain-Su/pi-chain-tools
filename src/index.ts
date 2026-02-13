@@ -114,6 +114,16 @@ export {
 	toYoctoNear,
 } from "./chains/near/runtime.js";
 export type { NearNetwork } from "./chains/near/runtime.js";
+export {
+	fetchRefPools,
+	getRefContractId,
+	getRefSwapQuote,
+} from "./chains/near/ref.js";
+export type {
+	RefNetwork,
+	RefPoolView,
+	RefSwapQuote,
+} from "./chains/near/ref.js";
 export { createNearReadTools } from "./chains/near/tools/read.js";
 export { createNearComposeTools } from "./chains/near/tools/compose.js";
 export { createNearExecuteTools } from "./chains/near/tools/execute.js";

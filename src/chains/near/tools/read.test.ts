@@ -14,6 +14,10 @@ const runtimeMocks = vi.hoisted(() => ({
 	),
 }));
 
+const refMocks = vi.hoisted(() => ({
+	getRefSwapQuote: vi.fn(),
+}));
+
 vi.mock("../runtime.js", async () => {
 	const actual =
 		await vi.importActual<typeof import("../runtime.js")>("../runtime.js");
@@ -28,6 +32,10 @@ vi.mock("../runtime.js", async () => {
 		resolveNearAccountId: runtimeMocks.resolveNearAccountId,
 	};
 });
+
+vi.mock("../ref.js", () => ({
+	getRefSwapQuote: refMocks.getRefSwapQuote,
+}));
 
 import { createNearReadTools } from "./read.js";
 
@@ -57,6 +65,17 @@ beforeEach(() => {
 		typeof value === "bigint" ? value.toString() : value,
 	);
 	runtimeMocks.formatTokenAmount.mockImplementation((value: string) => value);
+	refMocks.getRefSwapQuote.mockResolvedValue({
+		refContractId: "v2.ref-finance.near",
+		poolId: 1,
+		tokenInId: "usdt.tether-token.near",
+		tokenOutId: "usdc.fakes.near",
+		amountInRaw: "1000000",
+		amountOutRaw: "998000",
+		minAmountOutRaw: "993010",
+		feeBps: 30,
+		source: "bestDirectSimplePool",
+	});
 });
 
 describe("near_getBalance", () => {
@@ -198,6 +217,41 @@ describe("near_getFtBalance", () => {
 			rawBalance: "1234500",
 			symbol: "USDC",
 			uiAmount: "1.2345",
+		});
+	});
+});
+
+describe("near_getSwapQuoteRef", () => {
+	it("returns Ref quote details", async () => {
+		const tool = getTool("near_getSwapQuoteRef");
+		const result = await tool.execute("near-read-4", {
+			tokenInId: "usdt.tether-token.near",
+			tokenOutId: "usdc.fakes.near",
+			amountInRaw: "1000000",
+			poolId: "12",
+			slippageBps: 100,
+			network: "mainnet",
+		});
+
+		expect(refMocks.getRefSwapQuote).toHaveBeenCalledWith({
+			network: "mainnet",
+			rpcUrl: undefined,
+			refContractId: undefined,
+			tokenInId: "usdt.tether-token.near",
+			tokenOutId: "usdc.fakes.near",
+			amountInRaw: "1000000",
+			poolId: 12,
+			slippageBps: 100,
+		});
+		expect(result.content[0]?.text).toContain("Ref quote:");
+		expect(result.content[0]?.text).toContain("Pool: 1");
+		expect(result.details).toMatchObject({
+			network: "mainnet",
+			rpcEndpoint: "https://rpc.mainnet.near.org",
+			quote: {
+				poolId: 1,
+				amountOutRaw: "998000",
+			},
 		});
 	});
 });

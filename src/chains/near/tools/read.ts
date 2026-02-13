@@ -1,5 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
+import { getRefSwapQuote } from "../ref.js";
 import {
 	NEAR_TOOL_PREFIX,
 	callNearRpc,
@@ -162,6 +163,20 @@ async function queryFtMetadata(params: {
 function shortAccountId(value: string): string {
 	if (value.length <= 28) return value;
 	return `${value.slice(0, 14)}...${value.slice(-10)}`;
+}
+
+function parseOptionalPoolId(value?: number | string): number | undefined {
+	if (value == null) return undefined;
+	if (typeof value === "string" && !value.trim()) return undefined;
+	const normalized = typeof value === "number" ? value : Number(value.trim());
+	if (
+		!Number.isFinite(normalized) ||
+		!Number.isInteger(normalized) ||
+		normalized < 0
+	) {
+		throw new Error("poolId must be a non-negative integer");
+	}
+	return normalized;
 }
 
 export function createNearReadTools() {
@@ -346,6 +361,75 @@ export function createNearReadTools() {
 						rpcEndpoint: endpoint,
 						symbol,
 						uiAmount,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}getSwapQuoteRef`,
+			label: "NEAR Ref Swap Quote",
+			description:
+				"Get swap quote from Ref (Rhea route) using direct simple pool best-route or explicit pool.",
+			parameters: Type.Object({
+				tokenInId: Type.String({
+					description: "Input token contract id",
+				}),
+				tokenOutId: Type.String({
+					description: "Output token contract id",
+				}),
+				amountInRaw: Type.String({
+					description: "Input amount as raw integer string",
+				}),
+				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				slippageBps: Type.Optional(
+					Type.Number({ description: "Slippage in bps (default 50)" }),
+				),
+				refContractId: Type.Optional(
+					Type.String({
+						description:
+							"Ref exchange contract id override (default mainnet v2.ref-finance.near)",
+					}),
+				),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({ description: "Override NEAR JSON-RPC endpoint URL" }),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNearNetwork(params.network);
+				const endpoint = getNearRpcEndpoint(network, params.rpcUrl);
+				const tokenInId = params.tokenInId.trim();
+				const tokenOutId = params.tokenOutId.trim();
+				if (!tokenInId || !tokenOutId) {
+					throw new Error("tokenInId and tokenOutId are required");
+				}
+				const quote = await getRefSwapQuote({
+					network,
+					rpcUrl: params.rpcUrl,
+					refContractId: params.refContractId,
+					tokenInId,
+					tokenOutId,
+					amountInRaw: params.amountInRaw,
+					poolId: parseOptionalPoolId(params.poolId),
+					slippageBps: params.slippageBps,
+				});
+				const slippageBps =
+					typeof params.slippageBps === "number" &&
+					Number.isFinite(params.slippageBps)
+						? Math.max(0, Math.floor(params.slippageBps))
+						: 50;
+				const text = [
+					`Ref quote: ${quote.amountInRaw} raw ${tokenInId} -> ${quote.amountOutRaw} raw ${tokenOutId}`,
+					`Min output (${slippageBps} bps): ${quote.minAmountOutRaw} raw`,
+					`Pool: ${quote.poolId} (${quote.source})`,
+					`Contract: ${quote.refContractId}`,
+				].join("\n");
+				return {
+					content: [{ type: "text", text }],
+					details: {
+						network,
+						rpcEndpoint: endpoint,
+						quote,
 					},
 				};
 			},

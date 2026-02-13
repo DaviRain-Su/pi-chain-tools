@@ -1,6 +1,6 @@
 # Gradience
 
-Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui has a minimal read/execute vertical slice, NEAR has an initial read/rpc vertical slice, and EVM skeleton is scaffolded, with a chain-agnostic grouping model:
+Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui has a practical read/compose/execute/workflow slice, NEAR has read/execute/workflow coverage (including Ref swap), and EVM skeleton is scaffolded, with a chain-agnostic grouping model:
 
 - `read`
 - `compose`
@@ -47,16 +47,18 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - no concrete EVM tools are implemented yet
 - use `createEvmToolset()` as the extension point for future chains/rpcs/wallets
 
-## NEAR (Initial)
+## NEAR (Current)
 
 - `read`: `near_getBalance` (native NEAR balance, available + locked)
 - `read`: `near_getAccount` (view account state)
 - `read`: `near_getFtBalance` (NEP-141 FT balance by contract id, with metadata fallback)
+- `read`: `near_getSwapQuoteRef` (Ref/Rhea quote: explicit pool or best direct simple pool)
 - `execute`: `near_transferNear` (local credentials/env signer, mainnet safety gate)
 - `execute`: `near_transferFt` (NEP-141 `ft_transfer`, supports custom gas/deposit, mainnet safety gate)
-- `workflow`: `w3rt_run_near_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken)
+- `execute`: `near_swapRef` (Ref/Rhea swap via `ft_transfer_call`, mainnet safety gate)
+- `workflow`: `w3rt_run_near_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken; supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref`)
 - `rpc`: `near_rpc` (generic NEAR JSON-RPC passthrough; blocks `broadcast_tx_*` by default)
-- `compose/execute`: scaffolded for next-phase transaction + DeFi primitives
+- `Ref defaults`: mainnet `v2.ref-finance.near`, testnet `ref-finance-101.testnet` (env override supported)
 
 ## Sui (Minimal)
 
@@ -161,7 +163,7 @@ The package auto-loads one bundled extension (`src/pi/default-extension.ts`) tha
 
 - Solana workflow toolset
 - Sui full toolset (read/compose/execute/workflow/rpc)
-- NEAR initial toolset (read/rpc + compose/execute skeleton)
+- NEAR read/execute/workflow/rpc toolset (including Ref swap quote + execute)
 
 ### 3) Reload Pi and smoke test
 
@@ -260,6 +262,12 @@ Natural language confirmation example:
 - Workflow simulate:
   - `把 0.01 NEAR 转到 bob.near，先模拟`
 - Workflow execute:
+  - `继续执行刚才这笔，确认主网执行`
+- Ref quote:
+  - `帮我查一下 NEAR 上 Ref 从 usdt.tether-token.near 到 usdc.fakes.near 的报价，amountInRaw 1000000`
+- Ref swap simulate:
+  - `把 usdt.tether-token.near 的 1000000 raw 换成 usdc.fakes.near，先模拟`
+- Ref swap execute:
   - `继续执行刚才这笔，确认主网执行`
 
 ### 8) Troubleshooting
