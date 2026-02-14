@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
+	evaluateBtc5mTradeGuards,
 	getPolymarketOrderBook,
 	resolveBtc5mTradeSelection,
 } from "../polymarket.js";
@@ -22,6 +23,10 @@ type WorkflowTradeIntent = {
 	side?: "up" | "down";
 	stakeUsd: number;
 	maxEntryPrice?: number;
+	maxSpreadBps?: number;
+	minDepthUsd?: number;
+	maxStakeUsd?: number;
+	minConfidence?: number;
 	useAiAssist: boolean;
 };
 
@@ -48,6 +53,10 @@ type WorkflowParams = {
 	side?: "up" | "down";
 	stakeUsd?: number;
 	maxEntryPrice?: number;
+	maxSpreadBps?: number;
+	minDepthUsd?: number;
+	maxStakeUsd?: number;
+	minConfidence?: number;
 	orderId?: string;
 	orderIds?: string[];
 	cancelAll?: boolean;
@@ -197,6 +206,10 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			params.tokenId?.trim() ||
 			params.side ||
 			params.stakeUsd != null ||
+			params.maxSpreadBps != null ||
+			params.minDepthUsd != null ||
+			params.maxStakeUsd != null ||
+			params.minConfidence != null ||
 			params.orderId?.trim() ||
 			(params.orderIds && params.orderIds.length > 0) ||
 			params.cancelAll === true ||
@@ -277,6 +290,22 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 		maxEntryPrice:
 			params.maxEntryPrice != null
 				? parsePositiveNumber(params.maxEntryPrice, "maxEntryPrice")
+				: undefined,
+		maxSpreadBps:
+			params.maxSpreadBps != null
+				? parsePositiveNumber(params.maxSpreadBps, "maxSpreadBps")
+				: undefined,
+		minDepthUsd:
+			params.minDepthUsd != null
+				? parsePositiveNumber(params.minDepthUsd, "minDepthUsd")
+				: undefined,
+		maxStakeUsd:
+			params.maxStakeUsd != null
+				? parsePositiveNumber(params.maxStakeUsd, "maxStakeUsd")
+				: undefined,
+		minConfidence:
+			params.minConfidence != null
+				? parsePositiveNumber(params.minConfidence, "minConfidence")
 				: undefined,
 		useAiAssist: params.useAiAssist !== false,
 	};
@@ -426,6 +455,12 @@ export function createEvmWorkflowTools() {
 				maxEntryPrice: Type.Optional(
 					Type.Number({ minimum: 0.001, maximum: 0.999 }),
 				),
+				maxSpreadBps: Type.Optional(Type.Number({ minimum: 0.01 })),
+				minDepthUsd: Type.Optional(Type.Number({ minimum: 0.01 })),
+				maxStakeUsd: Type.Optional(Type.Number({ minimum: 0.01 })),
+				minConfidence: Type.Optional(
+					Type.Number({ minimum: 0.01, maximum: 0.99 }),
+				),
 				orderId: Type.Optional(Type.String()),
 				orderIds: Type.Optional(
 					Type.Array(Type.String({ minLength: 1 }), {
@@ -492,7 +527,7 @@ export function createEvmWorkflowTools() {
 					});
 					const orderbook = await getPolymarketOrderBook(trade.tokenId);
 					const entryPrice = orderbook.bestAsk?.price ?? null;
-					const simulateStatus =
+					const baseStatus =
 						entryPrice == null
 							? "no_liquidity"
 							: intent.maxEntryPrice != null &&
@@ -501,12 +536,30 @@ export function createEvmWorkflowTools() {
 								: "ready";
 					const estimatedShares =
 						entryPrice == null ? null : intent.stakeUsd / entryPrice;
+					const guardEvaluation = evaluateBtc5mTradeGuards({
+						stakeUsd: intent.stakeUsd,
+						orderbook,
+						limitPrice: intent.maxEntryPrice ?? entryPrice ?? 0,
+						orderSide: "buy",
+						adviceConfidence: trade.advice?.confidence ?? null,
+						guards: {
+							maxSpreadBps: intent.maxSpreadBps,
+							minDepthUsd: intent.minDepthUsd,
+							maxStakeUsd: intent.maxStakeUsd,
+							minConfidence: intent.minConfidence,
+						},
+					});
+					const analysisStatus =
+						baseStatus === "ready" && !guardEvaluation.passed
+							? "guard_blocked"
+							: baseStatus;
+					const simulateStatus = analysisStatus;
 
 					if (runMode === "analysis") {
 						const summaryLine = buildTradeSummaryLine({
 							intent,
 							phase: "analysis",
-							status: "ready",
+							status: analysisStatus,
 							marketSlug: trade.market.slug,
 							side: trade.side,
 							entryPrice,
@@ -532,11 +585,12 @@ export function createEvmWorkflowTools() {
 										tradeSelection: trade,
 										entryPrice,
 										estimatedShares,
+										guardEvaluation,
 										summaryLine,
 										summary: {
 											schema: "w3rt.workflow.summary.v1",
 											phase: "analysis",
-											status: "ready",
+											status: analysisStatus,
 											intentType: intent.type,
 											line: summaryLine,
 										},
@@ -579,6 +633,7 @@ export function createEvmWorkflowTools() {
 										orderbook,
 										entryPrice,
 										estimatedShares,
+										guardEvaluation,
 										status: simulateStatus,
 										summaryLine,
 										summary: {
@@ -595,6 +650,21 @@ export function createEvmWorkflowTools() {
 					}
 
 					assertMainnetConfirmation();
+					if (simulateStatus === "no_liquidity") {
+						throw new Error(
+							"Trade execute blocked: no ask liquidity in current orderbook.",
+						);
+					}
+					if (simulateStatus === "price_too_high") {
+						throw new Error(
+							`Trade execute blocked: entryPrice ${entryPrice ?? "n/a"} exceeds maxEntryPrice ${intent.maxEntryPrice}.`,
+						);
+					}
+					if (simulateStatus === "guard_blocked") {
+						throw new Error(
+							`Trade execute blocked by guard checks: ${guardEvaluation.issues.map((issue) => issue.message).join(" | ")}`,
+						);
+					}
 					const executeTool = resolveExecuteTool(
 						`${EVM_TOOL_PREFIX}polymarketPlaceOrder`,
 					);
@@ -604,6 +674,10 @@ export function createEvmWorkflowTools() {
 						side: trade.side,
 						stakeUsd: intent.stakeUsd,
 						maxEntryPrice: intent.maxEntryPrice,
+						maxSpreadBps: intent.maxSpreadBps,
+						minDepthUsd: intent.minDepthUsd,
+						maxStakeUsd: intent.maxStakeUsd,
+						minConfidence: intent.minConfidence,
 						dryRun: false,
 						useAiAssist: intent.useAiAssist,
 					});
@@ -633,6 +707,7 @@ export function createEvmWorkflowTools() {
 								execute: {
 									status: "submitted",
 									result: executeResult.details ?? null,
+									guardEvaluation,
 									summaryLine,
 									summary: {
 										schema: "w3rt.workflow.summary.v1",

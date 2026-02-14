@@ -112,6 +112,40 @@ export type PolymarketBtc5mAdvice = {
 	reasons: string[];
 };
 
+export type Btc5mTradeGuardConfig = {
+	maxSpreadBps?: number;
+	minDepthUsd?: number;
+	maxStakeUsd?: number;
+	minConfidence?: number;
+};
+
+export type Btc5mTradeGuardIssue = {
+	code:
+		| "max_spread_exceeded"
+		| "spread_unavailable"
+		| "min_depth_not_met"
+		| "max_stake_exceeded"
+		| "min_confidence_not_met"
+		| "confidence_unavailable";
+	message: string;
+};
+
+export type Btc5mTradeGuardEvaluation = {
+	passed: boolean;
+	metrics: {
+		spreadBps: number | null;
+		depthUsdAtLimit: number;
+		adviceConfidence: number | null;
+	};
+	applied: {
+		maxSpreadBps: number | null;
+		minDepthUsd: number | null;
+		maxStakeUsd: number | null;
+		minConfidence: number | null;
+	};
+	issues: Btc5mTradeGuardIssue[];
+};
+
 function toNumberOrNull(value: unknown): number | null {
 	if (typeof value === "number") {
 		return Number.isFinite(value) ? value : null;
@@ -227,6 +261,144 @@ function round4(value: number): number {
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.max(min, Math.min(max, value));
+}
+
+function round2(value: number): number {
+	return Number(value.toFixed(2));
+}
+
+function normalizeGuardValue(
+	value: number | undefined,
+	fieldName: string,
+): number | null {
+	if (value == null) return null;
+	if (!Number.isFinite(value) || value <= 0) {
+		throw new Error(`${fieldName} must be a positive number`);
+	}
+	return value;
+}
+
+function calculateSpreadBps(orderbook: PolymarketOrderBook): number | null {
+	if (!orderbook.bestAsk || !orderbook.bestBid) return null;
+	const ask = orderbook.bestAsk.price;
+	const bid = orderbook.bestBid.price;
+	if (ask <= 0 || bid <= 0) return null;
+	const midpoint = (ask + bid) / 2;
+	if (midpoint <= 0) return null;
+	return ((ask - bid) / midpoint) * 10_000;
+}
+
+function calculateDepthUsdAtLimit(params: {
+	orderbook: PolymarketOrderBook;
+	limitPrice: number;
+	orderSide: "buy" | "sell";
+}): number {
+	if (!Number.isFinite(params.limitPrice) || params.limitPrice <= 0) return 0;
+	if (params.orderSide === "buy") {
+		return params.orderbook.asks
+			.filter((level) => level.price <= params.limitPrice)
+			.reduce((sum, level) => sum + level.price * level.size, 0);
+	}
+	return params.orderbook.bids
+		.filter((level) => level.price >= params.limitPrice)
+		.reduce((sum, level) => sum + level.price * level.size, 0);
+}
+
+export function evaluateBtc5mTradeGuards(params: {
+	stakeUsd: number;
+	orderbook: PolymarketOrderBook;
+	limitPrice: number;
+	orderSide: "buy" | "sell";
+	adviceConfidence?: number | null;
+	guards: Btc5mTradeGuardConfig;
+}): Btc5mTradeGuardEvaluation {
+	const maxSpreadBps = normalizeGuardValue(
+		params.guards.maxSpreadBps,
+		"maxSpreadBps",
+	);
+	const minDepthUsd = normalizeGuardValue(
+		params.guards.minDepthUsd,
+		"minDepthUsd",
+	);
+	const maxStakeUsd = normalizeGuardValue(
+		params.guards.maxStakeUsd,
+		"maxStakeUsd",
+	);
+	const minConfidence = normalizeGuardValue(
+		params.guards.minConfidence,
+		"minConfidence",
+	);
+	const spreadBps = calculateSpreadBps(params.orderbook);
+	const depthUsdAtLimit = calculateDepthUsdAtLimit({
+		orderbook: params.orderbook,
+		limitPrice: params.limitPrice,
+		orderSide: params.orderSide,
+	});
+	const adviceConfidence =
+		params.adviceConfidence == null || !Number.isFinite(params.adviceConfidence)
+			? null
+			: params.adviceConfidence;
+	const issues: Btc5mTradeGuardIssue[] = [];
+
+	if (maxSpreadBps != null) {
+		if (spreadBps == null) {
+			issues.push({
+				code: "spread_unavailable",
+				message: "Spread unavailable: orderbook missing best bid/ask.",
+			});
+		} else if (spreadBps > maxSpreadBps) {
+			issues.push({
+				code: "max_spread_exceeded",
+				message: `Spread too wide: spreadBps=${round2(spreadBps)} > maxSpreadBps=${round2(maxSpreadBps)}`,
+			});
+		}
+	}
+
+	if (minDepthUsd != null && depthUsdAtLimit < minDepthUsd) {
+		issues.push({
+			code: "min_depth_not_met",
+			message: `Insufficient book depth: depthUsd=${round2(depthUsdAtLimit)} < minDepthUsd=${round2(minDepthUsd)}`,
+		});
+	}
+
+	if (maxStakeUsd != null && params.stakeUsd > maxStakeUsd) {
+		issues.push({
+			code: "max_stake_exceeded",
+			message: `Stake exceeds cap: stakeUsd=${round2(params.stakeUsd)} > maxStakeUsd=${round2(maxStakeUsd)}`,
+		});
+	}
+
+	if (minConfidence != null) {
+		if (adviceConfidence == null) {
+			issues.push({
+				code: "confidence_unavailable",
+				message:
+					"Advice confidence unavailable while minConfidence is required.",
+			});
+		} else if (adviceConfidence < minConfidence) {
+			issues.push({
+				code: "min_confidence_not_met",
+				message: `Advice confidence too low: confidence=${round4(adviceConfidence)} < minConfidence=${round4(minConfidence)}`,
+			});
+		}
+	}
+
+	return {
+		passed: issues.length === 0,
+		metrics: {
+			spreadBps: spreadBps == null ? null : round2(spreadBps),
+			depthUsdAtLimit: round2(depthUsdAtLimit),
+			adviceConfidence:
+				adviceConfidence == null ? null : round4(adviceConfidence),
+		},
+		applied: {
+			maxSpreadBps,
+			minDepthUsd,
+			maxStakeUsd,
+			minConfidence,
+		},
+		issues,
+	};
 }
 
 export function getPolymarketGammaBaseUrl(): string {

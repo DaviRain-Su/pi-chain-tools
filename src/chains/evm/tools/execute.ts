@@ -6,6 +6,7 @@ import {
 	isMainnetLikeEvmNetwork,
 } from "../policy.js";
 import {
+	evaluateBtc5mTradeGuards,
 	getPolymarketClobBaseUrl,
 	getPolymarketGeoblockStatus,
 	getPolymarketMarketBySlug,
@@ -443,6 +444,12 @@ export function createEvmExecuteTools() {
 				maxEntryPrice: Type.Optional(
 					Type.Number({ minimum: 0.001, maximum: 0.999 }),
 				),
+				maxSpreadBps: Type.Optional(Type.Number({ minimum: 0.01 })),
+				minDepthUsd: Type.Optional(Type.Number({ minimum: 0.01 })),
+				maxStakeUsd: Type.Optional(Type.Number({ minimum: 0.01 })),
+				minConfidence: Type.Optional(
+					Type.Number({ minimum: 0.01, maximum: 0.99 }),
+				),
 				dryRun: Type.Optional(Type.Boolean()),
 				useAiAssist: Type.Optional(Type.Boolean()),
 				fromPrivateKey: Type.Optional(Type.String()),
@@ -509,6 +516,19 @@ export function createEvmExecuteTools() {
 				if (!Number.isFinite(size) || size <= 0) {
 					throw new Error(`Invalid order size from stakeUsd=${stakeUsd}`);
 				}
+				const guardEvaluation = evaluateBtc5mTradeGuards({
+					stakeUsd,
+					orderbook,
+					limitPrice,
+					orderSide,
+					adviceConfidence: trade?.advice?.confidence ?? null,
+					guards: {
+						maxSpreadBps: params.maxSpreadBps,
+						minDepthUsd: params.minDepthUsd,
+						maxStakeUsd: params.maxStakeUsd,
+						minConfidence: params.minConfidence,
+					},
+				});
 				const tickSize = params.tickSize ?? market?.tickSize ?? 0.001;
 				const negRisk = params.negRisk ?? market?.negRisk ?? false;
 				const geoblock = await getPolymarketGeoblockStatus();
@@ -524,15 +544,17 @@ export function createEvmExecuteTools() {
 					size,
 					tickSize,
 					negRisk,
+					guardEvaluation,
 					geoblock,
 				};
 
 				if (dryRun) {
+					const guardStatus = guardEvaluation.passed ? "passed" : "blocked";
 					return {
 						content: [
 							{
 								type: "text",
-								text: `Polymarket order preview (${network}): ${orderSide} token=${tokenId} price=${limitPrice} size=${size.toFixed(4)} stakeUsd=${stakeUsd}`,
+								text: `Polymarket order preview (${network}): ${orderSide} token=${tokenId} price=${limitPrice} size=${size.toFixed(4)} stakeUsd=${stakeUsd} guard=${guardStatus}`,
 							},
 						],
 						details: {
@@ -541,6 +563,12 @@ export function createEvmExecuteTools() {
 							advice: trade?.advice ?? null,
 						},
 					};
+				}
+
+				if (!guardEvaluation.passed) {
+					throw new Error(
+						`Polymarket guard check failed: ${guardEvaluation.issues.map((issue) => issue.message).join(" | ")}`,
+					);
 				}
 
 				if (geoblock.blocked) {

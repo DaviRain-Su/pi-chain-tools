@@ -17,6 +17,45 @@ const polymarketMocks = vi.hoisted(() => ({
 	getPolymarketGeoblockStatus: vi.fn(),
 	parseUsdStake: vi.fn((value: number) => value),
 	getPolymarketClobBaseUrl: vi.fn(() => "https://clob.polymarket.com"),
+	evaluateBtc5mTradeGuards: vi.fn((params: Record<string, unknown>) => {
+		const orderbook = params.orderbook as {
+			bestAsk?: { price: number };
+			bestBid?: { price: number };
+		};
+		const guards = (params.guards ?? {}) as { maxSpreadBps?: number };
+		const ask = orderbook.bestAsk?.price;
+		const bid = orderbook.bestBid?.price;
+		const spreadBps =
+			ask != null && bid != null
+				? (((ask - bid) / ((ask + bid) / 2)) * 10_000).toFixed(2)
+				: null;
+		const issues =
+			guards.maxSpreadBps != null &&
+			spreadBps != null &&
+			Number(spreadBps) > guards.maxSpreadBps
+				? [
+						{
+							code: "max_spread_exceeded",
+							message: `Spread too wide: ${spreadBps}`,
+						},
+					]
+				: [];
+		return {
+			passed: issues.length === 0,
+			metrics: {
+				spreadBps: spreadBps == null ? null : Number(spreadBps),
+				depthUsdAtLimit: 0,
+				adviceConfidence: null,
+			},
+			applied: {
+				maxSpreadBps: guards.maxSpreadBps ?? null,
+				minDepthUsd: null,
+				maxStakeUsd: null,
+				minConfidence: null,
+			},
+			issues,
+		};
+	}),
 }));
 
 vi.mock("@polymarket/clob-client", () => {
@@ -59,6 +98,7 @@ vi.mock("../polymarket.js", () => ({
 	getPolymarketGeoblockStatus: polymarketMocks.getPolymarketGeoblockStatus,
 	parseUsdStake: polymarketMocks.parseUsdStake,
 	getPolymarketClobBaseUrl: polymarketMocks.getPolymarketClobBaseUrl,
+	evaluateBtc5mTradeGuards: polymarketMocks.evaluateBtc5mTradeGuards,
 }));
 
 import { createEvmExecuteTools } from "./execute.js";
@@ -170,6 +210,42 @@ afterEach(() => {
 });
 
 describe("evm execute tools", () => {
+	it("marks guard blocked in polymarket place-order preview when spread exceeds threshold", async () => {
+		const tool = getTool("evm_polymarketPlaceOrder");
+		const result = await tool.execute("guard-preview", {
+			network: "polygon",
+			stakeUsd: 20,
+			maxSpreadBps: 100,
+		});
+		expect(result.content[0]?.text).toContain("guard=blocked");
+		expect(result.details).toMatchObject({
+			dryRun: true,
+			orderPreview: {
+				guardEvaluation: {
+					passed: false,
+					issues: [
+						{
+							code: "max_spread_exceeded",
+						},
+					],
+				},
+			},
+		});
+	});
+
+	it("blocks polymarket place-order execute when guard checks fail", async () => {
+		const tool = getTool("evm_polymarketPlaceOrder");
+		await expect(
+			tool.execute("guard-execute", {
+				network: "polygon",
+				stakeUsd: 20,
+				maxSpreadBps: 100,
+				dryRun: false,
+			}),
+		).rejects.toThrow("Polymarket guard check failed");
+		expect(clobMocks.createOrDeriveApiKey).not.toHaveBeenCalled();
+	});
+
 	it("lists open orders in token scope", async () => {
 		clobMocks.getOpenOrders.mockResolvedValue([
 			{

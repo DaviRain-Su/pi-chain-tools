@@ -8,6 +8,45 @@ const executeMocks = vi.hoisted(() => ({
 const polymarketMocks = vi.hoisted(() => ({
 	resolveBtc5mTradeSelection: vi.fn(),
 	getPolymarketOrderBook: vi.fn(),
+	evaluateBtc5mTradeGuards: vi.fn((params: Record<string, unknown>) => {
+		const orderbook = params.orderbook as {
+			bestAsk?: { price: number };
+			bestBid?: { price: number };
+		};
+		const guards = (params.guards ?? {}) as { maxSpreadBps?: number };
+		const ask = orderbook.bestAsk?.price;
+		const bid = orderbook.bestBid?.price;
+		const spreadBps =
+			ask != null && bid != null
+				? (((ask - bid) / ((ask + bid) / 2)) * 10_000).toFixed(2)
+				: null;
+		const issues =
+			guards.maxSpreadBps != null &&
+			spreadBps != null &&
+			Number(spreadBps) > guards.maxSpreadBps
+				? [
+						{
+							code: "max_spread_exceeded",
+							message: `Spread too wide: ${spreadBps}`,
+						},
+					]
+				: [];
+		return {
+			passed: issues.length === 0,
+			metrics: {
+				spreadBps: spreadBps == null ? null : Number(spreadBps),
+				depthUsdAtLimit: 0,
+				adviceConfidence: null,
+			},
+			applied: {
+				maxSpreadBps: guards.maxSpreadBps ?? null,
+				minDepthUsd: null,
+				maxStakeUsd: null,
+				minConfidence: null,
+			},
+			issues,
+		};
+	}),
 }));
 
 vi.mock("./execute.js", () => ({
@@ -32,6 +71,7 @@ vi.mock("./execute.js", () => ({
 vi.mock("../polymarket.js", () => ({
 	resolveBtc5mTradeSelection: polymarketMocks.resolveBtc5mTradeSelection,
 	getPolymarketOrderBook: polymarketMocks.getPolymarketOrderBook,
+	evaluateBtc5mTradeGuards: polymarketMocks.evaluateBtc5mTradeGuards,
 }));
 
 import { createEvmWorkflowTools } from "./workflow.js";
@@ -122,6 +162,34 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		});
 	});
 
+	it("simulates trade with guard-blocked status when spread threshold is too strict", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf2-guarded", {
+			runId: "wf-evm-2-guarded",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 30,
+			side: "up",
+			maxSpreadBps: 100,
+		});
+		expect(result.content[0]?.text).toContain("status=guard_blocked");
+		expect(result.details).toMatchObject({
+			artifacts: {
+				simulate: {
+					status: "guard_blocked",
+					guardEvaluation: {
+						passed: false,
+						issues: [
+							{
+								code: "max_spread_exceeded",
+							},
+						],
+					},
+				},
+			},
+		});
+	});
+
 	it("blocks execute trade without mainnet confirmation", async () => {
 		const tool = getTool();
 		await expect(
@@ -169,6 +237,29 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 				},
 			},
 		});
+	});
+
+	it("blocks execute trade when guard checks fail", async () => {
+		const tool = getTool();
+		const simulated = await tool.execute("wf4-guard-sim", {
+			runId: "wf-evm-4-guard",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 20,
+			side: "up",
+			maxSpreadBps: 100,
+		});
+		const details = simulated.details as { confirmToken: string };
+		await expect(
+			tool.execute("wf4-guard-exec", {
+				runId: "wf-evm-4-guard",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+				confirmToken: details.confirmToken,
+			}),
+		).rejects.toThrow("guard checks");
+		expect(executeMocks.placeOrderExecute).not.toHaveBeenCalled();
 	});
 
 	it("simulates cancel intent from natural language", async () => {
