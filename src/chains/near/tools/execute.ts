@@ -123,6 +123,18 @@ type NearRefWithdrawParams = {
 	attachedDepositYoctoNear?: string;
 };
 
+type NearSubmitIntentsDepositParams = {
+	txHash: string;
+	depositAddress: string;
+	depositMemo?: string;
+	nearSenderAccount?: string;
+	network?: string;
+	confirmMainnet?: boolean;
+	apiBaseUrl?: string;
+	apiKey?: string;
+	jwt?: string;
+};
+
 type NearCallFunctionResult = {
 	result: number[];
 	logs: string[];
@@ -139,6 +151,16 @@ type NearStorageBalanceBounds = {
 	min: string;
 	max?: string;
 };
+
+type NearIntentsBadRequest = {
+	message?: string;
+	statusCode?: number;
+	error?: string;
+	timestamp?: string;
+	path?: string;
+};
+
+type NearIntentsQueryParams = Record<string, string | undefined>;
 
 type StorageRegistrationResult =
 	| {
@@ -163,6 +185,7 @@ const DEFAULT_REF_DEPOSIT_TOKEN_GAS = 70_000_000_000_000n;
 const DEFAULT_NEAR_SWAP_SLIPPAGE_BPS = 50;
 const DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS = 1000;
 const HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS = 5000;
+const DEFAULT_NEAR_INTENTS_API_BASE_URL = "https://1click.chaindefuser.com";
 
 function parsePositiveYocto(value: string, fieldName: string): bigint {
 	const normalized = value.trim();
@@ -182,6 +205,113 @@ function parseNonNegativeYocto(value: string, fieldName: string): bigint {
 		throw new Error(`${fieldName} must be an unsigned integer string`);
 	}
 	return BigInt(normalized);
+}
+
+function normalizeNonEmptyText(value: string, fieldName: string): string {
+	const normalized = value.trim();
+	if (!normalized) {
+		throw new Error(`${fieldName} is required`);
+	}
+	return normalized;
+}
+
+function resolveNearIntentsApiBaseUrl(endpoint?: string): string {
+	const explicit = endpoint?.trim();
+	const fromEnv = process.env.NEAR_INTENTS_API_BASE_URL?.trim();
+	const selected = explicit || fromEnv || DEFAULT_NEAR_INTENTS_API_BASE_URL;
+	return selected.endsWith("/") ? selected.slice(0, -1) : selected;
+}
+
+function resolveNearIntentsHeaders(params: {
+	apiKey?: string;
+	jwt?: string;
+}): Record<string, string> {
+	const headers: Record<string, string> = {};
+	const apiKey =
+		params.apiKey?.trim() || process.env.NEAR_INTENTS_API_KEY?.trim();
+	const jwt = params.jwt?.trim() || process.env.NEAR_INTENTS_JWT?.trim();
+	if (apiKey) headers["x-api-key"] = apiKey;
+	if (jwt) headers.Authorization = `Bearer ${jwt}`;
+	return headers;
+}
+
+function buildNearIntentsUrl(params: {
+	baseUrl: string;
+	path: string;
+	query?: NearIntentsQueryParams;
+}): string {
+	const url = new URL(params.path, `${params.baseUrl}/`);
+	if (params.query) {
+		for (const [key, value] of Object.entries(params.query)) {
+			if (typeof value === "string" && value.trim()) {
+				url.searchParams.set(key, value.trim());
+			}
+		}
+	}
+	return url.toString();
+}
+
+function resolveNearIntentsErrorMessage(
+	payload: unknown,
+	fallback: string,
+): string {
+	if (payload && typeof payload === "object") {
+		const candidate = payload as NearIntentsBadRequest;
+		if (typeof candidate.message === "string" && candidate.message.trim()) {
+			return candidate.message.trim();
+		}
+		if (typeof candidate.error === "string" && candidate.error.trim()) {
+			return candidate.error.trim();
+		}
+	}
+	return fallback;
+}
+
+async function fetchNearIntentsJson<T>(params: {
+	baseUrl: string;
+	path: string;
+	method: "GET" | "POST";
+	query?: NearIntentsQueryParams;
+	body?: Record<string, unknown>;
+	headers?: Record<string, string>;
+}): Promise<{
+	url: string;
+	status: number;
+	payload: T;
+}> {
+	const url = buildNearIntentsUrl({
+		baseUrl: params.baseUrl,
+		path: params.path,
+		query: params.query,
+	});
+	const response = await fetch(url, {
+		method: params.method,
+		headers: {
+			accept: "application/json",
+			...(params.body ? { "content-type": "application/json" } : {}),
+			...(params.headers ?? {}),
+		},
+		body: params.body ? JSON.stringify(params.body) : undefined,
+	});
+	const raw = await response.text();
+	let payload: unknown = null;
+	if (raw.trim()) {
+		try {
+			payload = JSON.parse(raw) as unknown;
+		} catch {
+			payload = raw;
+		}
+	}
+	if (!response.ok) {
+		throw new Error(
+			`NEAR Intents API ${params.method} ${params.path} failed (${response.status}): ${resolveNearIntentsErrorMessage(payload, response.statusText || "request failed")}`,
+		);
+	}
+	return {
+		url,
+		status: response.status,
+		payload: payload as T,
+	};
 }
 
 function parseScaledDecimalToRaw(
@@ -1593,6 +1723,126 @@ export function createNearExecuteTools(): RegisteredTool[] {
 						network,
 						fromAccountId: signerAccountId,
 						rpcEndpoint: endpoint,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}submitIntentsDeposit`,
+			label: "NEAR Intents Submit Deposit",
+			description:
+				"Submit a deposited tx hash to NEAR Intents 1Click (/v0/deposit/submit).",
+			parameters: Type.Object({
+				txHash: Type.String({
+					description: "On-chain deposit transaction hash to submit.",
+				}),
+				depositAddress: Type.String({
+					description: "Deposit address returned by NEAR Intents quote.",
+				}),
+				depositMemo: Type.Optional(
+					Type.String({
+						description:
+							"Optional deposit memo returned by quote (required in memo mode).",
+					}),
+				),
+				nearSenderAccount: Type.Optional(
+					Type.String({
+						description:
+							"Optional NEAR sender account id (nearSenderAccount in submit API).",
+					}),
+				),
+				network: nearNetworkSchema(),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+				apiBaseUrl: Type.Optional(
+					Type.String({
+						description:
+							"NEAR Intents API base URL override (default https://1click.chaindefuser.com).",
+					}),
+				),
+				apiKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional NEAR Intents API key (fallback env NEAR_INTENTS_API_KEY).",
+					}),
+				),
+				jwt: Type.Optional(
+					Type.String({
+						description: "Optional bearer JWT (fallback env NEAR_INTENTS_JWT).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as NearSubmitIntentsDepositParams;
+				const network = parseNearNetwork(params.network);
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const txHash = normalizeNonEmptyText(params.txHash, "txHash");
+				const depositAddress = normalizeNonEmptyText(
+					params.depositAddress,
+					"depositAddress",
+				);
+				const depositMemo =
+					typeof params.depositMemo === "string" && params.depositMemo.trim()
+						? params.depositMemo.trim()
+						: undefined;
+				const nearSenderAccount =
+					typeof params.nearSenderAccount === "string" &&
+					params.nearSenderAccount.trim()
+						? normalizeReceiverAccountId(params.nearSenderAccount)
+						: undefined;
+				const baseUrl = resolveNearIntentsApiBaseUrl(params.apiBaseUrl);
+				const authHeaders = resolveNearIntentsHeaders({
+					apiKey: params.apiKey,
+					jwt: params.jwt,
+				});
+				const response = await fetchNearIntentsJson<Record<string, unknown>>({
+					baseUrl,
+					path: "/v0/deposit/submit",
+					method: "POST",
+					headers: authHeaders,
+					body: {
+						txHash,
+						depositAddress,
+						...(depositMemo ? { memo: depositMemo } : {}),
+						...(nearSenderAccount
+							? {
+									nearSenderAccount,
+								}
+							: {}),
+					},
+				});
+				const responsePayload = response.payload;
+				const correlationId =
+					typeof responsePayload.correlationId === "string"
+						? responsePayload.correlationId
+						: null;
+				const status =
+					typeof responsePayload.status === "string"
+						? responsePayload.status
+						: null;
+				const lines = [
+					`Intents deposit submitted: txHash=${txHash}`,
+					`Deposit: ${depositAddress}${depositMemo ? ` (memo ${depositMemo})` : ""}`,
+				];
+				if (status) {
+					lines.push(`Status: ${status}`);
+				}
+				if (correlationId) {
+					lines.push(`CorrelationId: ${correlationId}`);
+				}
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						network,
+						apiBaseUrl: baseUrl,
+						endpoint: response.url,
+						httpStatus: response.status,
+						txHash,
+						depositAddress,
+						depositMemo: depositMemo ?? null,
+						nearSenderAccount: nearSenderAccount ?? null,
+						correlationId,
+						status,
+						response: responsePayload,
 					},
 				};
 			},

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtimeMocks = vi.hoisted(() => ({
 	callNearRpc: vi.fn(),
@@ -16,9 +16,12 @@ const executeMocks = vi.hoisted(() => ({
 	transferNearExecute: vi.fn(),
 	transferFtExecute: vi.fn(),
 	swapRefExecute: vi.fn(),
+	submitIntentsDepositExecute: vi.fn(),
 	addLiquidityRefExecute: vi.fn(),
 	removeLiquidityRefExecute: vi.fn(),
 }));
+
+const fetchMock = vi.hoisted(() => vi.fn());
 
 const refMocks = vi.hoisted(() => ({
 	fetchRefPoolById: vi.fn(),
@@ -64,6 +67,13 @@ vi.mock("./execute.js", () => ({
 			description: "ref swap",
 			parameters: {},
 			execute: executeMocks.swapRefExecute,
+		},
+		{
+			name: "near_submitIntentsDeposit",
+			label: "intents submit",
+			description: "intents submit",
+			parameters: {},
+			execute: executeMocks.submitIntentsDepositExecute,
 		},
 		{
 			name: "near_addLiquidityRef",
@@ -112,8 +122,24 @@ function encodeJsonResult(value: unknown): number[] {
 	return [...Buffer.from(JSON.stringify(value), "utf8")];
 }
 
+function mockFetchJsonOnce(params: {
+	status: number;
+	body: unknown;
+	statusText?: string;
+}) {
+	fetchMock.mockResolvedValueOnce({
+		ok: params.status >= 200 && params.status < 300,
+		status: params.status,
+		statusText:
+			params.statusText ??
+			(params.status >= 200 && params.status < 300 ? "OK" : "Bad Request"),
+		text: vi.fn().mockResolvedValue(JSON.stringify(params.body)),
+	} as unknown as Response);
+}
+
 beforeEach(() => {
 	vi.clearAllMocks();
+	vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 	Reflect.deleteProperty(process.env, "NEAR_SWAP_MAX_SLIPPAGE_BPS");
 	runtimeMocks.parseNearNetwork.mockReturnValue("mainnet");
 	runtimeMocks.resolveNearAccountId.mockImplementation(
@@ -142,6 +168,13 @@ beforeEach(() => {
 		content: [{ type: "text", text: "ok" }],
 		details: {
 			txHash: "near-exec-swap-hash",
+		},
+	});
+	executeMocks.submitIntentsDepositExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			correlationId: "corr-exec-1",
+			status: "PENDING_DEPOSIT",
 		},
 	});
 	executeMocks.addLiquidityRefExecute.mockResolvedValue({
@@ -247,6 +280,10 @@ beforeEach(() => {
 			return candidates.filter((tokenId) => tokenId === normalized);
 		},
 	);
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
 });
 
 describe("w3rt_run_near_workflow_v0", () => {
@@ -545,6 +582,267 @@ describe("w3rt_run_near_workflow_v0", () => {
 				minAmountOutRaw: "990000",
 			}),
 		).rejects.toThrow("below safe minimum");
+	});
+
+	it("parses natural-language intents swap intent", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-8d", {
+			runId: "wf-near-08d",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "通过 intents 把 NEAR 换成 USDC，amountRaw 1000000，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.intents",
+			intent: {
+				type: "near.swap.intents",
+				originAsset: "NEAR",
+				destinationAsset: "USDC",
+				amount: "1000000",
+			},
+		});
+	});
+
+	it("simulates intents swap and returns quote/deposit artifact", async () => {
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "near:wrap.near",
+					decimals: 24,
+					blockchain: "near",
+					symbol: "NEAR",
+					price: 4.2,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+				{
+					assetId: "near:usdc.tether-token.near",
+					decimals: 6,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+			],
+		});
+		mockFetchJsonOnce({
+			status: 201,
+			body: {
+				correlationId: "corr-sim-1",
+				timestamp: "2026-02-13T00:00:00Z",
+				signature: "sig-1",
+				quoteRequest: {
+					dry: true,
+				},
+				quote: {
+					depositAddress: "0xnear-deposit-1",
+					depositMemo: "memo-1",
+					amountIn: "10000000000000000000000",
+					amountInFormatted: "0.01",
+					amountInUsd: "0.042",
+					minAmountIn: "10000000000000000000000",
+					amountOut: "41871",
+					amountOutFormatted: "0.041871",
+					amountOutUsd: "0.041871",
+					minAmountOut: "40000",
+					timeEstimate: 22,
+				},
+			},
+		});
+		const tool = getTool();
+		const result = await tool.execute("near-wf-8e", {
+			runId: "wf-near-08e",
+			runMode: "simulate",
+			intentType: "near.swap.intents",
+			network: "mainnet",
+			originAsset: "NEAR",
+			destinationAsset: "USDC",
+			amountRaw: "10000000000000000000000",
+		});
+
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			1,
+			"https://1click.chaindefuser.com/v0/tokens",
+			expect.objectContaining({
+				method: "GET",
+			}),
+		);
+		expect(fetchMock).toHaveBeenNthCalledWith(
+			2,
+			"https://1click.chaindefuser.com/v0/quote",
+			expect.objectContaining({
+				method: "POST",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.intents",
+			intent: {
+				type: "near.swap.intents",
+				originAsset: "near:wrap.near",
+				destinationAsset: "near:usdc.tether-token.near",
+				depositAddress: "0xnear-deposit-1",
+				depositMemo: "memo-1",
+			},
+			artifacts: {
+				simulate: {
+					status: "success",
+					originAssetId: "near:wrap.near",
+					destinationAssetId: "near:usdc.tether-token.near",
+					quoteResponse: {
+						correlationId: "corr-sim-1",
+					},
+				},
+			},
+		});
+	});
+
+	it("executes intents swap submit with txHash after confirm token validation", async () => {
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "near:wrap.near",
+					decimals: 24,
+					blockchain: "near",
+					symbol: "NEAR",
+					price: 4.2,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+				{
+					assetId: "near:usdc.tether-token.near",
+					decimals: 6,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+			],
+		});
+		mockFetchJsonOnce({
+			status: 201,
+			body: {
+				correlationId: "corr-sim-2",
+				timestamp: "2026-02-13T00:00:00Z",
+				signature: "sig-2",
+				quoteRequest: { dry: true },
+				quote: {
+					depositAddress: "0xnear-deposit-2",
+					depositMemo: "memo-2",
+					amountIn: "10000000000000000000000",
+					amountInFormatted: "0.01",
+					amountInUsd: "0.042",
+					minAmountIn: "10000000000000000000000",
+					amountOut: "41871",
+					amountOutFormatted: "0.041871",
+					amountOutUsd: "0.041871",
+					minAmountOut: "40000",
+					timeEstimate: 22,
+				},
+			},
+		});
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-8f-sim", {
+			runId: "wf-near-08f",
+			runMode: "simulate",
+			intentType: "near.swap.intents",
+			network: "mainnet",
+			originAsset: "NEAR",
+			destinationAsset: "USDC",
+			amountRaw: "10000000000000000000000",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		const result = await tool.execute("near-wf-8f-exec", {
+			runId: "wf-near-08f",
+			runMode: "execute",
+			confirmMainnet: true,
+			confirmToken: token,
+			txHash: "0xfeedbeef",
+		});
+
+		expect(executeMocks.submitIntentsDepositExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				txHash: "0xfeedbeef",
+				depositAddress: "0xnear-deposit-2",
+				depositMemo: "memo-2",
+				confirmMainnet: true,
+				network: "mainnet",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.intents",
+			artifacts: {
+				execute: {
+					correlationId: "corr-exec-1",
+					status: "PENDING_DEPOSIT",
+				},
+			},
+		});
+	});
+
+	it("requires txHash for intents execute", async () => {
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "near:wrap.near",
+					decimals: 24,
+					blockchain: "near",
+					symbol: "NEAR",
+					price: 4.2,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+				{
+					assetId: "near:usdc.tether-token.near",
+					decimals: 6,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+			],
+		});
+		mockFetchJsonOnce({
+			status: 201,
+			body: {
+				correlationId: "corr-sim-3",
+				timestamp: "2026-02-13T00:00:00Z",
+				signature: "sig-3",
+				quoteRequest: { dry: true },
+				quote: {
+					depositAddress: "0xnear-deposit-3",
+					amountIn: "10000000000000000000000",
+					amountInFormatted: "0.01",
+					amountInUsd: "0.042",
+					minAmountIn: "10000000000000000000000",
+					amountOut: "41871",
+					amountOutFormatted: "0.041871",
+					amountOutUsd: "0.041871",
+					minAmountOut: "40000",
+					timeEstimate: 22,
+				},
+			},
+		});
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-8g-sim", {
+			runId: "wf-near-08g",
+			runMode: "simulate",
+			intentType: "near.swap.intents",
+			network: "mainnet",
+			originAsset: "NEAR",
+			destinationAsset: "USDC",
+			amountRaw: "10000000000000000000000",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		await expect(
+			tool.execute("near-wf-8g-exec", {
+				runId: "wf-near-08g",
+				runMode: "execute",
+				confirmMainnet: true,
+				confirmToken: token,
+			}),
+		).rejects.toThrow("requires txHash");
 	});
 
 	it("parses natural-language ref lp add intent", async () => {

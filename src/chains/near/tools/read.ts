@@ -88,6 +88,119 @@ type NearRefLpFailure = {
 	error: string;
 };
 
+type NearIntentsBlockchain =
+	| "near"
+	| "eth"
+	| "base"
+	| "arb"
+	| "btc"
+	| "sol"
+	| "ton"
+	| "doge"
+	| "xrp"
+	| "zec"
+	| "gnosis"
+	| "bera"
+	| "bsc"
+	| "pol"
+	| "tron"
+	| "sui"
+	| "op"
+	| "avax"
+	| "cardano"
+	| "ltc"
+	| "xlayer"
+	| "monad"
+	| "bch"
+	| "adi"
+	| "plasma"
+	| "starknet"
+	| "aleo";
+
+type NearIntentsToken = {
+	assetId: string;
+	decimals: number;
+	blockchain: string;
+	symbol: string;
+	price: number;
+	priceUpdatedAt: string;
+	contractAddress?: string;
+};
+
+type NearIntentsQuoteRequest = {
+	dry: boolean;
+	swapType: "EXACT_INPUT" | "EXACT_OUTPUT" | "FLEX_INPUT" | "ANY_INPUT";
+	slippageTolerance: number;
+	originAsset: string;
+	depositType: "ORIGIN_CHAIN" | "INTENTS";
+	destinationAsset: string;
+	amount: string;
+	refundTo: string;
+	refundType: "ORIGIN_CHAIN" | "INTENTS";
+	recipient: string;
+	recipientType: "DESTINATION_CHAIN" | "INTENTS";
+	deadline: string;
+	depositMode?: "SIMPLE" | "MEMO";
+	quoteWaitingTimeMs?: number;
+};
+
+type NearIntentsQuoteResponse = {
+	correlationId: string;
+	timestamp: string;
+	signature: string;
+	quoteRequest: NearIntentsQuoteRequest;
+	quote: {
+		depositAddress?: string;
+		depositMemo?: string;
+		amountIn: string;
+		amountInFormatted: string;
+		amountInUsd: string;
+		minAmountIn: string;
+		amountOut: string;
+		amountOutFormatted: string;
+		amountOutUsd: string;
+		minAmountOut: string;
+		deadline?: string;
+		timeWhenInactive?: string;
+		timeEstimate: number;
+	};
+};
+
+type NearIntentsStatusResponse = {
+	correlationId: string;
+	status:
+		| "KNOWN_DEPOSIT_TX"
+		| "PENDING_DEPOSIT"
+		| "INCOMPLETE_DEPOSIT"
+		| "PROCESSING"
+		| "SUCCESS"
+		| "REFUNDED"
+		| "FAILED";
+	updatedAt: string;
+	quoteResponse: NearIntentsQuoteResponse;
+	swapDetails: {
+		amountIn?: string;
+		amountInFormatted?: string;
+		amountOut?: string;
+		amountOutFormatted?: string;
+		refundedAmount?: string;
+		refundedAmountFormatted?: string;
+		refundReason?: string;
+		depositedAmount?: string;
+		depositedAmountFormatted?: string;
+	};
+};
+
+type NearIntentsBadRequest = {
+	message?: string;
+	statusCode?: number;
+	error?: string;
+	timestamp?: string;
+	path?: string;
+};
+
+type NearIntentsQueryParams = Record<string, string | undefined>;
+
 const NEAR_PORTFOLIO_ENV_BY_NETWORK: Record<"mainnet" | "testnet", string> = {
 	mainnet: "NEAR_PORTFOLIO_FT_MAINNET_CONTRACTS",
 	testnet: "NEAR_PORTFOLIO_FT_TESTNET_CONTRACTS",
@@ -104,6 +217,8 @@ const DEFAULT_NEAR_PORTFOLIO_FT_BY_NETWORK: Record<
 	],
 	testnet: ["usdt.fakes.testnet", "usdc.fakes.near"],
 };
+
+const DEFAULT_NEAR_INTENTS_API_BASE_URL = "https://1click.chaindefuser.com";
 
 function parseUnsignedBigInt(value: string, fieldName: string): bigint {
 	const normalized = value.trim();
@@ -301,6 +416,239 @@ function normalizeTokenFilterList(values?: string[]): string[] {
 	return dedupeStrings(
 		values.map((entry) => entry.trim().toLowerCase()).filter(Boolean),
 	);
+}
+
+function parsePositiveInt(
+	value: number | undefined,
+	fieldName: string,
+): number {
+	if (
+		typeof value !== "number" ||
+		!Number.isFinite(value) ||
+		!Number.isInteger(value) ||
+		value <= 0
+	) {
+		throw new Error(`${fieldName} must be a positive integer`);
+	}
+	return value;
+}
+
+function parseIntentsListLimit(value: number | undefined): number {
+	if (value == null) return 20;
+	return Math.min(200, parsePositiveInt(value, "limit"));
+}
+
+function parseIntentsSlippageTolerance(value: number | undefined): number {
+	if (value == null) return 100;
+	if (!Number.isFinite(value) || value < 0 || value > 5_000) {
+		throw new Error("slippageTolerance must be between 0 and 5000");
+	}
+	return Math.floor(value);
+}
+
+function parseIntentsQuoteWaitingTimeMs(
+	value: number | undefined,
+): number | undefined {
+	if (value == null) return undefined;
+	if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+		throw new Error("quoteWaitingTimeMs must be an integer >= 0");
+	}
+	return value;
+}
+
+function parseIntentsDeadline(value: string | undefined): string {
+	if (typeof value === "string" && value.trim()) {
+		const parsed = new Date(value);
+		if (Number.isNaN(parsed.getTime())) {
+			throw new Error("deadline must be a valid ISO datetime string");
+		}
+		return parsed.toISOString();
+	}
+	const fallback = new Date(Date.now() + 20 * 60 * 1000);
+	return fallback.toISOString();
+}
+
+function resolveNearIntentsApiBaseUrl(endpoint?: string): string {
+	const explicit = endpoint?.trim();
+	const fromEnv = process.env.NEAR_INTENTS_API_BASE_URL?.trim();
+	const selected = explicit || fromEnv || DEFAULT_NEAR_INTENTS_API_BASE_URL;
+	return selected.endsWith("/") ? selected.slice(0, -1) : selected;
+}
+
+function resolveNearIntentsHeaders(params: {
+	apiKey?: string;
+	jwt?: string;
+}): Record<string, string> {
+	const headers: Record<string, string> = {};
+	const apiKey =
+		params.apiKey?.trim() || process.env.NEAR_INTENTS_API_KEY?.trim();
+	const jwt = params.jwt?.trim() || process.env.NEAR_INTENTS_JWT?.trim();
+	if (apiKey) headers["x-api-key"] = apiKey;
+	if (jwt) headers.Authorization = `Bearer ${jwt}`;
+	return headers;
+}
+
+function buildNearIntentsUrl(params: {
+	baseUrl: string;
+	path: string;
+	query?: NearIntentsQueryParams;
+}): string {
+	const url = new URL(params.path, `${params.baseUrl}/`);
+	if (params.query) {
+		for (const [key, value] of Object.entries(params.query)) {
+			if (typeof value === "string" && value.trim()) {
+				url.searchParams.set(key, value.trim());
+			}
+		}
+	}
+	return url.toString();
+}
+
+function resolveNearIntentsErrorMessage(
+	payload: unknown,
+	fallback: string,
+): string {
+	if (payload && typeof payload === "object") {
+		const candidate = payload as NearIntentsBadRequest;
+		if (typeof candidate.message === "string" && candidate.message.trim()) {
+			return candidate.message.trim();
+		}
+		if (typeof candidate.error === "string" && candidate.error.trim()) {
+			return candidate.error.trim();
+		}
+	}
+	return fallback;
+}
+
+async function fetchNearIntentsJson<T>(params: {
+	baseUrl: string;
+	path: string;
+	method: "GET" | "POST";
+	query?: NearIntentsQueryParams;
+	body?: Record<string, unknown>;
+	headers?: Record<string, string>;
+}): Promise<{
+	url: string;
+	status: number;
+	payload: T;
+}> {
+	const url = buildNearIntentsUrl({
+		baseUrl: params.baseUrl,
+		path: params.path,
+		query: params.query,
+	});
+	const response = await fetch(url, {
+		method: params.method,
+		headers: {
+			accept: "application/json",
+			...(params.body ? { "content-type": "application/json" } : {}),
+			...(params.headers ?? {}),
+		},
+		body: params.body ? JSON.stringify(params.body) : undefined,
+	});
+	const raw = await response.text();
+	let payload: unknown = null;
+	if (raw.trim()) {
+		try {
+			payload = JSON.parse(raw) as unknown;
+		} catch {
+			payload = raw;
+		}
+	}
+	if (!response.ok) {
+		throw new Error(
+			`NEAR Intents API ${params.method} ${params.path} failed (${response.status}): ${resolveNearIntentsErrorMessage(payload, response.statusText || "request failed")}`,
+		);
+	}
+	return {
+		url,
+		status: response.status,
+		payload: payload as T,
+	};
+}
+
+function normalizeNearIntentsTokens(value: unknown): NearIntentsToken[] {
+	if (!Array.isArray(value)) {
+		throw new Error("NEAR Intents tokens response must be an array");
+	}
+	const normalized: NearIntentsToken[] = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== "object") continue;
+		const candidate = entry as Partial<NearIntentsToken>;
+		if (
+			typeof candidate.assetId !== "string" ||
+			typeof candidate.decimals !== "number" ||
+			typeof candidate.blockchain !== "string" ||
+			typeof candidate.symbol !== "string" ||
+			typeof candidate.price !== "number" ||
+			typeof candidate.priceUpdatedAt !== "string"
+		) {
+			continue;
+		}
+		normalized.push({
+			assetId: candidate.assetId,
+			decimals: Math.floor(candidate.decimals),
+			blockchain: candidate.blockchain,
+			symbol: candidate.symbol,
+			price: candidate.price,
+			priceUpdatedAt: candidate.priceUpdatedAt,
+			contractAddress:
+				typeof candidate.contractAddress === "string"
+					? candidate.contractAddress
+					: undefined,
+		});
+	}
+	return normalized;
+}
+
+function resolveNearIntentsAssetId(params: {
+	assetInput: string;
+	tokens: NearIntentsToken[];
+	preferredBlockchain?: string;
+	fieldName: string;
+}): string {
+	const normalizedInput = params.assetInput.trim();
+	if (!normalizedInput) {
+		throw new Error(`${params.fieldName} is required`);
+	}
+	if (normalizedInput.includes(":")) {
+		return normalizedInput;
+	}
+	const symbol = normalizedInput.toUpperCase();
+	const bySymbol = params.tokens.filter(
+		(token) => token.symbol.toUpperCase() === symbol,
+	);
+	if (bySymbol.length === 0) {
+		throw new Error(
+			`${params.fieldName} symbol '${normalizedInput}' is not supported by NEAR Intents`,
+		);
+	}
+	const preferred = params.preferredBlockchain?.trim().toLowerCase() || "near";
+	const onPreferred = bySymbol.filter(
+		(token) => token.blockchain.toLowerCase() === preferred,
+	);
+	if (onPreferred.length === 1) {
+		const selected = onPreferred[0];
+		if (selected) return selected.assetId;
+	}
+	if (bySymbol.length === 1) {
+		const selected = bySymbol[0];
+		if (selected) return selected.assetId;
+	}
+	const choices = bySymbol
+		.slice(0, 6)
+		.map((token) => `${token.assetId} [${token.blockchain}]`)
+		.join(", ");
+	throw new Error(
+		`${params.fieldName} symbol '${normalizedInput}' is ambiguous; provide explicit assetId. Candidates: ${choices}`,
+	);
+}
+
+function resolveNearIntentsTokenByAssetId(
+	assetId: string,
+	tokens: NearIntentsToken[],
+): NearIntentsToken | null {
+	return tokens.find((token) => token.assetId === assetId) ?? null;
 }
 
 function formatRefAssetAmount(params: {
@@ -1291,6 +1639,393 @@ export function createNearReadTools() {
 						network,
 						rpcEndpoint: endpoint,
 						quote,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}getIntentsTokens`,
+			label: "NEAR Intents Tokens",
+			description:
+				"List supported assets from NEAR Intents 1Click API (/v0/tokens) with optional filters.",
+			parameters: Type.Object({
+				apiBaseUrl: Type.Optional(
+					Type.String({
+						description:
+							"NEAR Intents API base URL override (default https://1click.chaindefuser.com)",
+					}),
+				),
+				apiKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional NEAR Intents API key (fallback env NEAR_INTENTS_API_KEY).",
+					}),
+				),
+				jwt: Type.Optional(
+					Type.String({
+						description:
+							"Optional bearer JWT for authenticated endpoints (fallback env NEAR_INTENTS_JWT).",
+					}),
+				),
+				blockchain: Type.Optional(
+					Type.String({
+						description: "Filter by blockchain (e.g. near, sol, eth).",
+					}),
+				),
+				symbol: Type.Optional(
+					Type.String({ description: "Filter by token symbol (e.g. USDC)." }),
+				),
+				assetId: Type.Optional(
+					Type.String({ description: "Filter by exact assetId." }),
+				),
+				limit: Type.Optional(
+					Type.Number({
+						description: "Max number of rows to show (default 20, max 200).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const baseUrl = resolveNearIntentsApiBaseUrl(params.apiBaseUrl);
+				const authHeaders = resolveNearIntentsHeaders({
+					apiKey: params.apiKey,
+					jwt: params.jwt,
+				});
+				const response = await fetchNearIntentsJson<NearIntentsToken[]>({
+					baseUrl,
+					path: "/v0/tokens",
+					method: "GET",
+					headers: authHeaders,
+				});
+				const tokens = normalizeNearIntentsTokens(response.payload);
+				const blockchainFilter = params.blockchain?.trim().toLowerCase() || "";
+				const symbolFilter = params.symbol?.trim().toUpperCase() || "";
+				const assetIdFilter = params.assetId?.trim().toLowerCase() || "";
+				const limit = parseIntentsListLimit(params.limit);
+				const filtered = tokens
+					.filter((token) =>
+						blockchainFilter
+							? token.blockchain.toLowerCase() === blockchainFilter
+							: true,
+					)
+					.filter((token) =>
+						symbolFilter ? token.symbol.toUpperCase() === symbolFilter : true,
+					)
+					.filter((token) =>
+						assetIdFilter
+							? token.assetId.toLowerCase() === assetIdFilter
+							: true,
+					)
+					.sort((left, right) => {
+						if (left.price === right.price) {
+							return left.assetId.localeCompare(right.assetId);
+						}
+						return left.price > right.price ? -1 : 1;
+					});
+				const selected = filtered.slice(0, limit);
+				const lines = [
+					`Intents tokens: ${selected.length} shown / ${filtered.length} matched (total ${tokens.length})`,
+				];
+				if (selected.length === 0) {
+					lines.push("No token matched current filters.");
+				}
+				for (const [index, token] of selected.entries()) {
+					const priceText = Number.isFinite(token.price)
+						? token.price.toLocaleString(undefined, {
+								maximumFractionDigits: 8,
+							})
+						: String(token.price);
+					lines.push(
+						`${index + 1}. ${token.symbol} [${token.blockchain}] price=$${priceText} assetId=${token.assetId}`,
+					);
+				}
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						apiBaseUrl: baseUrl,
+						endpoint: response.url,
+						httpStatus: response.status,
+						total: tokens.length,
+						matched: filtered.length,
+						shown: selected.length,
+						filters: {
+							blockchain: blockchainFilter || null,
+							symbol: symbolFilter || null,
+							assetId: assetIdFilter || null,
+						},
+						tokens: selected,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}getIntentsQuote`,
+			label: "NEAR Intents Quote",
+			description:
+				"Get NEAR Intents 1Click quote (/v0/quote). Defaults to dry-run for safe analysis.",
+			parameters: Type.Object({
+				originAsset: Type.String({
+					description:
+						"Origin assetId (e.g. nep141:wrap.near) or symbol (e.g. wNEAR).",
+				}),
+				destinationAsset: Type.String({
+					description:
+						"Destination assetId or symbol (if symbol, resolves with blockchainHint default near).",
+				}),
+				amount: Type.String({
+					description: "Amount in smallest unit (integer string).",
+				}),
+				accountId: Type.Optional(
+					Type.String({
+						description:
+							"Optional account used to default recipient/refundTo when they are omitted.",
+					}),
+				),
+				dry: Type.Optional(
+					Type.Boolean({
+						description: "Dry-run quote only (default true).",
+					}),
+				),
+				swapType: Type.Optional(
+					Type.Union([
+						Type.Literal("EXACT_INPUT"),
+						Type.Literal("EXACT_OUTPUT"),
+						Type.Literal("FLEX_INPUT"),
+						Type.Literal("ANY_INPUT"),
+					]),
+				),
+				slippageTolerance: Type.Optional(
+					Type.Number({
+						description:
+							"Slippage tolerance in bps (default 100, allowed 0..5000).",
+					}),
+				),
+				depositType: Type.Optional(
+					Type.Union([Type.Literal("ORIGIN_CHAIN"), Type.Literal("INTENTS")]),
+				),
+				refundType: Type.Optional(
+					Type.Union([Type.Literal("ORIGIN_CHAIN"), Type.Literal("INTENTS")]),
+				),
+				recipientType: Type.Optional(
+					Type.Union([
+						Type.Literal("DESTINATION_CHAIN"),
+						Type.Literal("INTENTS"),
+					]),
+				),
+				depositMode: Type.Optional(
+					Type.Union([Type.Literal("SIMPLE"), Type.Literal("MEMO")]),
+				),
+				recipient: Type.Optional(Type.String()),
+				refundTo: Type.Optional(Type.String()),
+				deadline: Type.Optional(
+					Type.String({
+						description:
+							"ISO datetime string; defaults to now + 20 minutes if omitted.",
+					}),
+				),
+				quoteWaitingTimeMs: Type.Optional(Type.Number()),
+				blockchainHint: Type.Optional(
+					Type.String({
+						description:
+							"When origin/destination uses symbol, prefer this blockchain (default near).",
+					}),
+				),
+				network: nearNetworkSchema(),
+				apiBaseUrl: Type.Optional(
+					Type.String({
+						description:
+							"NEAR Intents API base URL override (default https://1click.chaindefuser.com)",
+					}),
+				),
+				apiKey: Type.Optional(Type.String()),
+				jwt: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNearNetwork(params.network);
+				const baseUrl = resolveNearIntentsApiBaseUrl(params.apiBaseUrl);
+				const authHeaders = resolveNearIntentsHeaders({
+					apiKey: params.apiKey,
+					jwt: params.jwt,
+				});
+				const tokensResponse = await fetchNearIntentsJson<NearIntentsToken[]>({
+					baseUrl,
+					path: "/v0/tokens",
+					method: "GET",
+					headers: authHeaders,
+				});
+				const tokens = normalizeNearIntentsTokens(tokensResponse.payload);
+				const blockchainHint = params.blockchainHint?.trim().toLowerCase();
+				const originAssetId = resolveNearIntentsAssetId({
+					assetInput: params.originAsset,
+					tokens,
+					preferredBlockchain: blockchainHint,
+					fieldName: "originAsset",
+				});
+				const destinationAssetId = resolveNearIntentsAssetId({
+					assetInput: params.destinationAsset,
+					tokens,
+					preferredBlockchain: blockchainHint,
+					fieldName: "destinationAsset",
+				});
+				if (originAssetId === destinationAssetId) {
+					throw new Error("originAsset and destinationAsset must be different");
+				}
+				const amount = parseUnsignedBigInt(params.amount, "amount").toString();
+				const fallbackAccountId = resolveNearAccountId(
+					params.accountId,
+					network,
+				);
+				const recipient = params.recipient?.trim() || fallbackAccountId;
+				const refundTo = params.refundTo?.trim() || recipient;
+				const quoteWaitingTimeMs = parseIntentsQuoteWaitingTimeMs(
+					params.quoteWaitingTimeMs,
+				);
+				const quoteRequest: NearIntentsQuoteRequest = {
+					dry: params.dry !== false,
+					swapType: params.swapType ?? "EXACT_INPUT",
+					slippageTolerance: parseIntentsSlippageTolerance(
+						params.slippageTolerance,
+					),
+					originAsset: originAssetId,
+					depositType: params.depositType ?? "ORIGIN_CHAIN",
+					destinationAsset: destinationAssetId,
+					amount,
+					refundTo,
+					refundType: params.refundType ?? "ORIGIN_CHAIN",
+					recipient,
+					recipientType: params.recipientType ?? "DESTINATION_CHAIN",
+					deadline: parseIntentsDeadline(params.deadline),
+					depositMode: params.depositMode ?? "SIMPLE",
+					...(quoteWaitingTimeMs != null
+						? {
+								quoteWaitingTimeMs,
+							}
+						: {}),
+				};
+				const quoteResponse =
+					await fetchNearIntentsJson<NearIntentsQuoteResponse>({
+						baseUrl,
+						path: "/v0/quote",
+						method: "POST",
+						headers: authHeaders,
+						body: quoteRequest as unknown as Record<string, unknown>,
+					});
+				const originToken =
+					resolveNearIntentsTokenByAssetId(originAssetId, tokens) ?? null;
+				const destinationToken =
+					resolveNearIntentsTokenByAssetId(destinationAssetId, tokens) ?? null;
+				const originSymbol = originToken?.symbol || originAssetId;
+				const destinationSymbol =
+					destinationToken?.symbol || destinationAssetId;
+				const lines = [
+					`Intents quote (${quoteRequest.dry ? "dry" : "live"}): ${quoteResponse.payload.quote.amountInFormatted} ${originSymbol} -> ${quoteResponse.payload.quote.amountOutFormatted} ${destinationSymbol}`,
+					`Min output: ${quoteResponse.payload.quote.minAmountOut} raw`,
+					`Estimated time: ${quoteResponse.payload.quote.timeEstimate}s`,
+					`CorrelationId: ${quoteResponse.payload.correlationId}`,
+				];
+				if (quoteResponse.payload.quote.depositAddress) {
+					lines.push(
+						`Deposit address: ${quoteResponse.payload.quote.depositAddress}`,
+					);
+				}
+				if (quoteResponse.payload.quote.depositMemo) {
+					lines.push(
+						`Deposit memo: ${quoteResponse.payload.quote.depositMemo}`,
+					);
+				}
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						apiBaseUrl: baseUrl,
+						endpoint: quoteResponse.url,
+						httpStatus: quoteResponse.status,
+						network,
+						originAssetId,
+						destinationAssetId,
+						originSymbol,
+						destinationSymbol,
+						request: quoteRequest,
+						quoteResponse: quoteResponse.payload,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}getIntentsStatus`,
+			label: "NEAR Intents Status",
+			description:
+				"Check NEAR Intents execution status by depositAddress (/v0/status).",
+			parameters: Type.Object({
+				depositAddress: Type.String({
+					description: "Deposit address returned by 1Click quote response.",
+				}),
+				depositMemo: Type.Optional(
+					Type.String({
+						description:
+							"Optional deposit memo, required when quote returned memo mode.",
+					}),
+				),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				jwt: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const baseUrl = resolveNearIntentsApiBaseUrl(params.apiBaseUrl);
+				const authHeaders = resolveNearIntentsHeaders({
+					apiKey: params.apiKey,
+					jwt: params.jwt,
+				});
+				const statusResponse =
+					await fetchNearIntentsJson<NearIntentsStatusResponse>({
+						baseUrl,
+						path: "/v0/status",
+						method: "GET",
+						query: {
+							depositAddress: params.depositAddress,
+							depositMemo: params.depositMemo,
+						},
+						headers: authHeaders,
+					});
+				const payload = statusResponse.payload;
+				const quoteSummary = payload.quoteResponse?.quote;
+				const swapSummary = payload.swapDetails;
+				const lines = [
+					`Intents status: ${payload.status}`,
+					`Deposit: ${params.depositAddress}${params.depositMemo ? ` (memo ${params.depositMemo})` : ""}`,
+					`Updated: ${payload.updatedAt}`,
+					`CorrelationId: ${payload.correlationId}`,
+				];
+				if (swapSummary?.amountInFormatted || swapSummary?.amountOutFormatted) {
+					lines.push(
+						`Settled: ${swapSummary.amountInFormatted ?? swapSummary.amountIn ?? "unknown"} -> ${swapSummary.amountOutFormatted ?? swapSummary.amountOut ?? "unknown"}`,
+					);
+				} else if (
+					quoteSummary?.amountInFormatted ||
+					quoteSummary?.amountOutFormatted
+				) {
+					lines.push(
+						`Quoted: ${quoteSummary.amountInFormatted ?? quoteSummary.amountIn ?? "unknown"} -> ${quoteSummary.amountOutFormatted ?? quoteSummary.amountOut ?? "unknown"}`,
+					);
+				}
+				if (
+					swapSummary?.refundedAmountFormatted ||
+					swapSummary?.refundedAmount
+				) {
+					lines.push(
+						`Refunded: ${swapSummary.refundedAmountFormatted ?? swapSummary.refundedAmount}`,
+					);
+				}
+				if (swapSummary?.refundReason) {
+					lines.push(`Refund reason: ${swapSummary.refundReason}`);
+				}
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						apiBaseUrl: baseUrl,
+						endpoint: statusResponse.url,
+						httpStatus: statusResponse.status,
+						depositAddress: params.depositAddress,
+						depositMemo: params.depositMemo ?? null,
+						status: payload,
 					},
 				};
 			},

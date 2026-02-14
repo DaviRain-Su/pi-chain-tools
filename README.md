@@ -56,13 +56,17 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `near_getRefDeposits` (Ref exchange deposited balances, readable token symbols + raw/ui amounts)
 - `read`: `near_getRefLpPositions` (Ref LP share positions, pool pair labels + remove hints)
 - `read`: `near_getSwapQuoteRef` (Ref/Rhea quote: explicit pool/direct/two-hop route; supports token symbols like `NEAR`/`USDC`)
+- `read`: `near_getIntentsTokens` (NEAR Intents 1Click `/v0/tokens`, filterable supported-asset list)
+- `read`: `near_getIntentsQuote` (NEAR Intents 1Click `/v0/quote`, defaults to `dry=true` for safe preview)
+- `read`: `near_getIntentsStatus` (NEAR Intents 1Click `/v0/status` by `depositAddress`/`depositMemo`)
 - `execute`: `near_transferNear` (local credentials/env signer, mainnet safety gate)
 - `execute`: `near_transferFt` (NEP-141 `ft_transfer`, supports custom gas/deposit, mainnet safety gate)
 - `execute`: `near_swapRef` (Ref/Rhea swap via `ft_transfer_call`, supports multi-hop actions, mainnet safety gate, auto output-token `storage_deposit`)
+- `execute`: `near_submitIntentsDeposit` (NEAR Intents `/v0/deposit/submit`, submit deposit `txHash` + `depositAddress`/`depositMemo`, mainnet safety gate)
 - `execute`: `near_withdrawRefToken` (withdraw deposited token from Ref exchange back to wallet, optional full-balance withdraw)
 - `execute`: `near_addLiquidityRef` (Ref LP add-liquidity, includes optional auto register + token deposit to Ref exchange; supports auto pool selection by token pair when `poolId` is omitted)
 - `execute`: `near_removeLiquidityRef` (Ref LP remove-liquidity; supports auto pool selection by token pair when `poolId` is omitted, plus `autoWithdraw=true` to auto-withdraw pool tokens)
-- `workflow`: `w3rt_run_near_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken; supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks)
+- `workflow`: `w3rt_run_near_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken; supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks)
 - `LP auto-selection UX`: when pair-based selection has multiple candidate pools, simulate returns concise alternatives (`poolCandidates`) and text summary (`alternatives=...`)
 - `LP follow-up execute`: after simulate, execute can reuse the session and switch pool by natural language (`继续执行，用第2个池子`) or structured `poolCandidateIndex`
 - `swap safety rails`: `slippageBps` is safety-limited (default max `1000` bps via `NEAR_SWAP_MAX_SLIPPAGE_BPS`), and custom `minAmountOutRaw` cannot be lower than quote-safe minimum
@@ -96,6 +100,16 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `帮我查一下 NEAR 主网 Ref 里我存了哪些币`
 - Ref LP Positions (read):
   - `帮我查一下 NEAR 主网 Ref LP 持仓（扫描前 200 个池子）`
+- Intents Tokens (read):
+  - `帮我查一下 NEAR Intents 支持的 near 链 USDC 资产`
+- Intents Quote (read, dry preview):
+  - `帮我用 NEAR Intents 预估把 wNEAR 换成 USDC，amount=10000000000000000000000（dry）`
+- Intents Status (read):
+  - `帮我查一下 NEAR Intents 这个 depositAddress 的状态：0x...`
+- Intents Swap (workflow simulate):
+  - `intentText: "通过 intents 把 NEAR 换成 USDC，amountRaw 10000000000000000000000，先模拟"`
+- Intents Swap (workflow execute submit):
+  - `intentText: "继续执行刚才这笔 intents 兑换，txHash 0x..."` (with same `runId`, `runMode=execute`, and prior simulate output that includes `depositAddress`/`depositMemo`)
 
 ## Sui (Minimal)
 
@@ -319,6 +333,12 @@ Natural language confirmation example:
   - `把 0.01 NEAR 换成 USDC，先模拟`
 - Ref swap execute:
   - `继续执行刚才这笔，确认主网执行`
+- Intents quote (read):
+  - `帮我用 NEAR Intents 预估把 NEAR 换成 USDC，amount=10000000000000000000000（dry）`
+- Intents workflow simulate:
+  - `通过 intents 把 NEAR 换成 USDC，amountRaw 10000000000000000000000，先模拟`
+- Intents workflow execute (submit deposit):
+  - `继续执行刚才这笔 intents 兑换，txHash 0x...，确认主网执行`
 - Ref deposits:
   - `帮我查一下 NEAR 主网 Ref 存款（deposits）`
 - Ref LP positions:

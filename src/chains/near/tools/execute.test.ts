@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtimeMocks = vi.hoisted(() => ({
 	callNearRpc: vi.fn(),
@@ -47,6 +47,8 @@ const refMocks = vi.hoisted(() => ({
 	resolveRefTokenIds: vi.fn(),
 }));
 
+const fetchMock = vi.hoisted(() => vi.fn());
+
 vi.mock("../runtime.js", async () => {
 	const actual =
 		await vi.importActual<typeof import("../runtime.js")>("../runtime.js");
@@ -92,8 +94,24 @@ function getTool(name: string): ExecuteTool {
 	return tool as unknown as ExecuteTool;
 }
 
+function mockFetchJsonOnce(params: {
+	status: number;
+	body: unknown;
+	statusText?: string;
+}) {
+	fetchMock.mockResolvedValueOnce({
+		ok: params.status >= 200 && params.status < 300,
+		status: params.status,
+		statusText:
+			params.statusText ??
+			(params.status >= 200 && params.status < 300 ? "OK" : "Bad Request"),
+		text: vi.fn().mockResolvedValue(JSON.stringify(params.body)),
+	} as unknown as Response);
+}
+
 beforeEach(() => {
 	vi.clearAllMocks();
+	vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 	Reflect.deleteProperty(process.env, "NEAR_SWAP_MAX_SLIPPAGE_BPS");
 	runtimeMocks.parseNearNetwork.mockReturnValue("mainnet");
 	runtimeMocks.getNearRpcEndpoint.mockReturnValue(
@@ -204,6 +222,10 @@ beforeEach(() => {
 			return candidates.filter((tokenId) => tokenId === normalized);
 		},
 	);
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
 });
 
 describe("near_transferNear", () => {
@@ -982,5 +1004,80 @@ describe("near_removeLiquidityRef", () => {
 				},
 			],
 		});
+	});
+});
+
+describe("near_submitIntentsDeposit", () => {
+	it("submits deposit tx hash to intents API", async () => {
+		mockFetchJsonOnce({
+			status: 201,
+			body: {
+				correlationId: "corr-123",
+				status: "PENDING_DEPOSIT",
+			},
+		});
+		const tool = getTool("near_submitIntentsDeposit");
+		const result = await tool.execute("near-exec-intents-1", {
+			txHash: "0xabc123",
+			depositAddress: "0xdeposit",
+			depositMemo: "memo-1",
+			nearSenderAccount: "@alice.near",
+			confirmMainnet: true,
+		});
+
+		expect(fetchMock).toHaveBeenCalledWith(
+			"https://1click.chaindefuser.com/v0/deposit/submit",
+			expect.objectContaining({
+				method: "POST",
+				headers: expect.objectContaining({
+					accept: "application/json",
+					"content-type": "application/json",
+				}),
+				body: JSON.stringify({
+					txHash: "0xabc123",
+					depositAddress: "0xdeposit",
+					memo: "memo-1",
+					nearSenderAccount: "alice.near",
+				}),
+			}),
+		);
+		expect(result.details).toMatchObject({
+			network: "mainnet",
+			txHash: "0xabc123",
+			depositAddress: "0xdeposit",
+			depositMemo: "memo-1",
+			nearSenderAccount: "alice.near",
+			correlationId: "corr-123",
+			status: "PENDING_DEPOSIT",
+			httpStatus: 201,
+		});
+	});
+
+	it("blocks submit on mainnet without confirmation", async () => {
+		const tool = getTool("near_submitIntentsDeposit");
+		await expect(
+			tool.execute("near-exec-intents-2", {
+				txHash: "0xabc123",
+				depositAddress: "0xdeposit",
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("returns readable intents API errors", async () => {
+		mockFetchJsonOnce({
+			status: 400,
+			body: {
+				message: "deposit transaction not found",
+			},
+		});
+		const tool = getTool("near_submitIntentsDeposit");
+		await expect(
+			tool.execute("near-exec-intents-3", {
+				txHash: "0xdeadbeef",
+				depositAddress: "0xdeposit",
+				confirmMainnet: true,
+			}),
+		).rejects.toThrow("deposit transaction not found");
 	});
 });

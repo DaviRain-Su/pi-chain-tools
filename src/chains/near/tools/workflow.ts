@@ -54,6 +54,38 @@ type NearRefSwapIntent = {
 	attachedDepositYoctoNear?: string;
 };
 
+type NearIntentsSwapType =
+	| "EXACT_INPUT"
+	| "EXACT_OUTPUT"
+	| "FLEX_INPUT"
+	| "ANY_INPUT";
+type NearIntentsTransferType = "ORIGIN_CHAIN" | "INTENTS";
+type NearIntentsRecipientType = "DESTINATION_CHAIN" | "INTENTS";
+type NearIntentsDepositMode = "SIMPLE" | "MEMO";
+
+type NearIntentsSwapIntent = {
+	type: "near.swap.intents";
+	originAsset: string;
+	destinationAsset: string;
+	amount: string;
+	accountId?: string;
+	fromAccountId?: string;
+	recipient?: string;
+	refundTo?: string;
+	swapType?: NearIntentsSwapType;
+	slippageTolerance?: number;
+	depositType?: NearIntentsTransferType;
+	refundType?: NearIntentsTransferType;
+	recipientType?: NearIntentsRecipientType;
+	depositMode?: NearIntentsDepositMode;
+	deadline?: string;
+	quoteWaitingTimeMs?: number;
+	blockchainHint?: string;
+	depositAddress?: string;
+	depositMemo?: string;
+	apiBaseUrl?: string;
+};
+
 type NearRefAddLiquidityIntent = {
 	type: "near.lp.ref.add";
 	poolId?: number;
@@ -91,6 +123,7 @@ type NearWorkflowIntent =
 	| NearTransferIntent
 	| NearFtTransferIntent
 	| NearRefSwapIntent
+	| NearIntentsSwapIntent
 	| NearRefAddLiquidityIntent
 	| NearRefRemoveLiquidityIntent;
 
@@ -111,6 +144,8 @@ type WorkflowParams = {
 	amountIn?: string | number;
 	tokenInId?: string;
 	tokenOutId?: string;
+	originAsset?: string;
+	destinationAsset?: string;
 	tokenAId?: string;
 	tokenBId?: string;
 	poolId?: number | string;
@@ -128,6 +163,23 @@ type WorkflowParams = {
 	minAmountsRaw?: string[];
 	minAmountARaw?: string;
 	minAmountBRaw?: string;
+	recipient?: string;
+	refundTo?: string;
+	swapType?: NearIntentsSwapType;
+	slippageTolerance?: number;
+	depositType?: NearIntentsTransferType;
+	refundType?: NearIntentsTransferType;
+	recipientType?: NearIntentsRecipientType;
+	depositMode?: NearIntentsDepositMode;
+	deadline?: string;
+	quoteWaitingTimeMs?: number;
+	blockchainHint?: string;
+	depositAddress?: string;
+	depositMemo?: string;
+	txHash?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+	jwt?: string;
 	autoRegisterOutput?: boolean;
 	autoRegisterExchange?: boolean;
 	autoRegisterTokens?: boolean;
@@ -150,6 +202,8 @@ type ParsedIntentHints = {
 	amountInUi?: string;
 	tokenInId?: string;
 	tokenOutId?: string;
+	originAsset?: string;
+	destinationAsset?: string;
 	tokenAId?: string;
 	tokenBId?: string;
 	amountAUi?: string;
@@ -163,7 +217,13 @@ type ParsedIntentHints = {
 	poolId?: number;
 	poolCandidateIndex?: number;
 	slippageBps?: number;
+	slippageTolerance?: number;
 	refContractId?: string;
+	recipient?: string;
+	refundTo?: string;
+	depositAddress?: string;
+	depositMemo?: string;
+	txHash?: string;
 	autoWithdraw?: boolean;
 };
 
@@ -181,6 +241,65 @@ type NearCallFunctionResult = {
 	block_hash: string;
 };
 
+type NearIntentsToken = {
+	assetId: string;
+	decimals: number;
+	blockchain: string;
+	symbol: string;
+	price: number;
+	priceUpdatedAt: string;
+	contractAddress?: string;
+};
+
+type NearIntentsQuoteRequest = {
+	dry: boolean;
+	swapType: NearIntentsSwapType;
+	slippageTolerance: number;
+	originAsset: string;
+	depositType: NearIntentsTransferType;
+	destinationAsset: string;
+	amount: string;
+	refundTo: string;
+	refundType: NearIntentsTransferType;
+	recipient: string;
+	recipientType: NearIntentsRecipientType;
+	deadline: string;
+	depositMode?: NearIntentsDepositMode;
+	quoteWaitingTimeMs?: number;
+};
+
+type NearIntentsQuoteResponse = {
+	correlationId: string;
+	timestamp: string;
+	signature: string;
+	quoteRequest: NearIntentsQuoteRequest;
+	quote: {
+		depositAddress?: string;
+		depositMemo?: string;
+		amountIn: string;
+		amountInFormatted: string;
+		amountInUsd: string;
+		minAmountIn: string;
+		amountOut: string;
+		amountOutFormatted: string;
+		amountOutUsd: string;
+		minAmountOut: string;
+		deadline?: string;
+		timeWhenInactive?: string;
+		timeEstimate: number;
+	};
+};
+
+type NearIntentsBadRequest = {
+	message?: string;
+	statusCode?: number;
+	error?: string;
+	timestamp?: string;
+	path?: string;
+};
+
+type NearIntentsQueryParams = Record<string, string | undefined>;
+
 type WorkflowSessionRecord = {
 	runId: string;
 	network: "mainnet" | "testnet";
@@ -197,6 +316,7 @@ const WORKFLOW_SESSION_BY_RUN_ID = new Map<string, WorkflowSessionRecord>();
 let latestWorkflowSession: WorkflowSessionRecord | null = null;
 const DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS = 1000;
 const HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS = 5000;
+const DEFAULT_NEAR_INTENTS_API_BASE_URL = "https://1click.chaindefuser.com";
 
 function rememberWorkflowSession(record: WorkflowSessionRecord): void {
 	WORKFLOW_SESSION_BY_RUN_ID.set(record.runId, record);
@@ -399,6 +519,219 @@ function parseOptionalSharePercent(
 	return Math.floor(normalized * 100);
 }
 
+function parseIntentsSlippageTolerance(value: number | undefined): number {
+	if (value == null) return 100;
+	if (!Number.isFinite(value) || value < 0 || value > 5_000) {
+		throw new Error("slippageTolerance must be between 0 and 5000");
+	}
+	return Math.floor(value);
+}
+
+function parseIntentsQuoteWaitingTimeMs(
+	value: number | undefined,
+): number | undefined {
+	if (value == null) return undefined;
+	if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+		throw new Error("quoteWaitingTimeMs must be an integer >= 0");
+	}
+	return value;
+}
+
+function parseIntentsDeadline(value: string | undefined): string {
+	if (typeof value === "string" && value.trim()) {
+		const parsed = new Date(value);
+		if (Number.isNaN(parsed.getTime())) {
+			throw new Error("deadline must be a valid ISO datetime string");
+		}
+		return parsed.toISOString();
+	}
+	const fallback = new Date(Date.now() + 20 * 60 * 1000);
+	return fallback.toISOString();
+}
+
+function resolveNearIntentsApiBaseUrl(endpoint?: string): string {
+	const explicit = endpoint?.trim();
+	const fromEnv = process.env.NEAR_INTENTS_API_BASE_URL?.trim();
+	const selected = explicit || fromEnv || DEFAULT_NEAR_INTENTS_API_BASE_URL;
+	return selected.endsWith("/") ? selected.slice(0, -1) : selected;
+}
+
+function resolveNearIntentsHeaders(params: {
+	apiKey?: string;
+	jwt?: string;
+}): Record<string, string> {
+	const headers: Record<string, string> = {};
+	const apiKey =
+		params.apiKey?.trim() || process.env.NEAR_INTENTS_API_KEY?.trim();
+	const jwt = params.jwt?.trim() || process.env.NEAR_INTENTS_JWT?.trim();
+	if (apiKey) headers["x-api-key"] = apiKey;
+	if (jwt) headers.Authorization = `Bearer ${jwt}`;
+	return headers;
+}
+
+function buildNearIntentsUrl(params: {
+	baseUrl: string;
+	path: string;
+	query?: NearIntentsQueryParams;
+}): string {
+	const url = new URL(params.path, `${params.baseUrl}/`);
+	if (params.query) {
+		for (const [key, value] of Object.entries(params.query)) {
+			if (typeof value === "string" && value.trim()) {
+				url.searchParams.set(key, value.trim());
+			}
+		}
+	}
+	return url.toString();
+}
+
+function resolveNearIntentsErrorMessage(
+	payload: unknown,
+	fallback: string,
+): string {
+	if (payload && typeof payload === "object") {
+		const candidate = payload as NearIntentsBadRequest;
+		if (typeof candidate.message === "string" && candidate.message.trim()) {
+			return candidate.message.trim();
+		}
+		if (typeof candidate.error === "string" && candidate.error.trim()) {
+			return candidate.error.trim();
+		}
+	}
+	return fallback;
+}
+
+async function fetchNearIntentsJson<T>(params: {
+	baseUrl: string;
+	path: string;
+	method: "GET" | "POST";
+	query?: NearIntentsQueryParams;
+	body?: Record<string, unknown>;
+	headers?: Record<string, string>;
+}): Promise<{
+	url: string;
+	status: number;
+	payload: T;
+}> {
+	const url = buildNearIntentsUrl({
+		baseUrl: params.baseUrl,
+		path: params.path,
+		query: params.query,
+	});
+	const response = await fetch(url, {
+		method: params.method,
+		headers: {
+			accept: "application/json",
+			...(params.body ? { "content-type": "application/json" } : {}),
+			...(params.headers ?? {}),
+		},
+		body: params.body ? JSON.stringify(params.body) : undefined,
+	});
+	const raw = await response.text();
+	let payload: unknown = null;
+	if (raw.trim()) {
+		try {
+			payload = JSON.parse(raw) as unknown;
+		} catch {
+			payload = raw;
+		}
+	}
+	if (!response.ok) {
+		throw new Error(
+			`NEAR Intents API ${params.method} ${params.path} failed (${response.status}): ${resolveNearIntentsErrorMessage(payload, response.statusText || "request failed")}`,
+		);
+	}
+	return {
+		url,
+		status: response.status,
+		payload: payload as T,
+	};
+}
+
+function normalizeNearIntentsTokens(value: unknown): NearIntentsToken[] {
+	if (!Array.isArray(value)) {
+		throw new Error("NEAR Intents tokens response must be an array");
+	}
+	const normalized: NearIntentsToken[] = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== "object") continue;
+		const candidate = entry as Partial<NearIntentsToken>;
+		if (
+			typeof candidate.assetId !== "string" ||
+			typeof candidate.decimals !== "number" ||
+			typeof candidate.blockchain !== "string" ||
+			typeof candidate.symbol !== "string" ||
+			typeof candidate.price !== "number" ||
+			typeof candidate.priceUpdatedAt !== "string"
+		) {
+			continue;
+		}
+		normalized.push({
+			assetId: candidate.assetId,
+			decimals: Math.floor(candidate.decimals),
+			blockchain: candidate.blockchain,
+			symbol: candidate.symbol,
+			price: candidate.price,
+			priceUpdatedAt: candidate.priceUpdatedAt,
+			contractAddress:
+				typeof candidate.contractAddress === "string"
+					? candidate.contractAddress
+					: undefined,
+		});
+	}
+	return normalized;
+}
+
+function resolveNearIntentsAssetId(params: {
+	assetInput: string;
+	tokens: NearIntentsToken[];
+	preferredBlockchain?: string;
+	fieldName: string;
+}): string {
+	const normalizedInput = params.assetInput.trim();
+	if (!normalizedInput) {
+		throw new Error(`${params.fieldName} is required`);
+	}
+	if (normalizedInput.includes(":")) {
+		return normalizedInput;
+	}
+	const symbol = normalizedInput.toUpperCase();
+	const bySymbol = params.tokens.filter(
+		(token) => token.symbol.toUpperCase() === symbol,
+	);
+	if (bySymbol.length === 0) {
+		throw new Error(
+			`${params.fieldName} symbol '${normalizedInput}' is not supported by NEAR Intents`,
+		);
+	}
+	const preferred = params.preferredBlockchain?.trim().toLowerCase() || "near";
+	const onPreferred = bySymbol.filter(
+		(token) => token.blockchain.toLowerCase() === preferred,
+	);
+	if (onPreferred.length === 1) {
+		const selected = onPreferred[0];
+		if (selected) return selected.assetId;
+	}
+	if (bySymbol.length === 1) {
+		const selected = bySymbol[0];
+		if (selected) return selected.assetId;
+	}
+	const choices = bySymbol
+		.slice(0, 6)
+		.map((token) => `${token.assetId} [${token.blockchain}]`)
+		.join(", ");
+	throw new Error(
+		`${params.fieldName} symbol '${normalizedInput}' is ambiguous; provide explicit assetId. Candidates: ${choices}`,
+	);
+}
+
+function resolveNearIntentsTokenByAssetId(
+	assetId: string,
+	tokens: NearIntentsToken[],
+): NearIntentsToken | null {
+	return tokens.find((token) => token.assetId === assetId) ?? null;
+}
+
 function normalizeTokenInput(value: string, fieldName: string): string {
 	const normalized = value.trim().replace(/^@/, "");
 	if (!normalized) {
@@ -596,6 +929,9 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	const swapPairMatch = text.match(
 		/([a-z0-9][a-z0-9._-]*\.near)\s*(?:->|to|换成|换到|兑换为|兑换成|到)\s*([a-z0-9][a-z0-9._-]*\.near)/i,
 	);
+	const swapSymbolPairMatch = text.match(
+		/([a-z][a-z0-9._-]*)\s*(?:->|to|换成|换到|兑换为|兑换成)\s*([a-z][a-z0-9._-]*)/i,
+	);
 	const lpPairMatch = text.match(
 		/([a-z][a-z0-9._-]*)\s*\/\s*([a-z][a-z0-9._-]*)/i,
 	);
@@ -607,8 +943,26 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	const slippageMatch = text.match(
 		/(?:slippage|滑点)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(?:bps)?/i,
 	);
+	const intentsSlippageMatch = text.match(
+		/(?:slippageTolerance|intents\s*slippage|intents滑点)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(?:bps)?/i,
+	);
 	const refContractMatch = text.match(
 		/(?:ref\s*contract|ref合约|交易所合约)\s*[:：]?\s*([a-z0-9][a-z0-9._-]*(?:\.near)?)/i,
+	);
+	const recipientMatch = text.match(
+		/(?:recipient|收款地址|收款人)\s*[:：]?\s*([a-z0-9._:-]{6,})/i,
+	);
+	const refundToMatch = text.match(
+		/(?:refundto|refund_to|refund|退款地址)\s*[:：]?\s*([a-z0-9._:-]{6,})/i,
+	);
+	const depositAddressMatch = text.match(
+		/(?:depositaddress|deposit address|入金地址)\s*[:：]?\s*([a-z0-9._:-]{6,})/i,
+	);
+	const depositMemoMatch = text.match(
+		/(?:depositmemo|deposit memo|memo)\s*[:：]?\s*([a-z0-9._:-]{2,})/i,
+	);
+	const txHashMatch = text.match(
+		/(?:txhash|tx hash|交易hash|交易哈希)\s*[:：]?\s*([a-z0-9._:-]{8,})/i,
 	);
 	const amountARawMatch = text.match(
 		/(?:amounta[_\s-]*raw|amountaraw|rawa)\s*[:：]?\s*(\d+)/i,
@@ -652,6 +1006,10 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		lower.includes("兑换") ||
 		lower.includes("换成") ||
 		lower.includes("换到");
+	const likelyIntents =
+		lower.includes("intents") ||
+		lower.includes("1click") ||
+		lower.includes("defuse");
 	const hasLpKeyword =
 		lower.includes("lp") ||
 		lower.includes("liquidity") ||
@@ -684,6 +1042,14 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (swapUiAmountMatch?.[3]) hints.tokenOutId = swapUiAmountMatch[3];
 	if (swapPairMatch?.[1]) hints.tokenInId = swapPairMatch[1];
 	if (swapPairMatch?.[2]) hints.tokenOutId = swapPairMatch[2];
+	if (!hints.tokenInId && swapSymbolPairMatch?.[1])
+		hints.tokenInId = swapSymbolPairMatch[1];
+	if (!hints.tokenOutId && swapSymbolPairMatch?.[2])
+		hints.tokenOutId = swapSymbolPairMatch[2];
+	if (!hints.originAsset && hints.tokenInId)
+		hints.originAsset = hints.tokenInId;
+	if (!hints.destinationAsset && hints.tokenOutId)
+		hints.destinationAsset = hints.tokenOutId;
 	if (lpPairMatch?.[1]) hints.tokenAId = lpPairMatch[1];
 	if (lpPairMatch?.[2]) hints.tokenBId = lpPairMatch[2];
 	if (tokenAMatch?.[1]) hints.tokenAId = tokenAMatch[1];
@@ -745,9 +1111,20 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 			hints.slippageBps = Math.floor(parsed);
 		}
 	}
+	if (intentsSlippageMatch?.[1]) {
+		const parsed = Number(intentsSlippageMatch[1]);
+		if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 5000) {
+			hints.slippageTolerance = Math.floor(parsed);
+		}
+	}
 	if (refContractMatch?.[1]) {
 		hints.refContractId = refContractMatch[1];
 	}
+	if (recipientMatch?.[1]) hints.recipient = recipientMatch[1];
+	if (refundToMatch?.[1]) hints.refundTo = refundToMatch[1];
+	if (depositAddressMatch?.[1]) hints.depositAddress = depositAddressMatch[1];
+	if (depositMemoMatch?.[1]) hints.depositMemo = depositMemoMatch[1];
+	if (txHashMatch?.[1]) hints.txHash = txHashMatch[1];
 	if (
 		likelyLpRemove &&
 		(lower.includes("提回") ||
@@ -787,7 +1164,7 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		hints.tokenOutId &&
 		(likelySwap || hints.amountInRaw || hints.amountInUi)
 	) {
-		hints.intentType = "near.swap.ref";
+		hints.intentType = likelyIntents ? "near.swap.intents" : "near.swap.ref";
 		return hints;
 	}
 
@@ -811,6 +1188,7 @@ function inferIntentType(
 ): NearWorkflowIntent["type"] {
 	if (params.intentType === "near.lp.ref.add") return params.intentType;
 	if (params.intentType === "near.lp.ref.remove") return params.intentType;
+	if (params.intentType === "near.swap.intents") return params.intentType;
 	if (params.intentType === "near.swap.ref") return params.intentType;
 	if (params.intentType === "near.transfer.near") return params.intentType;
 	if (params.intentType === "near.transfer.ft") return params.intentType;
@@ -841,6 +1219,18 @@ function inferIntentType(
 			params.tokenBId)
 	) {
 		return "near.lp.ref.add";
+	}
+	if (
+		params.originAsset ||
+		params.destinationAsset ||
+		params.slippageTolerance != null ||
+		params.swapType ||
+		params.depositType ||
+		params.refundType ||
+		params.recipientType ||
+		params.depositMode
+	) {
+		return "near.swap.intents";
 	}
 	if (
 		params.tokenInId ||
@@ -1056,6 +1446,122 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 		};
 	}
 
+	if (intentType === "near.swap.intents") {
+		const originAsset = normalizeTokenInput(
+			params.originAsset ??
+				params.tokenInId ??
+				hints.originAsset ??
+				hints.tokenInId ??
+				"",
+			"originAsset",
+		);
+		const destinationAsset = normalizeTokenInput(
+			params.destinationAsset ??
+				params.tokenOutId ??
+				hints.destinationAsset ??
+				hints.tokenOutId ??
+				"",
+			"destinationAsset",
+		);
+		if (originAsset.toLowerCase() === destinationAsset.toLowerCase()) {
+			throw new Error("originAsset and destinationAsset must be different");
+		}
+		const explicitRawAmount =
+			params.amountRaw?.trim() ??
+			params.amountInRaw?.trim() ??
+			hints.amountRaw?.trim() ??
+			hints.amountInRaw?.trim() ??
+			"";
+		const amount =
+			explicitRawAmount ||
+			(() => {
+				const nearLikeOrigin =
+					originAsset.toLowerCase() === "near" ||
+					originAsset.toLowerCase() === "wnear" ||
+					originAsset.toLowerCase().includes("wrap.near") ||
+					originAsset.toLowerCase().includes("wrap.testnet");
+				const nearAmountInput =
+					typeof params.amountNear === "number" ||
+					typeof params.amountNear === "string"
+						? params.amountNear
+						: typeof params.amountIn === "number" ||
+								typeof params.amountIn === "string"
+							? params.amountIn
+							: typeof hints.amountInUi === "string"
+								? hints.amountInUi
+								: hints.amountNear;
+				if (nearLikeOrigin && nearAmountInput != null) {
+					return toYoctoNear(nearAmountInput).toString();
+				}
+				throw new Error(
+					"amount is required for near.swap.intents (provide amountRaw/amountInRaw, or amountNear for NEAR/wNEAR origin asset).",
+				);
+			})();
+		parsePositiveBigInt(amount, "amount");
+		const recipient =
+			typeof params.recipient === "string" && params.recipient.trim()
+				? params.recipient.trim()
+				: typeof hints.recipient === "string" && hints.recipient.trim()
+					? hints.recipient.trim()
+					: undefined;
+		const refundTo =
+			typeof params.refundTo === "string" && params.refundTo.trim()
+				? params.refundTo.trim()
+				: typeof hints.refundTo === "string" && hints.refundTo.trim()
+					? hints.refundTo.trim()
+					: undefined;
+		const depositAddress =
+			typeof params.depositAddress === "string" && params.depositAddress.trim()
+				? params.depositAddress.trim()
+				: typeof hints.depositAddress === "string" &&
+						hints.depositAddress.trim()
+					? hints.depositAddress.trim()
+					: undefined;
+		const depositMemo =
+			typeof params.depositMemo === "string" && params.depositMemo.trim()
+				? params.depositMemo.trim()
+				: typeof hints.depositMemo === "string" && hints.depositMemo.trim()
+					? hints.depositMemo.trim()
+					: undefined;
+		const blockchainHint =
+			typeof params.blockchainHint === "string" && params.blockchainHint.trim()
+				? params.blockchainHint.trim()
+				: undefined;
+		const apiBaseUrl =
+			typeof params.apiBaseUrl === "string" && params.apiBaseUrl.trim()
+				? params.apiBaseUrl.trim()
+				: undefined;
+		return {
+			type: "near.swap.intents",
+			originAsset,
+			destinationAsset,
+			amount,
+			accountId: fromAccountId,
+			fromAccountId,
+			recipient,
+			refundTo,
+			swapType: params.swapType ?? "EXACT_INPUT",
+			slippageTolerance: parseIntentsSlippageTolerance(
+				params.slippageTolerance ?? hints.slippageTolerance,
+			),
+			depositType: params.depositType ?? "ORIGIN_CHAIN",
+			refundType: params.refundType ?? "ORIGIN_CHAIN",
+			recipientType: params.recipientType ?? "DESTINATION_CHAIN",
+			depositMode: params.depositMode ?? "SIMPLE",
+			deadline:
+				typeof params.deadline === "string" && params.deadline.trim()
+					? parseIntentsDeadline(params.deadline)
+					: undefined,
+			quoteWaitingTimeMs: parseIntentsQuoteWaitingTimeMs(
+				params.quoteWaitingTimeMs,
+			),
+			blockchainHint,
+			depositAddress,
+			depositMemo,
+			apiBaseUrl,
+		};
+	}
+
 	if (intentType === "near.swap.ref") {
 		const tokenInId = normalizeTokenInput(
 			params.tokenInId ?? hints.tokenInId ?? "",
@@ -1190,6 +1696,8 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 	if (
 		params.tokenInId ||
 		params.tokenOutId ||
+		params.originAsset ||
+		params.destinationAsset ||
 		params.tokenAId ||
 		params.tokenBId ||
 		params.amountInRaw ||
@@ -1200,13 +1708,25 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 		params.shares ||
 		params.shareBps != null ||
 		params.sharePercent != null ||
-		params.amountIn != null
+		params.amountIn != null ||
+		params.swapType ||
+		params.depositType ||
+		params.refundType ||
+		params.recipientType ||
+		params.depositMode ||
+		params.recipient ||
+		params.refundTo
 	) {
 		return true;
 	}
 	if (
 		params.poolId != null ||
 		params.refContractId ||
+		params.slippageTolerance != null ||
+		params.deadline ||
+		params.quoteWaitingTimeMs != null ||
+		params.blockchainHint ||
+		params.apiBaseUrl ||
 		params.minAmountOutRaw ||
 		(Array.isArray(params.minAmountsRaw) && params.minAmountsRaw.length > 0) ||
 		params.minAmountARaw ||
@@ -1228,6 +1748,8 @@ function hasCoreIntentInputs(params: WorkflowParams): boolean {
 	if (
 		params.tokenInId ||
 		params.tokenOutId ||
+		params.originAsset ||
+		params.destinationAsset ||
 		params.tokenAId ||
 		params.tokenBId ||
 		params.amountInRaw ||
@@ -1238,12 +1760,24 @@ function hasCoreIntentInputs(params: WorkflowParams): boolean {
 		params.shares ||
 		params.shareBps != null ||
 		params.sharePercent != null ||
-		params.amountIn != null
+		params.amountIn != null ||
+		params.swapType ||
+		params.depositType ||
+		params.refundType ||
+		params.recipientType ||
+		params.depositMode ||
+		params.recipient ||
+		params.refundTo
 	) {
 		return true;
 	}
 	if (
 		params.refContractId ||
+		params.slippageTolerance != null ||
+		params.deadline ||
+		params.quoteWaitingTimeMs != null ||
+		params.blockchainHint ||
+		params.apiBaseUrl ||
 		params.minAmountOutRaw ||
 		(Array.isArray(params.minAmountsRaw) && params.minAmountsRaw.length > 0) ||
 		params.minAmountARaw ||
@@ -1268,6 +1802,8 @@ function hintsContainActionableIntentFields(hints: ParsedIntentHints): boolean {
 			hints.amountInUi ||
 			hints.tokenInId ||
 			hints.tokenOutId ||
+			hints.originAsset ||
+			hints.destinationAsset ||
 			hints.tokenAId ||
 			hints.tokenBId ||
 			hints.amountAUi ||
@@ -1279,7 +1815,10 @@ function hintsContainActionableIntentFields(hints: ParsedIntentHints): boolean {
 			hints.minAmountARaw ||
 			hints.minAmountBRaw ||
 			hints.slippageBps != null ||
+			hints.slippageTolerance != null ||
 			hints.refContractId ||
+			hints.recipient ||
+			hints.refundTo ||
 			hints.autoWithdraw != null,
 	);
 }
@@ -1708,6 +2247,115 @@ async function simulateRefSwap(params: {
 	};
 }
 
+async function simulateNearIntentsSwap(params: {
+	intent: NearIntentsSwapIntent;
+	network: string;
+	fromAccountId?: string;
+	apiKey?: string;
+	jwt?: string;
+}): Promise<{
+	status: "success";
+	accountId: string;
+	apiBaseUrl: string;
+	tokensEndpoint: string;
+	tokensHttpStatus: number;
+	quoteEndpoint: string;
+	quoteHttpStatus: number;
+	originAssetId: string;
+	destinationAssetId: string;
+	originSymbol: string;
+	destinationSymbol: string;
+	request: NearIntentsQuoteRequest;
+	quoteResponse: NearIntentsQuoteResponse;
+}> {
+	const accountId = resolveNearAccountId(
+		params.intent.accountId ?? params.fromAccountId,
+		params.network,
+	);
+	const baseUrl = resolveNearIntentsApiBaseUrl(params.intent.apiBaseUrl);
+	const authHeaders = resolveNearIntentsHeaders({
+		apiKey: params.apiKey,
+		jwt: params.jwt,
+	});
+	const tokensResponse = await fetchNearIntentsJson<NearIntentsToken[]>({
+		baseUrl,
+		path: "/v0/tokens",
+		method: "GET",
+		headers: authHeaders,
+	});
+	const tokens = normalizeNearIntentsTokens(tokensResponse.payload);
+	const originAssetId = resolveNearIntentsAssetId({
+		assetInput: params.intent.originAsset,
+		tokens,
+		preferredBlockchain: params.intent.blockchainHint,
+		fieldName: "originAsset",
+	});
+	const destinationAssetId = resolveNearIntentsAssetId({
+		assetInput: params.intent.destinationAsset,
+		tokens,
+		preferredBlockchain: params.intent.blockchainHint,
+		fieldName: "destinationAsset",
+	});
+	if (originAssetId === destinationAssetId) {
+		throw new Error("originAsset and destinationAsset must be different");
+	}
+	const recipient = params.intent.recipient?.trim() || accountId;
+	const refundTo = params.intent.refundTo?.trim() || recipient;
+	const quoteWaitingTimeMs = parseIntentsQuoteWaitingTimeMs(
+		params.intent.quoteWaitingTimeMs,
+	);
+	const quoteRequest: NearIntentsQuoteRequest = {
+		dry: true,
+		swapType: params.intent.swapType ?? "EXACT_INPUT",
+		slippageTolerance: parseIntentsSlippageTolerance(
+			params.intent.slippageTolerance,
+		),
+		originAsset: originAssetId,
+		depositType: params.intent.depositType ?? "ORIGIN_CHAIN",
+		destinationAsset: destinationAssetId,
+		amount: parsePositiveBigInt(params.intent.amount, "amount").toString(),
+		refundTo,
+		refundType: params.intent.refundType ?? "ORIGIN_CHAIN",
+		recipient,
+		recipientType: params.intent.recipientType ?? "DESTINATION_CHAIN",
+		deadline: parseIntentsDeadline(params.intent.deadline),
+		depositMode: params.intent.depositMode ?? "SIMPLE",
+		...(quoteWaitingTimeMs != null
+			? {
+					quoteWaitingTimeMs,
+				}
+			: {}),
+	};
+	const quoteResponse = await fetchNearIntentsJson<NearIntentsQuoteResponse>({
+		baseUrl,
+		path: "/v0/quote",
+		method: "POST",
+		headers: authHeaders,
+		body: quoteRequest as unknown as Record<string, unknown>,
+	});
+	const originSymbol =
+		resolveNearIntentsTokenByAssetId(originAssetId, tokens)?.symbol ??
+		originAssetId;
+	const destinationSymbol =
+		resolveNearIntentsTokenByAssetId(destinationAssetId, tokens)?.symbol ??
+		destinationAssetId;
+	return {
+		status: "success",
+		accountId,
+		apiBaseUrl: baseUrl,
+		tokensEndpoint: tokensResponse.url,
+		tokensHttpStatus: tokensResponse.status,
+		quoteEndpoint: quoteResponse.url,
+		quoteHttpStatus: quoteResponse.status,
+		originAssetId,
+		destinationAssetId,
+		originSymbol,
+		destinationSymbol,
+		request: quoteRequest,
+		quoteResponse: quoteResponse.payload,
+	};
+}
+
 function normalizePoolTokenIds(tokenIds: string[]): string[] {
 	return tokenIds
 		.map((tokenId) => tokenId.trim().toLowerCase())
@@ -2116,6 +2764,7 @@ function resolveExecuteTool(
 		| "near_transferNear"
 		| "near_transferFt"
 		| "near_swapRef"
+		| "near_submitIntentsDeposit"
 		| "near_addLiquidityRef"
 		| "near_removeLiquidityRef",
 ): WorkflowTool {
@@ -2215,7 +2864,7 @@ export function createNearWorkflowTools() {
 			name: "w3rt_run_near_workflow_v0",
 			label: "W3RT NEAR Workflow",
 			description:
-				"Run NEAR workflow in three phases: analysis -> simulate -> execute for native transfer, FT transfer, Ref swap, and Ref LP add/remove.",
+				"Run NEAR workflow in three phases: analysis -> simulate -> execute for native transfer, FT transfer, Ref swap, NEAR Intents swap, and Ref LP add/remove.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -2224,6 +2873,7 @@ export function createNearWorkflowTools() {
 						Type.Literal("near.transfer.near"),
 						Type.Literal("near.transfer.ft"),
 						Type.Literal("near.swap.ref"),
+						Type.Literal("near.swap.intents"),
 						Type.Literal("near.lp.ref.add"),
 						Type.Literal("near.lp.ref.remove"),
 					]),
@@ -2241,6 +2891,8 @@ export function createNearWorkflowTools() {
 				amountIn: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				tokenInId: Type.Optional(Type.String()),
 				tokenOutId: Type.Optional(Type.String()),
+				originAsset: Type.Optional(Type.String()),
+				destinationAsset: Type.Optional(Type.String()),
 				tokenAId: Type.Optional(Type.String()),
 				tokenBId: Type.Optional(Type.String()),
 				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
@@ -2248,8 +2900,43 @@ export function createNearWorkflowTools() {
 					Type.Union([Type.String(), Type.Number()]),
 				),
 				slippageBps: Type.Optional(Type.Number()),
+				slippageTolerance: Type.Optional(Type.Number()),
 				refContractId: Type.Optional(Type.String()),
 				minAmountOutRaw: Type.Optional(Type.String()),
+				recipient: Type.Optional(Type.String()),
+				refundTo: Type.Optional(Type.String()),
+				swapType: Type.Optional(
+					Type.Union([
+						Type.Literal("EXACT_INPUT"),
+						Type.Literal("EXACT_OUTPUT"),
+						Type.Literal("FLEX_INPUT"),
+						Type.Literal("ANY_INPUT"),
+					]),
+				),
+				depositType: Type.Optional(
+					Type.Union([Type.Literal("ORIGIN_CHAIN"), Type.Literal("INTENTS")]),
+				),
+				refundType: Type.Optional(
+					Type.Union([Type.Literal("ORIGIN_CHAIN"), Type.Literal("INTENTS")]),
+				),
+				recipientType: Type.Optional(
+					Type.Union([
+						Type.Literal("DESTINATION_CHAIN"),
+						Type.Literal("INTENTS"),
+					]),
+				),
+				depositMode: Type.Optional(
+					Type.Union([Type.Literal("SIMPLE"), Type.Literal("MEMO")]),
+				),
+				deadline: Type.Optional(Type.String()),
+				quoteWaitingTimeMs: Type.Optional(Type.Number()),
+				blockchainHint: Type.Optional(Type.String()),
+				depositAddress: Type.Optional(Type.String()),
+				depositMemo: Type.Optional(Type.String()),
+				txHash: Type.Optional(Type.String()),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				jwt: Type.Optional(Type.String()),
 				amountA: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				amountB: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				amountARaw: Type.Optional(Type.String()),
@@ -2388,19 +3075,27 @@ export function createNearWorkflowTools() {
 											rpcUrl: params.rpcUrl,
 											fromAccountId: params.fromAccountId,
 										})
-									: intent.type === "near.lp.ref.add"
-										? await simulateRefAddLiquidity({
+									: intent.type === "near.swap.intents"
+										? await simulateNearIntentsSwap({
 												intent,
 												network,
-												rpcUrl: params.rpcUrl,
 												fromAccountId: params.fromAccountId,
+												apiKey: params.apiKey,
+												jwt: params.jwt,
 											})
-										: await simulateRefRemoveLiquidity({
-												intent,
-												network,
-												rpcUrl: params.rpcUrl,
-												fromAccountId: params.fromAccountId,
-											});
+										: intent.type === "near.lp.ref.add"
+											? await simulateRefAddLiquidity({
+													intent,
+													network,
+													rpcUrl: params.rpcUrl,
+													fromAccountId: params.fromAccountId,
+												})
+											: await simulateRefRemoveLiquidity({
+													intent,
+													network,
+													rpcUrl: params.rpcUrl,
+													fromAccountId: params.fromAccountId,
+												});
 					const sessionIntent: NearWorkflowIntent =
 						(intent.type === "near.lp.ref.add" ||
 							intent.type === "near.lp.ref.remove") &&
@@ -2411,7 +3106,67 @@ export function createNearWorkflowTools() {
 									...intent,
 									poolId: (simulateArtifact as { poolId: number }).poolId,
 								}
-							: intent;
+							: intent.type === "near.swap.intents"
+								? {
+										...intent,
+										originAsset:
+											typeof (
+												simulateArtifact as {
+													originAssetId?: unknown;
+												}
+											).originAssetId === "string"
+												? (
+														simulateArtifact as {
+															originAssetId: string;
+														}
+													).originAssetId
+												: intent.originAsset,
+										destinationAsset:
+											typeof (
+												simulateArtifact as {
+													destinationAssetId?: unknown;
+												}
+											).destinationAssetId === "string"
+												? (
+														simulateArtifact as {
+															destinationAssetId: string;
+														}
+													).destinationAssetId
+												: intent.destinationAsset,
+										depositAddress:
+											typeof (
+												simulateArtifact as {
+													quoteResponse?: {
+														quote?: { depositAddress?: unknown };
+													};
+												}
+											).quoteResponse?.quote?.depositAddress === "string"
+												? (
+														simulateArtifact as {
+															quoteResponse: {
+																quote: { depositAddress: string };
+															};
+														}
+													).quoteResponse.quote.depositAddress
+												: intent.depositAddress,
+										depositMemo:
+											typeof (
+												simulateArtifact as {
+													quoteResponse?: {
+														quote?: { depositMemo?: unknown };
+													};
+												}
+											).quoteResponse?.quote?.depositMemo === "string"
+												? (
+														simulateArtifact as {
+															quoteResponse: {
+																quote: { depositMemo: string };
+															};
+														}
+													).quoteResponse.quote.depositMemo
+												: intent.depositMemo,
+									}
+								: intent;
 					const sessionConfirmToken = approvalRequired
 						? createConfirmToken({
 								runId,
@@ -2462,6 +3217,40 @@ export function createNearWorkflowTools() {
 						`Invalid confirmToken for runId=${runId}. expected=${confirmToken} provided=${params.confirmToken ?? "null"}.`,
 					);
 				}
+				const submitTxHash =
+					typeof params.txHash === "string" && params.txHash.trim()
+						? params.txHash.trim()
+						: typeof hints.txHash === "string" && hints.txHash.trim()
+							? hints.txHash.trim()
+							: undefined;
+				const submitDepositAddress =
+					typeof params.depositAddress === "string" &&
+					params.depositAddress.trim()
+						? params.depositAddress.trim()
+						: typeof hints.depositAddress === "string" &&
+								hints.depositAddress.trim()
+							? hints.depositAddress.trim()
+							: undefined;
+				const submitDepositMemo =
+					typeof params.depositMemo === "string" && params.depositMemo.trim()
+						? params.depositMemo.trim()
+						: typeof hints.depositMemo === "string" && hints.depositMemo.trim()
+							? hints.depositMemo.trim()
+							: undefined;
+				if (intent.type === "near.swap.intents") {
+					if (!submitTxHash) {
+						throw new Error(
+							"near.swap.intents execute requires txHash from the deposit transaction.",
+						);
+					}
+					const effectiveDepositAddress =
+						submitDepositAddress ?? intent.depositAddress;
+					if (!effectiveDepositAddress) {
+						throw new Error(
+							"near.swap.intents execute requires depositAddress (use simulate output or pass depositAddress).",
+						);
+					}
+				}
 
 				const executeTool =
 					intent.type === "near.transfer.near"
@@ -2470,9 +3259,11 @@ export function createNearWorkflowTools() {
 							? resolveExecuteTool("near_transferFt")
 							: intent.type === "near.swap.ref"
 								? resolveExecuteTool("near_swapRef")
-								: intent.type === "near.lp.ref.add"
-									? resolveExecuteTool("near_addLiquidityRef")
-									: resolveExecuteTool("near_removeLiquidityRef");
+								: intent.type === "near.swap.intents"
+									? resolveExecuteTool("near_submitIntentsDeposit")
+									: intent.type === "near.lp.ref.add"
+										? resolveExecuteTool("near_addLiquidityRef")
+										: resolveExecuteTool("near_removeLiquidityRef");
 				const executeResult = await executeTool.execute("near-wf-exec", {
 					...(intent.type === "near.transfer.near"
 						? {
@@ -2500,34 +3291,48 @@ export function createNearWorkflowTools() {
 										gas: intent.gas,
 										attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
 									}
-								: intent.type === "near.lp.ref.add"
+								: intent.type === "near.swap.intents"
 									? {
-											poolId: intent.poolId,
-											amountARaw: intent.amountARaw,
-											amountBRaw: intent.amountBRaw,
-											tokenAId: intent.tokenAId,
-											tokenBId: intent.tokenBId,
-											refContractId: intent.refContractId,
-											autoRegisterExchange: intent.autoRegisterExchange,
-											autoRegisterTokens: intent.autoRegisterTokens,
-											gas: intent.gas,
-											attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+											txHash: submitTxHash,
+											depositAddress:
+												submitDepositAddress ?? intent.depositAddress,
+											depositMemo: submitDepositMemo ?? intent.depositMemo,
+											nearSenderAccount:
+												intent.accountId ?? params.fromAccountId,
+											apiBaseUrl: params.apiBaseUrl ?? intent.apiBaseUrl,
+											apiKey: params.apiKey,
+											jwt: params.jwt,
 										}
-									: {
-											poolId: intent.poolId,
-											shares: intent.shares,
-											shareBps: intent.shareBps,
-											minAmountsRaw: intent.minAmountsRaw,
-											minAmountARaw: intent.minAmountARaw,
-											minAmountBRaw: intent.minAmountBRaw,
-											tokenAId: intent.tokenAId,
-											tokenBId: intent.tokenBId,
-											refContractId: intent.refContractId,
-											autoWithdraw: intent.autoWithdraw,
-											autoRegisterReceiver: intent.autoRegisterReceiver,
-											gas: intent.gas,
-											attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
-										}),
+									: intent.type === "near.lp.ref.add"
+										? {
+												poolId: intent.poolId,
+												amountARaw: intent.amountARaw,
+												amountBRaw: intent.amountBRaw,
+												tokenAId: intent.tokenAId,
+												tokenBId: intent.tokenBId,
+												refContractId: intent.refContractId,
+												autoRegisterExchange: intent.autoRegisterExchange,
+												autoRegisterTokens: intent.autoRegisterTokens,
+												gas: intent.gas,
+												attachedDepositYoctoNear:
+													intent.attachedDepositYoctoNear,
+											}
+										: {
+												poolId: intent.poolId,
+												shares: intent.shares,
+												shareBps: intent.shareBps,
+												minAmountsRaw: intent.minAmountsRaw,
+												minAmountARaw: intent.minAmountARaw,
+												minAmountBRaw: intent.minAmountBRaw,
+												tokenAId: intent.tokenAId,
+												tokenBId: intent.tokenBId,
+												refContractId: intent.refContractId,
+												autoWithdraw: intent.autoWithdraw,
+												autoRegisterReceiver: intent.autoRegisterReceiver,
+												gas: intent.gas,
+												attachedDepositYoctoNear:
+													intent.attachedDepositYoctoNear,
+											}),
 					network,
 					rpcUrl: params.rpcUrl,
 					fromAccountId: intent.fromAccountId ?? params.fromAccountId,
