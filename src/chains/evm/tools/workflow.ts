@@ -32,6 +32,7 @@ type WorkflowTradeIntent = {
 	requoteStaleOrders: boolean;
 	requotePriceStrategy?: RequotePriceStrategy;
 	requoteFallbackMode?: RequoteFallbackMode;
+	requoteMaxPriceDriftBps?: number;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
 	requoteMinIntervalSeconds?: number;
@@ -74,6 +75,7 @@ type WorkflowParams = {
 	requoteStaleOrders?: boolean;
 	requotePriceStrategy?: RequotePriceStrategy;
 	requoteFallbackMode?: RequoteFallbackMode;
+	requoteMaxPriceDriftBps?: number;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
 	requoteMinIntervalSeconds?: number;
@@ -95,6 +97,7 @@ type ParsedIntentHints = {
 	requoteStaleOrders?: boolean;
 	requotePriceStrategy?: RequotePriceStrategy;
 	requoteFallbackMode?: RequoteFallbackMode;
+	requoteMaxPriceDriftBps?: number;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
 	requoteMinIntervalSeconds?: number;
@@ -123,6 +126,7 @@ let latestWorkflowSession: WorkflowSessionRecord | null = null;
 type WorkflowTradeRequoteRuntimeState = {
 	lastExecuteAtMs: number;
 	attempts: number;
+	referencePrice: number | null;
 };
 
 const WORKFLOW_TRADE_REQUOTE_STATE_BY_RUN_ID = new Map<
@@ -228,6 +232,25 @@ function parseRequoteFallbackModeHint(
 	return undefined;
 }
 
+function parseRequoteMaxPriceDriftBpsHint(text?: string): number | undefined {
+	if (!text?.trim()) return undefined;
+	const bpsRaw =
+		text.match(
+			/(?:波动|偏移|drift|price\s*drift)[^0-9]{0,16}(\d+(?:\.\d+)?)\s*(?:bps|bp|基点)/i,
+		)?.[1] ?? undefined;
+	if (bpsRaw) {
+		const parsed = Number.parseFloat(bpsRaw);
+		return Number.isFinite(parsed) ? parsed : undefined;
+	}
+	const pctRaw =
+		text.match(
+			/(?:波动|偏移|drift|price\s*drift)[^0-9]{0,16}(\d+(?:\.\d+)?)\s*%/i,
+		)?.[1] ?? undefined;
+	if (!pctRaw) return undefined;
+	const parsed = Number.parseFloat(pctRaw);
+	return Number.isFinite(parsed) ? parsed * 100 : undefined;
+}
+
 function normalizeRequoteFallbackMode(
 	value?: string,
 ): RequoteFallbackMode | undefined {
@@ -324,6 +347,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	const side = parseSideHint(text);
 	const requotePriceStrategy = parseRequotePriceStrategyHint(text);
 	const requoteFallbackMode = parseRequoteFallbackModeHint(text);
+	const requoteMaxPriceDriftBps = parseRequoteMaxPriceDriftBpsHint(text);
 	const stakeMatch =
 		text.match(
 			/(?:stake|size|amount|仓位|金额|下注|下单)\s*[:= ]\s*(\d+(?:\.\d+)?)/i,
@@ -419,6 +443,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		requoteStaleOrders: hasRequotePhrase ? true : undefined,
 		requotePriceStrategy,
 		requoteFallbackMode,
+		requoteMaxPriceDriftBps,
 		maxAgeMinutes,
 		maxFillRatio,
 		requoteMinIntervalSeconds,
@@ -445,6 +470,7 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			params.requoteStaleOrders === true ||
 			params.requotePriceStrategy != null ||
 			params.requoteFallbackMode != null ||
+			params.requoteMaxPriceDriftBps != null ||
 			params.maxAgeMinutes != null ||
 			params.maxFillRatio != null ||
 			params.requoteMinIntervalSeconds != null ||
@@ -460,6 +486,7 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			parsed.requoteStaleOrders === true ||
 			parsed.requotePriceStrategy != null ||
 			parsed.requoteFallbackMode != null ||
+			parsed.requoteMaxPriceDriftBps != null ||
 			parsed.maxAgeMinutes != null ||
 			parsed.maxFillRatio != null ||
 			parsed.requoteMinIntervalSeconds != null ||
@@ -549,6 +576,8 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 		params.requotePriceStrategy ?? parsed.requotePriceStrategy;
 	const requoteFallbackModeRaw =
 		params.requoteFallbackMode ?? parsed.requoteFallbackMode;
+	const requoteMaxPriceDriftBpsRaw =
+		params.requoteMaxPriceDriftBps ?? parsed.requoteMaxPriceDriftBps;
 	const maxAgeMinutesRaw = params.maxAgeMinutes ?? parsed.maxAgeMinutes;
 	const maxFillRatioRaw = params.maxFillRatio ?? parsed.maxFillRatio;
 	const requoteMinIntervalSecondsRaw =
@@ -600,6 +629,13 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 	const requoteFallbackMode = requoteStaleOrders
 		? normalizeRequoteFallbackMode(requoteFallbackModeRaw ?? "retry_aggressive")
 		: normalizeRequoteFallbackMode(requoteFallbackModeRaw);
+	const requoteMaxPriceDriftBps =
+		requoteMaxPriceDriftBpsRaw != null
+			? parsePositiveNumber(
+					requoteMaxPriceDriftBpsRaw,
+					"requoteMaxPriceDriftBps",
+				)
+			: undefined;
 	if (requoteStaleOrders && maxAgeMinutes == null && maxFillRatio == null) {
 		throw new Error(
 			"requoteStaleOrders requires at least one stale filter: maxAgeMinutes or maxFillRatio.",
@@ -633,6 +669,7 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 		requoteStaleOrders,
 		requotePriceStrategy,
 		requoteFallbackMode,
+		requoteMaxPriceDriftBps,
 		maxAgeMinutes,
 		maxFillRatio,
 		requoteMinIntervalSeconds,
@@ -686,6 +723,11 @@ function buildTradeSummaryLine(params: {
 	}
 	if (params.intent.requoteFallbackMode) {
 		parts.push(`requoteFallbackMode=${params.intent.requoteFallbackMode}`);
+	}
+	if (params.intent.requoteMaxPriceDriftBps != null) {
+		parts.push(
+			`requoteMaxPriceDriftBps=${params.intent.requoteMaxPriceDriftBps}`,
+		);
 	}
 	if (params.requoteLimitPrice != null) {
 		parts.push(`requoteLimit=${params.requoteLimitPrice.toFixed(4)}`);
@@ -815,6 +857,7 @@ function readTradeRequoteRuntime(params: {
 		maxAttempts,
 		minIntervalSeconds,
 		remainingCooldownSeconds,
+		referencePrice: state?.referencePrice ?? null,
 		blockedByAttempts,
 		blockedByCooldown,
 	};
@@ -825,6 +868,36 @@ function writeTradeRequoteRuntime(
 	nextState: WorkflowTradeRequoteRuntimeState,
 ): void {
 	WORKFLOW_TRADE_REQUOTE_STATE_BY_RUN_ID.set(runId, nextState);
+}
+
+function evaluateRequoteVolatilityGuard(params: {
+	intent: WorkflowTradeIntent;
+	runtime: ReturnType<typeof readTradeRequoteRuntime> | null;
+	currentPrice: number | null;
+}) {
+	const maxDriftBps = params.intent.requoteMaxPriceDriftBps ?? null;
+	const referencePrice = params.runtime?.referencePrice ?? null;
+	const currentPrice = params.currentPrice;
+	if (maxDriftBps == null || referencePrice == null || currentPrice == null) {
+		return {
+			enabled: maxDriftBps != null,
+			maxDriftBps,
+			referencePrice,
+			currentPrice,
+			driftBps: null,
+			blocked: false,
+		};
+	}
+	const driftBps =
+		(Math.abs(currentPrice - referencePrice) / referencePrice) * 10_000;
+	return {
+		enabled: true,
+		maxDriftBps,
+		referencePrice,
+		currentPrice,
+		driftBps,
+		blocked: driftBps > maxDriftBps,
+	};
 }
 
 function extractTargetOrderCount(details: unknown): number | null {
@@ -945,6 +1018,7 @@ export function createEvmWorkflowTools() {
 				requoteFallbackMode: Type.Optional(
 					Type.Union([Type.Literal("none"), Type.Literal("retry_aggressive")]),
 				),
+				requoteMaxPriceDriftBps: Type.Optional(Type.Number({ minimum: 0.01 })),
 				maxAgeMinutes: Type.Optional(Type.Number({ minimum: 0.1 })),
 				maxFillRatio: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 				requoteMinIntervalSeconds: Type.Optional(Type.Number({ minimum: 0.1 })),
@@ -1053,6 +1127,11 @@ export function createEvmWorkflowTools() {
 									intent,
 								})
 							: null;
+						const volatilityGuard = evaluateRequoteVolatilityGuard({
+							intent,
+							runtime: requoteRuntime,
+							currentPrice: requotePricing?.limitPrice ?? effectiveOrderPrice,
+						});
 						const summaryLine = buildTradeSummaryLine({
 							intent,
 							phase: "analysis",
@@ -1096,6 +1175,7 @@ export function createEvmWorkflowTools() {
 													maxAgeMinutes: intent.maxAgeMinutes ?? null,
 													maxFillRatio: intent.maxFillRatio ?? null,
 													pricing: requotePricing,
+													volatilityGuard,
 													runtime: requoteRuntime,
 												}
 											: {
@@ -1124,7 +1204,8 @@ export function createEvmWorkflowTools() {
 							| "needs_signer"
 							| "precheck_failed"
 							| "throttled"
-							| "max_attempts_reached" = intent.requoteStaleOrders
+							| "max_attempts_reached"
+							| "volatility_blocked" = intent.requoteStaleOrders
 							? "ready"
 							: "disabled";
 						const requoteRuntime = intent.requoteStaleOrders
@@ -1133,6 +1214,11 @@ export function createEvmWorkflowTools() {
 									intent,
 								})
 							: null;
+						const volatilityGuard = evaluateRequoteVolatilityGuard({
+							intent,
+							runtime: requoteRuntime,
+							currentPrice: requotePricing?.limitPrice ?? effectiveOrderPrice,
+						});
 						if (intent.requoteStaleOrders) {
 							const cancelTool = resolveExecuteTool(
 								`${EVM_TOOL_PREFIX}polymarketCancelOrder`,
@@ -1164,6 +1250,9 @@ export function createEvmWorkflowTools() {
 								requoteRuntime?.blockedByCooldown
 							) {
 								staleRequoteStatus = "throttled";
+							}
+							if (staleRequoteStatus === "ready" && volatilityGuard.blocked) {
+								staleRequoteStatus = "volatility_blocked";
 							}
 						}
 						const staleTargets = extractTargetOrderCount(staleRequotePreview);
@@ -1208,6 +1297,7 @@ export function createEvmWorkflowTools() {
 											fallbackMode: intent.requoteFallbackMode ?? null,
 											targetOrders: staleTargets,
 											pricing: requotePricing,
+											volatilityGuard,
 											runtime: requoteRuntime,
 											result: staleRequotePreview,
 										},
@@ -1248,6 +1338,11 @@ export function createEvmWorkflowTools() {
 								intent,
 							})
 						: null;
+					const volatilityGuard = evaluateRequoteVolatilityGuard({
+						intent,
+						runtime: requoteRuntime,
+						currentPrice: requotePricing?.limitPrice ?? effectiveOrderPrice,
+					});
 					if (requoteRuntime?.blockedByAttempts) {
 						throw new Error(
 							`Trade execute blocked: requote max attempts reached (${requoteRuntime.attemptsUsed}/${requoteRuntime.maxAttempts}).`,
@@ -1256,6 +1351,11 @@ export function createEvmWorkflowTools() {
 					if (requoteRuntime?.blockedByCooldown) {
 						throw new Error(
 							`Trade execute throttled: wait ${requoteRuntime.remainingCooldownSeconds}s before next requote.`,
+						);
+					}
+					if (volatilityGuard.blocked) {
+						throw new Error(
+							`Trade execute blocked by requote volatility guard: drift=${volatilityGuard.driftBps?.toFixed(2)}bps > max=${volatilityGuard.maxDriftBps}.`,
 						);
 					}
 					let staleCancelResult: unknown = null;
@@ -1367,6 +1467,8 @@ export function createEvmWorkflowTools() {
 						writeTradeRequoteRuntime(runId, {
 							attempts: (requoteRuntime?.attemptsUsed ?? 0) + 1,
 							lastExecuteAtMs: nowMs,
+							referencePrice:
+								executedLimitPrice ?? requoteRuntime?.referencePrice ?? null,
 						});
 						nextRequoteRuntime = readTradeRequoteRuntime({
 							runId,
@@ -1432,6 +1534,7 @@ export function createEvmWorkflowTools() {
 										fallbackMode: intent.requoteFallbackMode ?? null,
 										targetOrders: staleCancelTargetOrders,
 										pricing: requotePricing,
+										volatilityGuard,
 										executedLimitPrice,
 										repost,
 										runtime: nextRequoteRuntime,

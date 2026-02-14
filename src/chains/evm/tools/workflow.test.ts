@@ -455,6 +455,131 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		});
 	});
 
+	it("blocks requote execute when price drift exceeds threshold", async () => {
+		polymarketMocks.getPolymarketOrderBook
+			.mockResolvedValueOnce({
+				tokenId: "token-up-1",
+				bestBid: { price: 0.49, size: 100 },
+				bestAsk: { price: 0.51, size: 100 },
+				midpoint: 0.5,
+				bids: [{ price: 0.49, size: 100 }],
+				asks: [{ price: 0.51, size: 100 }],
+			})
+			.mockResolvedValueOnce({
+				tokenId: "token-up-1",
+				bestBid: { price: 0.49, size: 100 },
+				bestAsk: { price: 0.51, size: 100 },
+				midpoint: 0.5,
+				bids: [{ price: 0.49, size: 100 }],
+				asks: [{ price: 0.51, size: 100 }],
+			})
+			.mockResolvedValueOnce({
+				tokenId: "token-up-1",
+				bestBid: { price: 0.69, size: 100 },
+				bestAsk: { price: 0.71, size: 100 },
+				midpoint: 0.7,
+				bids: [{ price: 0.69, size: 100 }],
+				asks: [{ price: 0.71, size: 100 }],
+			});
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-volatility-analysis", {
+			runId: "wf-evm-4-volatility",
+			runMode: "analysis",
+			network: "polygon",
+			stakeUsd: 25,
+			side: "up",
+			requoteStaleOrders: true,
+			maxAgeMinutes: 30,
+			requoteMaxPriceDriftBps: 100,
+		});
+		const details = analyzed.details as { confirmToken: string };
+		await tool.execute("wf4-volatility-exec-1", {
+			runId: "wf-evm-4-volatility",
+			runMode: "execute",
+			network: "polygon",
+			confirmMainnet: true,
+			confirmToken: details.confirmToken,
+		});
+		await expect(
+			tool.execute("wf4-volatility-exec-2", {
+				runId: "wf-evm-4-volatility",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+			}),
+		).rejects.toThrow("volatility guard");
+		expect(executeMocks.cancelOrderExecute).toHaveBeenCalledTimes(1);
+	});
+
+	it("marks simulate as volatility_blocked when requote drift is too large", async () => {
+		polymarketMocks.getPolymarketOrderBook
+			.mockResolvedValueOnce({
+				tokenId: "token-up-1",
+				bestBid: { price: 0.49, size: 100 },
+				bestAsk: { price: 0.51, size: 100 },
+				midpoint: 0.5,
+				bids: [{ price: 0.49, size: 100 }],
+				asks: [{ price: 0.51, size: 100 }],
+			})
+			.mockResolvedValueOnce({
+				tokenId: "token-up-1",
+				bestBid: { price: 0.49, size: 100 },
+				bestAsk: { price: 0.51, size: 100 },
+				midpoint: 0.5,
+				bids: [{ price: 0.49, size: 100 }],
+				asks: [{ price: 0.51, size: 100 }],
+			})
+			.mockResolvedValueOnce({
+				tokenId: "token-up-1",
+				bestBid: { price: 0.67, size: 100 },
+				bestAsk: { price: 0.69, size: 100 },
+				midpoint: 0.68,
+				bids: [{ price: 0.67, size: 100 }],
+				asks: [{ price: 0.69, size: 100 }],
+			});
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-volatility-sim-analysis", {
+			runId: "wf-evm-4-volatility-sim",
+			runMode: "analysis",
+			network: "polygon",
+			stakeUsd: 25,
+			side: "up",
+			requoteStaleOrders: true,
+			maxAgeMinutes: 30,
+			requoteMaxPriceDriftBps: 100,
+		});
+		const details = analyzed.details as { confirmToken: string };
+		await tool.execute("wf4-volatility-sim-exec", {
+			runId: "wf-evm-4-volatility-sim",
+			runMode: "execute",
+			network: "polygon",
+			confirmMainnet: true,
+			confirmToken: details.confirmToken,
+		});
+		const simulated = await tool.execute("wf4-volatility-sim-simulate", {
+			runId: "wf-evm-4-volatility-sim",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 25,
+			side: "up",
+			requoteStaleOrders: true,
+			maxAgeMinutes: 30,
+			requoteMaxPriceDriftBps: 100,
+		});
+		expect(simulated.details).toMatchObject({
+			artifacts: {
+				simulate: {
+					staleRequote: {
+						status: "volatility_blocked",
+						volatilityGuard: {
+							blocked: true,
+						},
+					},
+				},
+			},
+		});
+	});
+
 	it("fails requote execute directly when fallback mode is none", async () => {
 		executeMocks.placeOrderExecute.mockRejectedValueOnce(
 			new Error("primary place failed"),
