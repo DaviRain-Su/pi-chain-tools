@@ -839,6 +839,43 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		);
 	});
 
+	it("applies natural language risk profile defaults to trade guards", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5-risk-profile", {
+			runId: "wf-evm-5-risk-profile",
+			runMode: "simulate",
+			network: "polygon",
+			intentText: "买 BTC 5分钟涨 20 USDC，先模拟，保守",
+		});
+		expect(result.details).toMatchObject({
+			intentType: "evm.polymarket.btc5m.trade",
+			intent: {
+				riskProfile: "conservative",
+				maxSpreadBps: 40,
+				minDepthUsd: 250,
+				maxStakeUsd: 200,
+				minConfidence: 0.85,
+			},
+		});
+	});
+
+	it("keeps explicit guard values over risk profile defaults", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5-risk-profile-override", {
+			runId: "wf-evm-5-risk-override",
+			runMode: "simulate",
+			network: "polygon",
+			intentText: "买 BTC 5分钟涨 20 USDC，激进，点差不超过50bps，先模拟",
+		});
+		expect(result.details).toMatchObject({
+			intentType: "evm.polymarket.btc5m.trade",
+			intent: {
+				riskProfile: "aggressive",
+				maxSpreadBps: 50,
+			},
+		});
+	});
+
 	it("simulates stale-cancel intent from natural language with maxAgeMinutes", async () => {
 		const tool = getTool();
 		const result = await tool.execute("wf5-stale-sim", {

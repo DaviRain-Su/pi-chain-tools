@@ -18,9 +18,11 @@ import { createEvmExecuteTools } from "./execute.js";
 type WorkflowRunMode = "analysis" | "simulate" | "execute";
 type RequotePriceStrategy = "aggressive" | "passive" | "follow_mid";
 type RequoteFallbackMode = "none" | "retry_aggressive";
+type PolymarketRiskProfile = "conservative" | "balanced" | "aggressive";
 
 type WorkflowTradeIntent = {
 	type: "evm.polymarket.btc5m.trade";
+	riskProfile?: PolymarketRiskProfile;
 	marketSlug?: string;
 	side?: "up" | "down";
 	stakeUsd: number;
@@ -88,6 +90,7 @@ type WorkflowParams = {
 type ParsedIntentHints = {
 	runMode?: WorkflowRunMode;
 	intentType?: WorkflowIntent["type"];
+	riskProfile?: PolymarketRiskProfile;
 	marketSlug?: string;
 	tokenId?: string;
 	side?: "up" | "down";
@@ -467,6 +470,47 @@ function parseRequoteMaxAttemptsHint(text?: string): number | undefined {
 	return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function parseRiskProfileHint(text?: string): PolymarketRiskProfile | undefined {
+	if (!text?.trim()) return undefined;
+	if (/(保守|稳健|稳妥|低风险|谨慎|谨慎点)/i.test(text)) return "conservative";
+	if (/(激进|冒进|进攻|高风险|快进)/i.test(text)) return "aggressive";
+	if (/(平衡|中性|普通|标准|常规|均衡)/i.test(text)) return "balanced";
+	return undefined;
+}
+
+function getRiskProfileDefaults(profile?: PolymarketRiskProfile): Partial<
+	Pick<
+		WorkflowTradeIntent,
+		"maxSpreadBps" | "minDepthUsd" | "maxStakeUsd" | "minConfidence"
+	>
+> {
+	switch (profile) {
+		case "conservative":
+			return {
+				maxSpreadBps: 40,
+				minDepthUsd: 250,
+				maxStakeUsd: 200,
+				minConfidence: 0.85,
+			};
+		case "aggressive":
+			return {
+				maxSpreadBps: 180,
+				minDepthUsd: 40,
+				maxStakeUsd: 1000,
+				minConfidence: 0.45,
+			};
+		case "balanced":
+			return {
+				maxSpreadBps: 80,
+				minDepthUsd: 120,
+				maxStakeUsd: 500,
+				minConfidence: 0.65,
+			};
+		default:
+			return {};
+	}
+}
+
 function parseRequoteIntentHints(text?: string): {
 	hasRequotePhrase: boolean;
 	requoteMinIntervalSeconds?: number;
@@ -622,6 +666,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
 	const runMode = parseRunModeHint(text);
 	const side = parseSideHint(text);
+	const riskProfile = parseRiskProfileHint(text);
 	const maxEntryPrice = parseMaxEntryPriceHint(text);
 	const maxSpreadBps = parseMaxSpreadBpsHint(text);
 	const minDepthUsd = parseMinDepthUsdHint(text);
@@ -683,6 +728,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	const requoteMaxAttempts = requoteIntentHints.requoteMaxAttempts;
 
 	return {
+		riskProfile,
 		runMode,
 		intentType: isCancelIntent ? "evm.polymarket.btc5m.cancel" : undefined,
 		marketSlug: marketSlug?.trim(),
@@ -855,10 +901,24 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 		throw new Error("stakeUsd is required for evm.polymarket.btc5m.trade");
 	}
 	const maxEntryPriceRaw = params.maxEntryPrice ?? parsed.maxEntryPrice;
-	const maxSpreadBpsRaw = params.maxSpreadBps ?? parsed.maxSpreadBps;
-	const minDepthUsdRaw = params.minDepthUsd ?? parsed.minDepthUsd;
-	const maxStakeUsdRaw = params.maxStakeUsd ?? parsed.maxStakeUsd;
-	const minConfidenceRaw = params.minConfidence ?? parsed.minConfidence;
+	const riskProfileDefaults =
+		getRiskProfileDefaults(parsed.riskProfile) ?? {};
+	const maxSpreadBpsRaw =
+		params.maxSpreadBps ??
+		parsed.maxSpreadBps ??
+		riskProfileDefaults.maxSpreadBps;
+	const minDepthUsdRaw =
+		params.minDepthUsd ??
+		parsed.minDepthUsd ??
+		riskProfileDefaults.minDepthUsd;
+	const maxStakeUsdRaw =
+		params.maxStakeUsd ??
+		parsed.maxStakeUsd ??
+		riskProfileDefaults.maxStakeUsd;
+	const minConfidenceRaw =
+		params.minConfidence ??
+		parsed.minConfidence ??
+		riskProfileDefaults.minConfidence;
 	const requotePriceStrategyRaw =
 		params.requotePriceStrategy ?? parsed.requotePriceStrategy;
 	const requoteFallbackModeRaw =
@@ -930,6 +990,7 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 	}
 	return {
 		type: "evm.polymarket.btc5m.trade",
+		riskProfile: parsed.riskProfile,
 		marketSlug: params.marketSlug?.trim() || parsed.marketSlug,
 		side: params.side ?? parsed.side,
 		stakeUsd: parsePositiveNumber(stakeUsdRaw, "stakeUsd"),
@@ -995,6 +1056,7 @@ function buildTradeSummaryLine(params: {
 	const parts = [`${params.intent.type}`, `${params.phase}=${params.status}`];
 	if (params.marketSlug) parts.push(`market=${params.marketSlug}`);
 	if (params.side) parts.push(`side=${params.side}`);
+	if (params.intent.riskProfile) parts.push(`risk=${params.intent.riskProfile}`);
 	if (params.entryPrice != null)
 		parts.push(`entry=${params.entryPrice.toFixed(4)}`);
 	if (params.shares != null) parts.push(`shares~=${params.shares.toFixed(4)}`);

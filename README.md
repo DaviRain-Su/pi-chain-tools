@@ -68,7 +68,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `trade safety rails`: Polymarket trade compose/execute/workflow support optional guard params `maxSpreadBps` / `minDepthUsd` / `maxStakeUsd` / `minConfidence`; simulate can return `status=guard_blocked`, and execute is blocked when guards fail
 - `trade status loop`: workflow execute now attempts to attach order-status snapshot (state/fill/trade summary) when submit response contains `orderId/orderID`
 - `trade stale requote`: workflow trade supports `requoteStaleOrders=true` + stale filters (`maxAgeMinutes` / `maxFillRatio`) to run cancel-stale then repost in execute mode; supports pricing strategy `requotePriceStrategy=aggressive|passive|follow_mid`, fallback mode `requoteFallbackMode=none|retry_aggressive`, and limits `requoteMinIntervalSeconds` / `requoteMaxAttempts` / `requoteMaxPriceDriftBps` (volatility guard)
-- `natural-language workflow parsing`: intent text now supports richer phrasing for run mode (`先分析/先模拟/直接执行`), trade guards (`maxEntryPrice` / `maxSpreadBps` / `minDepthUsd` / `maxStakeUsd` / `minConfidence`), AI toggle (`不用AI`), and stale-requote controls (stale age, interval, attempts, fallback, drift `bps/%`)
+- `natural-language workflow parsing`: intent text now supports richer phrasing for run mode (`先分析/先模拟/直接执行`), trade guards (`maxEntryPrice` / `maxSpreadBps` / `minDepthUsd` / `maxStakeUsd` / `minConfidence`), risk profiles (`保守/平衡/激进`), AI toggle (`不用AI`), and stale-requote controls (stale age, interval, attempts, fallback, drift `bps/%`)
 - `stale cancel intent`: workflow cancel supports stale-filter params (`maxAgeMinutes`/`maxFillRatio`) and can parse natural language like "取消超过 30 分钟未成交挂单"
 - `transfer symbol map`: workflow can resolve `USDC/USDT/DAI/WETH/WBTC` addresses on `ethereum/polygon/arbitrum/optimism` and `USDC/DAI/WETH` on `base` (otherwise provide `tokenAddress`)
 - `transfer symbol map override`: configurable via `EVM_TRANSFER_TOKEN_MAP` (global JSON by symbol->network->address) and `EVM_TRANSFER_TOKEN_MAP_<NETWORK>` (per-network JSON by symbol->address, e.g. `EVM_TRANSFER_TOKEN_MAP_BASE`)
@@ -80,6 +80,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `帮我查一下 Polymarket BTC 5分钟的可交易市场`
 - `帮我分析 BTC 5m，建议买涨还是买跌`
 - `买 BTC 5分钟涨 20 USDC，先分析`
+- `买 BTC 5分钟涨 20 USDC，保守，先模拟`
 - `继续上一笔，先模拟`
 - `继续刚才这笔，确认主网执行，confirmToken EVM-XXXX`
 - `查一下我 BTC 5分钟的挂单`
