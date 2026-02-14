@@ -569,11 +569,20 @@ describe("near_getLendingPositionsBurrow", () => {
 		expect(result.content[0]?.text).toContain(
 			"Burrow positions: account alice.near",
 		);
+		expect(result.content[0]?.text).toContain("Risk: medium");
 		expect(result.content[0]?.text).toContain("Position REGULAR");
 		expect(result.content[0]?.text).toContain("borrowed USDC");
 		expect(result.details).toMatchObject({
 			accountId: "alice.near",
 			registered: true,
+			riskSummary: {
+				level: "medium",
+				suppliedAssetCount: 1,
+				collateralAssetCount: 1,
+				borrowedAssetCount: 1,
+				hasBorrowedExposure: true,
+				hasCollateralExposure: true,
+			},
 		});
 	});
 });

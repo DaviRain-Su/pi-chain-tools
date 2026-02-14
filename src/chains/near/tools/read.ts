@@ -136,6 +136,17 @@ type NearBurrowPositionView = {
 	borrowed: NearBurrowPositionAssetRow[];
 };
 
+type NearBurrowRiskSummary = {
+	level: "low" | "medium" | "high";
+	suppliedAssetCount: number;
+	collateralAssetCount: number;
+	borrowedAssetCount: number;
+	hasBorrowedExposure: boolean;
+	hasCollateralExposure: boolean;
+	accountLocked: boolean;
+	notes: string[];
+};
+
 type NearIntentsBlockchain =
 	| "near"
 	| "eth"
@@ -1349,6 +1360,67 @@ function formatBurrowAmountUi(params: {
 	}
 }
 
+function hasPositiveBurrowRowBalance(row: NearBurrowPositionAssetRow): boolean {
+	try {
+		return parseUnsignedBigInt(row.balanceRaw, "burrow.balanceRaw") > 0n;
+	} catch {
+		return false;
+	}
+}
+
+function countPositiveBurrowRows(rows: NearBurrowPositionAssetRow[]): number {
+	let count = 0;
+	for (const row of rows) {
+		if (hasPositiveBurrowRowBalance(row)) count += 1;
+	}
+	return count;
+}
+
+function buildBurrowRiskSummary(params: {
+	suppliedRows: NearBurrowPositionAssetRow[];
+	collateralRows: NearBurrowPositionAssetRow[];
+	borrowedRows: NearBurrowPositionAssetRow[];
+	accountLocked: boolean;
+}): NearBurrowRiskSummary {
+	const suppliedAssetCount = countPositiveBurrowRows(params.suppliedRows);
+	const collateralAssetCount = countPositiveBurrowRows(params.collateralRows);
+	const borrowedAssetCount = countPositiveBurrowRows(params.borrowedRows);
+	const hasBorrowedExposure = borrowedAssetCount > 0;
+	const hasCollateralExposure = collateralAssetCount > 0;
+	const notes: string[] = [];
+	if (hasBorrowedExposure && !hasCollateralExposure) {
+		notes.push(
+			"Borrowed exposure exists but no collateral rows were found. Verify account health before any borrow/withdraw.",
+		);
+	}
+	if (params.accountLocked) {
+		notes.push(
+			"Account is currently locked on Burrow. Certain borrow/withdraw actions may be blocked.",
+		);
+	}
+	if (hasBorrowedExposure) {
+		notes.push(
+			"Debt exposure detected. Run workflow simulate before execute for borrow/withdraw actions.",
+		);
+	}
+	const level: "low" | "medium" | "high" =
+		hasBorrowedExposure && !hasCollateralExposure
+			? "high"
+			: hasBorrowedExposure || params.accountLocked
+				? "medium"
+				: "low";
+	return {
+		level,
+		suppliedAssetCount,
+		collateralAssetCount,
+		borrowedAssetCount,
+		hasBorrowedExposure,
+		hasCollateralExposure,
+		accountLocked: params.accountLocked,
+		notes,
+	};
+}
+
 function normalizeBurrowMarketAsset(
 	value: unknown,
 ): BurrowAssetDetailedView | null {
@@ -2101,6 +2173,8 @@ export function createNearReadTools() {
 						);
 
 				const positions: NearBurrowPositionView[] = [];
+				const collateralRowsAll: NearBurrowPositionAssetRow[] = [];
+				const borrowedRowsAll: NearBurrowPositionAssetRow[] = [];
 				const positionEntries = snapshot.positions ?? {};
 				for (const [positionId, positionNode] of Object.entries(
 					positionEntries,
@@ -2119,6 +2193,8 @@ export function createNearReadTools() {
 						assets: normalizedPosition.borrowed ?? [],
 						extraDecimalsByToken,
 					});
+					collateralRowsAll.push(...collateralAll);
+					borrowedRowsAll.push(...borrowedAll);
 					const collateral = includeZero
 						? collateralAll
 						: collateralAll.filter(
@@ -2140,10 +2216,17 @@ export function createNearReadTools() {
 				positions.sort((left, right) =>
 					left.positionId.localeCompare(right.positionId),
 				);
+				const riskSummary = buildBurrowRiskSummary({
+					suppliedRows: suppliedAssetsAll,
+					collateralRows: collateralRowsAll,
+					borrowedRows: borrowedRowsAll,
+					accountLocked: snapshot.is_locked === true,
+				});
 
 				const lines = [
 					`Burrow positions: account ${accountId} on ${burrowContractId}`,
 					`Supplied assets: ${suppliedAssets.length}`,
+					`Risk: ${riskSummary.level} (supplied=${riskSummary.suppliedAssetCount}, collateral=${riskSummary.collateralAssetCount}, borrowed=${riskSummary.borrowedAssetCount})`,
 				];
 				for (const asset of suppliedAssets) {
 					const amountText =
@@ -2177,7 +2260,16 @@ export function createNearReadTools() {
 						);
 					}
 				}
-				if (lines.length <= 2) {
+				for (const note of riskSummary.notes) {
+					lines.push(`Risk note: ${note}`);
+				}
+				const hasDisplayedExposure =
+					suppliedAssets.length > 0 ||
+					positions.some(
+						(position) =>
+							position.collateral.length > 0 || position.borrowed.length > 0,
+					);
+				if (!hasDisplayedExposure) {
 					lines.push("No non-zero supplied/collateral/borrowed assets found.");
 				}
 
@@ -2193,6 +2285,7 @@ export function createNearReadTools() {
 						positions,
 						supplied: suppliedAssets,
 						isLocked: snapshot.is_locked === true,
+						riskSummary,
 						raw: snapshot,
 					},
 				};

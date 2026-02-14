@@ -2977,6 +2977,34 @@ function sumBurrowPositionAssetInnerByToken(params: {
 	return total;
 }
 
+function hasPositiveBurrowAssetBalance(value: unknown): boolean {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as { balance?: unknown };
+	if (typeof candidate.balance !== "string") return false;
+	try {
+		return parseNonNegativeBigInt(candidate.balance, "burrow.balance") > 0n;
+	} catch {
+		return false;
+	}
+}
+
+function countBurrowPositionAssetsBySide(params: {
+	positions?: BurrowAccountAllPositionsView["positions"];
+	side: "collateral" | "borrowed";
+}): number {
+	if (!params.positions) return 0;
+	let count = 0;
+	for (const position of Object.values(params.positions)) {
+		if (!position || typeof position !== "object") continue;
+		const assets = position[params.side];
+		if (!Array.isArray(assets)) continue;
+		for (const asset of assets) {
+			if (hasPositiveBurrowAssetBalance(asset)) count += 1;
+		}
+	}
+	return count;
+}
+
 function burrowInnerToRawString(
 	innerAmount: bigint,
 	extraDecimals: number,
@@ -4095,7 +4123,11 @@ async function simulateBurrowSupply(params: {
 	rpcUrl?: string;
 	fromAccountId?: string;
 }): Promise<{
-	status: "success" | "insufficient_balance" | "market_unavailable";
+	status:
+		| "success"
+		| "insufficient_balance"
+		| "market_unavailable"
+		| "collateral_unavailable";
 	fromAccountId: string;
 	burrowContractId: string;
 	tokenId: string;
@@ -4139,9 +4171,11 @@ async function simulateBurrowSupply(params: {
 	return {
 		status: !canDeposit
 			? "market_unavailable"
-			: availableRaw >= requiredRaw
-				? "success"
-				: "insufficient_balance",
+			: params.intent.asCollateral && !canUseAsCollateral
+				? "collateral_unavailable"
+				: availableRaw >= requiredRaw
+					? "success"
+					: "insufficient_balance",
 		fromAccountId,
 		burrowContractId,
 		tokenId,
@@ -4160,7 +4194,7 @@ async function simulateBurrowBorrow(params: {
 	rpcUrl?: string;
 	fromAccountId?: string;
 }): Promise<{
-	status: "success" | "market_unavailable";
+	status: "success" | "market_unavailable" | "insufficient_collateral";
 	fromAccountId: string;
 	burrowContractId: string;
 	tokenId: string;
@@ -4169,6 +4203,10 @@ async function simulateBurrowBorrow(params: {
 	extraDecimals: number;
 	withdrawToWallet: boolean;
 	canBorrow: boolean;
+	collateralAssetCount: number;
+	borrowedAssetCount: number;
+	riskLevel: "low" | "medium" | "high";
+	riskNotes: string[];
 }> {
 	const fromAccountId = resolveNearAccountId(
 		params.intent.fromAccountId ?? params.fromAccountId,
@@ -4184,8 +4222,43 @@ async function simulateBurrowBorrow(params: {
 	const amountRaw = parsePositiveBigInt(params.intent.amountRaw, "amountRaw");
 	const amountInner = toBurrowInnerAmount(amountRaw.toString(), extraDecimals);
 	const canBorrow = asset.config?.can_borrow !== false;
+	const snapshot = await fetchBurrowAccountAllPositions({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		burrowContractId,
+		accountId: fromAccountId,
+	});
+	const collateralAssetCount = countBurrowPositionAssetsBySide({
+		positions: snapshot?.positions,
+		side: "collateral",
+	});
+	const borrowedAssetCount = countBurrowPositionAssetsBySide({
+		positions: snapshot?.positions,
+		side: "borrowed",
+	});
+	const riskNotes: string[] = [];
+	if (collateralAssetCount <= 0) {
+		riskNotes.push(
+			"No non-zero Burrow collateral detected. Borrow may fail or be unsafe.",
+		);
+	}
+	if (borrowedAssetCount > 0) {
+		riskNotes.push(
+			"Existing Burrow debt detected; monitor health before increasing leverage.",
+		);
+	}
+	const riskLevel: "low" | "medium" | "high" =
+		collateralAssetCount <= 0
+			? "high"
+			: borrowedAssetCount > 0
+				? "medium"
+				: "low";
 	return {
-		status: canBorrow ? "success" : "market_unavailable",
+		status: !canBorrow
+			? "market_unavailable"
+			: collateralAssetCount <= 0
+				? "insufficient_collateral"
+				: "success",
 		fromAccountId,
 		burrowContractId,
 		tokenId,
@@ -4194,6 +4267,10 @@ async function simulateBurrowBorrow(params: {
 		extraDecimals,
 		withdrawToWallet: params.intent.withdrawToWallet,
 		canBorrow,
+		collateralAssetCount,
+		borrowedAssetCount,
+		riskLevel,
+		riskNotes,
 	};
 }
 
@@ -4284,7 +4361,8 @@ async function simulateBurrowWithdraw(params: {
 		| "success"
 		| "insufficient_balance"
 		| "no_supply"
-		| "market_unavailable";
+		| "market_unavailable"
+		| "risk_check_required";
 	fromAccountId: string;
 	burrowContractId: string;
 	tokenId: string;
@@ -4296,6 +4374,11 @@ async function simulateBurrowWithdraw(params: {
 	requiredInner: string;
 	recipientId: string | null;
 	canWithdraw: boolean;
+	suppliedInner: string;
+	collateralInner: string;
+	borrowedAssetCount: number;
+	riskLevel: "low" | "medium" | "high";
+	riskNotes: string[];
 }> {
 	const fromAccountId = resolveNearAccountId(
 		params.intent.fromAccountId ?? params.fromAccountId,
@@ -4332,14 +4415,37 @@ async function simulateBurrowWithdraw(params: {
 		"availableRaw",
 	);
 	const canWithdraw = asset.config?.can_withdraw !== false;
+	const borrowedAssetCount = countBurrowPositionAssetsBySide({
+		positions: snapshot?.positions,
+		side: "borrowed",
+	});
+	const usesCollateralPortion = requiredInner > suppliedInner;
+	const requiresRiskCheck = borrowedAssetCount > 0 && usesCollateralPortion;
+	const riskNotes: string[] = [];
+	if (requiresRiskCheck) {
+		riskNotes.push(
+			"Withdrawal would consume collateral while debt exists; run deeper health check before execute.",
+		);
+	} else if (borrowedAssetCount > 0) {
+		riskNotes.push(
+			"Debt exists on Burrow. Prefer small withdraws from non-collateral supply first.",
+		);
+	}
+	const riskLevel: "low" | "medium" | "high" = requiresRiskCheck
+		? "high"
+		: borrowedAssetCount > 0
+			? "medium"
+			: "low";
 	return {
 		status: !canWithdraw
 			? "market_unavailable"
 			: availableInner <= 0n
 				? "no_supply"
-				: availableInner >= requiredInner
-					? "success"
-					: "insufficient_balance",
+				: requiresRiskCheck
+					? "risk_check_required"
+					: availableInner >= requiredInner
+						? "success"
+						: "insufficient_balance",
 		fromAccountId,
 		burrowContractId,
 		tokenId,
@@ -4351,6 +4457,11 @@ async function simulateBurrowWithdraw(params: {
 		requiredInner: requiredInner.toString(),
 		recipientId: params.intent.recipientId ?? null,
 		canWithdraw,
+		suppliedInner: suppliedInner.toString(),
+		collateralInner: collateralInner.toString(),
+		borrowedAssetCount,
+		riskLevel,
+		riskNotes,
 	};
 }
 

@@ -3032,6 +3032,60 @@ describe("w3rt_run_near_workflow_v0", () => {
 		});
 	});
 
+	it("simulates burrow borrow and reports insufficient collateral", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "814",
+				block_height: 814,
+				logs: [],
+				result: encodeJsonResult([
+					{
+						token_id: "wrap.near",
+						supplied: { shares: "0", balance: "0" },
+						borrowed: { shares: "0", balance: "0" },
+						config: {
+							extra_decimals: 0,
+							can_deposit: true,
+							can_use_as_collateral: true,
+							can_borrow: true,
+							can_withdraw: true,
+						},
+					},
+				]),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "815",
+				block_height: 815,
+				logs: [],
+				result: encodeJsonResult({
+					account_id: "alice.near",
+					supplied: [],
+					positions: {},
+				}),
+			});
+		const tool = getTool();
+		const result = await tool.execute("near-wf-burrow-4-sim", {
+			runId: "wf-near-burrow-04-sim",
+			runMode: "simulate",
+			intentType: "near.lend.burrow.borrow",
+			network: "mainnet",
+			tokenId: "NEAR",
+			amountRaw: "1000",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lend.burrow.borrow",
+			artifacts: {
+				simulate: {
+					status: "insufficient_collateral",
+					tokenId: "wrap.near",
+					collateralAssetCount: 0,
+					riskLevel: "high",
+				},
+			},
+		});
+	});
+
 	it("simulates burrow repay and reports no-debt status", async () => {
 		runtimeMocks.callNearRpc
 			.mockResolvedValueOnce({
@@ -3086,6 +3140,86 @@ describe("w3rt_run_near_workflow_v0", () => {
 					status: "no_debt",
 					tokenId: "wrap.near",
 					borrowedRaw: "0",
+				},
+			},
+		});
+	});
+
+	it("simulates burrow withdraw and flags risk_check_required", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "821",
+				block_height: 821,
+				logs: [],
+				result: encodeJsonResult([
+					{
+						token_id: "wrap.near",
+						supplied: { shares: "0", balance: "0" },
+						borrowed: { shares: "0", balance: "0" },
+						config: {
+							extra_decimals: 0,
+							can_deposit: true,
+							can_use_as_collateral: true,
+							can_borrow: true,
+							can_withdraw: true,
+						},
+					},
+				]),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "822",
+				block_height: 822,
+				logs: [],
+				result: encodeJsonResult({
+					account_id: "alice.near",
+					supplied: [
+						{
+							token_id: "wrap.near",
+							balance: "1000",
+							shares: "900",
+						},
+					],
+					positions: {
+						REGULAR: {
+							collateral: [
+								{
+									token_id: "wrap.near",
+									balance: "900",
+									shares: "800",
+								},
+							],
+							borrowed: [
+								{
+									token_id: "usdc.tether-token.near",
+									balance: "10",
+									shares: "8",
+								},
+							],
+						},
+					},
+				}),
+			});
+		const tool = getTool();
+		const result = await tool.execute("near-wf-burrow-6-sim", {
+			runId: "wf-near-burrow-06-sim",
+			runMode: "simulate",
+			intentType: "near.lend.burrow.withdraw",
+			network: "mainnet",
+			tokenId: "NEAR",
+			amountRaw: "1500",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lend.burrow.withdraw",
+			artifacts: {
+				simulate: {
+					status: "risk_check_required",
+					tokenId: "wrap.near",
+					amountRaw: "1500",
+					suppliedInner: "1000",
+					collateralInner: "900",
+					borrowedAssetCount: 1,
+					riskLevel: "high",
 				},
 			},
 		});
