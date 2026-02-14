@@ -58,7 +58,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `near_getSwapQuoteRef` (Ref/Rhea quote: explicit pool/direct/two-hop route; supports token symbols like `NEAR`/`USDC`)
 - `read`: `near_getIntentsTokens` (NEAR Intents 1Click `/v0/tokens`, filterable supported-asset list)
 - `read`: `near_getIntentsQuote` (NEAR Intents 1Click `/v0/quote`, defaults to `dry=true` for safe preview)
-- `read`: `near_getIntentsExplorerTransactions` (NEAR Intents Explorer `/api/v0/transactions-pages` or cursor `/api/v0/transactions`, supports status/chain/time filters, returns business-readable summary: status counts + USD in/out + top routes; requires JWT)
+- `read`: `near_getIntentsExplorerTransactions` (NEAR Intents Explorer `/api/v0/transactions-pages` or cursor `/api/v0/transactions`, supports status/chain/time filters, includes `quickView=abnormal` preset, returns business-readable summary: status counts + USD in/out + top routes; requires JWT)
 - `read`: `near_getIntentsStatus` (NEAR Intents 1Click `/v0/status` by `depositAddress`/`depositMemo` or `correlationId`)
 - `read`: `near_getIntentsAnyInputWithdrawals` (NEAR Intents 1Click `/v0/any-input/withdrawals` for ANY_INPUT withdrawal records)
 - `compose`: `near_buildTransferNearTransaction` (unsigned native transfer payload, local signing)
@@ -133,6 +133,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - Intents Explorer Transactions (read):
   - `帮我查一下 NEAR Intents 最近 20 笔交易，筛选状态 SUCCESS/PROCESSING`
   - `帮我用 cursor 模式查 NEAR Intents 交易，direction=next，numberOfTransactions=20`
+  - `帮我查一下 NEAR Intents 异常交易（quickView=abnormal）`
 - Intents Status (read):
   - `帮我查一下 NEAR Intents 这个 depositAddress 的状态：0x...`
   - `帮我查一下 NEAR Intents 这个 correlationId 的状态：corr-...`

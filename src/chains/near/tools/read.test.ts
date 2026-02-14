@@ -981,6 +981,58 @@ describe("near_getIntentsExplorerTransactions", () => {
 		expect(restMocks.fetch).not.toHaveBeenCalled();
 	});
 
+	it("supports abnormal quickView preset", async () => {
+		process.env.NEAR_INTENTS_EXPLORER_JWT = "jwt-test-token";
+		mockFetchJsonOnce(200, {
+			data: [
+				{
+					originAsset: "nep141:wrap.near",
+					destinationAsset: "nep141:usdc.near",
+					depositAddress: "deposit-address-3",
+					recipient: "carol.near",
+					status: "FAILED",
+					createdAt: "2026-02-14T12:10:00.000Z",
+					createdAtTimestamp: 1771061400,
+					amountInFormatted: "0.1",
+					amountOutFormatted: "0.0",
+					senders: ["carol.near"],
+					nearTxHashes: [],
+					originChainTxHashes: [],
+					destinationChainTxHashes: [],
+				},
+			],
+			page: 1,
+			perPage: 20,
+			total: 1,
+			totalPages: 1,
+			nextPage: null,
+			prevPage: null,
+		});
+		const tool = getTool("near_getIntentsExplorerTransactions");
+		const result = await tool.execute("near-read-intents-explorer-quick-1", {
+			quickView: "abnormal",
+		});
+
+		const [url] = restMocks.fetch.mock.calls[0] ?? [];
+		expect(String(url)).toContain(
+			"statuses=FAILED%2CREFUNDED%2CINCOMPLETE_DEPOSIT",
+		);
+		expect(result.content[0]?.text).toContain(
+			"Quick view: abnormal (FAILED | REFUNDED | INCOMPLETE_DEPOSIT)",
+		);
+		expect(result.details).toMatchObject({
+			filters: {
+				quickView: "abnormal",
+				statuses: "FAILED,REFUNDED,INCOMPLETE_DEPOSIT",
+			},
+			summary: {
+				statusCounts: {
+					FAILED: 1,
+				},
+			},
+		});
+	});
+
 	it("surfaces explorer API errors", async () => {
 		process.env.NEAR_INTENTS_EXPLORER_JWT = "jwt-test-token";
 		mockFetchJsonOnce(429, {

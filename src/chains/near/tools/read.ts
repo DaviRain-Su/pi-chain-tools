@@ -2399,6 +2399,12 @@ export function createNearReadTools() {
 							"Pagination mode: pages uses /transactions-pages; cursor uses /transactions.",
 					}),
 				),
+				quickView: Type.Optional(
+					Type.Union([Type.Literal("abnormal")], {
+						description:
+							"Quick filter preset. 'abnormal' => FAILED/REFUNDED/INCOMPLETE_DEPOSIT.",
+					}),
+				),
 				page: Type.Optional(
 					Type.Number({
 						description: "Page number (default 1).",
@@ -2462,7 +2468,7 @@ export function createNearReadTools() {
 					Type.Array(
 						Type.String({
 							description:
-								"Status values: FAILED, INCOMPLETE_DEPOSIT, PENDING_DEPOSIT, PROCESSING, REFUNDED, SUCCESS.",
+								"Status values: FAILED, INCOMPLETE_DEPOSIT, PENDING_DEPOSIT, PROCESSING, REFUNDED, SUCCESS. Overrides quickView default when explicitly provided.",
 						}),
 					),
 				),
@@ -2507,6 +2513,7 @@ export function createNearReadTools() {
 					jwt: params.jwt,
 				});
 				const mode = params.mode === "cursor" ? "cursor" : "pages";
+				const quickView = params.quickView === "abnormal" ? "abnormal" : null;
 				const page = parseOptionalPositiveInt(params.page, "page");
 				const perPage = parseIntentsExplorerPerPage(params.perPage);
 				const numberOfTransactions = parseIntentsExplorerNumberOfTransactions(
@@ -2541,7 +2548,13 @@ export function createNearReadTools() {
 				) {
 					throw new Error("minUsdPrice must be <= maxUsdPrice");
 				}
-				const statuses = parseIntentsExplorerStatuses(params.statuses);
+				const effectiveStatusesInput =
+					Array.isArray(params.statuses) && params.statuses.length > 0
+						? params.statuses
+						: quickView === "abnormal"
+							? ["FAILED", "REFUNDED", "INCOMPLETE_DEPOSIT"]
+							: undefined;
+				const statuses = parseIntentsExplorerStatuses(effectiveStatusesInput);
 				const fromChainId = parseOptionalNearIntentsChain(
 					params.fromChainId,
 					"fromChainId",
@@ -2651,7 +2664,13 @@ export function createNearReadTools() {
 							.join(" | ")}`,
 					);
 				}
+				if (quickView === "abnormal") {
+					lines.push(
+						"Quick view: abnormal (FAILED | REFUNDED | INCOMPLETE_DEPOSIT)",
+					);
+				}
 				const activeFilters = [
+					quickView ? `quickView=${quickView}` : null,
 					fromChainId ? `fromChainId=${fromChainId}` : null,
 					toChainId ? `toChainId=${toChainId}` : null,
 					params.search?.trim() ? `search=${params.search.trim()}` : null,
@@ -2701,6 +2720,7 @@ export function createNearReadTools() {
 						httpStatus: response.status,
 						filters: {
 							mode,
+							quickView,
 							page: mode === "pages" ? (page ?? 1) : null,
 							perPage: mode === "pages" ? perPage : null,
 							numberOfTransactions:
