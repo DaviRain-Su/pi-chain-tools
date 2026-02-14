@@ -841,6 +841,11 @@ describe("near_getIntentsExplorerTransactions", () => {
 		expect(result.content[0]?.text).toContain(
 			"Intents explorer txs: 2 item(s)",
 		);
+		expect(result.content[0]?.text).toContain(
+			"Status summary: PROCESSING=1 | SUCCESS=1",
+		);
+		expect(result.content[0]?.text).toContain("USD in/out: $0.03 / $0.01");
+		expect(result.content[0]?.text).toContain("Top routes:");
 		expect(result.content[0]?.text).toContain("[SUCCESS]");
 		expect(result.content[0]?.text).toContain("[PROCESSING]");
 		expect(result.details).toMatchObject({
@@ -848,6 +853,20 @@ describe("near_getIntentsExplorerTransactions", () => {
 			totalPages: 3,
 			nextPage: 3,
 			prevPage: 1,
+			summary: {
+				statusCounts: {
+					SUCCESS: 1,
+					PROCESSING: 1,
+				},
+				totalAmountInUsd: 0.03,
+				totalAmountOutUsd: 0.01,
+				topRoutes: expect.arrayContaining([
+					{
+						route: expect.stringContaining("[nep141]"),
+						count: 1,
+					},
+				]),
+			},
 			transactions: [
 				{
 					status: "SUCCESS",
@@ -914,6 +933,10 @@ describe("near_getIntentsExplorerTransactions", () => {
 		expect(result.content[0]?.text).toContain(
 			"mode=cursor direction=next limit=2",
 		);
+		expect(result.content[0]?.text).toContain(
+			"Status summary: PROCESSING=1 | SUCCESS=1",
+		);
+		expect(result.content[0]?.text).toContain("Top routes:");
 		expect(result.content[0]?.text).toContain("Cursor(older): deposit-2_2");
 		expect(result.content[0]?.text).toContain("Cursor(newer): deposit-1_1");
 		expect(result.details).toMatchObject({
@@ -926,6 +949,18 @@ describe("near_getIntentsExplorerTransactions", () => {
 			cursor: {
 				older: "deposit-2_2",
 				newer: "deposit-1_1",
+			},
+			summary: {
+				statusCounts: {
+					SUCCESS: 1,
+					PROCESSING: 1,
+				},
+				topRoutes: [
+					{
+						route: expect.stringContaining("wrap.near [nep141]"),
+						count: 2,
+					},
+				],
 			},
 			transactions: [
 				{
