@@ -1352,6 +1352,9 @@ describe("w3rt_run_near_workflow_v0", () => {
 				execute: {
 					correlationId: "corr-exec-1",
 					status: "PENDING_DEPOSIT",
+					summaryLine: expect.stringContaining(
+						"intents submit=PENDING_DEPOSIT",
+					),
 					statusTracking: {
 						timedOut: false,
 						latestStatus: {
@@ -1438,6 +1441,9 @@ describe("w3rt_run_near_workflow_v0", () => {
 			artifacts: {
 				execute: {
 					correlationId: "corr-exec-1",
+					summaryLine: expect.stringContaining(
+						"intents submit=PENDING_DEPOSIT",
+					),
 					statusTracking: null,
 				},
 			},
@@ -1512,6 +1518,9 @@ describe("w3rt_run_near_workflow_v0", () => {
 			artifacts: {
 				execute: {
 					correlationId: "corr-exec-1",
+					summaryLine: expect.stringContaining(
+						"intents submit=PENDING_DEPOSIT",
+					),
 					statusTracking: null,
 				},
 			},
@@ -1938,6 +1947,7 @@ describe("w3rt_run_near_workflow_v0", () => {
 			artifacts: {
 				execute: {
 					correlationId: "corr-exec-1",
+					summaryLine: expect.stringContaining("withdrawals=success:1"),
 					statusTracking: {
 						timedOut: false,
 						latestStatus: {

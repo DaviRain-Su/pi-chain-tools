@@ -3754,6 +3754,64 @@ function buildIntentsExecuteReadableText(executeArtifact: unknown): string {
 	return lines.join("\n");
 }
 
+function shortenSummaryValue(value: string): string {
+	const normalized = value.trim();
+	if (normalized.length <= 18) return normalized;
+	return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
+}
+
+function buildIntentsExecuteOneLineSummary(executeArtifact: unknown): string {
+	if (!isObjectRecord(executeArtifact)) {
+		return "intents submitted";
+	}
+	const parts: string[] = ["intents"];
+	const submitStatus =
+		typeof executeArtifact.status === "string" && executeArtifact.status.trim()
+			? executeArtifact.status.trim()
+			: "submitted";
+	parts.push(`submit=${submitStatus}`);
+	const txHash =
+		typeof executeArtifact.txHash === "string" && executeArtifact.txHash.trim()
+			? executeArtifact.txHash.trim()
+			: null;
+	if (txHash) {
+		parts.push(`tx=${shortenSummaryValue(txHash)}`);
+	}
+	const correlationId =
+		typeof executeArtifact.correlationId === "string" &&
+		executeArtifact.correlationId.trim()
+			? executeArtifact.correlationId.trim()
+			: null;
+	if (correlationId) {
+		parts.push(`corr=${shortenSummaryValue(correlationId)}`);
+	}
+	if (isObjectRecord(executeArtifact.statusTracking)) {
+		const tracking = executeArtifact.statusTracking;
+		const latestStatus = isObjectRecord(tracking.latestStatus)
+			? tracking.latestStatus
+			: null;
+		const tracked =
+			latestStatus && typeof latestStatus.status === "string"
+				? latestStatus.status
+				: tracking.timedOut === true
+					? "PENDING(timeout)"
+					: null;
+		if (tracked) {
+			parts.push(`tracked=${tracked}`);
+		}
+	}
+	if (isObjectRecord(executeArtifact.anyInputWithdrawals)) {
+		const withdrawals = executeArtifact.anyInputWithdrawals;
+		const status =
+			typeof withdrawals.status === "string" ? withdrawals.status : "unknown";
+		const count = Array.isArray(withdrawals.withdrawals)
+			? withdrawals.withdrawals.length
+			: 0;
+		parts.push(`withdrawals=${status}:${count}`);
+	}
+	return parts.join(" ");
+}
+
 function buildSimulateResultSummary(
 	intentType: NearWorkflowIntent["type"],
 	simulateResult: unknown,
@@ -4707,30 +4765,36 @@ export function createNearWorkflowTools() {
 						: null;
 				const executeArtifact =
 					intent.type === "near.swap.intents" && executeDetails
-						? {
-								...(executeDetails as Record<string, unknown>),
-								broadcast:
-									intentsBroadcastDetails &&
-									typeof intentsBroadcastDetails.txHash === "string"
-										? intentsBroadcastDetails
-										: null,
-								depositAddress: effectiveIntentsDepositAddress ?? null,
-								depositMemo: effectiveIntentsDepositMemo ?? null,
-								anyInputWithdrawals,
-								statusTracking:
-									shouldTrackIntentsStatus && statusTracking
-										? statusTracking
-										: shouldTrackIntentsStatus
-											? {
-													timedOut: true,
-													attempts: 0,
-													latestStatus: null,
-													lastError:
-														"status tracking was requested but both depositAddress and correlationId are missing",
-													history: [],
-												}
+						? (() => {
+								const baseArtifact = {
+									...(executeDetails as Record<string, unknown>),
+									broadcast:
+										intentsBroadcastDetails &&
+										typeof intentsBroadcastDetails.txHash === "string"
+											? intentsBroadcastDetails
 											: null,
-							}
+									depositAddress: effectiveIntentsDepositAddress ?? null,
+									depositMemo: effectiveIntentsDepositMemo ?? null,
+									anyInputWithdrawals,
+									statusTracking:
+										shouldTrackIntentsStatus && statusTracking
+											? statusTracking
+											: shouldTrackIntentsStatus
+												? {
+														timedOut: true,
+														attempts: 0,
+														latestStatus: null,
+														lastError:
+															"status tracking was requested but both depositAddress and correlationId are missing",
+														history: [],
+													}
+												: null,
+								};
+								return {
+									...baseArtifact,
+									summaryLine: buildIntentsExecuteOneLineSummary(baseArtifact),
+								};
+							})()
 						: (executeDetails ?? null);
 				const executeSummaryText =
 					intent.type === "near.swap.intents"
