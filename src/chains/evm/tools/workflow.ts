@@ -471,7 +471,9 @@ function parseRequoteMaxAttemptsHint(text?: string): number | undefined {
 	return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-function parseRiskProfileHint(text?: string): PolymarketRiskProfile | undefined {
+function parseRiskProfileHint(
+	text?: string,
+): PolymarketRiskProfile | undefined {
 	if (!text?.trim()) return undefined;
 	if (
 		/(更|再|偏).{0,3}(保守|稳健|稳妥|低风险|谨慎点|safer|lower\s+risk|more\s+safe|more\s+conservative)|\b(conservative|defensive|safer)\b/i.test(
@@ -494,14 +496,15 @@ function parseRiskProfileHint(text?: string): PolymarketRiskProfile | undefined 
 	) {
 		return "balanced";
 	}
-	if (/(保守|稳健|稳妥|低风险|谨慎|谨慎点)/i.test(text))
-		return "conservative";
+	if (/(保守|稳健|稳妥|低风险|谨慎|谨慎点)/i.test(text)) return "conservative";
 	if (/(激进|冒进|进攻|高风险|快进)/i.test(text)) return "aggressive";
 	if (/(平衡|中性|普通|标准|常规|均衡)/i.test(text)) return "balanced";
 	return undefined;
 }
 
-function getRiskProfileDefaults(profile?: PolymarketRiskProfile): Partial<
+function getRiskProfileDefaults(
+	profile?: PolymarketRiskProfile,
+): Partial<
 	Pick<
 		WorkflowTradeIntent,
 		"maxSpreadBps" | "minDepthUsd" | "maxStakeUsd" | "minConfidence"
@@ -924,20 +927,15 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 		throw new Error("stakeUsd is required for evm.polymarket.btc5m.trade");
 	}
 	const maxEntryPriceRaw = params.maxEntryPrice ?? parsed.maxEntryPrice;
-	const riskProfileDefaults =
-		getRiskProfileDefaults(parsed.riskProfile) ?? {};
+	const riskProfileDefaults = getRiskProfileDefaults(parsed.riskProfile) ?? {};
 	const maxSpreadBpsRaw =
 		params.maxSpreadBps ??
 		parsed.maxSpreadBps ??
 		riskProfileDefaults.maxSpreadBps;
 	const minDepthUsdRaw =
-		params.minDepthUsd ??
-		parsed.minDepthUsd ??
-		riskProfileDefaults.minDepthUsd;
+		params.minDepthUsd ?? parsed.minDepthUsd ?? riskProfileDefaults.minDepthUsd;
 	const maxStakeUsdRaw =
-		params.maxStakeUsd ??
-		parsed.maxStakeUsd ??
-		riskProfileDefaults.maxStakeUsd;
+		params.maxStakeUsd ?? parsed.maxStakeUsd ?? riskProfileDefaults.maxStakeUsd;
 	const minConfidenceRaw =
 		params.minConfidence ??
 		parsed.minConfidence ??
@@ -1079,7 +1077,8 @@ function buildTradeSummaryLine(params: {
 	const parts = [`${params.intent.type}`, `${params.phase}=${params.status}`];
 	if (params.marketSlug) parts.push(`market=${params.marketSlug}`);
 	if (params.side) parts.push(`side=${params.side}`);
-	if (params.intent.riskProfile) parts.push(`risk=${params.intent.riskProfile}`);
+	if (params.intent.riskProfile)
+		parts.push(`risk=${params.intent.riskProfile}`);
 	if (params.entryPrice != null)
 		parts.push(`entry=${params.entryPrice.toFixed(4)}`);
 	if (params.shares != null) parts.push(`shares~=${params.shares.toFixed(4)}`);
@@ -1959,9 +1958,7 @@ export function createEvmWorkflowTools() {
 					const executeText = `Workflow executed: ${intent.type}${riskHint ? ` ${riskHint}` : ""}`;
 					rememberSession({ runId, network, intent });
 					return {
-						content: [
-							{ type: "text", text: executeText },
-						],
+						content: [{ type: "text", text: executeText }],
 						details: {
 							runId,
 							runMode,

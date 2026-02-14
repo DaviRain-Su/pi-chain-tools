@@ -428,13 +428,17 @@ function parseRunModeHint(text?: string): WorkflowRunMode | undefined {
 			text,
 		);
 	const hasAnalysis =
-		/(先分析|分析一下|先评估|先看分析|analysis|analyze|先看一下|先检查)/i.test(text);
+		/(先分析|分析一下|先评估|先看分析|analysis|analyze|先看一下|先检查)/i.test(
+			text,
+		);
 
 	if (hasSimulate && !hasExecute) return "simulate";
 	if (hasAnalysis && !hasExecute && !hasSimulate) return "analysis";
 	if (hasExecute && !hasSimulate && !hasAnalysis) return "execute";
 	if (hasSimulate && hasExecute) {
-		if (/(先模拟|先仿真|先dry\s*run|先试跑|先试一下|先预演|先演练)/i.test(text)) {
+		if (
+			/(先模拟|先仿真|先dry\s*run|先试跑|先试一下|先预演|先演练)/i.test(text)
+		) {
 			return "simulate";
 		}
 		return "execute";

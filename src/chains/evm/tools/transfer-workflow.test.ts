@@ -327,7 +327,8 @@ describe("w3rt_run_evm_transfer_workflow_v0", () => {
 			runId: "wf-evm-transfer-12",
 			runMode: "simulate",
 			network: "polygon",
-			intentText: "把 0.001 MATIC 转给 0x000000000000000000000000000000000000dEaD",
+			intentText:
+				"把 0.001 MATIC 转给 0x000000000000000000000000000000000000dEaD",
 		});
 		const token = (simulated.details as { confirmToken: string }).confirmToken;
 		await tool.execute("wf12", {

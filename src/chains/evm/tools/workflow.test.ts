@@ -921,9 +921,11 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 			stakeUsd: 20,
 			maxSpreadBps: 0.0001,
 		});
-		const simulateSummary = (result.details as {
-			artifacts?: { simulate?: { summary?: { riskHint?: string } } };
-		})?.artifacts?.simulate?.summary;
+		const simulateSummary = (
+			result.details as {
+				artifacts?: { simulate?: { summary?: { riskHint?: string } } };
+			}
+		)?.artifacts?.simulate?.summary;
 		expect(result.content[0]?.text).toContain("风险提示");
 		expect(simulateSummary?.riskHint).toContain("风险提示");
 		expect(simulateSummary?.riskHint).toContain("点差过宽");
@@ -939,9 +941,11 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 			stakeUsd: 20,
 			maxSpreadBps: 1000,
 		});
-		const simulateSummary = (result.details as {
-			artifacts?: { simulate?: { summary?: { riskHint?: string } } };
-		})?.artifacts?.simulate?.summary;
+		const simulateSummary = (
+			result.details as {
+				artifacts?: { simulate?: { summary?: { riskHint?: string } } };
+			}
+		)?.artifacts?.simulate?.summary;
 		expect(simulateSummary?.riskHint).toBeUndefined();
 	});
 

@@ -417,15 +417,18 @@ function parseRunModeHint(text?: string): WorkflowRunMode | undefined {
 		/(先模拟|模拟一下|先仿真|先dry\s*run|dry\s*run|simulate|先试跑|先试一下|先预演|先演练)/i.test(
 			text,
 		);
-	const hasAnalysis = /(先分析|分析一下|先评估|先看分析|analysis|analyze|先看一下|先检查)/i.test(
-		text,
-	);
+	const hasAnalysis =
+		/(先分析|分析一下|先评估|先看分析|analysis|analyze|先看一下|先检查)/i.test(
+			text,
+		);
 
 	if (hasSimulate && !hasExecute) return "simulate";
 	if (hasAnalysis && !hasExecute && !hasSimulate) return "analysis";
 	if (hasExecute && !hasSimulate && !hasAnalysis) return "execute";
 	if (hasSimulate && hasExecute) {
-		if (/(先模拟|先仿真|先dry\s*run|先试跑|先试一下|先预演|先演练)/i.test(text)) {
+		if (
+			/(先模拟|先仿真|先dry\s*run|先试跑|先试一下|先预演|先演练)/i.test(text)
+		) {
 			return "simulate";
 		}
 		return "execute";
@@ -2678,23 +2681,31 @@ function resolveDefiWorkflowRoute(
 		return "w3rt_run_sui_stablelayer_workflow_v0";
 	}
 
-	const runMode = parseRunMode(params.runMode ?? parseRunModeHint(params.intentText));
+	const runMode = parseRunMode(
+		params.runMode ?? parseRunModeHint(params.intentText),
+	);
 	const hasRoutingHints = Boolean(
 		intentType ||
-		params.stableCoinType?.trim() ||
-		params.amountUsdcRaw?.trim() ||
-		params.amountStableRaw?.trim() ||
-		params.clmmPositionId?.trim() ||
-		params.clmmPoolId?.trim() ||
-		params.positionNftId?.trim(),
+			params.stableCoinType?.trim() ||
+			params.amountUsdcRaw?.trim() ||
+			params.amountStableRaw?.trim() ||
+			params.clmmPositionId?.trim() ||
+			params.clmmPoolId?.trim() ||
+			params.positionNftId?.trim(),
 	);
 	if (runMode === "execute" && !hasRoutingHints) {
 		const explicitRunId = params.runId?.trim();
 		if (explicitRunId) {
 			const routedByRunId =
 				readWorkflowSession("w3rt_run_sui_workflow_v0", explicitRunId) ??
-				readWorkflowSession("w3rt_run_sui_stablelayer_workflow_v0", explicitRunId) ??
-				readWorkflowSession("w3rt_run_sui_cetus_farms_workflow_v0", explicitRunId);
+				readWorkflowSession(
+					"w3rt_run_sui_stablelayer_workflow_v0",
+					explicitRunId,
+				) ??
+				readWorkflowSession(
+					"w3rt_run_sui_cetus_farms_workflow_v0",
+					explicitRunId,
+				);
 			if (routedByRunId?.route) {
 				return routedByRunId.route;
 			}
