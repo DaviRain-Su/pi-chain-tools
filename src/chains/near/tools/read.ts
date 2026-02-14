@@ -101,6 +101,13 @@ type NearPortfolioValuationAsset = {
 	matchBy: "tokenId" | "symbol";
 };
 
+type NearPortfolioValuationCacheEntry = {
+	fetchedAtMs: number;
+	endpoint: string;
+	httpStatus: number;
+	tokens: NearIntentsToken[];
+};
+
 type NearRefDepositAsset = {
 	tokenId: string;
 	symbol: string;
@@ -378,6 +385,8 @@ const DEFAULT_NEAR_PORTFOLIO_FT_BY_NETWORK: Record<
 const DEFAULT_NEAR_INTENTS_API_BASE_URL = "https://1click.chaindefuser.com";
 const DEFAULT_NEAR_INTENTS_EXPLORER_API_BASE_URL =
 	"https://explorer.near-intents.org";
+const DEFAULT_NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS = 30_000;
+const MAX_NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS = 3_600_000;
 const NEAR_INTENTS_EXPLORER_STATUS_VALUES = [
 	"FAILED",
 	"INCOMPLETE_DEPOSIT",
@@ -386,6 +395,11 @@ const NEAR_INTENTS_EXPLORER_STATUS_VALUES = [
 	"REFUNDED",
 	"SUCCESS",
 ] as const;
+
+const nearPortfolioValuationTokenCache = new Map<
+	string,
+	NearPortfolioValuationCacheEntry
+>();
 const NEAR_INTENTS_EXPLORER_CHAIN_VALUES = [
 	"near",
 	"eth",
@@ -1076,6 +1090,22 @@ function parseOptionalNonNegativeNumber(
 	return value;
 }
 
+function parsePortfolioValuationCacheTtlMs(value: number | undefined): number {
+	if (value == null) {
+		const envValue = process.env.NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS?.trim();
+		if (!envValue) return DEFAULT_NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS;
+		const parsed = Number(envValue);
+		if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+			return DEFAULT_NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS;
+		}
+		return Math.min(parsed, MAX_NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS);
+	}
+	if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+		throw new Error("valuationCacheTtlMs must be an integer >= 0");
+	}
+	return Math.min(Math.floor(value), MAX_NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS);
+}
+
 function parseOptionalIsoDatetime(
 	value: string | undefined,
 	fieldName: string,
@@ -1572,6 +1602,57 @@ function resolveNearIntentsTokenByAssetId(
 	tokens: NearIntentsToken[],
 ): NearIntentsToken | null {
 	return tokens.find((token) => token.assetId === assetId) ?? null;
+}
+
+async function queryNearPortfolioValuationTokens(params: {
+	baseUrl: string;
+	headers: Record<string, string>;
+	cacheTtlMs: number;
+}): Promise<{
+	endpoint: string;
+	httpStatus: number;
+	tokens: NearIntentsToken[];
+	cacheHit: boolean;
+	cacheAgeMs: number | null;
+}> {
+	const now = Date.now();
+	if (params.cacheTtlMs > 0) {
+		const cached = nearPortfolioValuationTokenCache.get(params.baseUrl);
+		if (cached) {
+			const ageMs = now - cached.fetchedAtMs;
+			if (ageMs >= 0 && ageMs <= params.cacheTtlMs) {
+				return {
+					endpoint: cached.endpoint,
+					httpStatus: cached.httpStatus,
+					tokens: cached.tokens,
+					cacheHit: true,
+					cacheAgeMs: ageMs,
+				};
+			}
+		}
+	}
+	const response = await fetchNearIntentsJson<NearIntentsToken[]>({
+		baseUrl: params.baseUrl,
+		path: "/v0/tokens",
+		method: "GET",
+		headers: params.headers,
+	});
+	const tokens = normalizeNearIntentsTokens(response.payload);
+	if (params.cacheTtlMs > 0) {
+		nearPortfolioValuationTokenCache.set(params.baseUrl, {
+			fetchedAtMs: now,
+			endpoint: response.url,
+			httpStatus: response.status,
+			tokens,
+		});
+	}
+	return {
+		endpoint: response.url,
+		httpStatus: response.status,
+		tokens,
+		cacheHit: false,
+		cacheAgeMs: null,
+	};
 }
 
 function formatRefAssetAmount(params: {
@@ -2285,6 +2366,12 @@ export function createNearReadTools() {
 							"Optional JWT for valuation price feed (fallback env NEAR_INTENTS_JWT).",
 					}),
 				),
+				valuationCacheTtlMs: Type.Optional(
+					Type.Number({
+						description:
+							"Valuation token-price cache TTL in ms (default 30000; 0 disables cache).",
+					}),
+				),
 				network: nearNetworkSchema(),
 				rpcUrl: Type.Optional(
 					Type.String({ description: "Override NEAR JSON-RPC endpoint URL" }),
@@ -2296,6 +2383,9 @@ export function createNearReadTools() {
 				const endpoint = getNearRpcEndpoint(network, params.rpcUrl);
 				const includeZero = params.includeZeroBalances === true;
 				const includeValuationUsd = params.includeValuationUsd !== false;
+				const valuationCacheTtlMs = parsePortfolioValuationCacheTtlMs(
+					params.valuationCacheTtlMs,
+				);
 				const baseFtContractIds = resolvePortfolioFtContracts({
 					network,
 					ftContractIds: params.ftContractIds,
@@ -2447,6 +2537,11 @@ export function createNearReadTools() {
 					pricedWalletAssetCount: 0,
 					totalWalletUsd: null as number | null,
 					assets: [] as NearPortfolioValuationAsset[],
+					cache: {
+						ttlMs: valuationCacheTtlMs,
+						hit: false,
+						ageMs: null as number | null,
+					},
 					error: null as string | null,
 				};
 				if (includeValuationUsd) {
@@ -2458,18 +2553,17 @@ export function createNearReadTools() {
 							apiKey: params.valuationApiKey,
 							jwt: params.valuationJwt,
 						});
-						const tokenResponse = await fetchNearIntentsJson<
-							NearIntentsToken[]
-						>({
+						const tokenResponse = await queryNearPortfolioValuationTokens({
 							baseUrl,
-							path: "/v0/tokens",
-							method: "GET",
 							headers,
+							cacheTtlMs: valuationCacheTtlMs,
 						});
-						const tokens = normalizeNearIntentsTokens(tokenResponse.payload);
-						valuation.endpoint = tokenResponse.url;
-						valuation.httpStatus = tokenResponse.status;
+						const tokens = tokenResponse.tokens;
+						valuation.endpoint = tokenResponse.endpoint;
+						valuation.httpStatus = tokenResponse.httpStatus;
 						valuation.tokenCount = tokens.length;
+						valuation.cache.hit = tokenResponse.cacheHit;
+						valuation.cache.ageMs = tokenResponse.cacheAgeMs;
 						const priceIndex = buildNearPortfolioPriceIndex(tokens);
 						valuation.walletAssetCount = assets.filter((asset) =>
 							hasPositiveRawAmount(asset.rawAmount),
@@ -2727,6 +2821,7 @@ export function createNearReadTools() {
 						discoveryFailures: discovered.failures,
 						includeZeroBalances: includeZero,
 						includeValuationUsd,
+						valuationCacheTtlMs,
 						totalYoctoNear: totalYoctoNear.toString(),
 						availableYoctoNear: availableYoctoNear.toString(),
 						lockedYoctoNear: lockedYoctoNear.toString(),

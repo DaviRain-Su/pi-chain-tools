@@ -430,6 +430,96 @@ describe("near_getPortfolio", () => {
 		expect(valuation?.totalWalletUsd).toBeCloseTo(6.2345, 6);
 	});
 
+	it("reuses valuation token feed within cache ttl", async () => {
+		mockFetchJsonOnce(200, [
+			{
+				assetId: "nep141:wrap.near",
+				decimals: 24,
+				blockchain: "near",
+				symbol: "NEAR",
+				price: 5,
+				priceUpdatedAt: "2026-01-01T00:00:00.000Z",
+				contractAddress: "wrap.near",
+			},
+			{
+				assetId: "nep141:usdc.fakes.near",
+				decimals: 6,
+				blockchain: "near",
+				symbol: "USDC",
+				price: 1,
+				priceUpdatedAt: "2026-01-01T00:00:00.000Z",
+				contractAddress: "usdc.fakes.near",
+			},
+		]);
+		runtimeMocks.callNearRpc.mockImplementation(async ({ params }) => {
+			if (!params || typeof params !== "object") {
+				throw new Error("invalid params");
+			}
+			if (params.request_type === "view_account") {
+				return {
+					amount: "1000000000000000000000000",
+					block_hash: "4471",
+					block_height: 931,
+					code_hash: "11111111111111111111111111111111",
+					locked: "0",
+					storage_paid_at: 0,
+					storage_usage: 381,
+				};
+			}
+			if (params.method_name === "ft_balance_of") {
+				return {
+					block_hash: "4472",
+					block_height: 932,
+					logs: [],
+					result: encodeJsonResult("1000000"),
+				};
+			}
+			if (params.method_name === "ft_metadata") {
+				return {
+					block_hash: "4473",
+					block_height: 933,
+					logs: [],
+					result: encodeJsonResult({
+						decimals: 6,
+						symbol: "USDC",
+					}),
+				};
+			}
+			throw new Error("unexpected callNearRpc");
+		});
+		runtimeMocks.formatNearAmount.mockReturnValue("1");
+		runtimeMocks.formatTokenAmount.mockImplementation((value: string) => value);
+
+		const tool = getTool("near_getPortfolio");
+		const first = await tool.execute("near-read-portfolio-cache-1", {
+			accountId: "alice.near",
+			network: "mainnet",
+			ftContractIds: ["usdc.fakes.near"],
+			valuationApiBaseUrl: "https://cache-test.chaindefuser.example",
+			valuationCacheTtlMs: 60000,
+		});
+		const second = await tool.execute("near-read-portfolio-cache-2", {
+			accountId: "alice.near",
+			network: "mainnet",
+			ftContractIds: ["usdc.fakes.near"],
+			valuationApiBaseUrl: "https://cache-test.chaindefuser.example",
+			valuationCacheTtlMs: 60000,
+		});
+
+		expect(restMocks.fetch).toHaveBeenCalledTimes(1);
+		const firstValuation = (
+			first.details as { valuation?: { cache?: { hit?: boolean } } }
+		).valuation;
+		const secondValuation = (
+			second.details as {
+				valuation?: { cache?: { hit?: boolean; ageMs?: number | null } };
+			}
+		).valuation;
+		expect(firstValuation?.cache?.hit).toBe(false);
+		expect(secondValuation?.cache?.hit).toBe(true);
+		expect(secondValuation?.cache?.ageMs).not.toBeNull();
+	});
+
 	it("auto-discovers DeFi tokens from Ref/Burrow into portfolio query", async () => {
 		burrowMocks.fetchBurrowAccountAllPositions.mockResolvedValue({
 			account_id: "alice.near",
@@ -564,17 +654,6 @@ describe("near_getPortfolio", () => {
 				burrowCollateral: [],
 				burrowBorrowed: [],
 			},
-			walletNonZeroFtAssets: [
-				{
-					tokenId: "aurora",
-				},
-				{
-					tokenId: "usdc.fakes.near",
-				},
-				{
-					tokenId: "usdt.tether-token.near",
-				},
-			],
 			defiExposure: {
 				refDeposits: [
 					{
@@ -595,6 +674,18 @@ describe("near_getPortfolio", () => {
 				"usdt.tether-token.near",
 			],
 		});
+		const walletNonZero = (
+			result.details as {
+				walletNonZeroFtAssets?: Array<{ tokenId: string }>;
+			}
+		).walletNonZeroFtAssets;
+		expect(walletNonZero).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ tokenId: "aurora" }),
+				expect.objectContaining({ tokenId: "usdc.fakes.near" }),
+				expect.objectContaining({ tokenId: "usdt.tether-token.near" }),
+			]),
+		);
 	});
 
 	it("keeps discovered DeFi tokens even when wallet balance is zero", async () => {
