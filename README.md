@@ -526,12 +526,23 @@ If your host agent supports ACP-style tool exposure, use capability discovery fi
   - signer requirements and env keys
   - natural-language examples
   - tool-group summary (`read/compose/execute/rpc`)
+- Filtering:
+  - `maxRisk=low|medium|high` (default `high`)
+  - `executableOnly=true` (only executable workflow capabilities)
+
+ACP handshake tool:
+
+- Tool name: `w3rt_getCapabilityHandshake_v0`
+- Purpose: protocol-level handshake/negotiation payload (`schema = w3rt.capability.handshake.v1`)
+- Includes protocol info (`acp-tools`), server version, capability digest, and optional embedded capability catalog
 
 Natural language examples:
 
 - `列出你支持的所有链和工作流能力`
 - `只看 EVM 的能力，不要示例`
 - `给我 OpenClaw 可用的能力清单`
+- `给我 ACP 握手信息并附带能力清单`
+- `只返回中低风险且可执行的能力清单`
 
 ### 10) Troubleshooting
 

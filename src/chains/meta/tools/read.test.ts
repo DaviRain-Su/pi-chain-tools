@@ -55,17 +55,15 @@ type ReadTool = {
 	): Promise<{ content: { type: string; text: string }[]; details?: unknown }>;
 };
 
-function getTool(): ReadTool {
-	const tool = createMetaReadTools().find(
-		(entry) => entry.name === "w3rt_getCapabilities_v0",
-	);
-	if (!tool) throw new Error("w3rt_getCapabilities_v0 not found");
+function getTool(name: string): ReadTool {
+	const tool = createMetaReadTools().find((entry) => entry.name === name);
+	if (!tool) throw new Error(`${name} not found`);
 	return tool as unknown as ReadTool;
 }
 
 describe("meta capability tools", () => {
 	it("returns all chains by default", async () => {
-		const tool = getTool();
+		const tool = getTool("w3rt_getCapabilities_v0");
 		const result = await tool.execute("meta-1", {});
 		expect(result.content[0]?.text).toContain("ACP capability catalog");
 		expect(result.details).toMatchObject({
@@ -74,6 +72,11 @@ describe("meta capability tools", () => {
 				chain: "all",
 				includeExamples: true,
 				includeToolNames: true,
+				executableOnly: false,
+				maxRisk: "high",
+			},
+			digest: {
+				chainCount: 4,
 			},
 			chains: expect.arrayContaining([
 				expect.objectContaining({ chain: "solana" }),
@@ -84,38 +87,87 @@ describe("meta capability tools", () => {
 		});
 	});
 
-	it("supports chain filter and hides examples/tool names", async () => {
-		const tool = getTool();
+	it("filters by maxRisk and hides examples/tool names", async () => {
+		const tool = getTool("w3rt_getCapabilities_v0");
 		const result = await tool.execute("meta-2", {
-			chain: "evm",
+			maxRisk: "medium",
 			includeExamples: false,
 			includeToolNames: false,
 		});
-		expect(result.content[0]?.text).toContain("evm");
+		expect(result.content[0]?.text).toContain("maxRisk=medium");
 		expect(result.details).toMatchObject({
 			query: {
-				chain: "evm",
+				maxRisk: "medium",
 				includeExamples: false,
 				includeToolNames: false,
 			},
-			chains: [
+			chains: expect.not.arrayContaining([
+				expect.objectContaining({ chain: "evm" }),
+			]),
+		});
+		expect(result.details).toMatchObject({
+			chains: expect.arrayContaining([
 				expect.objectContaining({
-					chain: "evm",
+					chain: "solana",
 					workflows: [
 						expect.objectContaining({
 							nlExamples: [],
 						}),
 					],
 				}),
-			],
-			toolsets: [
+			]),
+			toolsets: expect.arrayContaining([
 				expect.objectContaining({
-					chain: "evm",
+					chain: "solana",
 					groups: expect.arrayContaining([
 						expect.objectContaining({ tools: [] }),
 					]),
 				}),
-			],
+			]),
+		});
+	});
+
+	it("returns ACP handshake with embedded capabilities by default", async () => {
+		const tool = getTool("w3rt_getCapabilityHandshake_v0");
+		const result = await tool.execute("meta-3", {
+			clientName: "openclaw-agent",
+			clientVersion: "0.1.0",
+		});
+		expect(result.content[0]?.text).toContain("ACP handshake ready");
+		expect(result.details).toMatchObject({
+			schema: "w3rt.capability.handshake.v1",
+			protocol: {
+				name: "acp-tools",
+				handshakeTool: "w3rt_getCapabilityHandshake_v0",
+				discoveryTool: "w3rt_getCapabilities_v0",
+			},
+			client: {
+				name: "openclaw-agent",
+				version: "0.1.0",
+			},
+			capabilityDigest: {
+				chainCount: 4,
+			},
+			capabilities: expect.objectContaining({
+				schema: "w3rt.capabilities.v1",
+			}),
+		});
+	});
+
+	it("returns handshake without embedded capabilities when disabled", async () => {
+		const tool = getTool("w3rt_getCapabilityHandshake_v0");
+		const result = await tool.execute("meta-4", {
+			includeCapabilities: false,
+			chain: "evm",
+			executableOnly: true,
+		});
+		expect(result.details).toMatchObject({
+			schema: "w3rt.capability.handshake.v1",
+			query: {
+				chain: "evm",
+				executableOnly: true,
+			},
+			capabilities: undefined,
 		});
 	});
 });

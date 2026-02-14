@@ -7,12 +7,21 @@ import { createSolanaWorkflowToolset } from "../../solana/workflow-toolset.js";
 import { createSuiToolset } from "../../sui/toolset.js";
 
 type SupportedChain = "solana" | "sui" | "near" | "evm";
+type RiskLevel = "low" | "medium" | "high";
 
 type WorkflowCapability = {
 	tool: string;
 	description: string;
 	intentTypes: string[];
 	nlExamples: string[];
+	execution: {
+		executable: boolean;
+		requiresSigner: boolean;
+		requiresMainnetConfirmation: boolean;
+		requiresConfirmToken: boolean;
+		defaultRunMode: "analysis" | "simulate" | "execute";
+		riskLevel: RiskLevel;
+	};
 };
 
 type ChainCapability = {
@@ -36,6 +45,19 @@ type ToolsetSummary = {
 	chain: string;
 	groups: ToolGroupSummary[];
 };
+
+type CapabilityQuery = {
+	chain: SupportedChain | "all";
+	includeExamples: boolean;
+	includeToolNames: boolean;
+	executableOnly: boolean;
+	maxRisk: RiskLevel;
+};
+
+const CAPABILITY_SCHEMA = "w3rt.capabilities.v1";
+const HANDSHAKE_SCHEMA = "w3rt.capability.handshake.v1";
+const SERVER_NAME = "pi-chain-tools";
+const SERVER_VERSION = "0.1.0";
 
 const CHAIN_CAPABILITIES: ChainCapability[] = [
 	{
@@ -72,6 +94,14 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 					"把 0.01 SOL 转给 xxx，先模拟",
 					"把 0.01 SOL 换成 USDC，先分析",
 				],
+				execution: {
+					executable: true,
+					requiresSigner: true,
+					requiresMainnetConfirmation: true,
+					requiresConfirmToken: true,
+					defaultRunMode: "analysis",
+					riskLevel: "medium",
+				},
 			},
 		],
 	},
@@ -107,7 +137,18 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 					"sui.farms.cetus.stake",
 					"sui.stablelayer.mint",
 				],
-				nlExamples: ["把 0.01 SUI 换成 USDC，先模拟", "取消刚才这笔，先分析"],
+				nlExamples: [
+					"把 0.01 SUI 换成 USDC，先模拟",
+					"继续执行刚才这笔，确认主网执行",
+				],
+				execution: {
+					executable: true,
+					requiresSigner: true,
+					requiresMainnetConfirmation: true,
+					requiresConfirmToken: true,
+					defaultRunMode: "analysis",
+					riskLevel: "medium",
+				},
 			},
 		],
 	},
@@ -148,6 +189,14 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 					"把 0.01 NEAR 换成 USDC，先模拟",
 					"继续执行刚才这笔，确认主网执行",
 				],
+				execution: {
+					executable: true,
+					requiresSigner: true,
+					requiresMainnetConfirmation: true,
+					requiresConfirmToken: true,
+					defaultRunMode: "analysis",
+					riskLevel: "medium",
+				},
 			},
 		],
 	},
@@ -185,6 +234,14 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 					"买 BTC 5分钟涨 20 USDC，先模拟",
 					"取消我 BTC 5m 所有挂单，先模拟",
 				],
+				execution: {
+					executable: true,
+					requiresSigner: true,
+					requiresMainnetConfirmation: true,
+					requiresConfirmToken: true,
+					defaultRunMode: "analysis",
+					riskLevel: "high",
+				},
 			},
 		],
 	},
@@ -222,16 +279,72 @@ function parseSupportedChain(value?: string): SupportedChain | "all" {
 	return "all";
 }
 
+function parseRiskLevel(value?: string): RiskLevel {
+	if (value === "low" || value === "medium" || value === "high") return value;
+	return "high";
+}
+
+function riskRank(level: RiskLevel): number {
+	if (level === "low") return 1;
+	if (level === "medium") return 2;
+	return 3;
+}
+
+function passesRiskFilter(level: RiskLevel, maxRisk: RiskLevel): boolean {
+	return riskRank(level) <= riskRank(maxRisk);
+}
+
+function parseCapabilityQuery(params: {
+	chain?: string;
+	includeExamples?: boolean;
+	includeToolNames?: boolean;
+	executableOnly?: boolean;
+	maxRisk?: string;
+}): CapabilityQuery {
+	return {
+		chain: parseSupportedChain(params.chain),
+		includeExamples: params.includeExamples !== false,
+		includeToolNames: params.includeToolNames !== false,
+		executableOnly: params.executableOnly === true,
+		maxRisk: parseRiskLevel(params.maxRisk),
+	};
+}
+
+function filterCapabilities(query: CapabilityQuery): ChainCapability[] {
+	const chainScoped =
+		query.chain === "all"
+			? CHAIN_CAPABILITIES
+			: CHAIN_CAPABILITIES.filter((entry) => entry.chain === query.chain);
+	const workflowsFiltered = chainScoped
+		.map((chain) => ({
+			...chain,
+			workflows: chain.workflows.filter((workflow) => {
+				if (!passesRiskFilter(workflow.execution.riskLevel, query.maxRisk)) {
+					return false;
+				}
+				if (query.executableOnly && !workflow.execution.executable) {
+					return false;
+				}
+				return true;
+			}),
+		}))
+		.filter((chain) => chain.workflows.length > 0);
+	return workflowsFiltered;
+}
+
 function summarizeCapabilitiesText(params: {
 	capabilities: ChainCapability[];
 	toolsets: ToolsetSummary[];
-	includeExamples: boolean;
-	includeToolNames: boolean;
+	query: CapabilityQuery;
 }): string {
 	const lines = [
-		`ACP capability catalog: chains=${params.capabilities.length}`,
+		`ACP capability catalog: chains=${params.capabilities.length} maxRisk=${params.query.maxRisk} executableOnly=${params.query.executableOnly}`,
 		"This extension can be exposed to OpenClaw/ACP as tool-based agent capabilities.",
 	];
+	if (params.capabilities.length === 0) {
+		lines.push("No capabilities matched current filters.");
+		return lines.join("\n");
+	}
 	for (const [index, chain] of params.capabilities.entries()) {
 		const workflowCount = chain.workflows.length;
 		lines.push(
@@ -242,7 +355,10 @@ function summarizeCapabilitiesText(params: {
 		for (const workflow of chain.workflows) {
 			lines.push(`   workflow: ${workflow.tool} (${workflow.description})`);
 			lines.push(`   intents: ${workflow.intentTypes.join(", ")}`);
-			if (params.includeExamples) {
+			lines.push(
+				`   execution: risk=${workflow.execution.riskLevel} signer=${workflow.execution.requiresSigner} confirmMainnet=${workflow.execution.requiresMainnetConfirmation} confirmToken=${workflow.execution.requiresConfirmToken}`,
+			);
+			if (params.query.includeExamples) {
 				lines.push(`   examples: ${workflow.nlExamples.join(" / ")}`);
 			}
 		}
@@ -255,7 +371,7 @@ function summarizeCapabilitiesText(params: {
 				0,
 			);
 			lines.push(`   tools: ${toolCount} total`);
-			if (params.includeToolNames) {
+			if (params.query.includeToolNames) {
 				for (const group of summary.groups) {
 					lines.push(
 						`   ${group.name}: ${group.tools.length ? group.tools.join(", ") : "(none)"}`,
@@ -268,6 +384,84 @@ function summarizeCapabilitiesText(params: {
 		"Mainnet execute remains guarded by confirmMainnet=true + confirmToken in workflow tools.",
 	);
 	return lines.join("\n");
+}
+
+function buildCapabilityDetails(query: CapabilityQuery) {
+	const capabilities = filterCapabilities(query);
+	const toolsets = collectToolsetSummaries()
+		.filter((entry) =>
+			capabilities.some((chainEntry) => chainEntry.chain === entry.chain),
+		)
+		.map((toolset) => ({
+			chain: toolset.chain,
+			groups: toolset.groups.map((group) => ({
+				name: group.name,
+				toolCount: group.toolCount,
+				tools: query.includeToolNames ? group.tools : [],
+			})),
+		}));
+
+	const publicChains = capabilities.map((entry) => ({
+		...entry,
+		workflows: entry.workflows.map((workflow) => ({
+			...workflow,
+			nlExamples: query.includeExamples ? workflow.nlExamples : [],
+		})),
+	}));
+
+	const digest = {
+		chainCount: capabilities.length,
+		workflowCount: capabilities.reduce(
+			(total, chain) => total + chain.workflows.length,
+			0,
+		),
+		intentCount: capabilities.reduce(
+			(total, chain) =>
+				total +
+				chain.workflows.reduce(
+					(workflowTotal, workflow) =>
+						workflowTotal + workflow.intentTypes.length,
+					0,
+				),
+			0,
+		),
+		chains: capabilities.map((entry) => entry.chain),
+	};
+
+	return {
+		capabilities,
+		toolsets,
+		publicChains,
+		digest,
+		query,
+	};
+}
+
+function capabilityDetailsPayload(
+	catalog: ReturnType<typeof buildCapabilityDetails>,
+) {
+	return {
+		schema: CAPABILITY_SCHEMA,
+		generatedAt: new Date().toISOString(),
+		integration: {
+			mode: "acp-tools",
+			target: ["pi", "openclaw"],
+			exposable: true,
+		},
+		query: catalog.query,
+		digest: catalog.digest,
+		chains: catalog.publicChains,
+		toolsets: catalog.toolsets,
+	};
+}
+
+function handshakeText(params: {
+	clientName: string | null;
+	digest: ReturnType<typeof buildCapabilityDetails>["digest"];
+	includesCapabilities: boolean;
+}): string {
+	const clientText = params.clientName ? ` client=${params.clientName}` : "";
+	return `ACP handshake ready:${clientText} server=${SERVER_NAME}@${SERVER_VERSION} chains=${params.digest.chainCount} workflows=${params.digest.workflowCount} intents=${params.digest.intentCount} includeCapabilities=${params.includesCapabilities}`;
 }
 
 export function createMetaReadTools() {
@@ -289,56 +483,102 @@ export function createMetaReadTools() {
 				),
 				includeExamples: Type.Optional(Type.Boolean()),
 				includeToolNames: Type.Optional(Type.Boolean()),
+				executableOnly: Type.Optional(Type.Boolean()),
+				maxRisk: Type.Optional(
+					Type.Union([
+						Type.Literal("low"),
+						Type.Literal("medium"),
+						Type.Literal("high"),
+					]),
+				),
 			}),
 			async execute(_toolCallId, params) {
-				const chain = parseSupportedChain(params.chain);
-				const includeExamples = params.includeExamples !== false;
-				const includeToolNames = params.includeToolNames !== false;
-				const capabilities =
-					chain === "all"
-						? CHAIN_CAPABILITIES
-						: CHAIN_CAPABILITIES.filter((entry) => entry.chain === chain);
-				const toolsets = collectToolsetSummaries().filter((entry) =>
-					capabilities.some((chainEntry) => chainEntry.chain === entry.chain),
-				);
-				const details = {
-					schema: "w3rt.capabilities.v1",
-					generatedAt: new Date().toISOString(),
-					integration: {
-						mode: "acp-tools",
-						target: ["pi", "openclaw"],
-						exposable: true,
-					},
-					query: {
-						chain,
-						includeExamples,
-						includeToolNames,
-					},
-					chains: capabilities.map((entry) => ({
-						...entry,
-						workflows: entry.workflows.map((workflow) => ({
-							...workflow,
-							nlExamples: includeExamples ? workflow.nlExamples : [],
-						})),
-					})),
-					toolsets: toolsets.map((toolset) => ({
-						chain: toolset.chain,
-						groups: toolset.groups.map((group) => ({
-							name: group.name,
-							toolCount: group.toolCount,
-							tools: includeToolNames ? group.tools : [],
-						})),
-					})),
-				};
+				const query = parseCapabilityQuery(params);
+				const catalog = buildCapabilityDetails(query);
+				const details = capabilityDetailsPayload(catalog);
 				return {
 					content: [
 						{
 							type: "text",
 							text: summarizeCapabilitiesText({
-								capabilities,
-								toolsets,
-								includeExamples,
-								includeToolNames,
+								capabilities: catalog.capabilities,
+								toolsets: catalog.toolsets,
+								query,
+							}),
+						},
+					],
+					details,
+				};
+			},
+		}),
+		defineTool({
+			name: "w3rt_getCapabilityHandshake_v0",
+			label: "w3rt Get Capability Handshake v0",
+			description:
+				"ACP handshake/negotiation payload with protocol metadata and optional embedded capability catalog.",
+			parameters: Type.Object({
+				clientName: Type.Optional(Type.String()),
+				clientVersion: Type.Optional(Type.String()),
+				chain: Type.Optional(
+					Type.Union([
+						Type.Literal("all"),
+						Type.Literal("solana"),
+						Type.Literal("sui"),
+						Type.Literal("near"),
+						Type.Literal("evm"),
+					]),
+				),
+				includeCapabilities: Type.Optional(Type.Boolean()),
+				includeExamples: Type.Optional(Type.Boolean()),
+				includeToolNames: Type.Optional(Type.Boolean()),
+				executableOnly: Type.Optional(Type.Boolean()),
+				maxRisk: Type.Optional(
+					Type.Union([
+						Type.Literal("low"),
+						Type.Literal("medium"),
+						Type.Literal("high"),
+					]),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const query = parseCapabilityQuery(params);
+				const includeCapabilities = params.includeCapabilities !== false;
+				const catalog = buildCapabilityDetails(query);
+				const capabilities = includeCapabilities
+					? capabilityDetailsPayload(catalog)
+					: undefined;
+				const details = {
+					schema: HANDSHAKE_SCHEMA,
+					generatedAt: new Date().toISOString(),
+					protocol: {
+						name: "acp-tools",
+						version: "v0",
+						discoveryTool: "w3rt_getCapabilities_v0",
+						handshakeTool: "w3rt_getCapabilityHandshake_v0",
+						summarySchema: "w3rt.workflow.summary.v1",
+						capabilitiesSchema: CAPABILITY_SCHEMA,
+					},
+					server: {
+						name: SERVER_NAME,
+						version: SERVER_VERSION,
+						targets: ["pi", "openclaw"],
+					},
+					client: {
+						name: params.clientName?.trim() || null,
+						version: params.clientVersion?.trim() || null,
+					},
+					query,
+					capabilityDigest: catalog.digest,
+					capabilities,
+				};
+				return {
+					content: [
+						{
+							type: "text",
+							text: handshakeText({
+								clientName: params.clientName?.trim() || null,
+								digest: catalog.digest,
+								includesCapabilities: includeCapabilities,
 							}),
 						},
 					],
