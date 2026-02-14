@@ -69,17 +69,56 @@ type ExecuteTool = {
 	): Promise<{ content: { type: string; text: string }[]; details?: unknown }>;
 };
 
+const ORIGINAL_FETCH = global.fetch;
+
 function getTool(name: string): ExecuteTool {
 	const tool = createEvmExecuteTools().find((entry) => entry.name === name);
 	if (!tool) throw new Error(`${name} not found`);
 	return tool as unknown as ExecuteTool;
 }
 
+function mockJsonRpcFetch() {
+	const txHash = `0x${"1".repeat(64)}`;
+	const fetchMock = vi.fn(
+		async (_url: string | URL | Request, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body ?? "{}")) as {
+				id?: string | number;
+				method?: string;
+			};
+			const method = body.method ?? "";
+			let result = "0x0";
+			if (method === "eth_getTransactionCount") result = "0x2";
+			if (method === "eth_gasPrice") result = "0x3b9aca00";
+			if (method === "eth_estimateGas") result = "0x5208";
+			if (method === "eth_sendRawTransaction") result = txHash;
+			return {
+				ok: true,
+				status: 200,
+				statusText: "OK",
+				text: async () =>
+					JSON.stringify({
+						jsonrpc: "2.0",
+						id: body.id ?? 1,
+						result,
+					}),
+			} as Response;
+		},
+	);
+	global.fetch = fetchMock as unknown as typeof fetch;
+	return {
+		fetchMock,
+		txHash,
+	};
+}
+
 beforeEach(() => {
 	vi.clearAllMocks();
+	global.fetch = ORIGINAL_FETCH;
 	process.env.POLYMARKET_PRIVATE_KEY =
 		"0x59c6995e998f97a5a0044976f6b5d8f8a3dfcc5f4f2f72f5f6f4f0f6f8f9f0a1";
 	process.env.POLYMARKET_FUNDER = "0x0000000000000000000000000000000000000001";
+	process.env.EVM_PRIVATE_KEY =
+		"0x59c6995e998f97a5a0044976f6b5d8f8a3dfcc5f4f2f72f5f6f4f0f6f8f9f0a1";
 	clobMocks.createOrDeriveApiKey.mockResolvedValue({
 		key: "k",
 		secret: "s",
@@ -117,6 +156,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	global.fetch = ORIGINAL_FETCH;
+	process.env.EVM_PRIVATE_KEY = undefined;
 	process.env.POLYMARKET_PRIVATE_KEY = undefined;
 	process.env.POLYMARKET_FUNDER = undefined;
 });
@@ -238,5 +279,82 @@ describe("evm execute tools", () => {
 				dryRun: true,
 			}),
 		).rejects.toThrow("Provide cancelAll=true");
+	});
+
+	it("previews native transfer in dryRun", async () => {
+		const tool = getTool("evm_transferNative");
+		const result = await tool.execute("t5", {
+			network: "polygon",
+			toAddress: "0x000000000000000000000000000000000000dEaD",
+			amountNative: 0.01,
+		});
+		expect(result.content[0]?.text).toContain("transfer preview");
+		expect(result.details).toMatchObject({
+			dryRun: true,
+			amountWei: "10000000000000000",
+			network: "polygon",
+		});
+	});
+
+	it("submits native transfer when confirmed", async () => {
+		const { fetchMock, txHash } = mockJsonRpcFetch();
+		const tool = getTool("evm_transferNative");
+		const result = await tool.execute("t6", {
+			network: "polygon",
+			toAddress: "0x000000000000000000000000000000000000dEaD",
+			amountNative: 0.001,
+			dryRun: false,
+			confirmMainnet: true,
+		});
+		expect(result.content[0]?.text).toContain("transfer submitted");
+		expect(result.details).toMatchObject({
+			dryRun: false,
+			txHash,
+		});
+		const methods = fetchMock.mock.calls.map((call) => {
+			const body = JSON.parse(String(call[1]?.body ?? "{}")) as {
+				method?: string;
+			};
+			return body.method;
+		});
+		expect(methods).toContain("eth_sendRawTransaction");
+	});
+
+	it("submits erc20 transfer when confirmed", async () => {
+		const { fetchMock, txHash } = mockJsonRpcFetch();
+		const tool = getTool("evm_transferErc20");
+		const result = await tool.execute("t7", {
+			network: "polygon",
+			tokenAddress: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+			toAddress: "0x000000000000000000000000000000000000dEaD",
+			amountRaw: "1000000",
+			dryRun: false,
+			confirmMainnet: true,
+		});
+		expect(result.content[0]?.text).toContain("ERC20 transfer submitted");
+		expect(result.details).toMatchObject({
+			dryRun: false,
+			txHash,
+			amountRaw: "1000000",
+		});
+		const methods = fetchMock.mock.calls.map((call) => {
+			const body = JSON.parse(String(call[1]?.body ?? "{}")) as {
+				method?: string;
+			};
+			return body.method;
+		});
+		expect(methods).toContain("eth_sendRawTransaction");
+	});
+
+	it("blocks mainnet transfer execute without confirmMainnet", async () => {
+		const tool = getTool("evm_transferNative");
+		await expect(
+			tool.execute("t8", {
+				network: "polygon",
+				toAddress: "0x000000000000000000000000000000000000dEaD",
+				amountNative: 0.001,
+				dryRun: false,
+			}),
+		).rejects.toThrow("Mainnet transfer blocked");
 	});
 });

@@ -57,6 +57,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `evm_polymarketPlaceOrder` (CLOB order submit, default `dryRun=true`)
 - `execute`: `evm_polymarketGetOpenOrders` (authenticated open-order list)
 - `execute`: `evm_polymarketCancelOrder` (cancel by orderId(s)/token scope/cancel-all, default `dryRun=true`)
+- `execute`: `evm_transferNative` (native token transfer, default `dryRun=true`, execute requires `confirmMainnet=true`)
+- `execute`: `evm_transferErc20` (ERC20 transfer by `tokenAddress + amountRaw`, default `dryRun=true`, execute requires `confirmMainnet=true`)
 - `workflow`: `w3rt_run_evm_polymarket_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken)
 - `workflow cancel intent`: supports `evm.polymarket.btc5m.cancel` (analysis/simulate/execute + deterministic mainnet confirmToken)
 - `mainnet guard`: workflow execute on polygon requires `confirmMainnet=true` + correct `confirmToken`
@@ -72,6 +74,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `查一下我 BTC 5分钟的挂单`
 - `取消我所有 BTC 5m 挂单，先模拟`
 - `继续撤单，确认主网执行，confirmToken EVM-XXXX`
+- `给 0x... 转 0.001 MATIC，先预览`
+- `把 1000000 raw USDC（Polygon）转到 0x...，确认主网执行`
 
 ## NEAR (Current)
 

@@ -207,6 +207,7 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 			"Polymarket BTC 5m market discovery",
 			"AI-assisted side recommendation",
 			"order place/list/cancel lifecycle",
+			"transparent settlement transfers (native/ERC20)",
 		],
 		signer: {
 			autoSources: [

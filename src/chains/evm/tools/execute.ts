@@ -11,8 +11,14 @@ import {
 } from "../polymarket.js";
 import {
 	EVM_TOOL_PREFIX,
+	evmHttpJson,
 	evmNetworkSchema,
+	getEvmChainId,
+	getEvmRpcEndpoint,
 	parseEvmNetwork,
+	parsePositiveIntegerString,
+	parsePositiveNumber,
+	stringifyUnknown,
 } from "../runtime.js";
 
 type ClobApiKeyCreds = {
@@ -219,6 +225,198 @@ function calculateRemainingSize(order: ClobOpenOrder): number | null {
 	const matched = parseNumberText(order.size_matched);
 	if (original == null || matched == null) return null;
 	return Math.max(0, original - matched);
+}
+
+type JsonRpcResponse<T> = {
+	jsonrpc?: string;
+	id?: string | number | null;
+	result?: T;
+	error?: {
+		code?: number;
+		message?: string;
+		data?: unknown;
+	};
+};
+
+function parseEvmAddress(value: string, fieldName: string): string {
+	const normalized = value.trim();
+	if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
+		throw new Error(`${fieldName} must be a valid EVM address`);
+	}
+	return normalized;
+}
+
+function parseHexQuantity(value: string, fieldName: string): bigint {
+	const normalized = value.trim();
+	if (!/^0x[0-9a-fA-F]+$/.test(normalized)) {
+		throw new Error(`${fieldName} must be a 0x-prefixed hex quantity`);
+	}
+	return BigInt(normalized);
+}
+
+function toHexQuantity(value: bigint): string {
+	if (value < 0n) {
+		throw new Error("hex quantity cannot be negative");
+	}
+	return `0x${value.toString(16)}`;
+}
+
+function isMainnetLike(network: ReturnType<typeof parseEvmNetwork>): boolean {
+	return network !== "sepolia";
+}
+
+function parseDecimalToUnits(
+	input: number | string,
+	decimals: number,
+	fieldName: string,
+): bigint {
+	const text =
+		typeof input === "number"
+			? Number.isFinite(input)
+				? input.toString()
+				: ""
+			: input.trim();
+	if (!text || /e/i.test(text)) {
+		throw new Error(`${fieldName} must be a non-scientific decimal value`);
+	}
+	if (!/^\d+(\.\d+)?$/.test(text)) {
+		throw new Error(`${fieldName} must be a positive decimal value`);
+	}
+	const [wholeRaw, fracRaw = ""] = text.split(".");
+	const whole = wholeRaw.replace(/^0+(?=\d)/, "") || "0";
+	const frac = fracRaw.slice(0, decimals).padEnd(decimals, "0");
+	const scale = 10n ** BigInt(decimals);
+	const wholeUnits = BigInt(whole) * scale;
+	const fracUnits = frac.length > 0 ? BigInt(frac) : 0n;
+	const units = wholeUnits + fracUnits;
+	if (units <= 0n) {
+		throw new Error(`${fieldName} must be greater than 0`);
+	}
+	return units;
+}
+
+function buildErc20TransferData(toAddress: string, amountRaw: bigint): string {
+	const selector = "a9059cbb";
+	const addressWord = toAddress
+		.toLowerCase()
+		.replace(/^0x/, "")
+		.padStart(64, "0");
+	const amountWord = amountRaw.toString(16).padStart(64, "0");
+	return `0x${selector}${addressWord}${amountWord}`;
+}
+
+function resolveEvmPrivateKey(input?: string): string {
+	const key =
+		input?.trim() ||
+		process.env.EVM_PRIVATE_KEY?.trim() ||
+		process.env.POLYMARKET_PRIVATE_KEY?.trim() ||
+		"";
+	if (!key) {
+		throw new Error(
+			"No EVM private key provided. Set fromPrivateKey or EVM_PRIVATE_KEY.",
+		);
+	}
+	return key;
+}
+
+async function callEvmRpc<T>(
+	rpcUrl: string,
+	method: string,
+	params: unknown[],
+): Promise<T> {
+	const payload = await evmHttpJson<JsonRpcResponse<T>>({
+		url: rpcUrl,
+		method: "POST",
+		body: {
+			jsonrpc: "2.0",
+			id: `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
+			method,
+			params,
+		},
+	});
+	if (payload.error) {
+		throw new Error(
+			`RPC ${method} failed: ${payload.error.message ?? stringifyUnknown(payload.error)}`,
+		);
+	}
+	if (payload.result == null) {
+		throw new Error(`RPC ${method} returned empty result`);
+	}
+	return payload.result;
+}
+
+async function resolveNonce(params: {
+	rpcUrl: string;
+	address: string;
+	nonce?: number;
+}): Promise<bigint> {
+	if (params.nonce != null) {
+		if (!Number.isInteger(params.nonce) || params.nonce < 0) {
+			throw new Error("nonce must be a non-negative integer");
+		}
+		return BigInt(params.nonce);
+	}
+	const nonceHex = await callEvmRpc<string>(
+		params.rpcUrl,
+		"eth_getTransactionCount",
+		[params.address, "pending"],
+	);
+	return parseHexQuantity(nonceHex, "nonce");
+}
+
+async function resolveGasPriceWei(params: {
+	rpcUrl: string;
+	gasPriceGwei?: number;
+}): Promise<bigint> {
+	if (params.gasPriceGwei != null) {
+		const gwei = parsePositiveNumber(params.gasPriceGwei, "gasPriceGwei");
+		return parseDecimalToUnits(gwei, 9, "gasPriceGwei");
+	}
+	const gasPriceHex = await callEvmRpc<string>(
+		params.rpcUrl,
+		"eth_gasPrice",
+		[],
+	);
+	return parseHexQuantity(gasPriceHex, "gasPrice");
+}
+
+async function resolveGasLimit(params: {
+	rpcUrl: string;
+	fromAddress: string;
+	toAddress: string;
+	valueWei: bigint;
+	data?: string;
+	gasLimit?: number;
+}): Promise<bigint> {
+	if (params.gasLimit != null) {
+		if (!Number.isInteger(params.gasLimit) || params.gasLimit <= 0) {
+			throw new Error("gasLimit must be a positive integer");
+		}
+		return BigInt(params.gasLimit);
+	}
+	const estimateHex = await callEvmRpc<string>(
+		params.rpcUrl,
+		"eth_estimateGas",
+		[
+			{
+				from: params.fromAddress,
+				to: params.toAddress,
+				value: toHexQuantity(params.valueWei),
+				...(params.data ? { data: params.data } : {}),
+			},
+		],
+	);
+	return parseHexQuantity(estimateHex, "gasLimit");
+}
+
+function formatNativeAmountFromWei(valueWei: bigint): string {
+	const decimals = 18;
+	const scale = 10n ** BigInt(decimals);
+	const whole = valueWei / scale;
+	const frac = valueWei % scale;
+	if (frac === 0n) return whole.toString();
+	const fracText = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
+	return `${whole.toString()}.${fracText}`;
 }
 
 export function createEvmExecuteTools() {
@@ -629,6 +827,246 @@ export function createEvmExecuteTools() {
 						targetOrderIds,
 						signatureType,
 						response: response ?? null,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${EVM_TOOL_PREFIX}transferNative`,
+			label: "EVM Transfer Native",
+			description:
+				"Transfer native token on EVM (e.g. ETH/MATIC). Defaults to dryRun=true.",
+			parameters: Type.Object({
+				network: evmNetworkSchema(),
+				toAddress: Type.String(),
+				amountNative: Type.Optional(
+					Type.Number({ minimum: 0.000000000000000001 }),
+				),
+				amountWei: Type.Optional(Type.String()),
+				rpcUrl: Type.Optional(Type.String()),
+				nonce: Type.Optional(Type.Number({ minimum: 0 })),
+				gasPriceGwei: Type.Optional(Type.Number({ minimum: 0.000000001 })),
+				gasLimit: Type.Optional(Type.Number({ minimum: 21000 })),
+				dryRun: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+				fromPrivateKey: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseEvmNetwork(params.network);
+				const mainnetLike = isMainnetLike(network);
+				const dryRun = params.dryRun !== false;
+				if (!dryRun && mainnetLike && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet transfer blocked. Re-run with confirmMainnet=true.",
+					);
+				}
+				const toAddress = parseEvmAddress(params.toAddress, "toAddress");
+				const amountWei = params.amountWei?.trim()
+					? BigInt(parsePositiveIntegerString(params.amountWei, "amountWei"))
+					: params.amountNative != null
+						? parseDecimalToUnits(
+								parsePositiveNumber(params.amountNative, "amountNative"),
+								18,
+								"amountNative",
+							)
+						: null;
+				if (amountWei == null || amountWei <= 0n) {
+					throw new Error("Provide amountNative or amountWei (>0)");
+				}
+				const rpcUrl = getEvmRpcEndpoint(network, params.rpcUrl);
+
+				if (dryRun) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `EVM native transfer preview (${network}): to=${toAddress} amount=${formatNativeAmountFromWei(amountWei)} native (${amountWei.toString()} wei)`,
+							},
+						],
+						details: {
+							dryRun: true,
+							network,
+							rpcUrl,
+							toAddress,
+							amountWei: amountWei.toString(),
+							amountNative: formatNativeAmountFromWei(amountWei),
+							mainnetLike,
+						},
+					};
+				}
+
+				const privateKey = resolveEvmPrivateKey(params.fromPrivateKey);
+				const signer = new Wallet(privateKey);
+				const fromAddress = signer.address;
+				const chainId = getEvmChainId(network);
+				const nonce = await resolveNonce({
+					rpcUrl,
+					address: fromAddress,
+					nonce: params.nonce,
+				});
+				const gasPriceWei = await resolveGasPriceWei({
+					rpcUrl,
+					gasPriceGwei: params.gasPriceGwei,
+				});
+				const gasLimit = await resolveGasLimit({
+					rpcUrl,
+					fromAddress,
+					toAddress,
+					valueWei: amountWei,
+					gasLimit: params.gasLimit,
+				});
+				const signedTx = await signer.signTransaction({
+					to: toAddress,
+					nonce: Number(nonce),
+					chainId,
+					value: toHexQuantity(amountWei),
+					gasPrice: toHexQuantity(gasPriceWei),
+					gasLimit: toHexQuantity(gasLimit),
+				});
+				const txHash = await callEvmRpc<string>(
+					rpcUrl,
+					"eth_sendRawTransaction",
+					[signedTx],
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `EVM native transfer submitted (${network}): ${txHash}`,
+						},
+					],
+					details: {
+						dryRun: false,
+						network,
+						rpcUrl,
+						chainId,
+						fromAddress,
+						toAddress,
+						amountWei: amountWei.toString(),
+						amountNative: formatNativeAmountFromWei(amountWei),
+						nonce: nonce.toString(),
+						gasPriceWei: gasPriceWei.toString(),
+						gasLimit: gasLimit.toString(),
+						txHash,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${EVM_TOOL_PREFIX}transferErc20`,
+			label: "EVM Transfer ERC20",
+			description:
+				"Transfer ERC20 token on EVM using tokenAddress + amountRaw. Defaults to dryRun=true.",
+			parameters: Type.Object({
+				network: evmNetworkSchema(),
+				tokenAddress: Type.String(),
+				toAddress: Type.String(),
+				amountRaw: Type.String(),
+				rpcUrl: Type.Optional(Type.String()),
+				nonce: Type.Optional(Type.Number({ minimum: 0 })),
+				gasPriceGwei: Type.Optional(Type.Number({ minimum: 0.000000001 })),
+				gasLimit: Type.Optional(Type.Number({ minimum: 21000 })),
+				dryRun: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+				fromPrivateKey: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseEvmNetwork(params.network);
+				const mainnetLike = isMainnetLike(network);
+				const dryRun = params.dryRun !== false;
+				if (!dryRun && mainnetLike && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet transfer blocked. Re-run with confirmMainnet=true.",
+					);
+				}
+				const tokenAddress = parseEvmAddress(
+					params.tokenAddress,
+					"tokenAddress",
+				);
+				const toAddress = parseEvmAddress(params.toAddress, "toAddress");
+				const amountRaw = BigInt(
+					parsePositiveIntegerString(params.amountRaw, "amountRaw"),
+				);
+				const data = buildErc20TransferData(toAddress, amountRaw);
+				const rpcUrl = getEvmRpcEndpoint(network, params.rpcUrl);
+
+				if (dryRun) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `EVM ERC20 transfer preview (${network}): token=${tokenAddress} to=${toAddress} amountRaw=${amountRaw.toString()}`,
+							},
+						],
+						details: {
+							dryRun: true,
+							network,
+							rpcUrl,
+							tokenAddress,
+							toAddress,
+							amountRaw: amountRaw.toString(),
+							data,
+							mainnetLike,
+						},
+					};
+				}
+
+				const privateKey = resolveEvmPrivateKey(params.fromPrivateKey);
+				const signer = new Wallet(privateKey);
+				const fromAddress = signer.address;
+				const chainId = getEvmChainId(network);
+				const nonce = await resolveNonce({
+					rpcUrl,
+					address: fromAddress,
+					nonce: params.nonce,
+				});
+				const gasPriceWei = await resolveGasPriceWei({
+					rpcUrl,
+					gasPriceGwei: params.gasPriceGwei,
+				});
+				const gasLimit = await resolveGasLimit({
+					rpcUrl,
+					fromAddress,
+					toAddress: tokenAddress,
+					valueWei: 0n,
+					data,
+					gasLimit: params.gasLimit,
+				});
+				const signedTx = await signer.signTransaction({
+					to: tokenAddress,
+					nonce: Number(nonce),
+					chainId,
+					value: "0x0",
+					gasPrice: toHexQuantity(gasPriceWei),
+					gasLimit: toHexQuantity(gasLimit),
+					data,
+				});
+				const txHash = await callEvmRpc<string>(
+					rpcUrl,
+					"eth_sendRawTransaction",
+					[signedTx],
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `EVM ERC20 transfer submitted (${network}): ${txHash}`,
+						},
+					],
+					details: {
+						dryRun: false,
+						network,
+						rpcUrl,
+						chainId,
+						fromAddress,
+						tokenAddress,
+						toAddress,
+						amountRaw: amountRaw.toString(),
+						nonce: nonce.toString(),
+						gasPriceWei: gasPriceWei.toString(),
+						gasLimit: gasLimit.toString(),
+						data,
+						txHash,
 					},
 				};
 			},
