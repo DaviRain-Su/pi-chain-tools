@@ -13,6 +13,7 @@ import {
 	SUI_COIN_TYPE,
 	type SuiNetwork,
 	getSuiClient,
+	getSuiExplorerTransactionUrl,
 	getSuiRpcEndpoint,
 	parsePositiveBigInt,
 	parseSuiNetwork,
@@ -156,6 +157,9 @@ type WorkflowParams = {
 	confirmToken?: string;
 	confirmRisk?: boolean;
 	waitForLocalExecution?: boolean;
+	signedTransactionBytesBase64?: string;
+	signedSignatures?: string[];
+	signedSignature?: string;
 };
 
 type StableLayerMintIntent = {
@@ -197,6 +201,9 @@ type StableLayerWorkflowParams = {
 	confirmToken?: string;
 	confirmRisk?: boolean;
 	waitForLocalExecution?: boolean;
+	signedTransactionBytesBase64?: string;
+	signedSignatures?: string[];
+	signedSignature?: string;
 };
 
 type ParsedStableLayerIntentHints = {
@@ -249,6 +256,9 @@ type CetusFarmsWorkflowParams = {
 	confirmToken?: string;
 	confirmRisk?: boolean;
 	waitForLocalExecution?: boolean;
+	signedTransactionBytesBase64?: string;
+	signedSignatures?: string[];
+	signedSignature?: string;
 };
 
 type ParsedCetusFarmsIntentHints = {
@@ -307,6 +317,9 @@ type SuiDefiWorkflowParams = {
 	confirmToken?: string;
 	confirmRisk?: boolean;
 	waitForLocalExecution?: boolean;
+	signedTransactionBytesBase64?: string;
+	signedSignatures?: string[];
+	signedSignature?: string;
 };
 
 type SuiWorkflowRiskBand = "safe" | "warning" | "critical" | "unknown";
@@ -1548,6 +1561,107 @@ function resolveRequestType(waitForLocalExecution?: boolean) {
 		: "WaitForLocalExecution";
 }
 
+type SignedSubmission = {
+	signedTransactionBytesBase64: string;
+	signedSignatures: string[];
+};
+
+function resolveSignedSubmission(params: {
+	signedTransactionBytesBase64?: string;
+	signedSignatures?: string[];
+	signedSignature?: string;
+}): SignedSubmission | null {
+	const signedTransactionBytesBase64 =
+		params.signedTransactionBytesBase64?.trim() || "";
+	const signatureFromSingle = params.signedSignature?.trim();
+	const signaturesFromArray = Array.isArray(params.signedSignatures)
+		? params.signedSignatures
+				.map((entry) => entry.trim())
+				.filter((entry) => entry.length > 0)
+		: [];
+	const signedSignatures = signatureFromSingle
+		? [signatureFromSingle, ...signaturesFromArray]
+		: signaturesFromArray;
+	if (!signedTransactionBytesBase64 && signedSignatures.length === 0) {
+		return null;
+	}
+	if (!signedTransactionBytesBase64) {
+		throw new Error(
+			"signedTransactionBytesBase64 is required when signedSignatures/signedSignature is provided.",
+		);
+	}
+	if (signedSignatures.length === 0) {
+		throw new Error(
+			"signedSignatures (or signedSignature) is required when signedTransactionBytesBase64 is provided.",
+		);
+	}
+	return {
+		signedTransactionBytesBase64,
+		signedSignatures,
+	};
+}
+
+function decodeBase64Bytes(value: string, fieldName: string): Uint8Array {
+	try {
+		const decoded = Buffer.from(value, "base64");
+		if (decoded.length === 0) {
+			throw new Error(`${fieldName} decoded to empty bytes.`);
+		}
+		return decoded;
+	} catch (error) {
+		throw new Error(
+			`${fieldName} must be valid base64: ${stringifyError(error)}`,
+		);
+	}
+}
+
+async function executeSignedTransactionBlock(params: {
+	network: SuiNetwork;
+	rpcUrl?: string;
+	signed: SignedSubmission;
+	waitForLocalExecution?: boolean;
+}): Promise<Record<string, unknown>> {
+	const requestType = resolveRequestType(params.waitForLocalExecution);
+	const client = getSuiClient(params.network, params.rpcUrl);
+	const transactionBlock = decodeBase64Bytes(
+		params.signed.signedTransactionBytesBase64,
+		"signedTransactionBytesBase64",
+	);
+	const response = await client.executeTransactionBlock({
+		transactionBlock,
+		signature:
+			params.signed.signedSignatures.length === 1
+				? params.signed.signedSignatures[0]
+				: params.signed.signedSignatures,
+		options: {
+			showEffects: true,
+			showEvents: true,
+			showObjectChanges: true,
+			showBalanceChanges: true,
+		},
+		requestType,
+	});
+	const status = response.effects?.status?.status ?? "unknown";
+	const error = response.effects?.status?.error ?? response.errors?.[0] ?? null;
+	if (status === "failure") {
+		throw new Error(
+			`Sui signed transaction execute failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+		);
+	}
+	return {
+		digest: response.digest,
+		status,
+		error,
+		confirmedLocalExecution: response.confirmedLocalExecution ?? null,
+		network: params.network,
+		rpcUrl: getSuiRpcEndpoint(params.network, params.rpcUrl),
+		requestType,
+		signatureCount: params.signed.signedSignatures.length,
+		executeVia: "signed_payload",
+		explorer: getSuiExplorerTransactionUrl(response.digest, params.network),
+	};
+}
+
 function parseSlippageDecimal(slippageBps?: number): number {
 	const bps = slippageBps ?? 100;
 	if (!Number.isFinite(bps) || bps <= 0 || bps > 10_000) {
@@ -2538,6 +2652,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				endpoint: Type.Optional(Type.String()),
 				apiKey: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				signedTransactionBytesBase64: Type.Optional(Type.String()),
+				signedSignatures: Type.Optional(
+					Type.Array(Type.String(), { minItems: 1, maxItems: 8 }),
+				),
+				signedSignature: Type.Optional(Type.String()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
 				confirmRisk: Type.Optional(Type.Boolean()),
@@ -2735,16 +2854,26 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					);
 				}
 
-				const executeResult = await executeIntent(intent, params, network);
-				const executeDetails = isRecordObject(executeResult.details)
-					? {
-							...executeResult.details,
-							riskCheck: executeRiskCheck,
-						}
-					: {
-							details: executeResult.details ?? null,
-							riskCheck: executeRiskCheck,
-						};
+				const signedSubmission = resolveSignedSubmission({
+					signedTransactionBytesBase64: params.signedTransactionBytesBase64,
+					signedSignatures: params.signedSignatures,
+					signedSignature: params.signedSignature,
+				});
+				const executeDetailsBase = signedSubmission
+					? await executeSignedTransactionBlock({
+							network,
+							signed: signedSubmission,
+							waitForLocalExecution: params.waitForLocalExecution,
+						})
+					: await executeIntent(intent, params, network).then((result) =>
+							isRecordObject(result.details)
+								? result.details
+								: { details: result.details ?? null },
+						);
+				const executeDetails = {
+					...executeDetailsBase,
+					riskCheck: executeRiskCheck,
+				};
 				const executeArtifact = attachExecuteSummary(
 					intent.type,
 					executeDetails,
@@ -2801,6 +2930,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				burnAll: Type.Optional(Type.Boolean()),
 				usdcCoinType: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				signedTransactionBytesBase64: Type.Optional(Type.String()),
+				signedSignatures: Type.Optional(
+					Type.Array(Type.String(), { minItems: 1, maxItems: 8 }),
+				),
+				signedSignature: Type.Optional(Type.String()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
 				confirmRisk: Type.Optional(Type.Boolean()),
@@ -2976,11 +3110,20 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					}
 				}
 
-				const executeResult = await executeStableLayerIntent(
-					intent,
-					params,
-					network,
-				);
+				const signedSubmission = resolveSignedSubmission({
+					signedTransactionBytesBase64: params.signedTransactionBytesBase64,
+					signedSignatures: params.signedSignatures,
+					signedSignature: params.signedSignature,
+				});
+				const executeResult = signedSubmission
+					? {
+							details: await executeSignedTransactionBlock({
+								network,
+								signed: signedSubmission,
+								waitForLocalExecution: params.waitForLocalExecution,
+							}),
+						}
+					: await executeStableLayerIntent(intent, params, network);
 				const executeArtifact = attachExecuteSummary(
 					intent.type,
 					executeResult.details ?? null,
@@ -3040,6 +3183,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				coinTypeB: Type.Optional(Type.String()),
 				positionNftId: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				signedTransactionBytesBase64: Type.Optional(Type.String()),
+				signedSignatures: Type.Optional(
+					Type.Array(Type.String(), { minItems: 1, maxItems: 8 }),
+				),
+				signedSignature: Type.Optional(Type.String()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
 				confirmRisk: Type.Optional(Type.Boolean()),
@@ -3216,11 +3364,21 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					}
 				}
 
-				const executeResult = await executeCetusFarmsIntent(
-					intent,
-					params,
-					network,
-				);
+				const signedSubmission = resolveSignedSubmission({
+					signedTransactionBytesBase64: params.signedTransactionBytesBase64,
+					signedSignatures: params.signedSignatures,
+					signedSignature: params.signedSignature,
+				});
+				const executeResult = signedSubmission
+					? {
+							details: await executeSignedTransactionBlock({
+								network,
+								rpcUrl: params.rpcUrl,
+								signed: signedSubmission,
+								waitForLocalExecution: params.waitForLocalExecution,
+							}),
+						}
+					: await executeCetusFarmsIntent(intent, params, network);
 				const executeArtifact = attachExecuteSummary(
 					intent.type,
 					executeResult.details ?? null,
@@ -3311,6 +3469,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				clmmPoolId: Type.Optional(Type.String()),
 				positionNftId: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
+				signedTransactionBytesBase64: Type.Optional(Type.String()),
+				signedSignatures: Type.Optional(
+					Type.Array(Type.String(), { minItems: 1, maxItems: 8 }),
+				),
+				signedSignature: Type.Optional(Type.String()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
 				confirmRisk: Type.Optional(Type.Boolean()),

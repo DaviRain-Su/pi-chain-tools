@@ -264,10 +264,10 @@ export EVM_TRANSFER_TOKEN_DECIMALS='{"USDC":6,"USDT":6}'
 - `execute`: `sui_stableLayerMint` / `sui_stableLayerBurn` / `sui_stableLayerClaim` (stable-layer-sdk execute tools)
 - `execute`: `sui_transferSui` (amount in `amountMist` or `amountSui`, with mainnet safety gate `confirmMainnet=true`)
 - `execute`: `sui_transferCoin` (non-SUI transfer, auto-merge coin objects, with mainnet safety gate)
-- `workflow`: `w3rt_run_sui_workflow_v0` (analysis/simulate/execute with deterministic mainnet confirmToken)
+- `workflow`: `w3rt_run_sui_workflow_v0` (analysis/simulate/execute with deterministic mainnet confirmToken; execute supports either local signer or signed payload submit via `signedTransactionBytesBase64 + signedSignatures`)
 - `workflow LP usability`: for `sui.lp.cetus.add/remove`, if `poolId` is omitted but `positionId` is provided, workflow now attempts to auto-resolve `poolId` from the on-chain position object
-- `workflow`: `w3rt_run_sui_stablelayer_workflow_v0` (analysis/simulate/execute for stable-layer mint/burn/claim with deterministic mainnet confirmToken)
-- `workflow`: `w3rt_run_sui_cetus_farms_workflow_v0` (analysis/simulate/execute for Cetus v2 farms stake/unstake/harvest with deterministic mainnet confirmToken)
+- `workflow`: `w3rt_run_sui_stablelayer_workflow_v0` (analysis/simulate/execute for stable-layer mint/burn/claim with deterministic mainnet confirmToken; supports signed payload submit on execute)
+- `workflow`: `w3rt_run_sui_cetus_farms_workflow_v0` (analysis/simulate/execute for Cetus v2 farms stake/unstake/harvest with deterministic mainnet confirmToken; supports signed payload submit on execute)
 - `workflow`: `w3rt_run_sui_defi_workflow_v0` (unified DeFi router workflow; auto-routes to core/stablelayer/cetus-farms flows)
 - `workflow risk gate (core)`: mainnet high-risk core actions (currently high-slippage swap / risky LP params) require explicit risk confirmation (`confirmRisk=true` or natural language like `我接受风险继续执行`)
 - `workflow readable risk hint (core)`: core workflow simulate/execute text now includes `风险提示：...` short hints to improve non-JSON readability
@@ -295,7 +295,8 @@ Use unified router tool `w3rt_run_sui_defi_workflow_v0`:
 Recommended execution flow on mainnet:
 1. `runMode=analysis` -> capture `confirmToken`
 2. `runMode=simulate` -> verify artifacts/status
-3. `runMode=execute` with `confirmMainnet=true` and `confirmToken=<token>`
+3. `runMode=execute` with `confirmMainnet=true` and `confirmToken=<token>`  
+   optional local-signer path: pass `signedTransactionBytesBase64` + `signedSignatures` to broadcast without exposing private key
 
 ## Use In Pi (Recommended)
 
@@ -451,6 +452,8 @@ Natural language confirmation example:
   - `把 0.01 SUI 换成 USDC，先模拟。`
 - Swap execute (after simulate):
   - `继续执行刚才这笔，确认主网执行。`
+- Swap execute (local sign submit, no private key):
+  - `继续执行刚才这笔，用本地钱包签名后的 payload 广播到主网。`
 - Cetus farms pools:
   - `帮我查一下 Sui 主网 Cetus farms 的池子列表。`
 - StableLayer:

@@ -231,6 +231,16 @@ beforeEach(() => {
 				},
 			},
 		}),
+		executeTransactionBlock: vi.fn().mockResolvedValue({
+			digest: "0xsigned",
+			confirmedLocalExecution: true,
+			effects: {
+				status: {
+					status: "success",
+				},
+			},
+			errors: [],
+		}),
 	});
 	executeMocks.transferSuiExecute.mockResolvedValue({
 		content: [{ type: "text", text: "ok" }],
@@ -458,6 +468,94 @@ describe("w3rt_run_sui_workflow_v0", () => {
 				},
 			},
 		});
+	});
+
+	it("executes with signed payload without requiring local private key", async () => {
+		const tool = getTool();
+		const destination =
+			"0x2222222222222222222222222222222222222222222222222222222222222222";
+		const signedClient = {
+			devInspectTransactionBlock: vi.fn().mockResolvedValue({
+				effects: {
+					status: {
+						status: "success",
+					},
+				},
+			}),
+			executeTransactionBlock: vi.fn().mockResolvedValue({
+				digest: "0xexec-signed-payload",
+				confirmedLocalExecution: true,
+				effects: {
+					status: {
+						status: "success",
+					},
+				},
+				errors: [],
+			}),
+		};
+		runtimeMocks.getSuiClient.mockReturnValue(signedClient);
+		const simulated = await tool.execute("wf4-sim-local-sign", {
+			runId: "wf-sui-04-signed",
+			runMode: "simulate",
+			intentType: "sui.transfer.sui",
+			network: "mainnet",
+			toAddress: destination,
+			amountSui: 0.000001,
+		});
+		const details = simulated.details as {
+			confirmToken: string;
+		};
+		const executed = await tool.execute("wf4-exec-local-sign", {
+			runId: "wf-sui-04-signed",
+			runMode: "execute",
+			network: "mainnet",
+			confirmMainnet: true,
+			confirmToken: details.confirmToken,
+			signedTransactionBytesBase64: "AQID",
+			signedSignatures: ["AQID"],
+		});
+		expect(signedClient.executeTransactionBlock).toHaveBeenCalledTimes(1);
+		expect(executeMocks.transferSuiExecute).not.toHaveBeenCalled();
+		expect(executed.details).toMatchObject({
+			intentType: "sui.transfer.sui",
+			artifacts: {
+				execute: {
+					digest: "0xexec-signed-payload",
+					executeVia: "signed_payload",
+					signatureCount: 1,
+				},
+			},
+		});
+	});
+
+	it("requires signatures when signedTransactionBytesBase64 is provided", async () => {
+		const tool = getTool();
+		const destination =
+			"0x2222222222222222222222222222222222222222222222222222222222222222";
+		const analysis = await tool.execute("wf4-analysis-missing-signature", {
+			runId: "wf-sui-04-missing-signature",
+			runMode: "analysis",
+			intentType: "sui.transfer.sui",
+			network: "mainnet",
+			toAddress: destination,
+			amountSui: 0.000001,
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		await expect(
+			tool.execute("wf4-exec-missing-signature", {
+				runId: "wf-sui-04-missing-signature",
+				runMode: "execute",
+				intentType: "sui.transfer.sui",
+				network: "mainnet",
+				toAddress: destination,
+				amountSui: 0.000001,
+				confirmMainnet: true,
+				confirmToken: token,
+				signedTransactionBytesBase64: "AQID",
+			}),
+		).rejects.toThrow(
+			"signedSignatures (or signedSignature) is required when signedTransactionBytesBase64 is provided.",
+		);
 	});
 
 	it("supports natural follow-up execute using latest simulated session", async () => {
