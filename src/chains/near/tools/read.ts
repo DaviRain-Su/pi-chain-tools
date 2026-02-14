@@ -890,6 +890,74 @@ function normalizeNearIntentsExplorerTransactions(
 	};
 }
 
+function formatNearIntentsExplorerAssetLabel(asset: string | null): string {
+	const normalized = asset?.trim();
+	if (!normalized) return "unknown";
+	const parts = normalized.split(":");
+	if (parts.length < 2) {
+		return normalized.length > 32 ? shortAccountId(normalized) : normalized;
+	}
+	const chain = parts[0]?.trim() || "unknown";
+	const rawToken = parts.slice(1).join(":").trim();
+	let tokenLabel = rawToken;
+	if (rawToken.includes("::")) {
+		const segments = rawToken.split("::").filter(Boolean);
+		const tail = segments[segments.length - 1];
+		tokenLabel = tail ?? rawToken;
+	}
+	if (tokenLabel.length > 32) {
+		tokenLabel = shortAccountId(tokenLabel);
+	}
+	return `${tokenLabel} [${chain}]`;
+}
+
+function parseOptionalFiniteNumber(value: string | null): number | null {
+	if (!value) return null;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatUsdApprox(value: number | null): string | null {
+	if (value == null) return null;
+	return value.toLocaleString(undefined, {
+		style: "currency",
+		currency: "USD",
+		minimumFractionDigits: value >= 100 ? 0 : 2,
+		maximumFractionDigits: 2,
+	});
+}
+
+function summarizeNearIntentsExplorerStatuses(
+	transactions: NearIntentsExplorerTransaction[],
+): Record<string, number> {
+	const summary: Record<string, number> = {};
+	for (const tx of transactions) {
+		const key = tx.status?.trim().toUpperCase() || "UNKNOWN";
+		summary[key] = (summary[key] ?? 0) + 1;
+	}
+	return summary;
+}
+
+function formatNearIntentsExplorerStatusSummary(
+	statusSummary: Record<string, number>,
+): string {
+	const preferredOrder = new Map<string, number>(
+		[...NEAR_INTENTS_EXPLORER_STATUS_VALUES, "UNKNOWN"].map(
+			(status, index) => [status, index] as const,
+		),
+	);
+	const statuses = Object.keys(statusSummary);
+	statuses.sort((left, right) => {
+		const leftOrder = preferredOrder.get(left) ?? Number.MAX_SAFE_INTEGER;
+		const rightOrder = preferredOrder.get(right) ?? Number.MAX_SAFE_INTEGER;
+		if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+		return left.localeCompare(right);
+	});
+	return statuses
+		.map((status) => `${status}=${statusSummary[status] ?? 0}`)
+		.join(" | ");
+}
+
 async function fetchNearIntentsJson<T>(params: {
 	baseUrl: string;
 	path: string;
@@ -2533,11 +2601,56 @@ export function createNearReadTools() {
 					normalized.data[0]?.depositAddressAndMemo ??
 					normalized.data[0]?.depositAddress ??
 					null;
+				const statusSummary = summarizeNearIntentsExplorerStatuses(
+					normalized.data,
+				);
+				const totalInUsd = normalized.data.reduce((sum, tx) => {
+					const value = parseOptionalFiniteNumber(tx.amountInUsd);
+					return value == null ? sum : sum + value;
+				}, 0);
+				const totalOutUsd = normalized.data.reduce((sum, tx) => {
+					const value = parseOptionalFiniteNumber(tx.amountOutUsd);
+					return value == null ? sum : sum + value;
+				}, 0);
+				const hasUsdSummary = normalized.data.some(
+					(tx) =>
+						parseOptionalFiniteNumber(tx.amountInUsd) != null ||
+						parseOptionalFiniteNumber(tx.amountOutUsd) != null,
+				);
+				const routeCounter = new Map<string, number>();
+				for (const tx of normalized.data) {
+					const routeLabel = `${formatNearIntentsExplorerAssetLabel(tx.originAsset)} -> ${formatNearIntentsExplorerAssetLabel(tx.destinationAsset)}`;
+					routeCounter.set(routeLabel, (routeCounter.get(routeLabel) ?? 0) + 1);
+				}
+				const topRoutes = [...routeCounter.entries()]
+					.sort((left, right) => {
+						if (left[1] === right[1]) return left[0].localeCompare(right[0]);
+						return right[1] - left[1];
+					})
+					.slice(0, 3)
+					.map(([route, count]) => ({ route, count }));
 				const lines = [
 					mode === "cursor"
 						? `Intents explorer txs: ${normalized.data.length} item(s) mode=cursor direction=${direction} limit=${numberOfTransactions}`
 						: `Intents explorer txs: ${normalized.data.length} item(s) page=${normalized.page ?? page ?? 1}/${normalized.totalPages ?? "?"} total=${normalized.total ?? "unknown"}`,
 				];
+				if (Object.keys(statusSummary).length > 0) {
+					lines.push(
+						`Status summary: ${formatNearIntentsExplorerStatusSummary(statusSummary)}`,
+					);
+				}
+				if (hasUsdSummary) {
+					lines.push(
+						`USD in/out: ${formatUsdApprox(totalInUsd) ?? "unknown"} / ${formatUsdApprox(totalOutUsd) ?? "unknown"}`,
+					);
+				}
+				if (topRoutes.length > 0) {
+					lines.push(
+						`Top routes: ${topRoutes
+							.map((entry) => `${entry.route} (${entry.count})`)
+							.join(" | ")}`,
+					);
+				}
 				const activeFilters = [
 					fromChainId ? `fromChainId=${fromChainId}` : null,
 					toChainId ? `toChainId=${toChainId}` : null,
@@ -2557,13 +2670,16 @@ export function createNearReadTools() {
 				for (const [index, tx] of shown.entries()) {
 					const amountIn = tx.amountInFormatted ?? tx.amountIn ?? "unknown";
 					const amountOut = tx.amountOutFormatted ?? tx.amountOut ?? "unknown";
-					const originAsset = tx.originAsset ?? "unknown";
-					const destinationAsset = tx.destinationAsset ?? "unknown";
+					const outUsd = parseOptionalFiniteNumber(tx.amountOutUsd);
+					const routeLabel = `${formatNearIntentsExplorerAssetLabel(tx.originAsset)} -> ${formatNearIntentsExplorerAssetLabel(tx.destinationAsset)}`;
 					lines.push(
-						`${index + 1}. [${tx.status ?? "UNKNOWN"}] ${amountIn} -> ${amountOut} (${originAsset} -> ${destinationAsset})`,
+						`${index + 1}. [${tx.status ?? "UNKNOWN"}] ${amountIn} -> ${amountOut}${outUsd != null ? ` (${formatUsdApprox(outUsd)})` : ""}`,
 					);
 					lines.push(
-						`   recipient=${tx.recipient ? shortAccountId(tx.recipient) : "unknown"} deposit=${tx.depositAddress ? shortAccountId(tx.depositAddress) : "unknown"} time=${tx.createdAt ?? "unknown"}`,
+						`   route=${routeLabel} recipient=${tx.recipient ? shortAccountId(tx.recipient) : "unknown"} time=${tx.createdAt ?? "unknown"}`,
+					);
+					lines.push(
+						`   deposit=${tx.depositAddress ? shortAccountId(tx.depositAddress) : "unknown"}${tx.intentHashes ? ` intent=${shortAccountId(tx.intentHashes)}` : ""}`,
 					);
 					if (tx.refundReason) {
 						lines.push(`   refundReason=${tx.refundReason}`);
@@ -2618,6 +2734,12 @@ export function createNearReadTools() {
 						cursor: {
 							older: cursorOlder,
 							newer: cursorNewer,
+						},
+						summary: {
+							statusCounts: statusSummary,
+							totalAmountInUsd: hasUsdSummary ? totalInUsd : null,
+							totalAmountOutUsd: hasUsdSummary ? totalOutUsd : null,
+							topRoutes,
 						},
 						transactions: normalized.data,
 						raw: response.payload,
