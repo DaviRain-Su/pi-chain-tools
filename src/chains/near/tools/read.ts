@@ -70,6 +70,13 @@ type NearPortfolioDiscoveryFailure = {
 	error: string;
 };
 
+type NearPortfolioDiscoveryByRole = {
+	refDeposits: string[];
+	burrowSupplied: string[];
+	burrowCollateral: string[];
+	burrowBorrowed: string[];
+};
+
 type NearRefDepositAsset = {
 	tokenId: string;
 	symbol: string;
@@ -532,43 +539,91 @@ function dedupeStrings(values: string[]): string[] {
 	return [...new Set(values)];
 }
 
+function summarizeTokenIdsForReadableLine(
+	tokenIds: string[],
+	labelByTokenId: Map<string, string>,
+): string {
+	if (tokenIds.length === 0) return "none";
+	const labels = dedupeStrings(
+		tokenIds.map((tokenId) => {
+			const normalized = tokenId.trim().toLowerCase();
+			if (!normalized) return "";
+			return labelByTokenId.get(normalized) ?? shortAccountId(normalized);
+		}),
+	).filter(Boolean);
+	if (labels.length <= 4) return labels.join(", ");
+	return `${labels.slice(0, 4).join(", ")} (+${labels.length - 4} more)`;
+}
+
 function collectBurrowTokenIdsFromSnapshot(
 	snapshot: BurrowAccountAllPositionsView | null,
 ): string[] {
-	if (!snapshot) return [];
-	const tokenIds: string[] = [];
-	const pushFromAssetNode = (node: unknown): void => {
+	const byRole = collectBurrowTokenIdsByRoleFromSnapshot(snapshot);
+	return dedupeStrings([
+		...byRole.supplied,
+		...byRole.collateral,
+		...byRole.borrowed,
+	]);
+}
+
+function collectBurrowTokenIdsByRoleFromSnapshot(
+	snapshot: BurrowAccountAllPositionsView | null,
+): {
+	supplied: string[];
+	collateral: string[];
+	borrowed: string[];
+} {
+	if (!snapshot) {
+		return {
+			supplied: [],
+			collateral: [],
+			borrowed: [],
+		};
+	}
+	const byRole = {
+		supplied: [] as string[],
+		collateral: [] as string[],
+		borrowed: [] as string[],
+	};
+	const parseTokenId = (node: unknown): string | null => {
 		const normalized = normalizeBurrowAccountAssetView(node);
-		if (!normalized) return;
+		if (!normalized) return null;
 		const tokenId = normalized.token_id.trim().toLowerCase();
-		if (!tokenId) return;
+		if (!tokenId) return null;
 		try {
 			const balance = parseUnsignedBigInt(
 				normalized.balance,
 				`burrow.${tokenId}.balance`,
 			);
-			if (balance > 0n) tokenIds.push(tokenId);
+			return balance > 0n ? tokenId : null;
 		} catch {
-			// Ignore malformed balance nodes.
+			return null;
 		}
 	};
 	for (const asset of Array.isArray(snapshot.supplied)
 		? snapshot.supplied
 		: []) {
-		pushFromAssetNode(asset);
+		const tokenId = parseTokenId(asset);
+		if (tokenId) byRole.supplied.push(tokenId);
 	}
 	const positions = snapshot.positions ?? {};
 	for (const positionNode of Object.values(positions)) {
 		const normalized = normalizeBurrowPositionNode(positionNode);
 		if (!normalized) continue;
 		for (const asset of normalized.collateral ?? []) {
-			pushFromAssetNode(asset);
+			const tokenId = parseTokenId(asset);
+			if (tokenId) byRole.collateral.push(tokenId);
 		}
 		for (const asset of normalized.borrowed ?? []) {
-			pushFromAssetNode(asset);
+			const tokenId = parseTokenId(asset);
+			if (tokenId) byRole.borrowed.push(tokenId);
 		}
 	}
-	return dedupeStrings(tokenIds);
+	return {
+		supplied: dedupeStrings(byRole.supplied),
+		collateral: dedupeStrings(byRole.collateral),
+		borrowed: dedupeStrings(byRole.borrowed),
+	};
 }
 
 async function discoverPortfolioFtContracts(params: {
@@ -581,11 +636,18 @@ async function discoverPortfolioFtContracts(params: {
 		refDeposits: string[];
 		burrowPositions: string[];
 	};
+	discoveredByRole: NearPortfolioDiscoveryByRole;
 	failures: NearPortfolioDiscoveryFailure[];
 }> {
 	const discoveredBySource = {
 		refDeposits: [] as string[],
 		burrowPositions: [] as string[],
+	};
+	const discoveredByRole: NearPortfolioDiscoveryByRole = {
+		refDeposits: [],
+		burrowSupplied: [],
+		burrowCollateral: [],
+		burrowBorrowed: [],
 	};
 	const failures: NearPortfolioDiscoveryFailure[] = [];
 	try {
@@ -608,6 +670,7 @@ async function discoverPortfolioFtContracts(params: {
 				})
 				.map(([tokenId]) => tokenId.toLowerCase()),
 		);
+		discoveredByRole.refDeposits = [...discoveredBySource.refDeposits];
 	} catch (error) {
 		failures.push({
 			source: "ref_deposits",
@@ -623,6 +686,10 @@ async function discoverPortfolioFtContracts(params: {
 			rpcUrl: params.rpcUrl,
 			burrowContractId,
 		});
+		const burrowByRole = collectBurrowTokenIdsByRoleFromSnapshot(snapshot);
+		discoveredByRole.burrowSupplied = burrowByRole.supplied;
+		discoveredByRole.burrowCollateral = burrowByRole.collateral;
+		discoveredByRole.burrowBorrowed = burrowByRole.borrowed;
 		discoveredBySource.burrowPositions =
 			collectBurrowTokenIdsFromSnapshot(snapshot);
 	} catch (error) {
@@ -638,6 +705,7 @@ async function discoverPortfolioFtContracts(params: {
 			...discoveredBySource.burrowPositions,
 		]),
 		discoveredBySource,
+		discoveredByRole,
 		failures,
 	};
 }
@@ -1982,6 +2050,12 @@ export function createNearReadTools() {
 								refDeposits: [] as string[],
 								burrowPositions: [] as string[],
 							},
+							discoveredByRole: {
+								refDeposits: [] as string[],
+								burrowSupplied: [] as string[],
+								burrowCollateral: [] as string[],
+								burrowBorrowed: [] as string[],
+							} as NearPortfolioDiscoveryByRole,
 							failures: [] as NearPortfolioDiscoveryFailure[],
 						};
 				const ftContractIds = dedupeStrings([
@@ -2092,9 +2166,29 @@ export function createNearReadTools() {
 					`Portfolio: ${assets.length} assets (account ${accountId})`,
 					`NEAR: ${formatNearAmount(totalYoctoNear, 8)} (available ${formatNearAmount(availableYoctoNear, 8)}, locked ${formatNearAmount(lockedYoctoNear, 8)})`,
 				];
+				const symbolByTokenId = new Map<string, string>();
+				for (const asset of assets) {
+					if (asset.kind !== "ft" || !asset.contractId) continue;
+					symbolByTokenId.set(asset.contractId.toLowerCase(), asset.symbol);
+				}
 				if (autoDiscoverDefiTokens) {
 					lines.push(
 						`Auto-discovered DeFi tokens: ${discovered.tokenIds.length} (Ref=${discovered.discoveredBySource.refDeposits.length}, Burrow=${discovered.discoveredBySource.burrowPositions.length})`,
+					);
+					lines.push(
+						`DeFi exposure: Ref deposits ${discovered.discoveredByRole.refDeposits.length} (${summarizeTokenIdsForReadableLine(
+							discovered.discoveredByRole.refDeposits,
+							symbolByTokenId,
+						)}); Burrow supplied ${discovered.discoveredByRole.burrowSupplied.length} (${summarizeTokenIdsForReadableLine(
+							discovered.discoveredByRole.burrowSupplied,
+							symbolByTokenId,
+						)}); collateral ${discovered.discoveredByRole.burrowCollateral.length} (${summarizeTokenIdsForReadableLine(
+							discovered.discoveredByRole.burrowCollateral,
+							symbolByTokenId,
+						)}); borrowed ${discovered.discoveredByRole.burrowBorrowed.length} (${summarizeTokenIdsForReadableLine(
+							discovered.discoveredByRole.burrowBorrowed,
+							symbolByTokenId,
+						)}).`,
 					);
 				}
 				for (const asset of assets) {
@@ -2142,6 +2236,7 @@ export function createNearReadTools() {
 						autoDiscoverDefiTokens,
 						discoveredFtContracts: discovered.tokenIds,
 						discoveredBySource: discovered.discoveredBySource,
+						discoveredByRole: discovered.discoveredByRole,
 						discoveryFailures: discovered.failures,
 						includeZeroBalances: includeZero,
 						totalYoctoNear: totalYoctoNear.toString(),

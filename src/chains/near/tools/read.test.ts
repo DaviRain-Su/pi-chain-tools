@@ -493,6 +493,9 @@ describe("near_getPortfolio", () => {
 		});
 
 		expect(result.content[0]?.text).toContain("Auto-discovered DeFi tokens");
+		expect(result.content[0]?.text).toContain("DeFi exposure:");
+		expect(result.content[0]?.text).toContain("Ref deposits 1");
+		expect(result.content[0]?.text).toContain("Burrow supplied 1");
 		expect(result.details).toMatchObject({
 			accountId: "alice.near",
 			autoDiscoverDefiTokens: true,
@@ -501,6 +504,12 @@ describe("near_getPortfolio", () => {
 			discoveredBySource: {
 				refDeposits: ["aurora"],
 				burrowPositions: ["usdt.tether-token.near"],
+			},
+			discoveredByRole: {
+				refDeposits: ["aurora"],
+				burrowSupplied: ["usdt.tether-token.near"],
+				burrowCollateral: [],
+				burrowBorrowed: [],
 			},
 			ftContractsQueried: [
 				"usdc.fakes.near",
@@ -620,9 +629,16 @@ describe("near_getPortfolio", () => {
 
 		expect(result.content[0]?.text).toContain("AURORA: 0");
 		expect(result.content[0]?.text).toContain("USDT: 0");
+		expect(result.content[0]?.text).toContain("DeFi exposure:");
 		expect(result.content[0]?.text).toContain("[discovered in Ref]");
 		expect(result.content[0]?.text).toContain("[discovered in Burrow]");
 		expect(result.details).toMatchObject({
+			discoveredByRole: {
+				refDeposits: ["aurora"],
+				burrowSupplied: ["usdt.tether-token.near"],
+				burrowCollateral: [],
+				burrowBorrowed: [],
+			},
 			assets: expect.arrayContaining([
 				expect.objectContaining({
 					contractId: "aurora",
