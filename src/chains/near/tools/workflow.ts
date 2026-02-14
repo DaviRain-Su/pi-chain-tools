@@ -1550,9 +1550,24 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	const wantsConfirmRisk =
 		lower.includes("确认风险执行") ||
 		lower.includes("确认风险") ||
+		lower.includes("确认高风险执行") ||
+		lower.includes("确认风险继续执行") ||
 		lower.includes("接受风险执行") ||
+		lower.includes("接受高风险执行") ||
+		lower.includes("我接受风险") ||
+		lower.includes("我已知晓风险") ||
+		lower.includes("风险已知晓") ||
+		lower.includes("高风险也执行") ||
+		lower.includes("强制执行") ||
 		lower.includes("accept risk") ||
+		lower.includes("accept the risk") ||
+		lower.includes("i accept risk") ||
+		lower.includes("risk accepted") ||
 		lower.includes("confirm risk") ||
+		lower.includes("confirm risk execute") ||
+		lower.includes("proceed with risk") ||
+		lower.includes("force execute") ||
+		lower.includes("force execution") ||
 		lower.includes("confirmrisk=true") ||
 		lower.includes("confirmrisk true");
 	const hasLpKeyword =
@@ -5042,6 +5057,54 @@ function assertMainnetExecutionConfirmed(
 	}
 }
 
+function resolveBurrowExecuteRiskCheckNode(
+	executeResult: unknown,
+): Record<string, unknown> | null {
+	if (!isObjectRecord(executeResult)) return null;
+	if (isObjectRecord(executeResult.riskCheck)) {
+		return executeResult.riskCheck;
+	}
+	if (isObjectRecord(executeResult.execute)) {
+		const executeNode = executeResult.execute;
+		if (isObjectRecord(executeNode.riskCheck)) {
+			return executeNode.riskCheck;
+		}
+	}
+	return null;
+}
+
+function buildBurrowExecuteRiskSummary(executeResult: unknown): string | null {
+	const riskCheck = resolveBurrowExecuteRiskCheckNode(executeResult);
+	if (!riskCheck) return null;
+	const parts: string[] = [];
+	if (typeof riskCheck.riskBand === "string" && riskCheck.riskBand.trim()) {
+		parts.push(`risk=${riskCheck.riskBand.trim()}`);
+	}
+	if (typeof riskCheck.riskEngine === "string" && riskCheck.riskEngine.trim()) {
+		parts.push(`riskEngine=${riskCheck.riskEngine.trim()}`);
+	}
+	if (
+		typeof riskCheck.healthFactor === "number" &&
+		Number.isFinite(riskCheck.healthFactor)
+	) {
+		parts.push(`hf=${riskCheck.healthFactor.toFixed(4)}`);
+	}
+	if (
+		typeof riskCheck.liquidationDistanceRatio === "number" &&
+		Number.isFinite(riskCheck.liquidationDistanceRatio)
+	) {
+		parts.push(
+			`liqDistance=${formatBurrowWorkflowRatioPercent(riskCheck.liquidationDistanceRatio)}`,
+		);
+	}
+	if (riskCheck.confirmRiskAccepted === true) {
+		parts.push("confirmRisk=accepted");
+	} else if (riskCheck.confirmRiskAccepted === false) {
+		parts.push("confirmRisk=not_accepted");
+	}
+	return parts.length > 0 ? parts.join(" ") : null;
+}
+
 function buildExecuteResultSummary(executeResult: unknown): string {
 	if (!executeResult || typeof executeResult !== "object") {
 		return "submitted";
@@ -5051,7 +5114,10 @@ function buildExecuteResultSummary(executeResult: unknown): string {
 		status?: unknown;
 		correlationId?: unknown;
 		statusTracking?: unknown;
+		riskCheck?: unknown;
+		execute?: unknown;
 	};
+	const parts: string[] = [];
 	const directStatus =
 		typeof candidate.status === "string" ? candidate.status : null;
 	const correlationId =
@@ -5060,14 +5126,13 @@ function buildExecuteResultSummary(executeResult: unknown): string {
 			? candidate.correlationId
 			: null;
 	if (directStatus || correlationId) {
-		return [
-			directStatus ? `status=${directStatus}` : null,
-			correlationId ? `correlationId=${correlationId}` : null,
-		]
-			.filter((item): item is string => item != null)
-			.join(" ");
-	}
-	if (
+		parts.push(
+			...[
+				directStatus ? `status=${directStatus}` : null,
+				correlationId ? `correlationId=${correlationId}` : null,
+			].filter((item): item is string => item != null),
+		);
+	} else if (
 		candidate.statusTracking &&
 		typeof candidate.statusTracking === "object" &&
 		typeof (candidate.statusTracking as { latestStatus?: { status?: unknown } })
@@ -5077,13 +5142,21 @@ function buildExecuteResultSummary(executeResult: unknown): string {
 			latestStatus: { status: string };
 			timedOut?: boolean;
 		};
-		return `status=${tracking.latestStatus.status}${tracking.timedOut ? " (poll-timeout)" : ""}`;
+		parts.push(
+			`status=${tracking.latestStatus.status}${tracking.timedOut ? " (poll-timeout)" : ""}`,
+		);
+	} else {
+		parts.push(
+			typeof candidate.txHash === "string" && candidate.txHash.trim()
+				? `txHash=${candidate.txHash}`
+				: "txHash=unknown",
+		);
 	}
-	const hashText =
-		typeof candidate.txHash === "string" && candidate.txHash.trim()
-			? `txHash=${candidate.txHash}`
-			: "txHash=unknown";
-	return hashText;
+	const burrowRiskSummary = buildBurrowExecuteRiskSummary(candidate);
+	if (burrowRiskSummary) {
+		parts.push(burrowRiskSummary);
+	}
+	return parts.join(" ");
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
@@ -6986,14 +7059,7 @@ export function createNearWorkflowTools() {
 					intent.type === "near.swap.intents"
 						? buildIntentsExecuteReadableText(executeArtifactWithSummary)
 						: `Workflow executed: ${intent.type} ${buildExecuteResultSummary(executeArtifactWithSummary)}`;
-				const executeSummaryRiskSuffix =
-					(intent.type === "near.lend.burrow.borrow" ||
-						intent.type === "near.lend.burrow.withdraw") &&
-					burrowExecuteRiskCheck &&
-					typeof burrowExecuteRiskCheck.riskBand === "string"
-						? ` risk=${burrowExecuteRiskCheck.riskBand}`
-						: "";
-				const executeSummaryText = `${executeSummaryTextBase}${executeSummaryRiskSuffix}`;
+				const executeSummaryText = executeSummaryTextBase;
 				return {
 					content: [
 						{
