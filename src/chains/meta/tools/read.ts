@@ -244,6 +244,24 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 					riskLevel: "high",
 				},
 			},
+			{
+				tool: "w3rt_run_evm_transfer_workflow_v0",
+				description:
+					"EVM transfer workflow for native/ERC20 transfers with analysis -> simulate -> execute.",
+				intentTypes: ["evm.transfer.native", "evm.transfer.erc20"],
+				nlExamples: [
+					"给 0x... 转 0.001 MATIC，先模拟",
+					"把 tokenAddress=0x... 的 1000000 raw 转给 0x...，先分析",
+				],
+				execution: {
+					executable: true,
+					requiresSigner: true,
+					requiresMainnetConfirmation: true,
+					requiresConfirmToken: true,
+					defaultRunMode: "analysis",
+					riskLevel: "medium",
+				},
+			},
 		],
 	},
 ];

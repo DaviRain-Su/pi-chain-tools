@@ -113,6 +113,7 @@ export { createEvmReadTools } from "./chains/evm/tools/read.js";
 export { createEvmComposeTools } from "./chains/evm/tools/compose.js";
 export { createEvmExecuteTools } from "./chains/evm/tools/execute.js";
 export { createEvmRpcTools } from "./chains/evm/tools/rpc.js";
+export { createEvmTransferWorkflowTools } from "./chains/evm/tools/transfer-workflow.js";
 export { createEvmWorkflowTools } from "./chains/evm/tools/workflow.js";
 export { createEvmToolset } from "./chains/evm/toolset.js";
 

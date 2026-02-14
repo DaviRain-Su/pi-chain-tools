@@ -94,37 +94,59 @@ describe("meta capability tools", () => {
 			includeExamples: false,
 			includeToolNames: false,
 		});
+		const details = result.details as {
+			query: {
+				maxRisk: string;
+				includeExamples: boolean;
+				includeToolNames: boolean;
+			};
+			chains: Array<{
+				chain: string;
+				workflows: Array<{ tool: string; nlExamples: string[] }>;
+			}>;
+			toolsets: Array<{
+				chain: string;
+				groups: Array<{ tools: string[] }>;
+			}>;
+		};
 		expect(result.content[0]?.text).toContain("maxRisk=medium");
-		expect(result.details).toMatchObject({
+		expect(details).toMatchObject({
 			query: {
 				maxRisk: "medium",
 				includeExamples: false,
 				includeToolNames: false,
 			},
-			chains: expect.not.arrayContaining([
+		});
+		expect(details).toMatchObject({
+			chains: expect.arrayContaining([
+				expect.objectContaining({ chain: "solana" }),
 				expect.objectContaining({ chain: "evm" }),
 			]),
-		});
-		expect(result.details).toMatchObject({
-			chains: expect.arrayContaining([
-				expect.objectContaining({
-					chain: "solana",
-					workflows: [
-						expect.objectContaining({
-							nlExamples: [],
-						}),
-					],
-				}),
-			]),
 			toolsets: expect.arrayContaining([
-				expect.objectContaining({
-					chain: "solana",
-					groups: expect.arrayContaining([
-						expect.objectContaining({ tools: [] }),
-					]),
-				}),
+				expect.objectContaining({ chain: "solana" }),
 			]),
 		});
+		for (const chain of details.chains) {
+			for (const workflow of chain.workflows) {
+				expect(workflow.nlExamples).toEqual([]);
+			}
+		}
+		const evm = details.chains.find((chain) => chain.chain === "evm");
+		expect(
+			evm?.workflows.some(
+				(workflow) => workflow.tool === "w3rt_run_evm_transfer_workflow_v0",
+			),
+		).toBe(true);
+		expect(
+			evm?.workflows.some(
+				(workflow) => workflow.tool === "w3rt_run_evm_polymarket_workflow_v0",
+			),
+		).toBe(false);
+		for (const toolset of details.toolsets) {
+			for (const group of toolset.groups) {
+				expect(group.tools).toEqual([]);
+			}
+		}
 	});
 
 	it("returns ACP handshake with embedded capabilities by default", async () => {
