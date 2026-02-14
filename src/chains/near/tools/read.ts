@@ -62,6 +62,7 @@ type NearPortfolioAsset = {
 	estimatedUsd?: number | null;
 	valuationSourceAssetId?: string | null;
 	valuationMatchBy?: "tokenId" | "symbol";
+	valuationPriceUpdatedAt?: string | null;
 };
 
 type NearPortfolioFailure = {
@@ -99,6 +100,7 @@ type NearPortfolioValuationAsset = {
 	estimatedUsd: number | null;
 	sourceAssetId: string;
 	matchBy: "tokenId" | "symbol";
+	priceUpdatedAt: string;
 };
 
 type NearPortfolioValuationCacheEntry = {
@@ -658,6 +660,7 @@ function resolvePortfolioAssetPrice(params: {
 	priceUsd: number;
 	sourceAssetId: string;
 	matchBy: "tokenId" | "symbol";
+	priceUpdatedAt: string;
 } | null {
 	const contractId =
 		typeof params.asset.contractId === "string"
@@ -670,6 +673,7 @@ function resolvePortfolioAssetPrice(params: {
 				priceUsd: matched.price,
 				sourceAssetId: matched.assetId,
 				matchBy: "tokenId",
+				priceUpdatedAt: matched.priceUpdatedAt,
 			};
 		}
 	}
@@ -681,6 +685,7 @@ function resolvePortfolioAssetPrice(params: {
 				priceUsd: nativeCandidate.price,
 				sourceAssetId: nativeCandidate.assetId,
 				matchBy: "tokenId",
+				priceUpdatedAt: nativeCandidate.priceUpdatedAt,
 			};
 		}
 	}
@@ -694,6 +699,7 @@ function resolvePortfolioAssetPrice(params: {
 		priceUsd: matched.price,
 		sourceAssetId: matched.assetId,
 		matchBy: "symbol",
+		priceUpdatedAt: matched.priceUpdatedAt,
 	};
 }
 
@@ -2463,6 +2469,7 @@ export function createNearReadTools() {
 						priceUsd: null,
 						estimatedUsd: null,
 						valuationSourceAssetId: null,
+						valuationPriceUpdatedAt: null,
 					},
 				];
 				const failures: NearPortfolioFailure[] = [];
@@ -2516,6 +2523,7 @@ export function createNearReadTools() {
 							priceUsd: null,
 							estimatedUsd: null,
 							valuationSourceAssetId: null,
+							valuationPriceUpdatedAt: null,
 						});
 					} catch (error) {
 						failures.push({
@@ -2537,6 +2545,8 @@ export function createNearReadTools() {
 					pricedWalletAssetCount: 0,
 					totalWalletUsd: null as number | null,
 					assets: [] as NearPortfolioValuationAsset[],
+					priceUpdatedAtLatest: null as string | null,
+					priceUpdatedAtOldest: null as string | null,
 					cache: {
 						ttlMs: valuationCacheTtlMs,
 						hit: false,
@@ -2577,6 +2587,7 @@ export function createNearReadTools() {
 							asset.priceUsd = resolved.priceUsd;
 							asset.valuationSourceAssetId = resolved.sourceAssetId;
 							asset.valuationMatchBy = resolved.matchBy;
+							asset.valuationPriceUpdatedAt = resolved.priceUpdatedAt;
 							asset.estimatedUsd = computePortfolioAssetEstimatedUsd(asset);
 							valuation.pricedAssetCount += 1;
 							if (hasPositiveRawAmount(asset.rawAmount)) {
@@ -2591,7 +2602,23 @@ export function createNearReadTools() {
 								estimatedUsd: asset.estimatedUsd,
 								sourceAssetId: resolved.sourceAssetId,
 								matchBy: resolved.matchBy,
+								priceUpdatedAt: resolved.priceUpdatedAt,
 							});
+						}
+						const priceUpdateTimes = valuation.assets
+							.map((asset) => {
+								const parsed = Date.parse(asset.priceUpdatedAt);
+								return Number.isFinite(parsed) ? parsed : null;
+							})
+							.filter(
+								(value): value is number =>
+									typeof value === "number" && Number.isFinite(value),
+							);
+						if (priceUpdateTimes.length > 0) {
+							const latest = Math.max(...priceUpdateTimes);
+							const oldest = Math.min(...priceUpdateTimes);
+							valuation.priceUpdatedAtLatest = new Date(latest).toISOString();
+							valuation.priceUpdatedAtOldest = new Date(oldest).toISOString();
 						}
 						const walletUsdRows = valuation.assets
 							.filter((asset) => hasPositiveRawAmount(asset.rawAmount))
@@ -2682,6 +2709,11 @@ export function createNearReadTools() {
 						if (walletAssetsByValue.length > 0) {
 							lines.push(
 								`Top wallet assets by USD: ${walletAssetsByValue.join(", ")}`,
+							);
+						}
+						if (valuation.priceUpdatedAtLatest) {
+							lines.push(
+								`Valuation prices as of: ${valuation.priceUpdatedAtLatest}`,
 							);
 						}
 					} else if (valuation.error) {

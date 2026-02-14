@@ -379,6 +379,7 @@ describe("near_getPortfolio", () => {
 		expect(result.content[0]?.text).toContain("Portfolio: 2 assets");
 		expect(result.content[0]?.text).toContain("Estimated USD value (wallet)");
 		expect(result.content[0]?.text).toContain("Top wallet assets by USD:");
+		expect(result.content[0]?.text).toContain("Valuation prices as of:");
 		expect(result.content[0]?.text).toContain("Wallet assets (>0):");
 		expect(result.content[0]?.text).toContain("USDC: 1.2345");
 		expect(result.content[0]?.text).toContain("Asset details:");
@@ -403,6 +404,8 @@ describe("near_getPortfolio", () => {
 				tokenCount: 2,
 				walletAssetCount: 2,
 				pricedWalletAssetCount: 2,
+				priceUpdatedAtLatest: "2026-01-01T00:00:00.000Z",
+				priceUpdatedAtOldest: "2026-01-01T00:00:00.000Z",
 			},
 			defiExposure: {
 				refDeposits: [],
