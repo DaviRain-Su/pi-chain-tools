@@ -594,6 +594,20 @@ function resolveBurrowWorkflowRiskBand(
 	return "safe";
 }
 
+function normalizeBurrowRiskBandValue(
+	value: unknown,
+): NearBurrowWorkflowRiskBand | null {
+	if (
+		value === "safe" ||
+		value === "warning" ||
+		value === "critical" ||
+		value === "unknown"
+	) {
+		return value;
+	}
+	return null;
+}
+
 function resolveBurrowWorkflowRiskBandFromHealthFactor(
 	healthFactor: number | null,
 ): NearBurrowWorkflowRiskBand {
@@ -5073,28 +5087,66 @@ function resolveBurrowExecuteRiskCheckNode(
 	return null;
 }
 
+function buildBurrowRiskReadableText(params: {
+	riskBand: NearBurrowWorkflowRiskBand | null;
+	healthFactor: number | null;
+	liquidationDistanceRatio: number | null;
+	confirmRiskAccepted?: boolean | null;
+}): string | null {
+	const riskBand = params.riskBand;
+	if (!riskBand) return null;
+	if (riskBand === "safe" && params.confirmRiskAccepted !== true) return null;
+	const riskLabel =
+		riskBand === "critical"
+			? "高风险"
+			: riskBand === "warning"
+				? "中风险"
+				: riskBand === "safe"
+					? "低风险"
+					: "未知风险";
+	const hfText =
+		params.healthFactor == null ? "n/a" : params.healthFactor.toFixed(4);
+	const liqDistanceText =
+		params.liquidationDistanceRatio == null
+			? "n/a"
+			: formatBurrowWorkflowRatioPercent(params.liquidationDistanceRatio);
+	const confirmText =
+		params.confirmRiskAccepted === true
+			? "已确认风险执行。"
+			: params.confirmRiskAccepted === false
+				? "未确认风险执行。"
+				: "";
+	return `风险提示：${riskLabel}（${riskBand}），健康因子=${hfText}，距清算线=${liqDistanceText}。${confirmText}`.trim();
+}
+
 function buildBurrowExecuteRiskSummary(executeResult: unknown): string | null {
 	const riskCheck = resolveBurrowExecuteRiskCheckNode(executeResult);
 	if (!riskCheck) return null;
 	const parts: string[] = [];
-	if (typeof riskCheck.riskBand === "string" && riskCheck.riskBand.trim()) {
-		parts.push(`risk=${riskCheck.riskBand.trim()}`);
-	}
+	const riskBand =
+		typeof riskCheck.riskBand === "string" && riskCheck.riskBand.trim()
+			? (riskCheck.riskBand.trim() as NearBurrowWorkflowRiskBand)
+			: null;
+	if (riskBand) parts.push(`risk=${riskBand}`);
 	if (typeof riskCheck.riskEngine === "string" && riskCheck.riskEngine.trim()) {
 		parts.push(`riskEngine=${riskCheck.riskEngine.trim()}`);
 	}
-	if (
+	const healthFactor =
 		typeof riskCheck.healthFactor === "number" &&
 		Number.isFinite(riskCheck.healthFactor)
-	) {
-		parts.push(`hf=${riskCheck.healthFactor.toFixed(4)}`);
+			? riskCheck.healthFactor
+			: null;
+	if (healthFactor != null) {
+		parts.push(`hf=${healthFactor.toFixed(4)}`);
 	}
-	if (
+	const liquidationDistanceRatio =
 		typeof riskCheck.liquidationDistanceRatio === "number" &&
 		Number.isFinite(riskCheck.liquidationDistanceRatio)
-	) {
+			? riskCheck.liquidationDistanceRatio
+			: null;
+	if (liquidationDistanceRatio != null) {
 		parts.push(
-			`liqDistance=${formatBurrowWorkflowRatioPercent(riskCheck.liquidationDistanceRatio)}`,
+			`liqDistance=${formatBurrowWorkflowRatioPercent(liquidationDistanceRatio)}`,
 		);
 	}
 	if (riskCheck.confirmRiskAccepted === true) {
@@ -5102,6 +5154,16 @@ function buildBurrowExecuteRiskSummary(executeResult: unknown): string | null {
 	} else if (riskCheck.confirmRiskAccepted === false) {
 		parts.push("confirmRisk=not_accepted");
 	}
+	const riskReadable = buildBurrowRiskReadableText({
+		riskBand,
+		healthFactor,
+		liquidationDistanceRatio,
+		confirmRiskAccepted:
+			typeof riskCheck.confirmRiskAccepted === "boolean"
+				? riskCheck.confirmRiskAccepted
+				: null,
+	});
+	if (riskReadable) parts.push(riskReadable);
 	return parts.length > 0 ? parts.join(" ") : null;
 }
 
@@ -5744,11 +5806,10 @@ function buildSimulateResultSummary(
 				? simulateResult.riskLevel
 				: null;
 		const riskBand =
-			typeof simulateResult.riskBand === "string"
-				? simulateResult.riskBand
-				: riskLevel === "high" || riskLevel === "medium" || riskLevel === "low"
-					? resolveBurrowWorkflowRiskBand(riskLevel)
-					: null;
+			normalizeBurrowRiskBandValue(simulateResult.riskBand) ??
+			(riskLevel === "high" || riskLevel === "medium" || riskLevel === "low"
+				? resolveBurrowWorkflowRiskBand(riskLevel)
+				: null);
 		const collateralAssetCount =
 			typeof simulateResult.collateralAssetCount === "number" &&
 			Number.isFinite(simulateResult.collateralAssetCount)
@@ -5775,6 +5836,12 @@ function buildSimulateResultSummary(
 			Number.isFinite(simulateResult.liquidationDistanceRatio)
 				? simulateResult.liquidationDistanceRatio
 				: null;
+		const riskReadable = buildBurrowRiskReadableText({
+			riskBand,
+			healthFactor,
+			liquidationDistanceRatio,
+			confirmRiskAccepted: null,
+		});
 		const parts = [`Workflow simulated: ${intentType} status=${statusText}`];
 		if (riskEngine) parts.push(`riskEngine=${riskEngine}`);
 		if (riskBand) parts.push(`risk=${riskBand}`);
@@ -5793,6 +5860,9 @@ function buildSimulateResultSummary(
 		}
 		if (riskNotesCount > 0) {
 			parts.push(`riskNotes=${riskNotesCount}`);
+		}
+		if (riskReadable) {
+			parts.push(riskReadable);
 		}
 		return parts.join(" ");
 	}
@@ -6568,9 +6638,7 @@ export function createNearWorkflowTools() {
 										jwt: params.jwt,
 									});
 						const riskBand =
-							typeof riskPrecheck.riskBand === "string"
-								? riskPrecheck.riskBand
-								: "unknown";
+							normalizeBurrowRiskBandValue(riskPrecheck.riskBand) ?? "unknown";
 						const riskLevel =
 							typeof riskPrecheck.riskLevel === "string"
 								? riskPrecheck.riskLevel
@@ -6622,7 +6690,14 @@ export function createNearWorkflowTools() {
 									: formatBurrowWorkflowRatioPercent(liquidationDistanceRatio);
 							const noteText =
 								riskNotes.length > 0 ? ` notes=${riskNotes.join(" | ")}` : "";
-							riskGateBlockMessage = `Burrow execute blocked by risk gate: intent=${intent.type} risk=${riskBand} level=${riskLevel} hf=${hfText} liqDistance=${liqText}. Pass confirmRisk=true to proceed.${noteText}`;
+							const riskReadable = buildBurrowRiskReadableText({
+								riskBand,
+								healthFactor,
+								liquidationDistanceRatio,
+								confirmRiskAccepted: false,
+							});
+							const readableSuffix = riskReadable ? ` ${riskReadable}` : "";
+							riskGateBlockMessage = `Burrow execute blocked by risk gate: intent=${intent.type} risk=${riskBand} level=${riskLevel} hf=${hfText} liqDistance=${liqText}. Pass confirmRisk=true to proceed (或在自然语言中说明“我接受风险继续执行”).${noteText}${readableSuffix}`;
 						}
 					} catch (error) {
 						burrowExecuteRiskCheck = {

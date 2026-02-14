@@ -68,6 +68,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `near_getLendingMarketsBurrow` (Burrow lending market list with capability flags + supply/borrow APR + readable amounts)
 - `read`: `near_getLendingPositionsBurrow` (Burrow account supplied/collateral/borrowed snapshot with readable token rows + risk summary + USD valuation/borrow-collateral ratio + configurable warning/critical thresholds)
 - `workflow`: Burrow borrow/withdraw `analysis/simulate` summary line now includes risk policy + risk band (`safe/warning/critical/unknown`) + `riskEngine`/`hf` fields for faster natural-language follow-up decisions
+- `workflow`: Burrow borrow/withdraw simulate/execute summaries now include a short readable risk hint (e.g. `风险提示：高风险（critical）...`) to reduce pure-JSON style output
 - `read`: `near_getRefDeposits` (Ref exchange deposited balances, readable token symbols + raw/ui amounts)
 - `read`: `near_getRefLpPositions` (Ref LP share positions, pool pair labels + remove hints)
 - `read`: `near_getSwapQuoteRef` (Ref/Rhea quote: explicit pool/direct/two-hop route; supports token symbols like `NEAR`/`USDC`)

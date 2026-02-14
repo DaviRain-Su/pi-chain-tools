@@ -3416,8 +3416,12 @@ describe("w3rt_run_near_workflow_v0", () => {
 			"riskEngine=health_factor",
 		);
 		expect(String(simulateArtifact?.summaryLine ?? "")).toContain("hf=1.0909");
+		expect(String(simulateArtifact?.summaryLine ?? "")).toContain(
+			"风险提示：中风险（warning）",
+		);
 		expect(result.content[0]?.text).toContain("riskEngine=health_factor");
 		expect(result.content[0]?.text).toContain("hf=1.0909");
+		expect(result.content[0]?.text).toContain("风险提示：中风险（warning）");
 	});
 
 	it("simulates burrow repay and reports no-debt status", async () => {
@@ -3694,15 +3698,17 @@ describe("w3rt_run_near_workflow_v0", () => {
 			],
 		});
 
-		await expect(
-			tool.execute("near-wf-burrow-risk-gate-exec", {
-				runId: "wf-near-burrow-risk-gate",
-				runMode: "execute",
-				network: "mainnet",
-				confirmMainnet: true,
-				confirmToken: token,
-			}),
-		).rejects.toThrow(/Pass confirmRisk=true to proceed/);
+		const executePromise = tool.execute("near-wf-burrow-risk-gate-exec", {
+			runId: "wf-near-burrow-risk-gate",
+			runMode: "execute",
+			network: "mainnet",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+		await expect(executePromise).rejects.toThrow(
+			/Pass confirmRisk=true to proceed/,
+		);
+		await expect(executePromise).rejects.toThrow(/我接受风险继续执行/);
 		expect(executeMocks.borrowBurrowExecute).not.toHaveBeenCalled();
 	});
 
@@ -3832,6 +3838,8 @@ describe("w3rt_run_near_workflow_v0", () => {
 		expect(result.content[0]?.text).toContain("riskEngine=health_factor");
 		expect(result.content[0]?.text).toContain("hf=0.7000");
 		expect(result.content[0]?.text).toContain("liqDistance=-30.00%");
+		expect(result.content[0]?.text).toContain("风险提示：高风险（critical）");
+		expect(result.content[0]?.text).toContain("已确认风险执行");
 	});
 
 	it("parses natural-language confirm-risk phrase for burrow execute follow-up", async () => {
