@@ -58,7 +58,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `near_getSwapQuoteRef` (Ref/Rhea quote: explicit pool/direct/two-hop route; supports token symbols like `NEAR`/`USDC`)
 - `read`: `near_getIntentsTokens` (NEAR Intents 1Click `/v0/tokens`, filterable supported-asset list)
 - `read`: `near_getIntentsQuote` (NEAR Intents 1Click `/v0/quote`, defaults to `dry=true` for safe preview)
-- `read`: `near_getIntentsExplorerTransactions` (NEAR Intents Explorer `/api/v0/transactions-pages`, supports status/chain/time filters; requires JWT)
+- `read`: `near_getIntentsExplorerTransactions` (NEAR Intents Explorer `/api/v0/transactions-pages` or cursor `/api/v0/transactions`, supports status/chain/time filters; requires JWT)
 - `read`: `near_getIntentsStatus` (NEAR Intents 1Click `/v0/status` by `depositAddress`/`depositMemo` or `correlationId`)
 - `read`: `near_getIntentsAnyInputWithdrawals` (NEAR Intents 1Click `/v0/any-input/withdrawals` for ANY_INPUT withdrawal records)
 - `compose`: `near_buildTransferNearTransaction` (unsigned native transfer payload, local signing)
@@ -132,6 +132,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `帮我用 NEAR Intents 预估把 wNEAR 换成 USDC，amount=10000000000000000000000（dry）`
 - Intents Explorer Transactions (read):
   - `帮我查一下 NEAR Intents 最近 20 笔交易，筛选状态 SUCCESS/PROCESSING`
+  - `帮我用 cursor 模式查 NEAR Intents 交易，direction=next，numberOfTransactions=20`
 - Intents Status (read):
   - `帮我查一下 NEAR Intents 这个 depositAddress 的状态：0x...`
   - `帮我查一下 NEAR Intents 这个 correlationId 的状态：corr-...`
@@ -380,6 +381,8 @@ Natural language confirmation example:
   - `通过 intents 把 NEAR 换成 USDC，amountRaw 10000000000000000000000，先模拟`
 - Intents workflow execute (submit deposit):
   - `继续执行刚才这笔 intents 兑换，txHash 0x...，确认主网执行`
+- Intents workflow execute (natural no-wait):
+  - `继续执行刚才这笔 intents 兑换，不用等待完成，确认主网执行`
 - Intents workflow execute (signed tx auto-broadcast):
   - `继续执行刚才这笔 intents 兑换，signedTxBase64 <BASE64_SIGNED_TX>，确认主网执行`
 - Intents ANY_INPUT withdrawals:

@@ -766,6 +766,32 @@ describe("w3rt_run_near_workflow_v0", () => {
 		);
 	});
 
+	it("parses confirm-mainnet phrase from intentText for follow-up execute", async () => {
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-5c-sim", {
+			runId: "wf-near-05c",
+			runMode: "simulate",
+			intentType: "near.transfer.near",
+			network: "mainnet",
+			toAccountId: "bob.near",
+			amountYoctoNear: "1000",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		await tool.execute("near-wf-5c-exec", {
+			runMode: "execute",
+			intentText: `继续执行刚才这笔，确认主网执行，confirmToken ${token}`,
+		});
+
+		expect(executeMocks.transferNearExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				toAccountId: "bob.near",
+				amountYoctoNear: "1000",
+				confirmMainnet: true,
+			}),
+		);
+	});
+
 	it("simulates ref swap and returns quote artifact", async () => {
 		runtimeMocks.callNearRpc
 			.mockResolvedValueOnce({
@@ -872,6 +898,26 @@ describe("w3rt_run_near_workflow_v0", () => {
 		});
 	});
 
+	it("parses percentage slippage for ref swap intentText", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-8-slippage-percent", {
+			runId: "wf-near-08-slippage-percent",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "把 0.01 NEAR 换成 USDC，滑点 1%，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.ref",
+			intent: {
+				type: "near.swap.ref",
+				tokenInId: "NEAR",
+				tokenOutId: "USDC",
+				slippageBps: 100,
+			},
+		});
+	});
+
 	it("blocks analysis when swap slippage exceeds configured safety limit", async () => {
 		process.env.NEAR_SWAP_MAX_SLIPPAGE_BPS = "100";
 		const tool = getTool();
@@ -921,6 +967,28 @@ describe("w3rt_run_near_workflow_v0", () => {
 				originAsset: "NEAR",
 				destinationAsset: "USDC",
 				amount: "1000000",
+			},
+		});
+	});
+
+	it("parses percentage intents slippage from intentText", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-8d-slippage", {
+			runId: "wf-near-08d-slippage",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"通过 intents 把 NEAR 换成 USDC，amountRaw 1000000，intents滑点 0.5%，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.intents",
+			intent: {
+				type: "near.swap.intents",
+				originAsset: "NEAR",
+				destinationAsset: "USDC",
+				amount: "1000000",
+				slippageTolerance: 50,
 			},
 		});
 	});
@@ -1267,6 +1335,12 @@ describe("w3rt_run_near_workflow_v0", () => {
 				},
 			},
 		});
+		expect(result.content[0]?.text).toContain(
+			"Workflow executed: near.swap.intents",
+		);
+		expect(result.content[0]?.text).toContain("Submit status: PENDING_DEPOSIT");
+		expect(result.content[0]?.text).toContain("CorrelationId: corr-exec-1");
+		expect(result.content[0]?.text).toContain("Tracked status: SUCCESS");
 	});
 
 	it("supports intents execute without status polling when disabled", async () => {
@@ -1331,6 +1405,80 @@ describe("w3rt_run_near_workflow_v0", () => {
 			confirmToken: token,
 			txHash: "0xfeedbeef2",
 			waitForFinalStatus: false,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.intents",
+			artifacts: {
+				execute: {
+					correlationId: "corr-exec-1",
+					statusTracking: null,
+				},
+			},
+		});
+	});
+
+	it("parses natural-language hint to disable intents status polling", async () => {
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "near:wrap.near",
+					decimals: 24,
+					blockchain: "near",
+					symbol: "NEAR",
+					price: 4.2,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+				{
+					assetId: "near:usdc.tether-token.near",
+					decimals: 6,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+			],
+		});
+		mockFetchJsonOnce({
+			status: 201,
+			body: {
+				correlationId: "corr-sim-2c",
+				timestamp: "2026-02-13T00:00:00Z",
+				signature: "sig-2c",
+				quoteRequest: { dry: true },
+				quote: {
+					depositAddress: "0xnear-deposit-2c",
+					depositMemo: "memo-2c",
+					amountIn: "10000000000000000000000",
+					amountInFormatted: "0.01",
+					amountInUsd: "0.042",
+					minAmountIn: "10000000000000000000000",
+					amountOut: "41871",
+					amountOutFormatted: "0.041871",
+					amountOutUsd: "0.041871",
+					minAmountOut: "40000",
+					timeEstimate: 22,
+				},
+			},
+		});
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-8f3-sim", {
+			runId: "wf-near-08f3",
+			runMode: "simulate",
+			intentType: "near.swap.intents",
+			network: "mainnet",
+			originAsset: "NEAR",
+			destinationAsset: "USDC",
+			amountRaw: "10000000000000000000000",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		const result = await tool.execute("near-wf-8f3-exec", {
+			runId: "wf-near-08f3",
+			runMode: "execute",
+			intentText: `继续执行刚才这笔，不用等待完成，confirmToken ${token}`,
+			confirmMainnet: true,
+			txHash: "0xfeedbeef3",
 		});
 
 		expect(result.details).toMatchObject({
@@ -1786,6 +1934,13 @@ describe("w3rt_run_near_workflow_v0", () => {
 				},
 			},
 		});
+		expect(result.content[0]?.text).toContain("Tracked status: SUCCESS");
+		expect(result.content[0]?.text).toContain(
+			"ANY_INPUT withdrawals: 1 record",
+		);
+		expect(result.content[0]?.text).toContain(
+			"Latest withdrawal: WITHDRAWN hash=0xwithdraw-any-3",
+		);
 	});
 
 	it("requires txHash or signedTxBase64 for intents execute", async () => {

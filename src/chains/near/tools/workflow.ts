@@ -248,6 +248,8 @@ type ParsedIntentHints = {
 	depositMemo?: string;
 	txHash?: string;
 	waitForFinalStatus?: boolean;
+	confirmMainnet?: boolean;
+	confirmToken?: string;
 	withdrawAll?: boolean;
 	autoWithdraw?: boolean;
 };
@@ -651,7 +653,9 @@ function shouldWaitForIntentsFinalStatus(
 	hints: ParsedIntentHints,
 ): boolean {
 	if (typeof value === "boolean") return value;
-	if (hints.waitForFinalStatus === true) return true;
+	if (typeof hints.waitForFinalStatus === "boolean") {
+		return hints.waitForFinalStatus;
+	}
 	return true;
 }
 
@@ -1079,17 +1083,36 @@ function applyLpTokenAmountHints(params: {
 	}
 }
 
+function parseSlippageBpsFromHint(
+	value: string | undefined,
+	unit: string | undefined,
+): number | null {
+	if (!value) return null;
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed < 0) return null;
+	const normalizedUnit = unit?.trim().toLowerCase();
+	const bps =
+		normalizedUnit === "%" ||
+		normalizedUnit === "percent" ||
+		normalizedUnit === "pct"
+			? parsed * 100
+			: parsed;
+	const rounded = Math.floor(bps);
+	if (rounded < 0 || rounded > 5000) return null;
+	return rounded;
+}
+
 function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (!intentText || !intentText.trim()) return {};
 	const text = intentText.trim();
 	const lower = text.toLowerCase();
 	const tokenAmountPairs = collectTokenAmountPairs(text);
 	const toMatch = text.match(
-		/(?:to|给|到)\s*([a-z0-9][a-z0-9._-]*(?:\.near)?)/i,
+		/(?:\bto\b|给|到)\s*([a-z0-9][a-z0-9._-]*(?:\.near)?)/i,
 	);
 	const nearAmountMatch = text.match(/(\d+(?:\.\d+)?)\s*near\b/i);
 	const ftContractMatch = text.match(
-		/(?:contract|合约|token)\s*[:：]?\s*([a-z0-9][a-z0-9._-]*(?:\.near)?)/i,
+		/(?:\bcontract\b|合约|\btoken\b)\s*[:：]?\s*([a-z0-9][a-z0-9._-]*(?:\.near)?)/i,
 	);
 	const rawAmountMatch = text.match(
 		/(?:raw|amountRaw|数量|amount)\s*[:：]?\s*(\d+)/i,
@@ -1112,10 +1135,10 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 			/(?:第\s*(\d+)\s*个\s*(?:候选)?(?:池子|池|pool)|(?:候选|candidate)\s*(?:pool)?\s*#?\s*(\d+))/i,
 		) ?? null;
 	const slippageMatch = text.match(
-		/(?:slippage|滑点)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(?:bps)?/i,
+		/(?:slippage|滑点)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(%|percent|pct|bps)?/i,
 	);
 	const intentsSlippageMatch = text.match(
-		/(?:slippageTolerance|intents\s*slippage|intents滑点)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(?:bps)?/i,
+		/(?:slippagetolerance|intents\s*slippage|intents滑点)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(%|percent|pct|bps)?/i,
 	);
 	const refContractMatch = text.match(
 		/(?:ref\s*contract|ref合约|交易所合约)\s*[:：]?\s*([a-z0-9][a-z0-9._-]*(?:\.near)?)/i,
@@ -1134,6 +1157,10 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	);
 	const txHashMatch = text.match(
 		/(?:txhash|tx hash|交易hash|交易哈希)\s*[:：]?\s*([a-z0-9._:-]{8,})/i,
+	);
+	const txHashLooseMatch = text.match(/\b(0x[a-f0-9]{32,})\b/i);
+	const confirmTokenMatch = text.match(
+		/(?:confirmtoken|confirm token|确认令牌|确认码)\s*[:：]?\s*([a-z0-9_-]{8,})/i,
 	);
 	const amountARawMatch = text.match(
 		/(?:amounta[_\s-]*raw|amountaraw|rawa)\s*[:：]?\s*(\d+)/i,
@@ -1164,7 +1191,7 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		/(?:tokenb|币b|代币b|token_b)\s*[:：]?\s*([a-z][a-z0-9._-]*)/i,
 	);
 	const tokenIdMatch = text.match(
-		/(?:tokenid|token id|token|币种|代币)\s*[:：]?\s*([a-z][a-z0-9._-]*)/i,
+		/(?:\btokenid\b|\btoken id\b|\btoken\b|币种|代币)\s*[:：]?\s*([a-z][a-z0-9._-]*)/i,
 	);
 	const refWithdrawTokenBeforeActionMatch = text.match(
 		/ref[^a-z0-9]*(?:里|中的)?\s*(?:把|将)?\s*([a-z][a-z0-9._-]*)\s*(?:全部|all|余额|balance)?\s*(?:提回|取回|提取|提现|withdraw|赎回)/i,
@@ -1212,6 +1239,22 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		lower.includes("wait for final") ||
 		lower.includes("wait completion") ||
 		lower.includes("track status");
+	const wantsNoWaitForFinalStatus =
+		lower.includes("不等待完成") ||
+		lower.includes("不用等待") ||
+		lower.includes("无需等待") ||
+		lower.includes("不跟踪状态") ||
+		lower.includes("无需跟踪") ||
+		lower.includes("不用跟踪") ||
+		lower.includes("do not wait") ||
+		lower.includes("don't wait") ||
+		lower.includes("no wait");
+	const wantsConfirmMainnet =
+		lower.includes("确认主网执行") ||
+		lower.includes("确认主网") ||
+		lower.includes("confirm mainnet") ||
+		lower.includes("confirmmainnet=true") ||
+		lower.includes("confirmmainnet true");
 	const hasLpKeyword =
 		lower.includes("lp") ||
 		lower.includes("liquidity") ||
@@ -1315,15 +1358,18 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		}
 	}
 	if (slippageMatch?.[1]) {
-		const parsed = Number(slippageMatch[1]);
-		if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 5000) {
-			hints.slippageBps = Math.floor(parsed);
+		const parsed = parseSlippageBpsFromHint(slippageMatch[1], slippageMatch[2]);
+		if (parsed != null) {
+			hints.slippageBps = parsed;
 		}
 	}
 	if (intentsSlippageMatch?.[1]) {
-		const parsed = Number(intentsSlippageMatch[1]);
-		if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 5000) {
-			hints.slippageTolerance = Math.floor(parsed);
+		const parsed = parseSlippageBpsFromHint(
+			intentsSlippageMatch[1],
+			intentsSlippageMatch[2],
+		);
+		if (parsed != null) {
+			hints.slippageTolerance = parsed;
 		}
 	}
 	if (refContractMatch?.[1]) {
@@ -1334,7 +1380,15 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (depositAddressMatch?.[1]) hints.depositAddress = depositAddressMatch[1];
 	if (depositMemoMatch?.[1]) hints.depositMemo = depositMemoMatch[1];
 	if (txHashMatch?.[1]) hints.txHash = txHashMatch[1];
-	if (wantsWaitForFinalStatus) hints.waitForFinalStatus = true;
+	if (!hints.txHash && txHashLooseMatch?.[1])
+		hints.txHash = txHashLooseMatch[1];
+	if (confirmTokenMatch?.[1]) hints.confirmToken = confirmTokenMatch[1];
+	if (wantsNoWaitForFinalStatus) {
+		hints.waitForFinalStatus = false;
+	} else if (wantsWaitForFinalStatus) {
+		hints.waitForFinalStatus = true;
+	}
+	if (wantsConfirmMainnet) hints.confirmMainnet = true;
 	if (
 		lower.includes("any input") ||
 		lower.includes("any_input") ||
@@ -2121,6 +2175,21 @@ function hintsContainActionableIntentFields(hints: ParsedIntentHints): boolean {
 			hints.refundTo ||
 			hints.withdrawAll != null ||
 			hints.autoWithdraw != null,
+	);
+}
+
+function looksLikeFollowUpExecuteIntent(intentText?: string): boolean {
+	if (!intentText || !intentText.trim()) return false;
+	const lower = intentText.trim().toLowerCase();
+	return (
+		lower.includes("继续执行") ||
+		lower.includes("执行刚才") ||
+		lower.includes("刚才这笔") ||
+		lower.includes("继续这笔") ||
+		lower.includes("继续上一笔") ||
+		lower.includes("continue execute") ||
+		lower.includes("continue last") ||
+		lower.includes("continue previous")
 	);
 }
 
@@ -3545,6 +3614,128 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object";
 }
 
+function buildIntentsExecuteReadableText(executeArtifact: unknown): string {
+	const lines = ["Workflow executed: near.swap.intents"];
+	if (!isObjectRecord(executeArtifact)) {
+		return `${lines[0]} submitted`;
+	}
+	lines[0] = `${lines[0]} ${buildExecuteResultSummary(executeArtifact)}`;
+
+	const submitStatus =
+		typeof executeArtifact.status === "string" &&
+		executeArtifact.status.trim().length > 0
+			? executeArtifact.status.trim()
+			: null;
+	if (submitStatus) {
+		lines.push(`Submit status: ${submitStatus}`);
+	}
+	const correlationId =
+		typeof executeArtifact.correlationId === "string" &&
+		executeArtifact.correlationId.trim().length > 0
+			? executeArtifact.correlationId.trim()
+			: null;
+	if (correlationId) {
+		lines.push(`CorrelationId: ${correlationId}`);
+	}
+	const depositAddress =
+		typeof executeArtifact.depositAddress === "string" &&
+		executeArtifact.depositAddress.trim().length > 0
+			? executeArtifact.depositAddress.trim()
+			: null;
+	const depositMemo =
+		typeof executeArtifact.depositMemo === "string" &&
+		executeArtifact.depositMemo.trim().length > 0
+			? executeArtifact.depositMemo.trim()
+			: null;
+	if (depositAddress) {
+		lines.push(
+			`Deposit: ${depositAddress}${depositMemo ? ` (memo ${depositMemo})` : ""}`,
+		);
+	}
+	const txHash =
+		typeof executeArtifact.txHash === "string" &&
+		executeArtifact.txHash.trim().length > 0
+			? executeArtifact.txHash.trim()
+			: null;
+	if (txHash) {
+		lines.push(`Deposit txHash: ${txHash}`);
+	}
+	if (isObjectRecord(executeArtifact.statusTracking)) {
+		const tracking = executeArtifact.statusTracking;
+		const latestStatus = isObjectRecord(tracking.latestStatus)
+			? tracking.latestStatus
+			: null;
+		const status =
+			latestStatus && typeof latestStatus.status === "string"
+				? latestStatus.status
+				: null;
+		const updatedAt =
+			latestStatus && typeof latestStatus.updatedAt === "string"
+				? latestStatus.updatedAt
+				: null;
+		const attempts =
+			typeof tracking.attempts === "number" ? tracking.attempts : null;
+		const timedOut = tracking.timedOut === true;
+		if (status) {
+			lines.push(
+				`Tracked status: ${status}${timedOut ? " (poll-timeout)" : ""}${updatedAt ? ` at ${updatedAt}` : ""}`,
+			);
+		} else if (timedOut) {
+			lines.push("Tracked status: pending (poll-timeout)");
+		}
+		if (attempts != null) {
+			lines.push(`Status poll attempts: ${attempts}`);
+		}
+		const lastError =
+			typeof tracking.lastError === "string" && tracking.lastError.trim()
+				? tracking.lastError.trim()
+				: null;
+		if (timedOut && lastError) {
+			lines.push(`Status tracking note: ${lastError}`);
+		}
+	}
+	if (isObjectRecord(executeArtifact.anyInputWithdrawals)) {
+		const withdrawals = executeArtifact.anyInputWithdrawals;
+		const status =
+			typeof withdrawals.status === "string" ? withdrawals.status : "unknown";
+		const records = Array.isArray(withdrawals.withdrawals)
+			? withdrawals.withdrawals
+			: [];
+		if (status === "success") {
+			lines.push(`ANY_INPUT withdrawals: ${records.length} record(s)`);
+		} else if (status === "pending") {
+			lines.push("ANY_INPUT withdrawals: pending");
+		} else if (status === "error") {
+			const error =
+				typeof withdrawals.error === "string" && withdrawals.error.trim()
+					? withdrawals.error.trim()
+					: "unknown error";
+			lines.push(`ANY_INPUT withdrawals: error (${error})`);
+		}
+		if (records.length > 0 && isObjectRecord(records[0])) {
+			const first = records[0];
+			const firstStatus =
+				typeof first.status === "string" ? first.status : "UNKNOWN";
+			const firstHash = typeof first.hash === "string" ? first.hash : null;
+			lines.push(
+				`Latest withdrawal: ${firstStatus}${firstHash ? ` hash=${firstHash}` : ""}`,
+			);
+		}
+		if (isObjectRecord(withdrawals.polling)) {
+			const polling = withdrawals.polling;
+			const attempts =
+				typeof polling.attempts === "number" ? polling.attempts : null;
+			const timedOut = polling.timedOut === true;
+			if (attempts != null) {
+				lines.push(
+					`ANY_INPUT polling: attempts=${attempts}${timedOut ? " (timeout)" : ""}`,
+				);
+			}
+		}
+	}
+	return lines.join("\n");
+}
+
 function buildSimulateResultSummary(
 	intentType: NearWorkflowIntent["type"],
 	simulateResult: unknown,
@@ -3746,7 +3937,8 @@ export function createNearWorkflowTools() {
 				const followUpByIntentText =
 					runMode === "execute" &&
 					!hasCoreIntentInputs(params) &&
-					!hintsContainActionableIntentFields(hints);
+					(looksLikeFollowUpExecuteIntent(params.intentText) ||
+						!hintsContainActionableIntentFields(hints));
 				if (
 					runMode === "execute" &&
 					!session &&
@@ -4159,10 +4351,21 @@ export function createNearWorkflowTools() {
 					};
 				}
 
-				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
-				if (approvalRequired && params.confirmToken !== confirmToken) {
+				const effectiveConfirmMainnet =
+					typeof params.confirmMainnet === "boolean"
+						? params.confirmMainnet
+						: hints.confirmMainnet;
+				const providedConfirmToken =
+					typeof params.confirmToken === "string" && params.confirmToken.trim()
+						? params.confirmToken.trim()
+						: typeof hints.confirmToken === "string" &&
+								hints.confirmToken.trim()
+							? hints.confirmToken.trim()
+							: params.confirmToken;
+				assertMainnetExecutionConfirmed(network, effectiveConfirmMainnet);
+				if (approvalRequired && providedConfirmToken !== confirmToken) {
 					throw new Error(
-						`Invalid confirmToken for runId=${runId}. expected=${confirmToken} provided=${params.confirmToken ?? "null"}.`,
+						`Invalid confirmToken for runId=${runId}. expected=${confirmToken} provided=${providedConfirmToken ?? "null"}.`,
 					);
 				}
 				let submitTxHash =
@@ -4204,7 +4407,7 @@ export function createNearWorkflowTools() {
 								signedTxBase64,
 								network,
 								rpcUrl: params.rpcUrl,
-								confirmMainnet: params.confirmMainnet,
+								confirmMainnet: effectiveConfirmMainnet,
 							},
 						);
 						const broadcastResultDetails = broadcastResult.details;
@@ -4352,7 +4555,7 @@ export function createNearWorkflowTools() {
 					rpcUrl: params.rpcUrl,
 					fromAccountId: intent.fromAccountId ?? params.fromAccountId,
 					privateKey: params.privateKey,
-					confirmMainnet: params.confirmMainnet,
+					confirmMainnet: effectiveConfirmMainnet,
 				});
 
 				const executeDetails = executeResult.details as
@@ -4503,11 +4706,15 @@ export function createNearWorkflowTools() {
 											: null,
 							}
 						: (executeDetails ?? null);
+				const executeSummaryText =
+					intent.type === "near.swap.intents"
+						? buildIntentsExecuteReadableText(executeArtifact)
+						: `Workflow executed: ${intent.type} ${buildExecuteResultSummary(executeArtifact)}`;
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Workflow executed: ${intent.type} ${buildExecuteResultSummary(executeDetails)}`,
+							text: executeSummaryText,
 						},
 					],
 					details: {
@@ -4519,7 +4726,7 @@ export function createNearWorkflowTools() {
 						approvalRequired,
 						confirmToken,
 						confirmTokenMatched:
-							!approvalRequired || params.confirmToken === confirmToken,
+							!approvalRequired || providedConfirmToken === confirmToken,
 						artifacts: {
 							execute: executeArtifact,
 						},

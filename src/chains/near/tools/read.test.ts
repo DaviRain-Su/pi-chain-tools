@@ -860,6 +860,84 @@ describe("near_getIntentsExplorerTransactions", () => {
 		});
 	});
 
+	it("supports cursor mode and exposes next cursors", async () => {
+		process.env.NEAR_INTENTS_EXPLORER_JWT = "jwt-test-token";
+		mockFetchJsonOnce(200, [
+			{
+				originAsset: "nep141:wrap.near",
+				destinationAsset: "nep141:usdc.near",
+				depositAddress: "deposit-1",
+				depositAddressAndMemo: "deposit-1_1",
+				recipient: "alice.near",
+				status: "SUCCESS",
+				createdAt: "2026-02-14T12:00:00.000Z",
+				createdAtTimestamp: 1771060800,
+				amountInFormatted: "0.01",
+				amountOutFormatted: "0.01",
+				senders: ["alice.near"],
+				nearTxHashes: [],
+				originChainTxHashes: [],
+				destinationChainTxHashes: [],
+			},
+			{
+				originAsset: "nep141:wrap.near",
+				destinationAsset: "nep141:usdc.near",
+				depositAddress: "deposit-2",
+				depositAddressAndMemo: "deposit-2_2",
+				recipient: "bob.near",
+				status: "PROCESSING",
+				createdAt: "2026-02-14T11:59:00.000Z",
+				createdAtTimestamp: 1771060740,
+				amountInFormatted: "0.02",
+				amountOutFormatted: "0.0195",
+				senders: ["bob.near"],
+				nearTxHashes: [],
+				originChainTxHashes: [],
+				destinationChainTxHashes: [],
+			},
+		]);
+		const tool = getTool("near_getIntentsExplorerTransactions");
+		const result = await tool.execute("near-read-intents-explorer-cursor-1", {
+			mode: "cursor",
+			numberOfTransactions: 2,
+			direction: "next",
+			lastDepositAddressAndMemo: "deposit-0_0",
+		});
+
+		const [url] = restMocks.fetch.mock.calls[0] ?? [];
+		expect(String(url)).toContain(
+			"https://explorer.near-intents.org/api/v0/transactions?",
+		);
+		expect(String(url)).toContain("numberOfTransactions=2");
+		expect(String(url)).toContain("lastDepositAddressAndMemo=deposit-0_0");
+		expect(String(url)).toContain("direction=next");
+		expect(result.content[0]?.text).toContain(
+			"mode=cursor direction=next limit=2",
+		);
+		expect(result.content[0]?.text).toContain("Cursor(older): deposit-2_2");
+		expect(result.content[0]?.text).toContain("Cursor(newer): deposit-1_1");
+		expect(result.details).toMatchObject({
+			filters: {
+				mode: "cursor",
+				numberOfTransactions: 2,
+				direction: "next",
+				lastDepositAddressAndMemo: "deposit-0_0",
+			},
+			cursor: {
+				older: "deposit-2_2",
+				newer: "deposit-1_1",
+			},
+			transactions: [
+				{
+					status: "SUCCESS",
+				},
+				{
+					status: "PROCESSING",
+				},
+			],
+		});
+	});
+
 	it("requires jwt for explorer API", async () => {
 		const tool = getTool("near_getIntentsExplorerTransactions");
 		await expect(

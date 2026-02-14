@@ -551,6 +551,13 @@ function parseIntentsExplorerPerPage(value: number | undefined): number {
 	return Math.min(1_000, parsePositiveInt(value, "perPage"));
 }
 
+function parseIntentsExplorerNumberOfTransactions(
+	value: number | undefined,
+): number {
+	if (value == null) return 50;
+	return Math.min(1_000, parsePositiveInt(value, "numberOfTransactions"));
+}
+
 function parseIntentsExplorerStatuses(
 	value: string[] | undefined,
 ): string | undefined {
@@ -795,7 +802,11 @@ function normalizeNearIntentsExplorerTransactions(
 		value && typeof value === "object"
 			? (value as Record<string, unknown>)
 			: {};
-	const dataSource = Array.isArray(root.data) ? root.data : [];
+	const dataSource = Array.isArray(value)
+		? value
+		: Array.isArray(root.data)
+			? root.data
+			: [];
 	const data = dataSource
 		.filter(
 			(entry): entry is Record<string, unknown> =>
@@ -2312,8 +2323,14 @@ export function createNearReadTools() {
 			name: `${NEAR_TOOL_PREFIX}getIntentsExplorerTransactions`,
 			label: "NEAR Intents Explorer Transactions",
 			description:
-				"List NEAR Intents Explorer transactions (/v0/transactions-pages). Requires JWT auth.",
+				"List NEAR Intents Explorer transactions (/api/v0/transactions-pages or /api/v0/transactions cursor mode). Requires JWT auth.",
 			parameters: Type.Object({
+				mode: Type.Optional(
+					Type.Union([Type.Literal("pages"), Type.Literal("cursor")], {
+						description:
+							"Pagination mode: pages uses /transactions-pages; cursor uses /transactions.",
+					}),
+				),
 				page: Type.Optional(
 					Type.Number({
 						description: "Page number (default 1).",
@@ -2322,6 +2339,24 @@ export function createNearReadTools() {
 				perPage: Type.Optional(
 					Type.Number({
 						description: "Rows per page (default 20, max 1000).",
+					}),
+				),
+				numberOfTransactions: Type.Optional(
+					Type.Number({
+						description:
+							"Cursor mode limit for /transactions (default 50, max 1000).",
+					}),
+				),
+				lastDepositAddressAndMemo: Type.Optional(
+					Type.String({
+						description:
+							"Cursor mode cursor key from previous page (depositAddressAndMemo).",
+					}),
+				),
+				direction: Type.Optional(
+					Type.Union([Type.Literal("next"), Type.Literal("prev")], {
+						description:
+							"Cursor mode direction: next=older records, prev=newer records.",
 					}),
 				),
 				search: Type.Optional(
@@ -2403,8 +2438,15 @@ export function createNearReadTools() {
 				const authHeaders = resolveNearIntentsExplorerHeaders({
 					jwt: params.jwt,
 				});
+				const mode = params.mode === "cursor" ? "cursor" : "pages";
 				const page = parseOptionalPositiveInt(params.page, "page");
 				const perPage = parseIntentsExplorerPerPage(params.perPage);
+				const numberOfTransactions = parseIntentsExplorerNumberOfTransactions(
+					params.numberOfTransactions,
+				);
+				const direction = params.direction === "prev" ? "prev" : "next";
+				const lastDepositAddressAndMemo =
+					params.lastDepositAddressAndMemo?.trim() || undefined;
 				const startTimestamp = parseOptionalIsoDatetime(
 					params.startTimestamp,
 					"startTimestamp",
@@ -2440,37 +2482,61 @@ export function createNearReadTools() {
 					params.toChainId,
 					"toChainId",
 				);
+				const baseQuery = {
+					search: params.search?.trim() || undefined,
+					fromChainId,
+					fromTokenId: params.fromTokenId?.trim() || undefined,
+					toChainId,
+					toTokenId: params.toTokenId?.trim() || undefined,
+					referral: params.referral?.trim() || undefined,
+					affiliate: params.affiliate?.trim() || undefined,
+					statuses,
+					showTestTxs:
+						typeof params.showTestTxs === "boolean"
+							? String(params.showTestTxs)
+							: undefined,
+					minUsdPrice: minUsdPrice != null ? String(minUsdPrice) : undefined,
+					maxUsdPrice: maxUsdPrice != null ? String(maxUsdPrice) : undefined,
+					startTimestamp,
+					endTimestamp,
+				};
 				const response = await fetchNearIntentsJson<unknown>({
 					baseUrl,
-					path: "/api/v0/transactions-pages",
+					path:
+						mode === "cursor"
+							? "/api/v0/transactions"
+							: "/api/v0/transactions-pages",
 					method: "GET",
-					query: {
-						page: page != null ? String(page) : undefined,
-						perPage: String(perPage),
-						search: params.search?.trim() || undefined,
-						fromChainId,
-						fromTokenId: params.fromTokenId?.trim() || undefined,
-						toChainId,
-						toTokenId: params.toTokenId?.trim() || undefined,
-						referral: params.referral?.trim() || undefined,
-						affiliate: params.affiliate?.trim() || undefined,
-						statuses,
-						showTestTxs:
-							typeof params.showTestTxs === "boolean"
-								? String(params.showTestTxs)
-								: undefined,
-						minUsdPrice: minUsdPrice != null ? String(minUsdPrice) : undefined,
-						maxUsdPrice: maxUsdPrice != null ? String(maxUsdPrice) : undefined,
-						startTimestamp,
-						endTimestamp,
-					},
+					query:
+						mode === "cursor"
+							? {
+									...baseQuery,
+									numberOfTransactions: String(numberOfTransactions),
+									lastDepositAddressAndMemo,
+									direction,
+								}
+							: {
+									...baseQuery,
+									page: page != null ? String(page) : undefined,
+									perPage: String(perPage),
+								},
 					headers: authHeaders,
 				});
 				const normalized = normalizeNearIntentsExplorerTransactions(
 					response.payload,
 				);
+				const cursorOlder =
+					normalized.data[normalized.data.length - 1]?.depositAddressAndMemo ??
+					normalized.data[normalized.data.length - 1]?.depositAddress ??
+					null;
+				const cursorNewer =
+					normalized.data[0]?.depositAddressAndMemo ??
+					normalized.data[0]?.depositAddress ??
+					null;
 				const lines = [
-					`Intents explorer txs: ${normalized.data.length} item(s) page=${normalized.page ?? page ?? 1}/${normalized.totalPages ?? "?"} total=${normalized.total ?? "unknown"}`,
+					mode === "cursor"
+						? `Intents explorer txs: ${normalized.data.length} item(s) mode=cursor direction=${direction} limit=${numberOfTransactions}`
+						: `Intents explorer txs: ${normalized.data.length} item(s) page=${normalized.page ?? page ?? 1}/${normalized.totalPages ?? "?"} total=${normalized.total ?? "unknown"}`,
 				];
 				const activeFilters = [
 					fromChainId ? `fromChainId=${fromChainId}` : null,
@@ -2482,6 +2548,10 @@ export function createNearReadTools() {
 				].filter((entry): entry is string => Boolean(entry));
 				if (activeFilters.length > 0) {
 					lines.push(`Filters: ${activeFilters.join(" | ")}`);
+				}
+				if (mode === "cursor") {
+					lines.push(`Cursor(older): ${cursorOlder ?? "none"}`);
+					lines.push(`Cursor(newer): ${cursorNewer ?? "none"}`);
 				}
 				const shown = normalized.data.slice(0, 10);
 				for (const [index, tx] of shown.entries()) {
@@ -2514,8 +2584,14 @@ export function createNearReadTools() {
 						endpoint: response.url,
 						httpStatus: response.status,
 						filters: {
-							page: page ?? 1,
-							perPage,
+							mode,
+							page: mode === "pages" ? (page ?? 1) : null,
+							perPage: mode === "pages" ? perPage : null,
+							numberOfTransactions:
+								mode === "cursor" ? numberOfTransactions : null,
+							direction: mode === "cursor" ? direction : null,
+							lastDepositAddressAndMemo:
+								mode === "cursor" ? (lastDepositAddressAndMemo ?? null) : null,
 							search: params.search?.trim() || null,
 							fromChainId: fromChainId ?? null,
 							toChainId: toChainId ?? null,
@@ -2539,6 +2615,10 @@ export function createNearReadTools() {
 						totalPages: normalized.totalPages,
 						nextPage: normalized.nextPage,
 						prevPage: normalized.prevPage,
+						cursor: {
+							older: cursorOlder,
+							newer: cursorNewer,
+						},
 						transactions: normalized.data,
 						raw: response.payload,
 					},
