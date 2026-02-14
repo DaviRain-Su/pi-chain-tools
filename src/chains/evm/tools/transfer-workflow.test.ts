@@ -293,4 +293,59 @@ describe("w3rt_run_evm_transfer_workflow_v0", () => {
 			}),
 		);
 	});
+
+	it("infers simulate runMode from natural language when runMode is omitted", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf11", {
+			runId: "wf-evm-transfer-11",
+			network: "polygon",
+			intentText:
+				"先模拟把 0.5 MATIC 转给 0x000000000000000000000000000000000000dEaD",
+		});
+		expect(result.content[0]?.text).toContain("Workflow simulated");
+		expect(result.details).toMatchObject({
+			runMode: "simulate",
+			intentType: "evm.transfer.native",
+			artifacts: {
+				simulate: { status: "ready" },
+			},
+		});
+		expect(executeMocks.transferNativeExecute).toHaveBeenCalledWith(
+			"wf-evm-transfer-simulate",
+			expect.objectContaining({
+				network: "polygon",
+				dryRun: true,
+				toAddress: "0x000000000000000000000000000000000000dEaD",
+				amountNative: 0.5,
+			}),
+		);
+	});
+
+	it("infers execute runMode from natural-language follow-up and reuses prior session", async () => {
+		const tool = getTool();
+		const simulated = await tool.execute("wf12", {
+			runId: "wf-evm-transfer-12",
+			runMode: "simulate",
+			network: "polygon",
+			intentText: "把 0.001 MATIC 转给 0x000000000000000000000000000000000000dEaD",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		await tool.execute("wf12", {
+			runId: "wf-evm-transfer-12",
+			intentText: "继续执行刚才这笔，确认主网执行",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.transferNativeExecute).toHaveBeenCalledWith(
+			"wf-evm-transfer-execute",
+			expect.objectContaining({
+				network: "polygon",
+				dryRun: false,
+				confirmMainnet: true,
+				toAddress: "0x000000000000000000000000000000000000dEaD",
+				amountNative: 0.001,
+			}),
+		);
+	});
 });
