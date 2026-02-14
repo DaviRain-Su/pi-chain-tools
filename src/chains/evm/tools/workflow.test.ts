@@ -893,6 +893,40 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		});
 	});
 
+	it("adds readable risk hint when guards block simulate", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5-risk-hint-block", {
+			runId: "wf-evm-5-risk-hint-block",
+			runMode: "simulate",
+			network: "polygon",
+			side: "up",
+			stakeUsd: 20,
+			maxSpreadBps: 0.0001,
+		});
+		const simulateSummary = (result.details as {
+			artifacts?: { simulate?: { summary?: { riskHint?: string } } };
+		})?.artifacts?.simulate?.summary;
+		expect(result.content[0]?.text).toContain("风险提示");
+		expect(simulateSummary?.riskHint).toContain("风险提示");
+		expect(simulateSummary?.riskHint).toContain("点差过宽");
+	});
+
+	it("does not emit risk hint when trade passes guards and no profile is set", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5-risk-hint-safe", {
+			runId: "wf-evm-5-risk-hint-safe",
+			runMode: "simulate",
+			network: "polygon",
+			side: "up",
+			stakeUsd: 20,
+			maxSpreadBps: 1000,
+		});
+		const simulateSummary = (result.details as {
+			artifacts?: { simulate?: { summary?: { riskHint?: string } } };
+		})?.artifacts?.simulate?.summary;
+		expect(simulateSummary?.riskHint).toBeUndefined();
+	});
+
 	it("keeps explicit guard values over risk profile defaults", async () => {
 		const tool = getTool();
 		const result = await tool.execute("wf5-risk-profile-override", {

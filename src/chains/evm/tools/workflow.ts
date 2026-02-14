@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
+	type Btc5mTradeGuardEvaluation,
 	evaluateBtc5mTradeGuards,
 	getPolymarketOrderBook,
 	resolveBtc5mTradeSelection,
@@ -1130,6 +1131,53 @@ function buildTradeSummaryLine(params: {
 	return parts.join(" ");
 }
 
+function buildPolymarketRiskHint(params: {
+	intent: WorkflowTradeIntent;
+	guardEvaluation: Btc5mTradeGuardEvaluation;
+}): string | null {
+	const profileLabel =
+		params.intent.riskProfile != null
+			? `风险画像：${params.intent.riskProfile === "conservative" ? "保守" : params.intent.riskProfile === "aggressive" ? "激进" : "平衡"}（${params.intent.riskProfile}）`
+			: "";
+	const profileHint = profileLabel ? `${profileLabel}，` : "";
+	const formatNumeric = (value: number | null): string =>
+		value == null || !Number.isFinite(value) ? "n/a" : value.toFixed(4);
+	const formatConfidence = (value: number | null): string =>
+		value == null || !Number.isFinite(value) ? "n/a" : value.toFixed(4);
+	const issueText = params.guardEvaluation.issues.map((issue) => {
+		switch (issue.code) {
+			case "max_spread_exceeded": {
+				return `点差过宽（当前 ${formatNumeric(params.guardEvaluation.metrics.spreadBps)} > 限制 ${formatNumeric(params.guardEvaluation.applied.maxSpreadBps)}）`;
+			}
+			case "spread_unavailable": {
+				return "点差不可评估：盘口缺少买卖一档";
+			}
+			case "min_depth_not_met": {
+				return `盘口深度不足（当前 ${formatNumeric(params.guardEvaluation.metrics.depthUsdAtLimit)} < 要求 ${formatNumeric(params.guardEvaluation.applied.minDepthUsd)} USD）`;
+			}
+			case "max_stake_exceeded": {
+				return `下注规模过大（当前 ${formatNumeric(params.intent.stakeUsd)} > 限制 ${formatNumeric(params.guardEvaluation.applied.maxStakeUsd)}）`;
+			}
+			case "min_confidence_not_met": {
+				return `建议置信度不足（当前 ${formatConfidence(params.guardEvaluation.metrics.adviceConfidence)} < 要求 ${formatConfidence(params.guardEvaluation.applied.minConfidence)}）`;
+			}
+			case "confidence_unavailable": {
+				return "建议置信度不可用（无法进行置信度风控）";
+			}
+			default:
+				return issue.message;
+		}
+	});
+	if (params.guardEvaluation.passed) {
+		if (!profileLabel) return null;
+		return `风险提示：${profileHint}风控通过。`;
+	}
+	if (issueText.length === 0) {
+		return `风险提示：${profileHint}风控未通过。`;
+	}
+	return `风险提示：${profileHint}风控未通过。原因：${issueText.join("；")}`;
+}
+
 function buildCancelSummaryLine(params: {
 	intent: WorkflowCancelIntent;
 	phase: WorkflowRunMode;
@@ -1509,6 +1557,10 @@ export function createEvmWorkflowTools() {
 							runtime: requoteRuntime,
 							currentPrice: requotePricing?.limitPrice ?? effectiveOrderPrice,
 						});
+						const riskHint = buildPolymarketRiskHint({
+							intent,
+							guardEvaluation,
+						});
 						const summaryLine = buildTradeSummaryLine({
 							intent,
 							phase: "analysis",
@@ -1523,7 +1575,10 @@ export function createEvmWorkflowTools() {
 						rememberSession({ runId, network, intent });
 						return {
 							content: [
-								{ type: "text", text: `Workflow analyzed: ${intent.type}` },
+								{
+									type: "text",
+									text: `Workflow analyzed: ${intent.type}${riskHint ? ` ${riskHint}` : ""}`,
+								},
 							],
 							details: {
 								runId,
@@ -1566,6 +1621,7 @@ export function createEvmWorkflowTools() {
 											status: analysisStatus,
 											intentType: intent.type,
 											line: summaryLine,
+											...(riskHint ? { riskHint } : {}),
 										},
 									},
 								},
@@ -1595,6 +1651,10 @@ export function createEvmWorkflowTools() {
 							intent,
 							runtime: requoteRuntime,
 							currentPrice: requotePricing?.limitPrice ?? effectiveOrderPrice,
+						});
+						const riskHint = buildPolymarketRiskHint({
+							intent,
+							guardEvaluation,
 						});
 						if (intent.requoteStaleOrders) {
 							const cancelTool = resolveExecuteTool(
@@ -1633,6 +1693,7 @@ export function createEvmWorkflowTools() {
 							}
 						}
 						const staleTargets = extractTargetOrderCount(staleRequotePreview);
+						const simulateText = `Workflow simulated: ${intent.type} status=${simulateStatus}${riskHint ? ` ${riskHint}` : ""}`;
 						const summaryLine = buildTradeSummaryLine({
 							intent,
 							phase: "simulate",
@@ -1650,7 +1711,7 @@ export function createEvmWorkflowTools() {
 							content: [
 								{
 									type: "text",
-									text: `Workflow simulated: ${intent.type} status=${simulateStatus}`,
+									text: simulateText,
 								},
 							],
 							details: {
@@ -1686,6 +1747,7 @@ export function createEvmWorkflowTools() {
 											status: simulateStatus,
 											intentType: intent.type,
 											line: summaryLine,
+											...(riskHint ? { riskHint } : {}),
 										},
 									},
 								},
@@ -1890,10 +1952,15 @@ export function createEvmWorkflowTools() {
 						requoteLimitPrice: executedLimitPrice,
 						staleTargets: staleCancelTargetOrders,
 					});
+					const riskHint = buildPolymarketRiskHint({
+						intent,
+						guardEvaluation,
+					});
+					const executeText = `Workflow executed: ${intent.type}${riskHint ? ` ${riskHint}` : ""}`;
 					rememberSession({ runId, network, intent });
 					return {
 						content: [
-							{ type: "text", text: `Workflow executed: ${intent.type}` },
+							{ type: "text", text: executeText },
 						],
 						details: {
 							runId,
@@ -1928,6 +1995,7 @@ export function createEvmWorkflowTools() {
 										status: "submitted",
 										intentType: intent.type,
 										line: summaryLine,
+										...(riskHint ? { riskHint } : {}),
 									},
 								},
 							},
