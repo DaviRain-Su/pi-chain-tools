@@ -179,6 +179,20 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		});
 	});
 
+	it("infers simulate runMode from natural language when runMode is omitted", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf2-auto-sim", {
+			runId: "wf-evm-2-auto-sim",
+			network: "polygon",
+			intentText: "买 BTC 5分钟涨 20 USDC，先模拟",
+		});
+		expect(result.content[0]?.text).toContain("Workflow simulated");
+		expect(result.details).toMatchObject({
+			runMode: "simulate",
+			intentType: "evm.polymarket.btc5m.trade",
+		});
+	});
+
 	it("simulates trade with guard-blocked status when spread threshold is too strict", async () => {
 		const tool = getTool();
 		const result = await tool.execute("wf2-guarded", {
@@ -266,6 +280,25 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 				},
 			},
 		});
+	});
+
+	it("infers execute runMode + mainnet confirmation from natural language", async () => {
+		const tool = getTool();
+		const simulated = await tool.execute("wf4-auto-exec-sim", {
+			runId: "wf-evm-4-auto-exec",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 22,
+			side: "up",
+		});
+		const details = simulated.details as { confirmToken: string };
+		const executed = await tool.execute("wf4-auto-exec", {
+			runId: "wf-evm-4-auto-exec",
+			network: "polygon",
+			intentText: `继续执行刚才这笔，确认主网执行，confirmToken=${details.confirmToken}`,
+		});
+		expect(executed.content[0]?.text).toContain("Workflow executed");
+		expect(executeMocks.placeOrderExecute).toHaveBeenCalledTimes(1);
 	});
 
 	it("simulates trade with stale requote preview", async () => {
@@ -737,6 +770,71 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 			expect.objectContaining({
 				maxAgeMinutes: 30,
 				dryRun: true,
+			}),
+		);
+	});
+
+	it("parses rich natural language requote controls into trade intent", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5-requote-rich-sim", {
+			runId: "wf-evm-5-requote-rich",
+			runMode: "simulate",
+			network: "polygon",
+			intentText:
+				"买 BTC 5分钟涨 20 USDC，1小时未成交就自动重挂，用稳健策略，失败后再试一次，每2分钟最多3次，波动不超过0.8%，先模拟",
+		});
+		expect(result.details).toMatchObject({
+			intentType: "evm.polymarket.btc5m.trade",
+			intent: {
+				requoteStaleOrders: true,
+				requotePriceStrategy: "passive",
+				requoteFallbackMode: "retry_aggressive",
+				maxAgeMinutes: 60,
+				requoteMinIntervalSeconds: 120,
+				requoteMaxAttempts: 3,
+				requoteMaxPriceDriftBps: 80,
+			},
+			artifacts: {
+				simulate: {
+					staleRequote: {
+						enabled: true,
+						status: "ready",
+					},
+				},
+			},
+		});
+		expect(executeMocks.cancelOrderExecute).toHaveBeenCalledWith(
+			"wf-evm-trade-stale-simulate",
+			expect.objectContaining({
+				maxAgeMinutes: 60,
+				dryRun: true,
+			}),
+		);
+	});
+
+	it("parses natural-language guard config and AI toggle into trade intent", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5-guard-rich-sim", {
+			runId: "wf-evm-5-guard-rich",
+			runMode: "simulate",
+			network: "polygon",
+			intentText:
+				"不用AI，买 BTC 5分钟涨 20 USDC，最高入场价 0.53，点差不超过80bps，最小深度至少100，最大下注25，置信度至少60%，先模拟",
+		});
+		expect(result.details).toMatchObject({
+			intentType: "evm.polymarket.btc5m.trade",
+			intent: {
+				maxEntryPrice: 0.53,
+				maxSpreadBps: 80,
+				minDepthUsd: 100,
+				maxStakeUsd: 25,
+				minConfidence: 0.6,
+				useAiAssist: false,
+			},
+		});
+		expect(polymarketMocks.resolveBtc5mTradeSelection).toHaveBeenCalledWith(
+			expect.objectContaining({
+				useAiAssist: false,
 			}),
 		);
 	});

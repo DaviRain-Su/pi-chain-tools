@@ -86,11 +86,17 @@ type WorkflowParams = {
 };
 
 type ParsedIntentHints = {
+	runMode?: WorkflowRunMode;
 	intentType?: WorkflowIntent["type"];
 	marketSlug?: string;
 	tokenId?: string;
 	side?: "up" | "down";
 	stakeUsd?: number;
+	maxEntryPrice?: number;
+	maxSpreadBps?: number;
+	minDepthUsd?: number;
+	maxStakeUsd?: number;
+	minConfidence?: number;
 	orderId?: string;
 	orderIds?: string[];
 	cancelAll?: boolean;
@@ -102,6 +108,7 @@ type ParsedIntentHints = {
 	maxFillRatio?: number;
 	requoteMinIntervalSeconds?: number;
 	requoteMaxAttempts?: number;
+	useAiAssist?: boolean;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
 };
@@ -190,13 +197,169 @@ function parseSideHint(text: string): "up" | "down" | undefined {
 	return undefined;
 }
 
+function parseRunModeHint(text?: string): WorkflowRunMode | undefined {
+	if (!text?.trim()) return undefined;
+	const hasExecute =
+		/(确认主网执行|确认执行|直接执行|立即执行|现在执行|马上执行|execute|submit|live\s+order|real\s+order)/i.test(
+			text,
+		);
+	const hasSimulate =
+		/(先模拟|模拟一下|先仿真|先dry\s*run|dry\s*run|simulate|先试跑|先试一下)/i.test(
+			text,
+		);
+	const hasAnalysis =
+		/(先分析|分析一下|先评估|先看分析|analysis|analyze|先看一下)/i.test(text);
+	if (hasSimulate && !hasExecute) return "simulate";
+	if (hasAnalysis && !hasExecute && !hasSimulate) return "analysis";
+	if (hasExecute && !hasSimulate && !hasAnalysis) return "execute";
+	if (hasSimulate && hasExecute) {
+		if (/(先模拟|先dry\s*run|先试跑|先试一下)/i.test(text)) {
+			return "simulate";
+		}
+		return "execute";
+	}
+	if (hasAnalysis && hasExecute) {
+		if (/(先分析|先评估|先看一下)/i.test(text)) return "analysis";
+		return "execute";
+	}
+	if (hasExecute) return "execute";
+	if (hasSimulate) return "simulate";
+	if (hasAnalysis) return "analysis";
+	return undefined;
+}
+
+function parseValueAsProbability(
+	valueRaw: string,
+	unitRaw?: string,
+): number | null {
+	const value = Number.parseFloat(valueRaw);
+	if (!Number.isFinite(value) || value <= 0) return null;
+	const unit = unitRaw?.toLowerCase() ?? "";
+	if (unit.includes("%") || value > 1) {
+		return value / 100;
+	}
+	return value;
+}
+
+function parseValueAsEntryPrice(
+	valueRaw: string,
+	unitRaw?: string,
+): number | null {
+	const value = Number.parseFloat(valueRaw);
+	if (!Number.isFinite(value) || value <= 0) return null;
+	const unit = unitRaw?.toLowerCase() ?? "";
+	if (/(c|cent|cents|美分)/i.test(unit)) return value / 100;
+	return value;
+}
+
+function parseMaxEntryPriceHint(text?: string): number | undefined {
+	if (!text?.trim()) return undefined;
+	const direct =
+		text.match(
+			/(?:max\s*entry(?:\s*price)?|entry(?:\s*price)?|最高(?:入场)?价(?:格)?|入场价(?:格)?|价格)\s*(?:<=|<|不超过|不高于|最多|上限|at most|max)?\s*[:= ]?\s*(\d+(?:\.\d+)?)(?:\s*(c|cent|cents|美分))?/i,
+		) ??
+		text.match(
+			/(\d+(?:\.\d+)?)(?:\s*(c|cent|cents|美分))?\s*(?:以内|以下|不超过|不高于|at most|max)[^。；，,\n]{0,18}(?:入场价|价格|entry(?:\s*price)?)/i,
+		);
+	if (!direct) return undefined;
+	const parsed = parseValueAsEntryPrice(direct[1], direct[2]);
+	if (parsed == null || !Number.isFinite(parsed)) return undefined;
+	return parsed;
+}
+
+function parseMaxSpreadBpsHint(text?: string): number | undefined {
+	if (!text?.trim()) return undefined;
+	const bpsDirect =
+		text.match(
+			/(?:max\s*spread|spread|点差)\s*(?:<=|<|不超过|不高于|at most|max)?\s*[:= ]?\s*(\d+(?:\.\d+)?)\s*(?:bps|bp|基点)/i,
+		) ??
+		text.match(
+			/(\d+(?:\.\d+)?)\s*(?:bps|bp|基点)[^。；，,\n]{0,18}(?:点差|spread)/i,
+		);
+	if (bpsDirect?.[1]) {
+		const parsed = Number.parseFloat(bpsDirect[1]);
+		return Number.isFinite(parsed) ? parsed : undefined;
+	}
+	const pctDirect =
+		text.match(
+			/(?:max\s*spread|spread|点差)\s*(?:<=|<|不超过|不高于|at most|max)?\s*[:= ]?\s*(\d+(?:\.\d+)?)\s*%/i,
+		) ?? text.match(/(\d+(?:\.\d+)?)\s*%[^。；，,\n]{0,18}(?:点差|spread)/i);
+	if (!pctDirect?.[1]) return undefined;
+	const pct = Number.parseFloat(pctDirect[1]);
+	return Number.isFinite(pct) ? pct * 100 : undefined;
+}
+
+function parseMinDepthUsdHint(text?: string): number | undefined {
+	if (!text?.trim()) return undefined;
+	const direct =
+		text.match(
+			/(?:min\s*depth|minDepthUsd|最小深度|深度至少|depth)\s*(?:>=|>|至少|不低于|at least|min)?\s*[:= ]?\s*(\d+(?:\.\d+)?)/i,
+		) ??
+		text.match(
+			/(\d+(?:\.\d+)?)\s*(?:usd|usdc)?[^。；，,\n]{0,18}(?:最小深度|深度|depth)(?:至少|以上|及以上|at least)/i,
+		);
+	if (!direct?.[1]) return undefined;
+	const parsed = Number.parseFloat(direct[1]);
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseMaxStakeUsdHint(text?: string): number | undefined {
+	if (!text?.trim()) return undefined;
+	const direct =
+		text.match(
+			/(?:max\s*stake|maxStakeUsd|最大(?:下注|仓位|金额|下单)|最多(?:下注|仓位|金额|下单)|下注上限|仓位上限|stake\s*cap|size\s*cap)\s*(?:<=|<|最多|最大|不超过|at most|max)?\s*[:= ]?\s*(\d+(?:\.\d+)?)/i,
+		) ??
+		text.match(
+			/(\d+(?:\.\d+)?)\s*(?:usd|usdc)?[^。；，,\n]{0,18}(?:最多(?:下注|仓位|金额)|最大(?:下注|仓位|金额)|上限|max|cap)/i,
+		);
+	if (!direct?.[1]) return undefined;
+	const parsed = Number.parseFloat(direct[1]);
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseMinConfidenceHint(text?: string): number | undefined {
+	if (!text?.trim()) return undefined;
+	const direct =
+		text.match(
+			/(?:min\s*confidence|minConfidence|confidence|置信度|信心)\s*(?:>=|>|至少|不低于|at least|min)?\s*[:= ]?\s*(\d+(?:\.\d+)?)(\s*%|％)?/i,
+		) ??
+		text.match(
+			/(\d+(?:\.\d+)?)(\s*%|％)?\s*(?:以上|及以上|至少|at least)[^。；，,\n]{0,18}(?:置信度|confidence|信心)/i,
+		);
+	if (!direct?.[1]) return undefined;
+	const parsed = parseValueAsProbability(direct[1], direct[2]);
+	if (parsed == null || !Number.isFinite(parsed)) return undefined;
+	return parsed;
+}
+
+function parseUseAiAssistHint(text?: string): boolean | undefined {
+	if (!text?.trim()) return undefined;
+	if (
+		/(不用ai|关闭ai|禁用ai|no\s*ai|without\s*ai|手动判断|不使用(?:ai)?建议)/i.test(
+			text,
+		)
+	) {
+		return false;
+	}
+	if (/(ai辅助|ai建议|智能建议|自动判断方向|use\s*ai|with\s*ai)/i.test(text)) {
+		return true;
+	}
+	return undefined;
+}
+
 function parseRequotePriceStrategyHint(
 	text?: string,
 ): RequotePriceStrategy | undefined {
 	if (!text?.trim()) return undefined;
-	if (/(aggressive|激进|快速成交|taker)/i.test(text)) return "aggressive";
-	if (/(passive|保守|被动|maker)/i.test(text)) return "passive";
-	if (/(follow[-_\s]?mid|midpoint|中价|中间价|跟随中价)/i.test(text)) {
+	if (/(aggressive|激进|快速成交|taker|吃单|尽快成交)/i.test(text)) {
+		return "aggressive";
+	}
+	if (/(passive|保守|被动|maker|稳健|稳妥|挂深一点)/i.test(text)) {
+		return "passive";
+	}
+	if (
+		/(follow[-_\s]?mid|midpoint|中价|中间价|跟随中价|跟中价|中性)/i.test(text)
+	) {
 		return "follow_mid";
 	}
 	return undefined;
@@ -225,7 +388,9 @@ function parseRequoteFallbackModeHint(
 	if (!text?.trim()) return undefined;
 	if (/(不重试|no\s+fallback|no\s+retry|不要兜底)/i.test(text)) return "none";
 	if (
-		/(失败后.*重试|fallback|兜底|保底|重试激进|retry\s+aggressive)/i.test(text)
+		/(失败后.*重试|fallback|兜底|保底|重试激进|retry\s+aggressive|失败后再试|失败再来一次)/i.test(
+			text,
+		)
 	) {
 		return "retry_aggressive";
 	}
@@ -238,17 +403,128 @@ function parseRequoteMaxPriceDriftBpsHint(text?: string): number | undefined {
 		text.match(
 			/(?:波动|偏移|drift|price\s*drift)[^0-9]{0,16}(\d+(?:\.\d+)?)\s*(?:bps|bp|基点)/i,
 		)?.[1] ?? undefined;
-	if (bpsRaw) {
-		const parsed = Number.parseFloat(bpsRaw);
+	const bpsRawReverse =
+		text.match(
+			/(\d+(?:\.\d+)?)\s*(?:bps|bp|基点)[^。；，,\n]{0,16}(?:波动|偏移|drift|price\s*drift)/i,
+		)?.[1] ?? undefined;
+	const bpsValueRaw = bpsRaw ?? bpsRawReverse;
+	if (bpsValueRaw) {
+		const parsed = Number.parseFloat(bpsValueRaw);
 		return Number.isFinite(parsed) ? parsed : undefined;
 	}
 	const pctRaw =
 		text.match(
 			/(?:波动|偏移|drift|price\s*drift)[^0-9]{0,16}(\d+(?:\.\d+)?)\s*%/i,
 		)?.[1] ?? undefined;
-	if (!pctRaw) return undefined;
-	const parsed = Number.parseFloat(pctRaw);
+	const pctRawReverse =
+		text.match(
+			/(\d+(?:\.\d+)?)\s*%[^。；，,\n]{0,16}(?:波动|偏移|drift|price\s*drift)/i,
+		)?.[1] ?? undefined;
+	const pctValueRaw = pctRaw ?? pctRawReverse;
+	if (!pctValueRaw) return undefined;
+	const parsed = Number.parseFloat(pctValueRaw);
 	return Number.isFinite(parsed) ? parsed * 100 : undefined;
+}
+
+function parseDurationToSeconds(
+	valueRaw: string,
+	unitRaw: string,
+): number | null {
+	const value = Number.parseFloat(valueRaw);
+	if (!Number.isFinite(value) || value <= 0) return null;
+	const unit = unitRaw.toLowerCase();
+	if (/(秒|sec|secs|second|seconds)/i.test(unit)) return value;
+	if (/(分|min|mins|minute|minutes)/i.test(unit)) return value * 60;
+	if (/(小时|hr|hrs|hour|hours)/i.test(unit)) return value * 3600;
+	return null;
+}
+
+function parseRequoteMinIntervalSecondsHint(text?: string): number | undefined {
+	if (!text?.trim()) return undefined;
+	const match =
+		text.match(
+			/(?:每|间隔|冷却|cooldown|interval)\s*(\d+(?:\.\d+)?)\s*(秒|secs?|seconds?|分钟|mins?|minutes?|小时|hrs?|hours?)/i,
+		) ??
+		text.match(
+			/(\d+(?:\.\d+)?)\s*(秒|secs?|seconds?|分钟|mins?|minutes?|小时|hrs?|hours?)[^。；，,\n]{0,16}(?:间隔|冷却|cooldown|后再重挂|再试|重挂一次)/i,
+		);
+	if (!match) return undefined;
+	const seconds = parseDurationToSeconds(match[1], match[2]);
+	return seconds == null ? undefined : seconds;
+}
+
+function parseRequoteMaxAttemptsHint(text?: string): number | undefined {
+	if (!text?.trim()) return undefined;
+	const raw =
+		text.match(
+			/(?:最多|至多|max)\s*(\d+)\s*(?:次|times?)\s*(?:重挂|re-?quote|repost|尝试)?/i,
+		)?.[1] ??
+		text.match(
+			/(?:重挂|re-?quote|repost)[^。；，,\n]{0,12}(?:最多|至多|max)\s*(\d+)\s*(?:次|times?)/i,
+		)?.[1];
+	if (!raw) return undefined;
+	const parsed = Number.parseInt(raw, 10);
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseRequoteIntentHints(text?: string): {
+	hasRequotePhrase: boolean;
+	requoteMinIntervalSeconds?: number;
+	requoteMaxAttempts?: number;
+} {
+	if (!text?.trim()) {
+		return { hasRequotePhrase: false };
+	}
+	const hasRequotePhrase =
+		/(撤单重挂|重新挂单|重挂|re-?quote|repost|replace\s+stale|重新下单|自动重挂|没成交就重挂|未成交就重挂|重试下单|再试挂单|再试下单)/i.test(
+			text,
+		);
+	return {
+		hasRequotePhrase,
+		requoteMinIntervalSeconds: parseRequoteMinIntervalSecondsHint(text),
+		requoteMaxAttempts: parseRequoteMaxAttemptsHint(text),
+	};
+}
+
+function parseRequoteMaxFillRatioHint(text?: string): number | undefined {
+	if (!text?.trim()) return undefined;
+	const raw =
+		text.match(
+			/(?:maxFillRatio|fill\s*ratio)\s*[:= ]\s*(\d+(?:\.\d+)?%?)/i,
+		)?.[1] ??
+		text.match(
+			/(?:成交率|fill\s*ratio)\s*(?:<=|<|不高于|低于|小于|at most|below)\s*(\d+(?:\.\d+)?%?)/i,
+		)?.[1];
+	if (!raw) return undefined;
+	const isPercent = raw.includes("%");
+	const parsed = Number.parseFloat(raw.replace("%", ""));
+	if (!Number.isFinite(parsed)) return undefined;
+	return isPercent || parsed > 1 ? parsed / 100 : parsed;
+}
+
+function parseStaleAgeMinutesHint(text?: string): number | undefined {
+	if (!text?.trim()) return undefined;
+	const minuteMatch =
+		text.match(
+			/(?:超(?:过|出)|超过|older than|for at least)\s*(\d+(?:\.\d+)?)\s*(?:分钟|mins?|minutes?)/i,
+		)?.[1] ??
+		text.match(
+			/(\d+(?:\.\d+)?)\s*(?:分钟|mins?|minutes?)\s*(?:未成交|未成单|未成交挂单|stale|old)/i,
+		)?.[1];
+	if (minuteMatch) {
+		const parsed = Number.parseFloat(minuteMatch);
+		return Number.isFinite(parsed) ? parsed : undefined;
+	}
+	const hourMatch =
+		text.match(
+			/(?:超(?:过|出)|超过|older than|for at least)\s*(\d+(?:\.\d+)?)\s*(?:小时|hrs?|hours?)/i,
+		)?.[1] ??
+		text.match(
+			/(\d+(?:\.\d+)?)\s*(?:小时|hrs?|hours?)\s*(?:未成交|未成单|未成交挂单|stale|old)/i,
+		)?.[1];
+	if (!hourMatch) return undefined;
+	const parsedHour = Number.parseFloat(hourMatch);
+	return Number.isFinite(parsedHour) ? parsedHour * 60 : undefined;
 }
 
 function normalizeRequoteFallbackMode(
@@ -344,10 +620,18 @@ function resolveRequoteLimitPrice(params: {
 
 function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
+	const runMode = parseRunModeHint(text);
 	const side = parseSideHint(text);
+	const maxEntryPrice = parseMaxEntryPriceHint(text);
+	const maxSpreadBps = parseMaxSpreadBpsHint(text);
+	const minDepthUsd = parseMinDepthUsdHint(text);
+	const maxStakeUsd = parseMaxStakeUsdHint(text);
+	const minConfidence = parseMinConfidenceHint(text);
+	const useAiAssist = parseUseAiAssistHint(text);
 	const requotePriceStrategy = parseRequotePriceStrategyHint(text);
 	const requoteFallbackMode = parseRequoteFallbackModeHint(text);
 	const requoteMaxPriceDriftBps = parseRequoteMaxPriceDriftBpsHint(text);
+	const requoteIntentHints = parseRequoteIntentHints(text);
 	const stakeMatch =
 		text.match(
 			/(?:stake|size|amount|仓位|金额|下注|下单)\s*[:= ]\s*(\d+(?:\.\d+)?)/i,
@@ -361,8 +645,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		Boolean(stakeMatch) ||
 		Boolean(side) ||
 		/(买|卖|下单|开仓|做多|做空|trade|buy|sell)/i.test(text);
-	const hasRequotePhrase =
-		/(撤单重挂|重新挂单|重挂|re-?quote|repost|replace\s+stale)/i.test(text);
+	const hasRequotePhrase = requoteIntentHints.hasRequotePhrase;
 	const hasCancelPhrase =
 		/(取消|撤销|撤单|清空挂单|cancel\s+order|cancel\s+orders?|cancel)/i.test(
 			text,
@@ -385,58 +668,32 @@ function parseIntentText(text?: string): ParsedIntentHints {
 				.map((entry) => entry.trim())
 				.filter((entry) => entry.length > 0)
 		: undefined;
-	const staleMinutesMatch =
-		text.match(
-			/(?:超(?:过|出)|超过|older than|for at least)\s*(\d+(?:\.\d+)?)\s*(?:分钟|mins?|minutes?)/i,
-		)?.[1] ??
-		text.match(
-			/(\d+(?:\.\d+)?)\s*(?:分钟|mins?|minutes?)\s*(?:未成交|未成单|未成交挂单|stale|old)/i,
-		)?.[1];
+	const maxAgeMinutesHint = parseStaleAgeMinutesHint(text);
 	const staleModeHint =
 		/(未成交|未成单|超时|过期挂单|stale|old\s+orders?)/i.test(text) ||
 		undefined;
 	const maxAgeMinutes =
-		staleMinutesMatch && (isCancelIntent || staleModeHint || hasRequotePhrase)
-			? Number.parseFloat(staleMinutesMatch)
+		maxAgeMinutesHint != null &&
+		(isCancelIntent || staleModeHint || hasRequotePhrase)
+			? maxAgeMinutesHint
 			: undefined;
-	const maxFillRatioRaw =
-		text.match(
-			/(?:maxFillRatio|fill\s*ratio)\s*[:= ]\s*(\d+(?:\.\d+)?%?)/i,
-		)?.[1] ??
-		text.match(
-			/(?:成交率|fill\s*ratio)\s*(?:<=|<|不高于|低于|小于|at most|below)\s*(\d+(?:\.\d+)?%?)/i,
-		)?.[1];
-	let maxFillRatio: number | undefined;
-	if (maxFillRatioRaw) {
-		const isPercent = maxFillRatioRaw.includes("%");
-		const parsed = Number.parseFloat(maxFillRatioRaw.replace("%", ""));
-		if (Number.isFinite(parsed)) {
-			maxFillRatio = isPercent || parsed > 1 ? parsed / 100 : parsed;
-		}
-	}
-	const requoteMinIntervalSecondsRaw = hasRequotePhrase
-		? text.match(
-				/(?:每|间隔|冷却|cooldown|interval)\s*(\d+(?:\.\d+)?)\s*(?:秒|secs?|seconds?)/i,
-			)?.[1]
-		: undefined;
-	const requoteMaxAttemptsRaw = hasRequotePhrase
-		? text.match(
-				/(?:最多|至多|max)\s*(\d+)\s*(?:次|times?)\s*(?:重挂|re-?quote|repost|尝试)?/i,
-			)?.[1]
-		: undefined;
-	const requoteMinIntervalSeconds = requoteMinIntervalSecondsRaw
-		? Number.parseFloat(requoteMinIntervalSecondsRaw)
-		: undefined;
-	const requoteMaxAttempts = requoteMaxAttemptsRaw
-		? Number.parseInt(requoteMaxAttemptsRaw, 10)
-		: undefined;
+	const maxFillRatio = parseRequoteMaxFillRatioHint(text);
+	const requoteMinIntervalSeconds =
+		requoteIntentHints.requoteMinIntervalSeconds;
+	const requoteMaxAttempts = requoteIntentHints.requoteMaxAttempts;
 
 	return {
+		runMode,
 		intentType: isCancelIntent ? "evm.polymarket.btc5m.cancel" : undefined,
 		marketSlug: marketSlug?.trim(),
 		tokenId,
 		side,
 		stakeUsd: stakeMatch?.[1] ? Number.parseFloat(stakeMatch[1]) : undefined,
+		maxEntryPrice,
+		maxSpreadBps,
+		minDepthUsd,
+		maxStakeUsd,
+		minConfidence,
 		orderId: explicitOrderId,
 		orderIds,
 		cancelAll,
@@ -448,6 +705,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		maxFillRatio,
 		requoteMinIntervalSeconds,
 		requoteMaxAttempts,
+		useAiAssist,
 		confirmMainnet: hasConfirmMainnetPhrase(text) ? true : undefined,
 		confirmToken: extractConfirmTokenFromText(text),
 	};
@@ -460,6 +718,7 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			params.tokenId?.trim() ||
 			params.side ||
 			params.stakeUsd != null ||
+			params.maxEntryPrice != null ||
 			params.maxSpreadBps != null ||
 			params.minDepthUsd != null ||
 			params.maxStakeUsd != null ||
@@ -480,6 +739,11 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			parsed.tokenId ||
 			parsed.side ||
 			parsed.stakeUsd != null ||
+			parsed.maxEntryPrice != null ||
+			parsed.maxSpreadBps != null ||
+			parsed.minDepthUsd != null ||
+			parsed.maxStakeUsd != null ||
+			parsed.minConfidence != null ||
 			parsed.orderId ||
 			(parsed.orderIds && parsed.orderIds.length > 0) ||
 			parsed.cancelAll === true ||
@@ -498,6 +762,24 @@ function normalizeOrderId(value: string): string {
 	const normalized = value.trim();
 	if (!normalized) throw new Error("orderId cannot be empty");
 	return normalized;
+}
+
+function normalizeEntryPrice(value: number | undefined): number | undefined {
+	if (value == null) return undefined;
+	const parsed = parsePositiveNumber(value, "maxEntryPrice");
+	if (parsed <= 0 || parsed > 1) {
+		throw new Error("maxEntryPrice must be within (0, 1]");
+	}
+	return parsed;
+}
+
+function normalizeConfidence(value: number | undefined): number | undefined {
+	if (value == null) return undefined;
+	const parsed = parsePositiveNumber(value, "minConfidence");
+	if (parsed <= 0 || parsed > 1) {
+		throw new Error("minConfidence must be within (0, 1]");
+	}
+	return parsed;
 }
 
 function collectOrderIds(input: {
@@ -564,7 +846,7 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 			cancelAll,
 			maxAgeMinutes,
 			maxFillRatio,
-			useAiAssist: params.useAiAssist !== false,
+			useAiAssist: params.useAiAssist ?? parsed.useAiAssist ?? true,
 		};
 	}
 
@@ -572,6 +854,11 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 	if (stakeUsdRaw == null) {
 		throw new Error("stakeUsd is required for evm.polymarket.btc5m.trade");
 	}
+	const maxEntryPriceRaw = params.maxEntryPrice ?? parsed.maxEntryPrice;
+	const maxSpreadBpsRaw = params.maxSpreadBps ?? parsed.maxSpreadBps;
+	const minDepthUsdRaw = params.minDepthUsd ?? parsed.minDepthUsd;
+	const maxStakeUsdRaw = params.maxStakeUsd ?? parsed.maxStakeUsd;
+	const minConfidenceRaw = params.minConfidence ?? parsed.minConfidence;
 	const requotePriceStrategyRaw =
 		params.requotePriceStrategy ?? parsed.requotePriceStrategy;
 	const requoteFallbackModeRaw =
@@ -646,26 +933,20 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 		marketSlug: params.marketSlug?.trim() || parsed.marketSlug,
 		side: params.side ?? parsed.side,
 		stakeUsd: parsePositiveNumber(stakeUsdRaw, "stakeUsd"),
-		maxEntryPrice:
-			params.maxEntryPrice != null
-				? parsePositiveNumber(params.maxEntryPrice, "maxEntryPrice")
-				: undefined,
+		maxEntryPrice: normalizeEntryPrice(maxEntryPriceRaw),
 		maxSpreadBps:
-			params.maxSpreadBps != null
-				? parsePositiveNumber(params.maxSpreadBps, "maxSpreadBps")
+			maxSpreadBpsRaw != null
+				? parsePositiveNumber(maxSpreadBpsRaw, "maxSpreadBps")
 				: undefined,
 		minDepthUsd:
-			params.minDepthUsd != null
-				? parsePositiveNumber(params.minDepthUsd, "minDepthUsd")
+			minDepthUsdRaw != null
+				? parsePositiveNumber(minDepthUsdRaw, "minDepthUsd")
 				: undefined,
 		maxStakeUsd:
-			params.maxStakeUsd != null
-				? parsePositiveNumber(params.maxStakeUsd, "maxStakeUsd")
+			maxStakeUsdRaw != null
+				? parsePositiveNumber(maxStakeUsdRaw, "maxStakeUsd")
 				: undefined,
-		minConfidence:
-			params.minConfidence != null
-				? parsePositiveNumber(params.minConfidence, "minConfidence")
-				: undefined,
+		minConfidence: normalizeConfidence(minConfidenceRaw),
 		requoteStaleOrders,
 		requotePriceStrategy,
 		requoteFallbackMode,
@@ -674,7 +955,7 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 		maxFillRatio,
 		requoteMinIntervalSeconds,
 		requoteMaxAttempts,
-		useAiAssist: params.useAiAssist !== false,
+		useAiAssist: params.useAiAssist ?? parsed.useAiAssist ?? true,
 	};
 }
 
@@ -1031,8 +1312,8 @@ export function createEvmWorkflowTools() {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as WorkflowParams;
-				const runMode = parseRunMode(params.runMode);
 				const parsedHints = parseIntentText(params.intentText);
+				const runMode = parseRunMode(params.runMode ?? parsedHints.runMode);
 				const priorSession =
 					runMode === "execute" ? readSession(params.runId) : null;
 				const runId = createRunId(
