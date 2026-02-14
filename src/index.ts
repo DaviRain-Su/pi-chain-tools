@@ -84,6 +84,8 @@ export { createSolanaRpcTools } from "./chains/solana/tools/rpc.js";
 export { createSolanaWorkflowTools } from "./chains/solana/tools/workflow.js";
 export { createSolanaToolset } from "./chains/solana/toolset.js";
 export { createSolanaWorkflowToolset } from "./chains/solana/workflow-toolset.js";
+export { createMetaReadTools } from "./chains/meta/tools/read.js";
+export { createMetaToolset } from "./chains/meta/toolset.js";
 
 export {
 	EVM_TOOL_PREFIX,

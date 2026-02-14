@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import defaultExtension from "./default-extension.js";
 
 describe("defaultExtension", () => {
-	it("registers bundled Solana + Sui + NEAR + EVM tools once", () => {
+	it("registers bundled Meta + Solana + Sui + NEAR + EVM tools once", () => {
 		const names: string[] = [];
 		const registrar = {
 			registerTool(tool: { name: string }) {
@@ -13,6 +13,7 @@ describe("defaultExtension", () => {
 		defaultExtension(registrar);
 		defaultExtension(registrar);
 
+		expect(names).toContain("w3rt_getCapabilities_v0");
 		expect(names).toContain("solana_getBalance");
 		expect(names).toContain("w3rt_run_workflow_v0");
 		expect(names).toContain("sui_getBalance");

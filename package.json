@@ -12,6 +12,7 @@
 		"./pi/default-extension": "./src/pi/default-extension.ts",
 		"./pi/solana-extension": "./src/pi/solana-extension.ts",
 		"./pi/solana-workflow-extension": "./src/pi/solana-workflow-extension.ts",
+		"./pi/meta-extension": "./src/pi/meta-extension.ts",
 		"./pi/evm-extension": "./src/pi/evm-extension.ts",
 		"./pi/sui-extension": "./src/pi/sui-extension.ts",
 		"./pi/near-extension": "./src/pi/near-extension.ts"

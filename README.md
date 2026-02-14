@@ -338,9 +338,11 @@ pi install npm:pi-chain-tools
 
 The package auto-loads one bundled extension (`src/pi/default-extension.ts`) that registers:
 
+- Meta capability discovery toolset (`w3rt_getCapabilities_v0`)
 - Solana workflow toolset
 - Sui full toolset (read/compose/execute/workflow/rpc)
 - NEAR read/execute/workflow/rpc toolset (including Ref swap quote + execute)
+- EVM Polymarket toolset (read/compose/execute/workflow)
 
 ### 3) Reload Pi and smoke test
 
@@ -354,6 +356,12 @@ Then ask naturally:
 
 ```text
 帮我查一下 Sui 主网余额
+```
+
+Or ask for ACP/OpenClaw capability discovery:
+
+```text
+列出你现在支持的链上能力和自然语言操作示例
 ```
 
 Notes:
@@ -501,9 +509,29 @@ ls ~/.near-credentials/mainnet
 
 Then run these prompts:
 
+- `列出你现在支持的链上能力和自然语言操作示例`
 - `帮我查一下 Sui 主网本地钱包余额（包含USDC）`
 - `帮我查一下 NEAR 主网 Ref 存款（deposits）`
 - `帮我查一下 NEAR 主网 Ref LP 持仓`
+
+### ACP/OpenClaw Capability Discovery
+
+If your host agent supports ACP-style tool exposure, use capability discovery first:
+
+- Tool name: `w3rt_getCapabilities_v0`
+- Purpose: machine-readable capability catalog (`schema = w3rt.capabilities.v1`)
+- Includes:
+  - chain coverage + maturity status
+  - workflow entry tools + intent types
+  - signer requirements and env keys
+  - natural-language examples
+  - tool-group summary (`read/compose/execute/rpc`)
+
+Natural language examples:
+
+- `列出你支持的所有链和工作流能力`
+- `只看 EVM 的能力，不要示例`
+- `给我 OpenClaw 可用的能力清单`
 
 ### 10) Troubleshooting
 
