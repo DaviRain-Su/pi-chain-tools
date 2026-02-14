@@ -25,6 +25,9 @@ const executeMocks = vi.hoisted(() => ({
 const composeMocks = vi.hoisted(() => ({
 	buildTransferNearCompose: vi.fn(),
 	buildTransferFtCompose: vi.fn(),
+	buildIntentsSwapDepositCompose: vi.fn(),
+	buildAddLiquidityRefCompose: vi.fn(),
+	buildRemoveLiquidityRefCompose: vi.fn(),
 	buildSwapRefCompose: vi.fn(),
 	buildRefWithdrawCompose: vi.fn(),
 }));
@@ -122,6 +125,27 @@ vi.mock("./compose.js", () => ({
 			description: "compose ft transfer",
 			parameters: {},
 			execute: composeMocks.buildTransferFtCompose,
+		},
+		{
+			name: "near_buildIntentsSwapDepositTransaction",
+			label: "compose intents deposit",
+			description: "compose intents deposit",
+			parameters: {},
+			execute: composeMocks.buildIntentsSwapDepositCompose,
+		},
+		{
+			name: "near_buildAddLiquidityRefTransaction",
+			label: "compose ref add liquidity",
+			description: "compose ref add liquidity",
+			parameters: {},
+			execute: composeMocks.buildAddLiquidityRefCompose,
+		},
+		{
+			name: "near_buildRemoveLiquidityRefTransaction",
+			label: "compose ref remove liquidity",
+			description: "compose ref remove liquidity",
+			parameters: {},
+			execute: composeMocks.buildRemoveLiquidityRefCompose,
 		},
 		{
 			name: "near_buildSwapRefTransaction",
@@ -253,6 +277,24 @@ beforeEach(() => {
 		content: [{ type: "text", text: "ok" }],
 		details: {
 			unsignedPayload: "near-compose-transfer-ft",
+		},
+	});
+	composeMocks.buildIntentsSwapDepositCompose.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			unsignedPayload: "near-compose-intents-deposit",
+		},
+	});
+	composeMocks.buildAddLiquidityRefCompose.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			unsignedPayload: "near-compose-ref-add-liquidity",
+		},
+	});
+	composeMocks.buildRemoveLiquidityRefCompose.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			unsignedPayload: "near-compose-ref-remove-liquidity",
 		},
 	});
 	composeMocks.buildSwapRefCompose.mockResolvedValue({
@@ -454,6 +496,103 @@ describe("w3rt_run_near_workflow_v0", () => {
 			artifacts: {
 				compose: {
 					unsignedPayload: "near-compose-swap-ref",
+				},
+			},
+		});
+	});
+
+	it("composes intents deposit and returns unsigned payload artifact", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-1-compose-intents", {
+			runId: "wf-near-01-compose-intents",
+			runMode: "compose",
+			network: "mainnet",
+			intentType: "near.swap.intents",
+			originAsset: "USDC",
+			destinationAsset: "NEAR",
+			amountRaw: "1000000",
+		});
+
+		expect(composeMocks.buildIntentsSwapDepositCompose).toHaveBeenCalledWith(
+			"near-wf-compose",
+			expect.objectContaining({
+				originAsset: "USDC",
+				destinationAsset: "NEAR",
+				amount: "1000000",
+				network: "mainnet",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runMode: "compose",
+			intentType: "near.swap.intents",
+			approvalRequired: false,
+			artifacts: {
+				compose: {
+					unsignedPayload: "near-compose-intents-deposit",
+				},
+			},
+		});
+	});
+
+	it("composes ref add-liquidity and returns unsigned payload artifact", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-1-compose-lp-add", {
+			runId: "wf-near-01-compose-lp-add",
+			runMode: "compose",
+			network: "mainnet",
+			intentType: "near.lp.ref.add",
+			poolId: 7,
+			amountARaw: "1000",
+			amountBRaw: "2000",
+			tokenAId: "wrap.near",
+			tokenBId: "usdc.tether-token.near",
+		});
+
+		expect(composeMocks.buildAddLiquidityRefCompose).toHaveBeenCalledWith(
+			"near-wf-compose",
+			expect.objectContaining({
+				poolId: 7,
+				amountARaw: "1000",
+				amountBRaw: "2000",
+				network: "mainnet",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runMode: "compose",
+			intentType: "near.lp.ref.add",
+			artifacts: {
+				compose: {
+					unsignedPayload: "near-compose-ref-add-liquidity",
+				},
+			},
+		});
+	});
+
+	it("composes ref remove-liquidity and returns unsigned payload artifact", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-1-compose-lp-remove", {
+			runId: "wf-near-01-compose-lp-remove",
+			runMode: "compose",
+			network: "mainnet",
+			intentType: "near.lp.ref.remove",
+			poolId: 7,
+			shares: "1000",
+		});
+
+		expect(composeMocks.buildRemoveLiquidityRefCompose).toHaveBeenCalledWith(
+			"near-wf-compose",
+			expect.objectContaining({
+				poolId: 7,
+				shares: "1000",
+				network: "mainnet",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runMode: "compose",
+			intentType: "near.lp.ref.remove",
+			artifacts: {
+				compose: {
+					unsignedPayload: "near-compose-ref-remove-liquidity",
 				},
 			},
 		});

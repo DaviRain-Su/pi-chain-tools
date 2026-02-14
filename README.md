@@ -61,7 +61,10 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `near_getIntentsStatus` (NEAR Intents 1Click `/v0/status` by `depositAddress`/`depositMemo`)
 - `compose`: `near_buildTransferNearTransaction` (unsigned native transfer payload, local signing)
 - `compose`: `near_buildTransferFtTransaction` (unsigned NEP-141 `ft_transfer` payload, local signing)
+- `compose`: `near_buildIntentsSwapDepositTransaction` (unsigned NEAR Intents deposit tx from `/v0/quote`, local signing)
 - `compose`: `near_buildSwapRefTransaction` (unsigned Ref swap payload(s), can include output-token `storage_deposit` pre-tx)
+- `compose`: `near_buildAddLiquidityRefTransaction` (unsigned Ref add-liquidity tx set, optional pre-registration/deposit steps)
+- `compose`: `near_buildRemoveLiquidityRefTransaction` (unsigned Ref remove-liquidity tx, supports shares/shareBps)
 - `compose`: `near_buildRefWithdrawTransaction` (unsigned Ref withdraw payload(s), can include `storage_deposit` pre-tx when needed)
 - `execute`: `near_transferNear` (local credentials/env signer, mainnet safety gate)
 - `execute`: `near_transferFt` (NEP-141 `ft_transfer`, supports custom gas/deposit, mainnet safety gate)
@@ -70,7 +73,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `near_withdrawRefToken` (withdraw deposited token from Ref exchange back to wallet, optional full-balance withdraw)
 - `execute`: `near_addLiquidityRef` (Ref LP add-liquidity, includes optional auto register + token deposit to Ref exchange; supports auto pool selection by token pair when `poolId` is omitted)
 - `execute`: `near_removeLiquidityRef` (Ref LP remove-liquidity; supports auto pool selection by token pair when `poolId` is omitted, plus `autoWithdraw=true` to auto-withdraw pool tokens)
-- `workflow`: `w3rt_run_near_workflow_v0` (analysis/compose/simulate/execute + deterministic mainnet confirmToken; compose currently supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw`; full workflow intents include `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks)
+- `workflow`: `w3rt_run_near_workflow_v0` (analysis/compose/simulate/execute + deterministic mainnet confirmToken; compose currently supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove` / `near.ref.withdraw`; full workflow intents include `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks)
 - `intents execute tracking`: `near.swap.intents` execute now polls `/v0/status` by default after submit (until terminal status or timeout). Tunables: `waitForFinalStatus`, `statusPollIntervalMs`, `statusTimeoutMs`.
 - `LP auto-selection UX`: when pair-based selection has multiple candidate pools, simulate returns concise alternatives (`poolCandidates`) and text summary (`alternatives=...`)
 - `LP follow-up execute`: after simulate, execute can reuse the session and switch pool by natural language (`继续执行，用第2个池子`) or structured `poolCandidateIndex`
@@ -109,6 +112,11 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `near_buildTransferNearTransaction` with `fromAccountId`, `toAccountId`, `amountNear`
 - Compose unsigned Ref swap (tool):
   - `near_buildSwapRefTransaction` with `fromAccountId`, `tokenInId`, `tokenOutId`, `amountInRaw` (optional `minAmountOutRaw`/`slippageBps`)
+- Compose unsigned Intents deposit (tool):
+  - `near_buildIntentsSwapDepositTransaction` with `fromAccountId`, `originAsset`, `destinationAsset`, `amount`
+- Compose unsigned Ref LP add/remove (tools):
+  - `near_buildAddLiquidityRefTransaction` with `poolId` (or pair), `amountARaw`, `amountBRaw`
+  - `near_buildRemoveLiquidityRefTransaction` with `poolId`, `shares` (or `shareBps`)
 - Compose unsigned Ref withdraw (tool):
   - `near_buildRefWithdrawTransaction` with `fromAccountId`, `tokenId`, `amountRaw` (or `withdrawAll=true`)
 - Ref Deposits (read):

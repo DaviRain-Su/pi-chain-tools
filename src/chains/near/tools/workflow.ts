@@ -3222,6 +3222,9 @@ function resolveComposeTool(
 	name:
 		| "near_buildTransferNearTransaction"
 		| "near_buildTransferFtTransaction"
+		| "near_buildIntentsSwapDepositTransaction"
+		| "near_buildAddLiquidityRefTransaction"
+		| "near_buildRemoveLiquidityRefTransaction"
 		| "near_buildSwapRefTransaction"
 		| "near_buildRefWithdrawTransaction",
 ): WorkflowComposeTool {
@@ -3577,6 +3580,77 @@ export function createNearWorkflowTools() {
 							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
 							publicKey: params.publicKey,
 						});
+					} else if (intent.type === "near.swap.intents") {
+						const composeTool = resolveComposeTool(
+							"near_buildIntentsSwapDepositTransaction",
+						);
+						composeResult = await composeTool.execute("near-wf-compose", {
+							originAsset: intent.originAsset,
+							destinationAsset: intent.destinationAsset,
+							amount: intent.amount,
+							accountId: intent.accountId ?? intent.fromAccountId,
+							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+							recipient: intent.recipient,
+							refundTo: intent.refundTo,
+							swapType: intent.swapType,
+							slippageTolerance: intent.slippageTolerance,
+							depositType: intent.depositType,
+							refundType: intent.refundType,
+							recipientType: intent.recipientType,
+							depositMode: intent.depositMode,
+							deadline: intent.deadline,
+							quoteWaitingTimeMs: intent.quoteWaitingTimeMs,
+							blockchainHint: intent.blockchainHint,
+							apiBaseUrl: intent.apiBaseUrl ?? params.apiBaseUrl,
+							apiKey: params.apiKey,
+							jwt: params.jwt,
+							network,
+							rpcUrl: params.rpcUrl,
+							publicKey: params.publicKey,
+						});
+					} else if (intent.type === "near.lp.ref.add") {
+						const composeTool = resolveComposeTool(
+							"near_buildAddLiquidityRefTransaction",
+						);
+						composeResult = await composeTool.execute("near-wf-compose", {
+							poolId: intent.poolId,
+							amountARaw: intent.amountARaw,
+							amountBRaw: intent.amountBRaw,
+							tokenAId: intent.tokenAId,
+							tokenBId: intent.tokenBId,
+							refContractId: intent.refContractId,
+							autoRegisterExchange: intent.autoRegisterExchange,
+							autoRegisterTokens: intent.autoRegisterTokens,
+							gas: intent.gas,
+							attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+							network,
+							rpcUrl: params.rpcUrl,
+							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+							publicKey: params.publicKey,
+						});
+					} else if (intent.type === "near.lp.ref.remove") {
+						const composeTool = resolveComposeTool(
+							"near_buildRemoveLiquidityRefTransaction",
+						);
+						composeResult = await composeTool.execute("near-wf-compose", {
+							poolId: intent.poolId,
+							shares: intent.shares,
+							shareBps: intent.shareBps,
+							minAmountsRaw: intent.minAmountsRaw,
+							minAmountARaw: intent.minAmountARaw,
+							minAmountBRaw: intent.minAmountBRaw,
+							tokenAId: intent.tokenAId,
+							tokenBId: intent.tokenBId,
+							refContractId: intent.refContractId,
+							autoWithdraw: intent.autoWithdraw,
+							autoRegisterReceiver: intent.autoRegisterReceiver,
+							gas: intent.gas,
+							attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+							network,
+							rpcUrl: params.rpcUrl,
+							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+							publicKey: params.publicKey,
+						});
 					} else if (intent.type === "near.ref.withdraw") {
 						const composeTool = resolveComposeTool(
 							"near_buildRefWithdrawTransaction",
@@ -3596,7 +3670,7 @@ export function createNearWorkflowTools() {
 						});
 					} else {
 						throw new Error(
-							`compose currently supports near.transfer.near / near.transfer.ft / near.swap.ref / near.ref.withdraw. Unsupported intentType=${intent.type}`,
+							"compose currently supports near.transfer.near / near.transfer.ft / near.swap.ref / near.swap.intents / near.lp.ref.add / near.lp.ref.remove / near.ref.withdraw.",
 						);
 					}
 

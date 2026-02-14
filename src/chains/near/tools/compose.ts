@@ -10,8 +10,12 @@ import {
 import { defineTool } from "../../../core/types.js";
 import type { RegisteredTool } from "../../../core/types.js";
 import {
+	type RefPoolPairCandidate,
+	fetchRefPoolById,
+	findRefPoolForPair,
 	getRefContractId,
 	getRefSwapQuote,
+	getRefTokenDecimalsHint,
 	resolveRefTokenIds,
 } from "../ref.js";
 import {
@@ -55,6 +59,74 @@ type NearBuildRefSwapTransactionParams = {
 	slippageBps?: number;
 	refContractId?: string;
 	autoRegisterOutput?: boolean;
+	fromAccountId?: string;
+	publicKey?: string;
+	network?: string;
+	rpcUrl?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearBuildIntentsSwapDepositTransactionParams = {
+	originAsset: string;
+	destinationAsset: string;
+	amount: string;
+	accountId?: string;
+	fromAccountId?: string;
+	recipient?: string;
+	refundTo?: string;
+	swapType?: NearIntentsSwapType;
+	slippageTolerance?: number;
+	depositType?: NearIntentsTransferType;
+	refundType?: NearIntentsTransferType;
+	recipientType?: NearIntentsRecipientType;
+	depositMode?: NearIntentsDepositMode;
+	deadline?: string;
+	quoteWaitingTimeMs?: number;
+	blockchainHint?: string;
+	network?: string;
+	rpcUrl?: string;
+	publicKey?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+	jwt?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearBuildRefAddLiquidityTransactionParams = {
+	poolId?: number | string;
+	amountsRaw?: string[];
+	amountARaw?: string;
+	amountBRaw?: string;
+	amountA?: string | number;
+	amountB?: string | number;
+	tokenAId?: string;
+	tokenBId?: string;
+	refContractId?: string;
+	autoRegisterExchange?: boolean;
+	autoRegisterTokens?: boolean;
+	fromAccountId?: string;
+	publicKey?: string;
+	network?: string;
+	rpcUrl?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearBuildRefRemoveLiquidityTransactionParams = {
+	poolId?: number | string;
+	shares?: string;
+	shareBps?: number;
+	sharePercent?: string | number;
+	minAmountsRaw?: string[];
+	minAmountARaw?: string;
+	minAmountBRaw?: string;
+	tokenAId?: string;
+	tokenBId?: string;
+	refContractId?: string;
+	autoWithdraw?: boolean;
+	autoRegisterReceiver?: boolean;
 	fromAccountId?: string;
 	publicKey?: string;
 	network?: string;
@@ -115,6 +187,74 @@ type NearStorageBalance = {
 type NearStorageBalanceBounds = {
 	min: string;
 	max?: string;
+};
+
+type NearIntentsBadRequest = {
+	message?: string;
+	statusCode?: number;
+	error?: string;
+	timestamp?: string;
+	path?: string;
+};
+
+type NearIntentsQueryParams = Record<string, string | undefined>;
+
+type NearIntentsSwapType =
+	| "EXACT_INPUT"
+	| "EXACT_OUTPUT"
+	| "FLEX_INPUT"
+	| "ANY_INPUT";
+type NearIntentsTransferType = "ORIGIN_CHAIN" | "INTENTS";
+type NearIntentsRecipientType = "DESTINATION_CHAIN" | "INTENTS";
+type NearIntentsDepositMode = "SIMPLE" | "MEMO";
+
+type NearIntentsToken = {
+	assetId: string;
+	decimals: number;
+	blockchain: string;
+	symbol: string;
+	price: number;
+	priceUpdatedAt: string;
+	contractAddress?: string;
+};
+
+type NearIntentsQuoteRequest = {
+	dry: boolean;
+	swapType: NearIntentsSwapType;
+	slippageTolerance: number;
+	originAsset: string;
+	depositType: NearIntentsTransferType;
+	destinationAsset: string;
+	amount: string;
+	refundTo: string;
+	refundType: NearIntentsTransferType;
+	recipient: string;
+	recipientType: NearIntentsRecipientType;
+	deadline: string;
+	depositMode?: NearIntentsDepositMode;
+	quoteWaitingTimeMs?: number;
+};
+
+type NearIntentsQuoteResponse = {
+	correlationId: string;
+	timestamp: string;
+	signature: string;
+	quoteRequest: NearIntentsQuoteRequest;
+	quote: {
+		depositAddress?: string;
+		depositMemo?: string;
+		amountIn: string;
+		amountInFormatted: string;
+		amountInUsd: string;
+		minAmountIn: string;
+		amountOut: string;
+		amountOutFormatted: string;
+		amountOutUsd: string;
+		minAmountOut: string;
+		deadline?: string;
+		timeWhenInactive?: string;
+		timeEstimate: number;
+	};
 };
 
 type ActionSummary =
@@ -190,9 +330,14 @@ const DEFAULT_REF_WITHDRAW_GAS = 180_000_000_000_000n;
 const DEFAULT_ATTACHED_DEPOSIT = 1n;
 const DEFAULT_FT_STORAGE_DEPOSIT_YOCTO_NEAR = 1_250_000_000_000_000_000_000n;
 const DEFAULT_STORAGE_DEPOSIT_GAS = 30_000_000_000_000n;
+const DEFAULT_REF_ACCOUNT_STORAGE_DEPOSIT_YOCTO_NEAR =
+	100_000_000_000_000_000_000_000n;
+const DEFAULT_REF_REGISTER_TOKENS_GAS = 40_000_000_000_000n;
+const DEFAULT_REF_DEPOSIT_TOKEN_GAS = 70_000_000_000_000n;
 const DEFAULT_NEAR_SWAP_SLIPPAGE_BPS = 50;
 const DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS = 1000;
 const HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS = 5000;
+const DEFAULT_NEAR_INTENTS_API_BASE_URL = "https://1click.chaindefuser.com";
 
 function parsePositiveBigInt(value: string, fieldName: string): bigint {
 	const normalized = value.trim();
@@ -380,6 +525,483 @@ function resolveSafeMinAmountOutRaw(params: {
 		return requested.toString();
 	}
 	return quoteMinAmountOutRaw.toString();
+}
+
+function parseScaledDecimalToRaw(
+	value: string | number,
+	decimals: number,
+	fieldName: string,
+): string {
+	const normalized =
+		typeof value === "number" ? value.toString() : value.trim();
+	if (!/^\d+(\.\d+)?$/.test(normalized)) {
+		throw new Error(`${fieldName} must be a positive decimal number`);
+	}
+	if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
+		throw new Error("token decimals are invalid");
+	}
+	const [wholePart, fractionPart = ""] = normalized.split(".");
+	if (fractionPart.length > decimals) {
+		throw new Error(`${fieldName} supports up to ${decimals} decimal places`);
+	}
+	const whole = BigInt(wholePart);
+	const fraction = fractionPart.padEnd(decimals, "0");
+	const fractionValue = fraction ? BigInt(fraction) : 0n;
+	return (whole * 10n ** BigInt(decimals) + fractionValue).toString();
+}
+
+function parseShareBps(value: number | undefined, fieldName: string): number {
+	if (value == null) {
+		throw new Error(`${fieldName} is required`);
+	}
+	if (!Number.isFinite(value) || value <= 0 || value > 10_000) {
+		throw new Error(`${fieldName} must be between 1 and 10000`);
+	}
+	return Math.floor(value);
+}
+
+function parseSharePercent(
+	value: string | number | undefined,
+	fieldName: string,
+): number {
+	if (value == null) {
+		throw new Error(`${fieldName} is required`);
+	}
+	const normalized =
+		typeof value === "number" ? value : Number(value.trim().replace("%", ""));
+	if (!Number.isFinite(normalized) || normalized <= 0 || normalized > 100) {
+		throw new Error(`${fieldName} must be between 0 and 100`);
+	}
+	return Math.floor(normalized * 100);
+}
+
+function parseIntentsSlippageTolerance(value: number | undefined): number {
+	if (value == null) return 100;
+	if (!Number.isFinite(value) || value < 0 || value > 5_000) {
+		throw new Error("slippageTolerance must be between 0 and 5000");
+	}
+	return Math.floor(value);
+}
+
+function parseIntentsQuoteWaitingTimeMs(
+	value: number | undefined,
+): number | undefined {
+	if (value == null) return undefined;
+	if (!Number.isFinite(value) || !Number.isInteger(value) || value < 0) {
+		throw new Error("quoteWaitingTimeMs must be an integer >= 0");
+	}
+	return value;
+}
+
+function parseIntentsDeadline(value: string | undefined): string {
+	if (typeof value === "string" && value.trim()) {
+		const parsed = new Date(value);
+		if (Number.isNaN(parsed.getTime())) {
+			throw new Error("deadline must be a valid ISO datetime string");
+		}
+		return parsed.toISOString();
+	}
+	const fallback = new Date(Date.now() + 20 * 60 * 1000);
+	return fallback.toISOString();
+}
+
+function resolveNearIntentsApiBaseUrl(endpoint?: string): string {
+	const explicit = endpoint?.trim();
+	const fromEnv = process.env.NEAR_INTENTS_API_BASE_URL?.trim();
+	const selected = explicit || fromEnv || DEFAULT_NEAR_INTENTS_API_BASE_URL;
+	return selected.endsWith("/") ? selected.slice(0, -1) : selected;
+}
+
+function resolveNearIntentsHeaders(params: {
+	apiKey?: string;
+	jwt?: string;
+}): Record<string, string> {
+	const headers: Record<string, string> = {};
+	const apiKey =
+		params.apiKey?.trim() || process.env.NEAR_INTENTS_API_KEY?.trim();
+	const jwt = params.jwt?.trim() || process.env.NEAR_INTENTS_JWT?.trim();
+	if (apiKey) headers["x-api-key"] = apiKey;
+	if (jwt) headers.Authorization = `Bearer ${jwt}`;
+	return headers;
+}
+
+function buildNearIntentsUrl(params: {
+	baseUrl: string;
+	path: string;
+	query?: NearIntentsQueryParams;
+}): string {
+	const url = new URL(params.path, `${params.baseUrl}/`);
+	if (params.query) {
+		for (const [key, value] of Object.entries(params.query)) {
+			if (typeof value === "string" && value.trim()) {
+				url.searchParams.set(key, value.trim());
+			}
+		}
+	}
+	return url.toString();
+}
+
+function resolveNearIntentsErrorMessage(
+	payload: unknown,
+	fallback: string,
+): string {
+	if (payload && typeof payload === "object") {
+		const candidate = payload as NearIntentsBadRequest;
+		if (typeof candidate.message === "string" && candidate.message.trim()) {
+			return candidate.message.trim();
+		}
+		if (typeof candidate.error === "string" && candidate.error.trim()) {
+			return candidate.error.trim();
+		}
+	}
+	return fallback;
+}
+
+async function fetchNearIntentsJson<T>(params: {
+	baseUrl: string;
+	path: string;
+	method: "GET" | "POST";
+	query?: NearIntentsQueryParams;
+	body?: Record<string, unknown>;
+	headers?: Record<string, string>;
+}): Promise<{
+	url: string;
+	status: number;
+	payload: T;
+}> {
+	const url = buildNearIntentsUrl({
+		baseUrl: params.baseUrl,
+		path: params.path,
+		query: params.query,
+	});
+	const response = await fetch(url, {
+		method: params.method,
+		headers: {
+			accept: "application/json",
+			...(params.body ? { "content-type": "application/json" } : {}),
+			...(params.headers ?? {}),
+		},
+		body: params.body ? JSON.stringify(params.body) : undefined,
+	});
+	const raw = await response.text();
+	let payload: unknown = null;
+	if (raw.trim()) {
+		try {
+			payload = JSON.parse(raw) as unknown;
+		} catch {
+			payload = raw;
+		}
+	}
+	if (!response.ok) {
+		throw new Error(
+			`NEAR Intents API ${params.method} ${params.path} failed (${response.status}): ${resolveNearIntentsErrorMessage(payload, response.statusText || "request failed")}`,
+		);
+	}
+	return {
+		url,
+		status: response.status,
+		payload: payload as T,
+	};
+}
+
+function normalizeNearIntentsTokens(value: unknown): NearIntentsToken[] {
+	if (!Array.isArray(value)) {
+		throw new Error("NEAR Intents tokens response must be an array");
+	}
+	const normalized: NearIntentsToken[] = [];
+	for (const entry of value) {
+		if (!entry || typeof entry !== "object") continue;
+		const candidate = entry as Partial<NearIntentsToken>;
+		if (
+			typeof candidate.assetId !== "string" ||
+			typeof candidate.decimals !== "number" ||
+			typeof candidate.blockchain !== "string" ||
+			typeof candidate.symbol !== "string" ||
+			typeof candidate.price !== "number" ||
+			typeof candidate.priceUpdatedAt !== "string"
+		) {
+			continue;
+		}
+		normalized.push({
+			assetId: candidate.assetId,
+			decimals: Math.floor(candidate.decimals),
+			blockchain: candidate.blockchain,
+			symbol: candidate.symbol,
+			price: candidate.price,
+			priceUpdatedAt: candidate.priceUpdatedAt,
+			contractAddress:
+				typeof candidate.contractAddress === "string"
+					? candidate.contractAddress
+					: undefined,
+		});
+	}
+	return normalized;
+}
+
+function resolveNearIntentsAssetId(params: {
+	assetInput: string;
+	tokens: NearIntentsToken[];
+	preferredBlockchain?: string;
+	fieldName: string;
+}): string {
+	const normalizedInput = params.assetInput.trim();
+	if (!normalizedInput) {
+		throw new Error(`${params.fieldName} is required`);
+	}
+	if (normalizedInput.includes(":")) {
+		return normalizedInput;
+	}
+	const symbol = normalizedInput.toUpperCase();
+	const bySymbol = params.tokens.filter(
+		(token) => token.symbol.toUpperCase() === symbol,
+	);
+	if (bySymbol.length === 0) {
+		throw new Error(
+			`${params.fieldName} symbol '${normalizedInput}' is not supported by NEAR Intents`,
+		);
+	}
+	const preferred = params.preferredBlockchain?.trim().toLowerCase() || "near";
+	const onPreferred = bySymbol.filter(
+		(token) => token.blockchain.toLowerCase() === preferred,
+	);
+	if (onPreferred.length === 1) {
+		const selected = onPreferred[0];
+		if (selected) return selected.assetId;
+	}
+	if (bySymbol.length === 1) {
+		const selected = bySymbol[0];
+		if (selected) return selected.assetId;
+	}
+	const choices = bySymbol
+		.slice(0, 6)
+		.map((token) => `${token.assetId} [${token.blockchain}]`)
+		.join(", ");
+	throw new Error(
+		`${params.fieldName} symbol '${normalizedInput}' is ambiguous; provide explicit assetId. Candidates: ${choices}`,
+	);
+}
+
+function resolveNearIntentsTokenByAssetId(
+	assetId: string,
+	tokens: NearIntentsToken[],
+): NearIntentsToken | null {
+	return tokens.find((token) => token.assetId === assetId) ?? null;
+}
+
+function isNearIntentsNativeToken(token: NearIntentsToken): boolean {
+	if (token.blockchain.trim().toLowerCase() !== "near") return false;
+	const contractAddress = token.contractAddress?.trim().toLowerCase() ?? "";
+	return !contractAddress;
+}
+
+function normalizeTokenIdList(tokenIds: string[]): string[] {
+	return tokenIds
+		.map((tokenId) => tokenId.trim().toLowerCase())
+		.filter(Boolean);
+}
+
+function resolvePoolTokenId(params: {
+	network: string;
+	tokenInput?: string;
+	poolTokenIds: string[];
+	defaultTokenId: string;
+	fieldName: string;
+}): string {
+	if (!params.tokenInput || !params.tokenInput.trim()) {
+		return params.defaultTokenId;
+	}
+	const matches = resolveRefTokenIds({
+		network: params.network,
+		tokenIdOrSymbol: params.tokenInput,
+		availableTokenIds: params.poolTokenIds,
+	});
+	if (!matches[0]) {
+		throw new Error(
+			`${params.fieldName} does not match pool tokens: ${params.tokenInput}`,
+		);
+	}
+	return matches[0];
+}
+
+function resolveRawAmountByToken(params: {
+	network: string;
+	rawValue?: string;
+	uiValue?: string | number;
+	tokenInput: string;
+	fieldRaw: string;
+	fieldUi: string;
+}): string {
+	if (typeof params.rawValue === "string" && params.rawValue.trim()) {
+		return parsePositiveBigInt(params.rawValue, params.fieldRaw).toString();
+	}
+	if (params.uiValue == null) {
+		throw new Error(`Provide ${params.fieldRaw} or ${params.fieldUi}`);
+	}
+	const decimals = getRefTokenDecimalsHint({
+		network: params.network,
+		tokenIdOrSymbol: params.tokenInput,
+	});
+	if (decimals == null) {
+		throw new Error(
+			`Cannot infer decimals for ${params.tokenInput}. Provide ${params.fieldRaw}.`,
+		);
+	}
+	const rawAmount = parseScaledDecimalToRaw(
+		params.uiValue,
+		decimals,
+		params.fieldUi,
+	);
+	parsePositiveBigInt(rawAmount, params.fieldUi);
+	return rawAmount;
+}
+
+function resolveAddLiquidityAmounts(params: {
+	network: string;
+	poolTokenIds: string[];
+	amountsRaw?: string[];
+	amountARaw?: string;
+	amountBRaw?: string;
+	amountA?: string | number;
+	amountB?: string | number;
+	tokenAId?: string;
+	tokenBId?: string;
+}): {
+	amountsRaw: string[];
+	tokenAId: string;
+	tokenBId: string;
+} {
+	const poolTokenIds = normalizeTokenIdList(params.poolTokenIds);
+	if (poolTokenIds.length < 2) {
+		throw new Error("Ref pool must include at least 2 tokens");
+	}
+	if (Array.isArray(params.amountsRaw) && params.amountsRaw.length > 0) {
+		if (params.amountsRaw.length !== poolTokenIds.length) {
+			throw new Error(
+				`amountsRaw must include ${poolTokenIds.length} entries for pool token order`,
+			);
+		}
+		const normalized = params.amountsRaw.map((value, index) =>
+			parseNonNegativeBigInt(value, `amountsRaw[${index}]`).toString(),
+		);
+		const hasPositive = normalized.some((value) => BigInt(value) > 0n);
+		if (!hasPositive) {
+			throw new Error("amountsRaw must include at least one positive amount");
+		}
+		return {
+			amountsRaw: normalized,
+			tokenAId: poolTokenIds[0] ?? "",
+			tokenBId: poolTokenIds[1] ?? "",
+		};
+	}
+
+	const tokenAId = resolvePoolTokenId({
+		network: params.network,
+		tokenInput: params.tokenAId,
+		poolTokenIds,
+		defaultTokenId: poolTokenIds[0] ?? "",
+		fieldName: "tokenAId",
+	});
+	const tokenBId = resolvePoolTokenId({
+		network: params.network,
+		tokenInput: params.tokenBId,
+		poolTokenIds,
+		defaultTokenId: poolTokenIds[1] ?? "",
+		fieldName: "tokenBId",
+	});
+	let resolvedTokenAId = tokenAId;
+	let resolvedTokenBId = tokenBId;
+	if (
+		resolvedTokenAId === resolvedTokenBId &&
+		typeof params.tokenAId === "string" &&
+		params.tokenAId.trim() &&
+		(!params.tokenBId || !params.tokenBId.trim())
+	) {
+		resolvedTokenBId =
+			poolTokenIds.find((tokenId) => tokenId !== resolvedTokenAId) ?? "";
+	}
+	if (
+		resolvedTokenAId === resolvedTokenBId &&
+		typeof params.tokenBId === "string" &&
+		params.tokenBId.trim() &&
+		(!params.tokenAId || !params.tokenAId.trim())
+	) {
+		resolvedTokenAId =
+			poolTokenIds.find((tokenId) => tokenId !== resolvedTokenBId) ?? "";
+	}
+	if (
+		!resolvedTokenAId ||
+		!resolvedTokenBId ||
+		resolvedTokenAId === resolvedTokenBId
+	) {
+		throw new Error(
+			"tokenAId and tokenBId must resolve to two distinct tokens",
+		);
+	}
+	const amountA = resolveRawAmountByToken({
+		network: params.network,
+		rawValue: params.amountARaw,
+		uiValue: params.amountA,
+		tokenInput: resolvedTokenAId,
+		fieldRaw: "amountARaw",
+		fieldUi: "amountA",
+	});
+	const amountB = resolveRawAmountByToken({
+		network: params.network,
+		rawValue: params.amountBRaw,
+		uiValue: params.amountB,
+		tokenInput: resolvedTokenBId,
+		fieldRaw: "amountBRaw",
+		fieldUi: "amountB",
+	});
+	const amountsRaw = poolTokenIds.map(() => "0");
+	const tokenAIndex = poolTokenIds.indexOf(resolvedTokenAId);
+	const tokenBIndex = poolTokenIds.indexOf(resolvedTokenBId);
+	if (tokenAIndex < 0 || tokenBIndex < 0) {
+		throw new Error("tokenAId/tokenBId are not part of the selected pool");
+	}
+	amountsRaw[tokenAIndex] = amountA;
+	amountsRaw[tokenBIndex] = amountB;
+	return {
+		amountsRaw,
+		tokenAId: resolvedTokenAId,
+		tokenBId: resolvedTokenBId,
+	};
+}
+
+function resolveRemoveLiquidityMinAmounts(params: {
+	poolTokenIds: string[];
+	minAmountsRaw?: string[];
+	minAmountARaw?: string;
+	minAmountBRaw?: string;
+}): string[] {
+	const poolTokenIds = normalizeTokenIdList(params.poolTokenIds);
+	if (poolTokenIds.length < 2) {
+		throw new Error("Ref pool must include at least 2 tokens");
+	}
+	if (Array.isArray(params.minAmountsRaw) && params.minAmountsRaw.length > 0) {
+		if (params.minAmountsRaw.length !== poolTokenIds.length) {
+			throw new Error(
+				`minAmountsRaw must include ${poolTokenIds.length} entries for pool token order`,
+			);
+		}
+		return params.minAmountsRaw.map((value, index) =>
+			parseNonNegativeBigInt(value, `minAmountsRaw[${index}]`).toString(),
+		);
+	}
+	const result = poolTokenIds.map(() => "0");
+	if (typeof params.minAmountARaw === "string" && params.minAmountARaw.trim()) {
+		result[0] = parseNonNegativeBigInt(
+			params.minAmountARaw,
+			"minAmountARaw",
+		).toString();
+	}
+	if (typeof params.minAmountBRaw === "string" && params.minAmountBRaw.trim()) {
+		result[1] = parseNonNegativeBigInt(
+			params.minAmountBRaw,
+			"minAmountBRaw",
+		).toString();
+	}
+	return result;
 }
 
 function resolveAttachedDeposit(value?: string): string {
@@ -612,6 +1234,32 @@ async function queryRefUserDeposits(params: {
 	return deposits;
 }
 
+async function queryRefPoolShares(params: {
+	network: string;
+	rpcUrl?: string;
+	refContractId: string;
+	poolId: number;
+	accountId: string;
+}): Promise<string> {
+	const result = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		params: {
+			request_type: "call_function",
+			account_id: params.refContractId,
+			method_name: "get_pool_shares",
+			args_base64: encodeNearCallArgs({
+				pool_id: params.poolId,
+				account_id: params.accountId,
+			}),
+			finality: "final",
+		},
+	});
+	const parsed = decodeNearCallResultJson<string>(result);
+	return parseNonNegativeBigInt(parsed, "poolShares").toString();
+}
+
 function resolveRefWithdrawTokenId(params: {
 	network: string;
 	tokenInput: string;
@@ -643,6 +1291,7 @@ async function queryStorageRegistrationStatus(params: {
 	rpcUrl?: string;
 	ftContractId: string;
 	accountId: string;
+	fallbackMinimumYoctoNear?: bigint;
 }): Promise<StorageRegistrationStatus> {
 	try {
 		const balanceResult = await callNearRpc<NearCallFunctionResult>({
@@ -699,7 +1348,8 @@ async function queryStorageRegistrationStatus(params: {
 		const minDeposit =
 			bounds && typeof bounds.min === "string" && bounds.min.trim()
 				? parseNonNegativeBigInt(bounds.min, "storageBalanceBounds.min")
-				: DEFAULT_FT_STORAGE_DEPOSIT_YOCTO_NEAR;
+				: (params.fallbackMinimumYoctoNear ??
+					DEFAULT_FT_STORAGE_DEPOSIT_YOCTO_NEAR);
 		return {
 			status: "needs_registration",
 			estimatedDepositYoctoNear: minDeposit.toString(),
@@ -923,6 +1573,888 @@ export function createNearComposeTools(): RegisteredTool[] {
 						accessKeySource: keyState.source,
 						accessKeyPermission: keyState.permission,
 						blockHeight: keyState.blockHeight,
+						transactionCount: 1,
+						requiresLocalSignature: true,
+						expirationNote:
+							"Unsigned payload includes nonce+blockHash and expires quickly. Sign and broadcast promptly.",
+						transaction: artifact,
+						transactions: [artifact],
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}buildIntentsSwapDepositTransaction`,
+			label: "NEAR Build Intents Swap Deposit Transaction",
+			description:
+				"Build unsigned NEAR Intents deposit transaction payload for local signing (from /v0/quote depositAddress).",
+			parameters: Type.Object({
+				originAsset: Type.String({
+					description: "Origin asset symbol or assetId.",
+				}),
+				destinationAsset: Type.String({
+					description: "Destination asset symbol or assetId.",
+				}),
+				amount: Type.String({
+					description: "Origin amount in raw integer string.",
+				}),
+				accountId: Type.Optional(
+					Type.String({
+						description: "Alias of signer account id (same as fromAccountId).",
+					}),
+				),
+				fromAccountId: Type.Optional(
+					Type.String({
+						description:
+							"Signer account id. If omitted, resolve from env/credentials.",
+					}),
+				),
+				recipient: Type.Optional(Type.String()),
+				refundTo: Type.Optional(Type.String()),
+				swapType: Type.Optional(
+					Type.Union([
+						Type.Literal("EXACT_INPUT"),
+						Type.Literal("EXACT_OUTPUT"),
+						Type.Literal("FLEX_INPUT"),
+						Type.Literal("ANY_INPUT"),
+					]),
+				),
+				slippageTolerance: Type.Optional(Type.Number()),
+				depositType: Type.Optional(
+					Type.Union([Type.Literal("ORIGIN_CHAIN"), Type.Literal("INTENTS")]),
+				),
+				refundType: Type.Optional(
+					Type.Union([Type.Literal("ORIGIN_CHAIN"), Type.Literal("INTENTS")]),
+				),
+				recipientType: Type.Optional(
+					Type.Union([
+						Type.Literal("DESTINATION_CHAIN"),
+						Type.Literal("INTENTS"),
+					]),
+				),
+				depositMode: Type.Optional(
+					Type.Union([Type.Literal("SIMPLE"), Type.Literal("MEMO")]),
+				),
+				deadline: Type.Optional(Type.String()),
+				quoteWaitingTimeMs: Type.Optional(Type.Number()),
+				blockchainHint: Type.Optional(Type.String()),
+				publicKey: Type.Optional(Type.String()),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				jwt: Type.Optional(Type.String()),
+				gas: Type.Optional(
+					Type.String({
+						description:
+							"Gas for NEP-141 ft_transfer in yoctoGas (default 30000000000000 / 30 Tgas).",
+					}),
+				),
+				attachedDepositYoctoNear: Type.Optional(
+					Type.String({
+						description:
+							"Attached deposit for NEP-141 ft_transfer in yoctoNEAR (default 1).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params =
+					rawParams as NearBuildIntentsSwapDepositTransactionParams;
+				const network = parseNearNetwork(params.network);
+				const signerAccountId = resolveNearAccountId(
+					params.accountId ?? params.fromAccountId,
+					network,
+				);
+				const keyState = await resolveComposeAccessKeyState({
+					accountId: signerAccountId,
+					publicKey: params.publicKey,
+					network,
+					rpcUrl: params.rpcUrl,
+				});
+				const baseUrl = resolveNearIntentsApiBaseUrl(params.apiBaseUrl);
+				const authHeaders = resolveNearIntentsHeaders({
+					apiKey: params.apiKey,
+					jwt: params.jwt,
+				});
+				const tokensResponse = await fetchNearIntentsJson<unknown[]>({
+					baseUrl,
+					path: "/v0/tokens",
+					method: "GET",
+					headers: authHeaders,
+				});
+				const tokens = normalizeNearIntentsTokens(tokensResponse.payload);
+				const originAssetId = resolveNearIntentsAssetId({
+					assetInput: params.originAsset,
+					tokens,
+					preferredBlockchain: params.blockchainHint,
+					fieldName: "originAsset",
+				});
+				const destinationAssetId = resolveNearIntentsAssetId({
+					assetInput: params.destinationAsset,
+					tokens,
+					preferredBlockchain: params.blockchainHint,
+					fieldName: "destinationAsset",
+				});
+				if (originAssetId === destinationAssetId) {
+					throw new Error("originAsset and destinationAsset must be different");
+				}
+				const recipient =
+					typeof params.recipient === "string" && params.recipient.trim()
+						? params.recipient.trim()
+						: signerAccountId;
+				const refundTo =
+					typeof params.refundTo === "string" && params.refundTo.trim()
+						? params.refundTo.trim()
+						: recipient;
+				const quoteWaitingTimeMs = parseIntentsQuoteWaitingTimeMs(
+					params.quoteWaitingTimeMs,
+				);
+				const quoteRequest: NearIntentsQuoteRequest = {
+					dry: true,
+					swapType: params.swapType ?? "EXACT_INPUT",
+					slippageTolerance: parseIntentsSlippageTolerance(
+						params.slippageTolerance,
+					),
+					originAsset: originAssetId,
+					depositType: params.depositType ?? "ORIGIN_CHAIN",
+					destinationAsset: destinationAssetId,
+					amount: parsePositiveBigInt(params.amount, "amount").toString(),
+					refundTo,
+					refundType: params.refundType ?? "ORIGIN_CHAIN",
+					recipient,
+					recipientType: params.recipientType ?? "DESTINATION_CHAIN",
+					deadline: parseIntentsDeadline(params.deadline),
+					depositMode: params.depositMode ?? "SIMPLE",
+					...(quoteWaitingTimeMs != null
+						? {
+								quoteWaitingTimeMs,
+							}
+						: {}),
+				};
+				const quoteResponse =
+					await fetchNearIntentsJson<NearIntentsQuoteResponse>({
+						baseUrl,
+						path: "/v0/quote",
+						method: "POST",
+						headers: authHeaders,
+						body: quoteRequest as unknown as Record<string, unknown>,
+					});
+				const depositAddress = normalizeAccountId(
+					quoteResponse.payload.quote.depositAddress ?? "",
+					"quote.depositAddress",
+				);
+				const depositMemo =
+					typeof quoteResponse.payload.quote.depositMemo === "string" &&
+					quoteResponse.payload.quote.depositMemo.trim()
+						? quoteResponse.payload.quote.depositMemo.trim()
+						: undefined;
+				const originToken = resolveNearIntentsTokenByAssetId(
+					originAssetId,
+					tokens,
+				);
+				if (!originToken) {
+					throw new Error(
+						`Cannot resolve origin token metadata for assetId ${originAssetId}`,
+					);
+				}
+				if (originToken.blockchain.trim().toLowerCase() !== "near") {
+					throw new Error(
+						`originAsset blockchain '${originToken.blockchain}' is not supported for NEAR compose. Use NEAR-origin assets only.`,
+					);
+				}
+				const amountInRaw = parsePositiveBigInt(
+					quoteResponse.payload.quote.amountIn,
+					"quote.amountIn",
+				).toString();
+
+				let artifact: UnsignedTransactionArtifact;
+				let routeType: "native_transfer" | "ft_transfer";
+				if (isNearIntentsNativeToken(originToken)) {
+					if (depositMemo) {
+						throw new Error(
+							"Quote requires depositMemo, but native NEAR transfer cannot attach memo. Use a token-based origin asset or wallet flow that supports this quote.",
+						);
+					}
+					routeType = "native_transfer";
+					artifact = createUnsignedTransactionArtifact({
+						label: "intents_deposit_near",
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						receiverId: depositAddress,
+						nonce: keyState.nextNonce,
+						blockHash: keyState.blockHash,
+						actions: [actions.transfer(BigInt(amountInRaw))],
+						actionSummaries: [
+							{
+								type: "Transfer",
+								depositYoctoNear: amountInRaw,
+							},
+						],
+					});
+				} else {
+					routeType = "ft_transfer";
+					const ftContractId = normalizeAccountId(
+						originToken.contractAddress ?? "",
+						"originToken.contractAddress",
+					);
+					const transferGas = resolveRequestGas(params.gas);
+					const transferDeposit = resolveAttachedDeposit(
+						params.attachedDepositYoctoNear,
+					);
+					const ftArgs = {
+						receiver_id: depositAddress,
+						amount: amountInRaw,
+						...(depositMemo ? { memo: depositMemo } : {}),
+					};
+					artifact = createUnsignedTransactionArtifact({
+						label: "intents_deposit_ft",
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						receiverId: ftContractId,
+						nonce: keyState.nextNonce,
+						blockHash: keyState.blockHash,
+						actions: [
+							actions.functionCall(
+								"ft_transfer",
+								ftArgs,
+								BigInt(transferGas),
+								BigInt(transferDeposit),
+							),
+						],
+						actionSummaries: [
+							{
+								type: "FunctionCall",
+								methodName: "ft_transfer",
+								args: ftArgs,
+								gas: transferGas,
+								depositYoctoNear: transferDeposit,
+							},
+						],
+					});
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Unsigned Intents deposit built: ${originAssetId} -> ${destinationAssetId} via ${routeType}.`,
+						},
+					],
+					details: {
+						network,
+						rpcEndpoint: getNearRpcEndpoint(network, params.rpcUrl),
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						accessKeySource: keyState.source,
+						accessKeyPermission: keyState.permission,
+						blockHeight: keyState.blockHeight,
+						apiBaseUrl: baseUrl,
+						tokensEndpoint: tokensResponse.url,
+						tokensHttpStatus: tokensResponse.status,
+						quoteEndpoint: quoteResponse.url,
+						quoteHttpStatus: quoteResponse.status,
+						routeType,
+						originAssetId,
+						destinationAssetId,
+						originToken,
+						depositAddress,
+						depositMemo: depositMemo ?? null,
+						quoteRequest,
+						quoteResponse: quoteResponse.payload,
+						transactionCount: 1,
+						requiresLocalSignature: true,
+						expirationNote:
+							"Unsigned payload includes nonce+blockHash and expires quickly. Sign and broadcast promptly.",
+						transaction: artifact,
+						transactions: [artifact],
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}buildAddLiquidityRefTransaction`,
+			label: "NEAR Build Ref Add Liquidity Transaction",
+			description:
+				"Build unsigned Ref add-liquidity transaction payload(s) for local signing, including optional storage/deposit pre-transactions.",
+			parameters: Type.Object({
+				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				amountsRaw: Type.Optional(Type.Array(Type.String())),
+				amountARaw: Type.Optional(Type.String()),
+				amountBRaw: Type.Optional(Type.String()),
+				amountA: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				amountB: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				tokenAId: Type.Optional(Type.String()),
+				tokenBId: Type.Optional(Type.String()),
+				refContractId: Type.Optional(Type.String()),
+				autoRegisterExchange: Type.Optional(Type.Boolean()),
+				autoRegisterTokens: Type.Optional(Type.Boolean()),
+				fromAccountId: Type.Optional(Type.String()),
+				publicKey: Type.Optional(Type.String()),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				gas: Type.Optional(Type.String()),
+				attachedDepositYoctoNear: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as NearBuildRefAddLiquidityTransactionParams;
+				const network = parseNearNetwork(params.network);
+				const signerAccountId = resolveNearAccountId(
+					params.fromAccountId,
+					network,
+				);
+				const keyState = await resolveComposeAccessKeyState({
+					accountId: signerAccountId,
+					publicKey: params.publicKey,
+					network,
+					rpcUrl: params.rpcUrl,
+				});
+				const addLiquidityGas = resolveRefSwapGas(params.gas);
+				const addLiquidityDeposit = resolveAttachedDeposit(
+					params.attachedDepositYoctoNear,
+				);
+				const autoRegisterExchange = params.autoRegisterExchange !== false;
+				const autoRegisterTokens = params.autoRegisterTokens !== false;
+				const refContractId = getRefContractId(network, params.refContractId);
+				let poolId = parseOptionalPoolId(params.poolId);
+				let poolSelectionSource: "explicitPool" | "bestLiquidityPool" =
+					"explicitPool";
+				let poolCandidates: RefPoolPairCandidate[] = [];
+				let inferredPair:
+					| {
+							tokenAId: string;
+							tokenBId: string;
+							liquidityScore: string;
+					  }
+					| undefined;
+				const pool =
+					poolId != null
+						? await fetchRefPoolById({
+								network,
+								rpcUrl: params.rpcUrl,
+								refContractId,
+								poolId,
+							})
+						: await (async () => {
+								const tokenAInput = params.tokenAId?.trim() ?? "";
+								const tokenBInput = params.tokenBId?.trim() ?? "";
+								if (!tokenAInput || !tokenBInput) {
+									throw new Error(
+										"poolId is required when tokenAId/tokenBId are not both provided",
+									);
+								}
+								const selection = await findRefPoolForPair({
+									network,
+									rpcUrl: params.rpcUrl,
+									refContractId,
+									tokenAId: tokenAInput,
+									tokenBId: tokenBInput,
+								});
+								poolId = selection.poolId;
+								poolSelectionSource = selection.source;
+								poolCandidates = Array.isArray(selection.candidates)
+									? selection.candidates
+									: [];
+								inferredPair = {
+									tokenAId: selection.tokenAId,
+									tokenBId: selection.tokenBId,
+									liquidityScore: selection.liquidityScore,
+								};
+								return selection.pool;
+							})();
+				if (poolId == null) {
+					throw new Error("Failed to resolve poolId for add liquidity");
+				}
+				const poolTokenIds = normalizeTokenIdList(pool.token_account_ids);
+				const { amountsRaw, tokenAId, tokenBId } = resolveAddLiquidityAmounts({
+					network,
+					poolTokenIds,
+					amountsRaw: params.amountsRaw,
+					amountARaw: params.amountARaw,
+					amountBRaw: params.amountBRaw,
+					amountA: params.amountA,
+					amountB: params.amountB,
+					tokenAId: params.tokenAId ?? inferredPair?.tokenAId,
+					tokenBId: params.tokenBId ?? inferredPair?.tokenBId,
+				});
+				const activeTokenRows = poolTokenIds
+					.map((tokenId, index) => ({
+						tokenId,
+						amountRaw: amountsRaw[index] ?? "0",
+					}))
+					.filter(
+						(entry) =>
+							parseNonNegativeBigInt(entry.amountRaw, "amountRaw") > 0n,
+					);
+				if (activeTokenRows.length === 0) {
+					throw new Error(
+						"No positive token amount provided for add liquidity",
+					);
+				}
+
+				const artifacts: UnsignedTransactionArtifact[] = [];
+				let nextNonce = keyState.nextNonce;
+				const exchangeStorageRegistration =
+					autoRegisterExchange === true
+						? await queryStorageRegistrationStatus({
+								network,
+								rpcUrl: params.rpcUrl,
+								ftContractId: refContractId,
+								accountId: signerAccountId,
+								fallbackMinimumYoctoNear:
+									DEFAULT_REF_ACCOUNT_STORAGE_DEPOSIT_YOCTO_NEAR,
+							})
+						: null;
+				if (
+					exchangeStorageRegistration &&
+					exchangeStorageRegistration.status === "needs_registration"
+				) {
+					artifacts.push(
+						createUnsignedTransactionArtifact({
+							label: "exchange_storage_deposit",
+							signerAccountId,
+							signerPublicKey: keyState.signerPublicKey,
+							receiverId: refContractId,
+							nonce: nextNonce,
+							blockHash: keyState.blockHash,
+							actions: [
+								actions.functionCall(
+									"storage_deposit",
+									{
+										account_id: signerAccountId,
+									},
+									DEFAULT_STORAGE_DEPOSIT_GAS,
+									parseNonNegativeBigInt(
+										exchangeStorageRegistration.estimatedDepositYoctoNear,
+										"exchangeStorage.estimatedDepositYoctoNear",
+									),
+								),
+							],
+							actionSummaries: [
+								{
+									type: "FunctionCall",
+									methodName: "storage_deposit",
+									args: {
+										account_id: signerAccountId,
+									},
+									gas: DEFAULT_STORAGE_DEPOSIT_GAS.toString(),
+									depositYoctoNear:
+										exchangeStorageRegistration.estimatedDepositYoctoNear,
+								},
+							],
+						}),
+					);
+					nextNonce += 1n;
+				}
+
+				const tokenStorageRegistrations: Array<{
+					tokenId: string;
+					registration: StorageRegistrationStatus;
+				}> = [];
+				if (autoRegisterTokens) {
+					for (const row of activeTokenRows) {
+						const registration = await queryStorageRegistrationStatus({
+							network,
+							rpcUrl: params.rpcUrl,
+							ftContractId: row.tokenId,
+							accountId: refContractId,
+						});
+						tokenStorageRegistrations.push({
+							tokenId: row.tokenId,
+							registration,
+						});
+						if (registration.status === "needs_registration") {
+							artifacts.push(
+								createUnsignedTransactionArtifact({
+									label: "token_storage_deposit",
+									signerAccountId,
+									signerPublicKey: keyState.signerPublicKey,
+									receiverId: row.tokenId,
+									nonce: nextNonce,
+									blockHash: keyState.blockHash,
+									actions: [
+										actions.functionCall(
+											"storage_deposit",
+											{
+												account_id: refContractId,
+												registration_only: true,
+											},
+											DEFAULT_STORAGE_DEPOSIT_GAS,
+											parseNonNegativeBigInt(
+												registration.estimatedDepositYoctoNear,
+												`tokenStorage[${row.tokenId}].estimatedDepositYoctoNear`,
+											),
+										),
+									],
+									actionSummaries: [
+										{
+											type: "FunctionCall",
+											methodName: "storage_deposit",
+											args: {
+												account_id: refContractId,
+												registration_only: true,
+											},
+											gas: DEFAULT_STORAGE_DEPOSIT_GAS.toString(),
+											depositYoctoNear: registration.estimatedDepositYoctoNear,
+										},
+									],
+								}),
+							);
+							nextNonce += 1n;
+						}
+					}
+					artifacts.push(
+						createUnsignedTransactionArtifact({
+							label: "register_tokens",
+							signerAccountId,
+							signerPublicKey: keyState.signerPublicKey,
+							receiverId: refContractId,
+							nonce: nextNonce,
+							blockHash: keyState.blockHash,
+							actions: [
+								actions.functionCall(
+									"register_tokens",
+									{
+										token_ids: activeTokenRows.map((row) => row.tokenId),
+									},
+									DEFAULT_REF_REGISTER_TOKENS_GAS,
+									0n,
+								),
+							],
+							actionSummaries: [
+								{
+									type: "FunctionCall",
+									methodName: "register_tokens",
+									args: {
+										token_ids: activeTokenRows.map((row) => row.tokenId),
+									},
+									gas: DEFAULT_REF_REGISTER_TOKENS_GAS.toString(),
+									depositYoctoNear: "0",
+								},
+							],
+						}),
+					);
+					nextNonce += 1n;
+				}
+
+				for (const row of activeTokenRows) {
+					artifacts.push(
+						createUnsignedTransactionArtifact({
+							label: "token_deposit",
+							signerAccountId,
+							signerPublicKey: keyState.signerPublicKey,
+							receiverId: row.tokenId,
+							nonce: nextNonce,
+							blockHash: keyState.blockHash,
+							actions: [
+								actions.functionCall(
+									"ft_transfer_call",
+									{
+										receiver_id: refContractId,
+										amount: row.amountRaw,
+										msg: "",
+									},
+									DEFAULT_REF_DEPOSIT_TOKEN_GAS,
+									1n,
+								),
+							],
+							actionSummaries: [
+								{
+									type: "FunctionCall",
+									methodName: "ft_transfer_call",
+									args: {
+										receiver_id: refContractId,
+										amount: row.amountRaw,
+										msg: "",
+									},
+									gas: DEFAULT_REF_DEPOSIT_TOKEN_GAS.toString(),
+									depositYoctoNear: "1",
+								},
+							],
+						}),
+					);
+					nextNonce += 1n;
+				}
+
+				artifacts.push(
+					createUnsignedTransactionArtifact({
+						label: "ref_add_liquidity",
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						receiverId: refContractId,
+						nonce: nextNonce,
+						blockHash: keyState.blockHash,
+						actions: [
+							actions.functionCall(
+								"add_liquidity",
+								{
+									pool_id: poolId,
+									amounts: amountsRaw,
+								},
+								BigInt(addLiquidityGas),
+								BigInt(addLiquidityDeposit),
+							),
+						],
+						actionSummaries: [
+							{
+								type: "FunctionCall",
+								methodName: "add_liquidity",
+								args: {
+									pool_id: poolId,
+									amounts: amountsRaw,
+								},
+								gas: addLiquidityGas,
+								depositYoctoNear: addLiquidityDeposit,
+							},
+						],
+					}),
+				);
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Unsigned Ref add_liquidity built: pool=${poolId} txCount=${artifacts.length}.`,
+						},
+					],
+					details: {
+						network,
+						rpcEndpoint: getNearRpcEndpoint(network, params.rpcUrl),
+						refContractId,
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						accessKeySource: keyState.source,
+						accessKeyPermission: keyState.permission,
+						blockHeight: keyState.blockHeight,
+						poolId,
+						poolSelectionSource,
+						poolCandidates,
+						poolTokenIds,
+						tokenAId,
+						tokenBId,
+						inferredPair,
+						amountsRaw,
+						autoRegisterExchange,
+						autoRegisterTokens,
+						exchangeStorageRegistration,
+						tokenStorageRegistrations,
+						addLiquidityGas,
+						attachedDepositYoctoNear: addLiquidityDeposit,
+						transactionCount: artifacts.length,
+						requiresLocalSignature: true,
+						expirationNote:
+							"Unsigned payload includes nonce+blockHash and expires quickly. Sign and broadcast promptly in listed order.",
+						transaction: artifacts[artifacts.length - 1] ?? null,
+						transactions: artifacts,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}buildRemoveLiquidityRefTransaction`,
+			label: "NEAR Build Ref Remove Liquidity Transaction",
+			description:
+				"Build unsigned Ref remove-liquidity transaction payload for local signing.",
+			parameters: Type.Object({
+				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				shares: Type.Optional(Type.String()),
+				shareBps: Type.Optional(Type.Number()),
+				sharePercent: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				minAmountsRaw: Type.Optional(Type.Array(Type.String())),
+				minAmountARaw: Type.Optional(Type.String()),
+				minAmountBRaw: Type.Optional(Type.String()),
+				tokenAId: Type.Optional(Type.String()),
+				tokenBId: Type.Optional(Type.String()),
+				refContractId: Type.Optional(Type.String()),
+				autoWithdraw: Type.Optional(Type.Boolean()),
+				autoRegisterReceiver: Type.Optional(Type.Boolean()),
+				fromAccountId: Type.Optional(Type.String()),
+				publicKey: Type.Optional(Type.String()),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				gas: Type.Optional(Type.String()),
+				attachedDepositYoctoNear: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params =
+					rawParams as NearBuildRefRemoveLiquidityTransactionParams;
+				if (params.autoWithdraw === true) {
+					throw new Error(
+						"autoWithdraw=true is not supported in compose mode yet. Compose remove first, then use Ref withdraw compose for token withdrawals.",
+					);
+				}
+				const network = parseNearNetwork(params.network);
+				const signerAccountId = resolveNearAccountId(
+					params.fromAccountId,
+					network,
+				);
+				const keyState = await resolveComposeAccessKeyState({
+					accountId: signerAccountId,
+					publicKey: params.publicKey,
+					network,
+					rpcUrl: params.rpcUrl,
+				});
+				const removeLiquidityGas = resolveRefSwapGas(params.gas);
+				const removeLiquidityDeposit = resolveAttachedDeposit(
+					params.attachedDepositYoctoNear,
+				);
+				const refContractId = getRefContractId(network, params.refContractId);
+				let poolId = parseOptionalPoolId(params.poolId);
+				let poolSelectionSource: "explicitPool" | "bestLiquidityPool" =
+					"explicitPool";
+				let poolCandidates: RefPoolPairCandidate[] = [];
+				let inferredPair:
+					| {
+							tokenAId: string;
+							tokenBId: string;
+							liquidityScore: string;
+					  }
+					| undefined;
+				const pool =
+					poolId != null
+						? await fetchRefPoolById({
+								network,
+								rpcUrl: params.rpcUrl,
+								refContractId,
+								poolId,
+							})
+						: await (async () => {
+								const tokenAInput = params.tokenAId?.trim() ?? "";
+								const tokenBInput = params.tokenBId?.trim() ?? "";
+								if (!tokenAInput || !tokenBInput) {
+									throw new Error(
+										"poolId is required when tokenAId/tokenBId are not both provided",
+									);
+								}
+								const selection = await findRefPoolForPair({
+									network,
+									rpcUrl: params.rpcUrl,
+									refContractId,
+									tokenAId: tokenAInput,
+									tokenBId: tokenBInput,
+								});
+								poolId = selection.poolId;
+								poolSelectionSource = selection.source;
+								poolCandidates = Array.isArray(selection.candidates)
+									? selection.candidates
+									: [];
+								inferredPair = {
+									tokenAId: selection.tokenAId,
+									tokenBId: selection.tokenBId,
+									liquidityScore: selection.liquidityScore,
+								};
+								return selection.pool;
+							})();
+				if (poolId == null) {
+					throw new Error("Failed to resolve poolId for remove liquidity");
+				}
+				const poolTokenIds = normalizeTokenIdList(pool.token_account_ids);
+				const minAmountsRaw = resolveRemoveLiquidityMinAmounts({
+					poolTokenIds,
+					minAmountsRaw: params.minAmountsRaw,
+					minAmountARaw: params.minAmountARaw,
+					minAmountBRaw: params.minAmountBRaw,
+				});
+				const shareResolution =
+					typeof params.shares === "string" && params.shares.trim()
+						? {
+								shares: parsePositiveBigInt(params.shares, "shares").toString(),
+								availableShares: null as string | null,
+								shareBpsUsed: null as number | null,
+							}
+						: await (async () => {
+								const shareBps =
+									params.shareBps != null
+										? parseShareBps(params.shareBps, "shareBps")
+										: params.sharePercent != null
+											? parseSharePercent(params.sharePercent, "sharePercent")
+											: (() => {
+													throw new Error(
+														"Provide shares, shareBps, or sharePercent",
+													);
+												})();
+								const availableShares = await queryRefPoolShares({
+									network,
+									rpcUrl: params.rpcUrl,
+									refContractId,
+									poolId,
+									accountId: signerAccountId,
+								});
+								const computed =
+									(parseNonNegativeBigInt(availableShares, "availableShares") *
+										BigInt(shareBps)) /
+									10_000n;
+								if (computed <= 0n) {
+									throw new Error(
+										`shareBps/sharePercent resolves to 0 shares (available=${availableShares})`,
+									);
+								}
+								return {
+									shares: computed.toString(),
+									availableShares,
+									shareBpsUsed: shareBps,
+								};
+							})();
+
+				const artifact = createUnsignedTransactionArtifact({
+					label: "ref_remove_liquidity",
+					signerAccountId,
+					signerPublicKey: keyState.signerPublicKey,
+					receiverId: refContractId,
+					nonce: keyState.nextNonce,
+					blockHash: keyState.blockHash,
+					actions: [
+						actions.functionCall(
+							"remove_liquidity",
+							{
+								pool_id: poolId,
+								shares: shareResolution.shares,
+								min_amounts: minAmountsRaw,
+							},
+							BigInt(removeLiquidityGas),
+							BigInt(removeLiquidityDeposit),
+						),
+					],
+					actionSummaries: [
+						{
+							type: "FunctionCall",
+							methodName: "remove_liquidity",
+							args: {
+								pool_id: poolId,
+								shares: shareResolution.shares,
+								min_amounts: minAmountsRaw,
+							},
+							gas: removeLiquidityGas,
+							depositYoctoNear: removeLiquidityDeposit,
+						},
+					],
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Unsigned Ref remove_liquidity built: pool=${poolId} shares=${shareResolution.shares}.`,
+						},
+					],
+					details: {
+						network,
+						rpcEndpoint: getNearRpcEndpoint(network, params.rpcUrl),
+						refContractId,
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						accessKeySource: keyState.source,
+						accessKeyPermission: keyState.permission,
+						blockHeight: keyState.blockHeight,
+						poolId,
+						poolSelectionSource,
+						poolCandidates,
+						poolTokenIds,
+						tokenAId: inferredPair?.tokenAId ?? null,
+						tokenBId: inferredPair?.tokenBId ?? null,
+						minAmountsRaw,
+						shares: shareResolution.shares,
+						availableShares: shareResolution.availableShares,
+						shareBpsUsed: shareResolution.shareBpsUsed,
+						gas: removeLiquidityGas,
+						attachedDepositYoctoNear: removeLiquidityDeposit,
 						transactionCount: 1,
 						requiresLocalSignature: true,
 						expirationNote:

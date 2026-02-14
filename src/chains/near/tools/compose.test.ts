@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const runtimeMocks = vi.hoisted(() => ({
 	callNearRpc: vi.fn(),
@@ -12,10 +12,15 @@ const runtimeMocks = vi.hoisted(() => ({
 }));
 
 const refMocks = vi.hoisted(() => ({
+	fetchRefPoolById: vi.fn(),
+	findRefPoolForPair: vi.fn(),
 	getRefContractId: vi.fn(() => "v2.ref-finance.near"),
+	getRefTokenDecimalsHint: vi.fn(),
 	getRefSwapQuote: vi.fn(),
 	resolveRefTokenIds: vi.fn(),
 }));
+
+const fetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../runtime.js", async () => {
 	const actual =
@@ -35,7 +40,10 @@ vi.mock("../ref.js", async () => {
 	const actual = await vi.importActual<typeof import("../ref.js")>("../ref.js");
 	return {
 		...actual,
+		fetchRefPoolById: refMocks.fetchRefPoolById,
+		findRefPoolForPair: refMocks.findRefPoolForPair,
 		getRefContractId: refMocks.getRefContractId,
+		getRefTokenDecimalsHint: refMocks.getRefTokenDecimalsHint,
 		getRefSwapQuote: refMocks.getRefSwapQuote,
 		resolveRefTokenIds: refMocks.resolveRefTokenIds,
 	};
@@ -63,8 +71,24 @@ function encodeJsonResult(value: unknown): number[] {
 	return [...Buffer.from(JSON.stringify(value), "utf8")];
 }
 
+function mockFetchJsonOnce(params: {
+	status: number;
+	body: unknown;
+	statusText?: string;
+}) {
+	fetchMock.mockResolvedValueOnce({
+		ok: params.status >= 200 && params.status < 300,
+		status: params.status,
+		statusText:
+			params.statusText ??
+			(params.status >= 200 && params.status < 300 ? "OK" : "Bad Request"),
+		text: vi.fn().mockResolvedValue(JSON.stringify(params.body)),
+	} as unknown as Response);
+}
+
 beforeEach(() => {
 	vi.clearAllMocks();
+	vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 	runtimeMocks.parseNearNetwork.mockReturnValue("mainnet");
 	runtimeMocks.resolveNearAccountId.mockImplementation(
 		(accountId?: string) => accountId ?? "alice.near",
@@ -74,6 +98,31 @@ beforeEach(() => {
 		"https://rpc.mainnet.near.org",
 	);
 	refMocks.getRefContractId.mockReturnValue("v2.ref-finance.near");
+	refMocks.getRefTokenDecimalsHint.mockImplementation(
+		({
+			tokenIdOrSymbol,
+		}: {
+			tokenIdOrSymbol: string;
+		}) => {
+			const normalized = tokenIdOrSymbol.toLowerCase();
+			if (
+				normalized === "near" ||
+				normalized === "wnear" ||
+				normalized.includes("wrap.")
+			) {
+				return 24;
+			}
+			if (
+				normalized === "usdc" ||
+				normalized === "usdt" ||
+				normalized.includes("usdc") ||
+				normalized.includes("usdt")
+			) {
+				return 6;
+			}
+			return null;
+		},
+	);
 	refMocks.getRefSwapQuote.mockResolvedValue({
 		refContractId: "v2.ref-finance.near",
 		poolId: 7,
@@ -115,6 +164,42 @@ beforeEach(() => {
 			return candidates.filter((tokenId) => tokenId === normalized);
 		},
 	);
+	refMocks.fetchRefPoolById.mockResolvedValue({
+		id: 7,
+		token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+		amounts: ["1", "1"],
+		total_fee: 30,
+		pool_kind: "SIMPLE_POOL",
+	});
+	refMocks.findRefPoolForPair.mockResolvedValue({
+		refContractId: "v2.ref-finance.near",
+		poolId: 7,
+		poolKind: "SIMPLE_POOL",
+		tokenAId: "wrap.near",
+		tokenBId: "usdc.tether-token.near",
+		liquidityScore: "1",
+		source: "bestLiquidityPool",
+		candidates: [
+			{
+				poolId: 7,
+				poolKind: "SIMPLE_POOL",
+				tokenAId: "wrap.near",
+				tokenBId: "usdc.tether-token.near",
+				liquidityScore: "1",
+			},
+		],
+		pool: {
+			id: 7,
+			token_account_ids: ["wrap.near", "usdc.tether-token.near"],
+			amounts: ["1", "1"],
+			total_fee: 30,
+			pool_kind: "SIMPLE_POOL",
+		},
+	});
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
 });
 
 describe("near compose tools", () => {
@@ -218,6 +303,101 @@ describe("near compose tools", () => {
 		});
 	});
 
+	it("builds unsigned intents deposit transaction via ft_transfer", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			keys: [
+				{
+					public_key: TEST_PUBLIC_KEY,
+					access_key: {
+						nonce: 15,
+						permission: "FullAccess",
+					},
+				},
+			],
+			block_hash: TEST_BLOCK_HASH,
+			block_height: 128,
+		});
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "near:usdc",
+					decimals: 6,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-01-01T00:00:00Z",
+					contractAddress: "usdc.tether-token.near",
+				},
+				{
+					assetId: "near:near",
+					decimals: 24,
+					blockchain: "near",
+					symbol: "NEAR",
+					price: 5,
+					priceUpdatedAt: "2026-01-01T00:00:00Z",
+				},
+			],
+		});
+		mockFetchJsonOnce({
+			status: 200,
+			body: {
+				correlationId: "corr-1",
+				timestamp: "2026-01-01T00:00:00Z",
+				signature: "sig",
+				quoteRequest: {
+					dry: true,
+				},
+				quote: {
+					depositAddress: "intents-deposit.near",
+					depositMemo: "memo-123",
+					amountIn: "1000000",
+					amountInFormatted: "1",
+					amountInUsd: "1",
+					minAmountIn: "1000000",
+					amountOut: "1000000",
+					amountOutFormatted: "1",
+					amountOutUsd: "1",
+					minAmountOut: "990000",
+					timeEstimate: 30,
+				},
+			},
+		});
+		const tool = getTool("near_buildIntentsSwapDepositTransaction");
+		const result = await tool.execute("near-compose-intents-1", {
+			network: "mainnet",
+			fromAccountId: "alice.near",
+			originAsset: "USDC",
+			destinationAsset: "NEAR",
+			amount: "1000000",
+		});
+
+		expect(result.details).toMatchObject({
+			routeType: "ft_transfer",
+			originAssetId: "near:usdc",
+			destinationAssetId: "near:near",
+			depositAddress: "intents-deposit.near",
+			depositMemo: "memo-123",
+			transactionCount: 1,
+			transaction: {
+				label: "intents_deposit_ft",
+				receiverId: "usdc.tether-token.near",
+				nonce: "16",
+				actionSummaries: [
+					{
+						type: "FunctionCall",
+						methodName: "ft_transfer",
+						args: {
+							receiver_id: "intents-deposit.near",
+							amount: "1000000",
+							memo: "memo-123",
+						},
+					},
+				],
+			},
+		});
+	});
+
 	it("builds unsigned ref withdraw transaction from deposited token", async () => {
 		runtimeMocks.callNearRpc
 			.mockResolvedValueOnce({
@@ -280,6 +460,107 @@ describe("near compose tools", () => {
 						},
 					},
 				],
+			},
+		});
+	});
+
+	it("builds unsigned ref add-liquidity transaction set", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			keys: [
+				{
+					public_key: TEST_PUBLIC_KEY,
+					access_key: {
+						nonce: 20,
+						permission: "FullAccess",
+					},
+				},
+			],
+			block_hash: TEST_BLOCK_HASH,
+			block_height: 129,
+		});
+		const tool = getTool("near_buildAddLiquidityRefTransaction");
+		const result = await tool.execute("near-compose-lp-add-1", {
+			network: "mainnet",
+			fromAccountId: "alice.near",
+			poolId: 7,
+			amountARaw: "1000",
+			amountBRaw: "2000",
+			tokenAId: "wrap.near",
+			tokenBId: "usdc.tether-token.near",
+			autoRegisterExchange: false,
+			autoRegisterTokens: false,
+		});
+
+		expect(refMocks.fetchRefPoolById).toHaveBeenCalledWith({
+			network: "mainnet",
+			rpcUrl: undefined,
+			refContractId: "v2.ref-finance.near",
+			poolId: 7,
+		});
+		expect(result.details).toMatchObject({
+			poolId: 7,
+			poolSelectionSource: "explicitPool",
+			amountsRaw: ["1000", "2000"],
+			transactionCount: 3,
+			transactions: [
+				{
+					label: "token_deposit",
+					receiverId: "wrap.near",
+					nonce: "21",
+				},
+				{
+					label: "token_deposit",
+					receiverId: "usdc.tether-token.near",
+					nonce: "22",
+				},
+				{
+					label: "ref_add_liquidity",
+					receiverId: "v2.ref-finance.near",
+					nonce: "23",
+				},
+			],
+		});
+	});
+
+	it("builds unsigned ref remove-liquidity transaction from shareBps", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				keys: [
+					{
+						public_key: TEST_PUBLIC_KEY,
+						access_key: {
+							nonce: 30,
+							permission: "FullAccess",
+						},
+					},
+				],
+				block_hash: TEST_BLOCK_HASH,
+				block_height: 130,
+			})
+			.mockResolvedValueOnce({
+				result: encodeJsonResult("10000"),
+				logs: [],
+				block_hash: "2230",
+				block_height: 340,
+			});
+		const tool = getTool("near_buildRemoveLiquidityRefTransaction");
+		const result = await tool.execute("near-compose-lp-remove-1", {
+			network: "mainnet",
+			fromAccountId: "alice.near",
+			poolId: 7,
+			shareBps: 5000,
+		});
+
+		expect(result.details).toMatchObject({
+			poolId: 7,
+			shares: "5000",
+			shareBpsUsed: 5000,
+			availableShares: "10000",
+			transactionCount: 1,
+			transaction: {
+				label: "ref_remove_liquidity",
+				receiverId: "v2.ref-finance.near",
+				nonce: "31",
 			},
 		});
 	});
