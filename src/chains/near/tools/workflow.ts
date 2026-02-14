@@ -17,9 +17,10 @@ import {
 	resolveNearAccountId,
 	toYoctoNear,
 } from "../runtime.js";
+import { createNearComposeTools } from "./compose.js";
 import { createNearExecuteTools } from "./execute.js";
 
-type WorkflowRunMode = "analysis" | "simulate" | "execute";
+type WorkflowRunMode = "analysis" | "compose" | "simulate" | "execute";
 
 type NearTransferIntent = {
 	type: "near.transfer.near";
@@ -207,6 +208,7 @@ type WorkflowParams = {
 	attachedDepositYoctoNear?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
+	publicKey?: string;
 	privateKey?: string;
 };
 
@@ -357,6 +359,7 @@ type WorkflowSessionRecord = {
 type RefPoolCandidateSummary = RefPoolPairCandidate;
 
 type WorkflowTool = ReturnType<typeof createNearExecuteTools>[number];
+type WorkflowComposeTool = ReturnType<typeof createNearComposeTools>[number];
 
 const WORKFLOW_SESSION_BY_RUN_ID = new Map<string, WorkflowSessionRecord>();
 let latestWorkflowSession: WorkflowSessionRecord | null = null;
@@ -379,7 +382,12 @@ function readWorkflowSession(runId?: string): WorkflowSessionRecord | null {
 }
 
 function parseRunMode(value?: string): WorkflowRunMode {
-	if (value === "analysis" || value === "simulate" || value === "execute") {
+	if (
+		value === "analysis" ||
+		value === "compose" ||
+		value === "simulate" ||
+		value === "execute"
+	) {
 		return value;
 	}
 	return "analysis";
@@ -3210,6 +3218,19 @@ function resolveExecuteTool(
 	return tool;
 }
 
+function resolveComposeTool(
+	name:
+		| "near_buildTransferNearTransaction"
+		| "near_buildTransferFtTransaction"
+		| "near_buildRefWithdrawTransaction",
+): WorkflowComposeTool {
+	const tool = createNearComposeTools().find((entry) => entry.name === name);
+	if (!tool) {
+		throw new Error(`Compose tool not found: ${name}`);
+	}
+	return tool;
+}
+
 function assertMainnetExecutionConfirmed(
 	network: string,
 	confirmMainnet?: boolean,
@@ -3331,6 +3352,7 @@ function workflowRunModeSchema() {
 	return Type.Optional(
 		Type.Union([
 			Type.Literal("analysis"),
+			Type.Literal("compose"),
 			Type.Literal("simulate"),
 			Type.Literal("execute"),
 		]),
@@ -3343,7 +3365,7 @@ export function createNearWorkflowTools() {
 			name: "w3rt_run_near_workflow_v0",
 			label: "W3RT NEAR Workflow",
 			description:
-				"Run NEAR workflow in three phases: analysis -> simulate -> execute for native transfer, FT transfer, Ref swap, Ref withdraw, NEAR Intents swap, and Ref LP add/remove.",
+				"Run NEAR workflow in phases: analysis -> compose/simulate -> execute for native transfer, FT transfer, Ref swap, Ref withdraw, NEAR Intents swap, and Ref LP add/remove.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -3441,6 +3463,7 @@ export function createNearWorkflowTools() {
 				attachedDepositYoctoNear: Type.Optional(Type.String()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
+				publicKey: Type.Optional(Type.String()),
 				privateKey: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, rawParams) {
@@ -3498,6 +3521,92 @@ export function createNearWorkflowTools() {
 								),
 							})
 						: normalizeIntent(params);
+
+				if (runMode === "compose") {
+					let composeResult:
+						| {
+								content: { type: string; text: string }[];
+								details?: unknown;
+						  }
+						| undefined;
+					if (intent.type === "near.transfer.near") {
+						const composeTool = resolveComposeTool(
+							"near_buildTransferNearTransaction",
+						);
+						composeResult = await composeTool.execute("near-wf-compose", {
+							toAccountId: intent.toAccountId,
+							amountYoctoNear: intent.amountYoctoNear,
+							network,
+							rpcUrl: params.rpcUrl,
+							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+							publicKey: params.publicKey,
+						});
+					} else if (intent.type === "near.transfer.ft") {
+						const composeTool = resolveComposeTool(
+							"near_buildTransferFtTransaction",
+						);
+						composeResult = await composeTool.execute("near-wf-compose", {
+							ftContractId: intent.ftContractId,
+							toAccountId: intent.toAccountId,
+							amountRaw: intent.amountRaw,
+							gas: intent.gas,
+							attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+							network,
+							rpcUrl: params.rpcUrl,
+							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+							publicKey: params.publicKey,
+						});
+					} else if (intent.type === "near.ref.withdraw") {
+						const composeTool = resolveComposeTool(
+							"near_buildRefWithdrawTransaction",
+						);
+						composeResult = await composeTool.execute("near-wf-compose", {
+							tokenId: intent.tokenId,
+							amountRaw: intent.amountRaw,
+							withdrawAll: intent.withdrawAll,
+							refContractId: intent.refContractId,
+							autoRegisterReceiver: intent.autoRegisterReceiver,
+							gas: intent.gas,
+							attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+							network,
+							rpcUrl: params.rpcUrl,
+							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+							publicKey: params.publicKey,
+						});
+					} else {
+						throw new Error(
+							`compose currently supports near.transfer.near / near.transfer.ft / near.ref.withdraw. Unsupported intentType=${intent.type}`,
+						);
+					}
+
+					rememberWorkflowSession({
+						runId,
+						network,
+						intent,
+						confirmToken: null,
+						poolCandidates: [],
+					});
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Workflow composed: ${intent.type}`,
+							},
+						],
+						details: {
+							runId,
+							runMode,
+							network,
+							intentType: intent.type,
+							intent,
+							approvalRequired: false,
+							confirmToken: null,
+							artifacts: {
+								compose: composeResult.details ?? null,
+							},
+						},
+					};
+				}
 
 				const approvalRequired = network === "mainnet";
 				const confirmToken = approvalRequired

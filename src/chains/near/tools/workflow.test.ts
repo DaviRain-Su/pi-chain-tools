@@ -22,6 +22,12 @@ const executeMocks = vi.hoisted(() => ({
 	removeLiquidityRefExecute: vi.fn(),
 }));
 
+const composeMocks = vi.hoisted(() => ({
+	buildTransferNearCompose: vi.fn(),
+	buildTransferFtCompose: vi.fn(),
+	buildRefWithdrawCompose: vi.fn(),
+}));
+
 const fetchMock = vi.hoisted(() => vi.fn());
 
 const refMocks = vi.hoisted(() => ({
@@ -96,6 +102,32 @@ vi.mock("./execute.js", () => ({
 			description: "ref remove liquidity",
 			parameters: {},
 			execute: executeMocks.removeLiquidityRefExecute,
+		},
+	],
+}));
+
+vi.mock("./compose.js", () => ({
+	createNearComposeTools: () => [
+		{
+			name: "near_buildTransferNearTransaction",
+			label: "compose near transfer",
+			description: "compose near transfer",
+			parameters: {},
+			execute: composeMocks.buildTransferNearCompose,
+		},
+		{
+			name: "near_buildTransferFtTransaction",
+			label: "compose ft transfer",
+			description: "compose ft transfer",
+			parameters: {},
+			execute: composeMocks.buildTransferFtCompose,
+		},
+		{
+			name: "near_buildRefWithdrawTransaction",
+			label: "compose ref withdraw",
+			description: "compose ref withdraw",
+			parameters: {},
+			execute: composeMocks.buildRefWithdrawCompose,
 		},
 	],
 }));
@@ -201,6 +233,24 @@ beforeEach(() => {
 		content: [{ type: "text", text: "ok" }],
 		details: {
 			txHash: "near-exec-remove-liquidity-hash",
+		},
+	});
+	composeMocks.buildTransferNearCompose.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			unsignedPayload: "near-compose-transfer-near",
+		},
+	});
+	composeMocks.buildTransferFtCompose.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			unsignedPayload: "near-compose-transfer-ft",
+		},
+	});
+	composeMocks.buildRefWithdrawCompose.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			unsignedPayload: "near-compose-ref-withdraw",
 		},
 	});
 	refMocks.getRefContractId.mockReturnValue("v2.ref-finance.near");
@@ -324,6 +374,40 @@ describe("w3rt_run_near_workflow_v0", () => {
 				"NEAR-",
 			),
 		).toBe(true);
+	});
+
+	it("composes near transfer and returns unsigned payload artifact", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-1-compose", {
+			runId: "wf-near-01-compose",
+			runMode: "compose",
+			network: "mainnet",
+			intentType: "near.transfer.near",
+			toAccountId: "bob.near",
+			amountYoctoNear: "1000",
+			publicKey: "ed25519:11111111111111111111111111111111",
+		});
+
+		expect(composeMocks.buildTransferNearCompose).toHaveBeenCalledWith(
+			"near-wf-compose",
+			expect.objectContaining({
+				toAccountId: "bob.near",
+				amountYoctoNear: "1000",
+				network: "mainnet",
+				publicKey: "ed25519:11111111111111111111111111111111",
+			}),
+		);
+		expect(result.content[0]?.text).toContain("Workflow composed");
+		expect(result.details).toMatchObject({
+			runMode: "compose",
+			intentType: "near.transfer.near",
+			approvalRequired: false,
+			artifacts: {
+				compose: {
+					unsignedPayload: "near-compose-transfer-near",
+				},
+			},
+		});
 	});
 
 	it("simulates native transfer and returns artifacts", async () => {

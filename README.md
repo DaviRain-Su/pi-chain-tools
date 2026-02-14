@@ -59,6 +59,9 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `near_getIntentsTokens` (NEAR Intents 1Click `/v0/tokens`, filterable supported-asset list)
 - `read`: `near_getIntentsQuote` (NEAR Intents 1Click `/v0/quote`, defaults to `dry=true` for safe preview)
 - `read`: `near_getIntentsStatus` (NEAR Intents 1Click `/v0/status` by `depositAddress`/`depositMemo`)
+- `compose`: `near_buildTransferNearTransaction` (unsigned native transfer payload, local signing)
+- `compose`: `near_buildTransferFtTransaction` (unsigned NEP-141 `ft_transfer` payload, local signing)
+- `compose`: `near_buildRefWithdrawTransaction` (unsigned Ref withdraw payload(s), can include `storage_deposit` pre-tx when needed)
 - `execute`: `near_transferNear` (local credentials/env signer, mainnet safety gate)
 - `execute`: `near_transferFt` (NEP-141 `ft_transfer`, supports custom gas/deposit, mainnet safety gate)
 - `execute`: `near_swapRef` (Ref/Rhea swap via `ft_transfer_call`, supports multi-hop actions, mainnet safety gate, auto output-token `storage_deposit`)
@@ -66,7 +69,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `near_withdrawRefToken` (withdraw deposited token from Ref exchange back to wallet, optional full-balance withdraw)
 - `execute`: `near_addLiquidityRef` (Ref LP add-liquidity, includes optional auto register + token deposit to Ref exchange; supports auto pool selection by token pair when `poolId` is omitted)
 - `execute`: `near_removeLiquidityRef` (Ref LP remove-liquidity; supports auto pool selection by token pair when `poolId` is omitted, plus `autoWithdraw=true` to auto-withdraw pool tokens)
-- `workflow`: `w3rt_run_near_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken; supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks)
+- `workflow`: `w3rt_run_near_workflow_v0` (analysis/compose/simulate/execute + deterministic mainnet confirmToken; compose currently supports `near.transfer.near` / `near.transfer.ft` / `near.ref.withdraw`; full workflow intents include `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks)
 - `intents execute tracking`: `near.swap.intents` execute now polls `/v0/status` by default after submit (until terminal status or timeout). Tunables: `waitForFinalStatus`, `statusPollIntervalMs`, `statusTimeoutMs`.
 - `LP auto-selection UX`: when pair-based selection has multiple candidate pools, simulate returns concise alternatives (`poolCandidates`) and text summary (`alternatives=...`)
 - `LP follow-up execute`: after simulate, execute can reuse the session and switch pool by natural language (`继续执行，用第2个池子`) or structured `poolCandidateIndex`
@@ -101,6 +104,10 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `intentText: "在 Ref 把 USDC 提回钱包，amountRaw 1000000，先模拟"`
 - Ref Withdraw (analysis, full balance):
   - `intentText: "在 Ref 把 USDC 全部提回钱包，先分析"`
+- Compose unsigned transfer (tool):
+  - `near_buildTransferNearTransaction` with `fromAccountId`, `toAccountId`, `amountNear`
+- Compose unsigned Ref withdraw (tool):
+  - `near_buildRefWithdrawTransaction` with `fromAccountId`, `tokenId`, `amountRaw` (or `withdrawAll=true`)
 - Ref Deposits (read):
   - `帮我查一下 NEAR 主网 Ref 里我存了哪些币`
 - Ref LP Positions (read):
