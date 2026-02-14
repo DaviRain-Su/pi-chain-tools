@@ -1,4 +1,19 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const TRANSFER_ENV_KEYS = [
+	"EVM_TRANSFER_TOKEN_MAP",
+	"EVM_TRANSFER_TOKEN_DECIMALS",
+	"EVM_TRANSFER_TOKEN_MAP_ETHEREUM",
+	"EVM_TRANSFER_TOKEN_MAP_SEPOLIA",
+	"EVM_TRANSFER_TOKEN_MAP_POLYGON",
+	"EVM_TRANSFER_TOKEN_MAP_BASE",
+	"EVM_TRANSFER_TOKEN_MAP_ARBITRUM",
+	"EVM_TRANSFER_TOKEN_MAP_OPTIMISM",
+] as const;
+
+const TRANSFER_ENV_SNAPSHOT = Object.fromEntries(
+	TRANSFER_ENV_KEYS.map((key) => [key, process.env[key]]),
+) as Record<(typeof TRANSFER_ENV_KEYS)[number], string | undefined>;
 
 const executeMocks = vi.hoisted(() => ({
 	transferNativeExecute: vi.fn(),
@@ -42,6 +57,9 @@ function getTool(): WorkflowTool {
 }
 
 beforeEach(() => {
+	for (const key of TRANSFER_ENV_KEYS) {
+		Reflect.deleteProperty(process.env, key);
+	}
 	vi.clearAllMocks();
 	executeMocks.transferNativeExecute.mockResolvedValue({
 		content: [{ type: "text", text: "native ok" }],
@@ -51,6 +69,17 @@ beforeEach(() => {
 		content: [{ type: "text", text: "erc20 ok" }],
 		details: { txHash: `0x${"2".repeat(64)}` },
 	});
+});
+
+afterEach(() => {
+	for (const key of TRANSFER_ENV_KEYS) {
+		const value = TRANSFER_ENV_SNAPSHOT[key];
+		if (value == null) {
+			Reflect.deleteProperty(process.env, key);
+		} else {
+			process.env[key] = value;
+		}
+	}
 });
 
 describe("w3rt_run_evm_transfer_workflow_v0", () => {
@@ -221,7 +250,47 @@ describe("w3rt_run_evm_transfer_workflow_v0", () => {
 					"把 1 USDT 转给 0x000000000000000000000000000000000000dEaD，先模拟",
 			}),
 		).rejects.toThrow(
-			"No known USDT address configured for network=base. Provide tokenAddress explicitly.",
+			"No known USDT address configured for network=base. Provide tokenAddress explicitly or set EVM_TRANSFER_TOKEN_MAP_BASE.",
+		);
+	});
+
+	it("uses per-network env token map overrides", async () => {
+		process.env.EVM_TRANSFER_TOKEN_MAP_BASE = JSON.stringify({
+			USDT: "0x1111111111111111111111111111111111111111",
+		});
+		const tool = getTool();
+		await tool.execute("wf9", {
+			runMode: "simulate",
+			network: "base",
+			intentText:
+				"把 1 USDT 转给 0x000000000000000000000000000000000000dEaD，先模拟",
+		});
+		expect(executeMocks.transferErc20Execute).toHaveBeenCalledWith(
+			"wf-evm-transfer-simulate",
+			expect.objectContaining({
+				network: "base",
+				tokenAddress: "0x1111111111111111111111111111111111111111",
+				amountRaw: "1000000",
+			}),
+		);
+	});
+
+	it("uses env decimals override for symbol amount conversion", async () => {
+		process.env.EVM_TRANSFER_TOKEN_DECIMALS = JSON.stringify({
+			USDC: 8,
+		});
+		const tool = getTool();
+		await tool.execute("wf10", {
+			runMode: "simulate",
+			network: "polygon",
+			intentText:
+				"把 1.25 USDC 转给 0x000000000000000000000000000000000000dEaD，先模拟",
+		});
+		expect(executeMocks.transferErc20Execute).toHaveBeenCalledWith(
+			"wf-evm-transfer-simulate",
+			expect.objectContaining({
+				amountRaw: "125000000",
+			}),
 		);
 	});
 });

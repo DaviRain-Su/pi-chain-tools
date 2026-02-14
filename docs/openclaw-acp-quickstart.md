@@ -58,6 +58,13 @@ Verify:
 - tool: `w3rt_getPolicy_v0`
 - optional audit verify tool: `w3rt_getPolicyAudit_v0` (for example `{"scope":"evm.transfer","limit":5}`)
 
+Optional symbol map override (when a network token address differs from defaults):
+
+```bash
+export EVM_TRANSFER_TOKEN_MAP_BASE='{"USDT":"0x1111111111111111111111111111111111111111"}'
+export EVM_TRANSFER_TOKEN_DECIMALS='{"USDT":6}'
+```
+
 ## 4) First workflows
 
 ### Polymarket BTC 5m

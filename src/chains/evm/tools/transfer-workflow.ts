@@ -14,61 +14,84 @@ import { createEvmExecuteTools } from "./execute.js";
 
 type WorkflowRunMode = "analysis" | "simulate" | "execute";
 type KnownTokenSymbol = "USDC" | "USDT" | "DAI" | "WETH" | "WBTC";
-
-const TOKEN_METADATA_BY_SYMBOL: Record<
-	KnownTokenSymbol,
-	{ decimals: number; addresses: Partial<Record<EvmNetwork, string>> }
-> = {
-	USDC: {
-		decimals: 6,
-		addresses: {
-			ethereum: "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
-			sepolia: "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
-			polygon: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
-			base: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-			arbitrum: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-			optimism: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
-		},
-	},
-	USDT: {
-		decimals: 6,
-		addresses: {
-			ethereum: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-			polygon: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
-			arbitrum: "0xFd086bC7CD5C481DCC9C85EBE478A1C0b69FCbb9",
-			optimism: "0x94b008Aa00579c1307B0EF2c499aD98a8ce58e58",
-		},
-	},
-	DAI: {
-		decimals: 18,
-		addresses: {
-			ethereum: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
-			polygon: "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063",
-			base: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
-			arbitrum: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
-			optimism: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
-		},
-	},
-	WETH: {
-		decimals: 18,
-		addresses: {
-			ethereum: "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2",
-			polygon: "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619",
-			base: "0x4200000000000000000000000000000000000006",
-			arbitrum: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
-			optimism: "0x4200000000000000000000000000000000000006",
-		},
-	},
-	WBTC: {
-		decimals: 8,
-		addresses: {
-			ethereum: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
-			polygon: "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",
-			arbitrum: "0x2f2a2543B76A4166549F7AaB2e75Bef0aefC5B0f",
-			optimism: "0x68f180fcce6836688e9084f035309e29bf0a2095",
-		},
-	},
+type TokenSymbolMetadata = {
+	decimals: number;
+	addresses: Partial<Record<EvmNetwork, string>>;
 };
+
+const EVM_NETWORKS: EvmNetwork[] = [
+	"ethereum",
+	"sepolia",
+	"polygon",
+	"base",
+	"arbitrum",
+	"optimism",
+];
+
+const EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK: Record<EvmNetwork, string> = {
+	ethereum: "EVM_TRANSFER_TOKEN_MAP_ETHEREUM",
+	sepolia: "EVM_TRANSFER_TOKEN_MAP_SEPOLIA",
+	polygon: "EVM_TRANSFER_TOKEN_MAP_POLYGON",
+	base: "EVM_TRANSFER_TOKEN_MAP_BASE",
+	arbitrum: "EVM_TRANSFER_TOKEN_MAP_ARBITRUM",
+	optimism: "EVM_TRANSFER_TOKEN_MAP_OPTIMISM",
+};
+
+const EVM_TRANSFER_TOKEN_MAP_ENV = "EVM_TRANSFER_TOKEN_MAP";
+const EVM_TRANSFER_TOKEN_DECIMALS_ENV = "EVM_TRANSFER_TOKEN_DECIMALS";
+
+const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
+	{
+		USDC: {
+			decimals: 6,
+			addresses: {
+				ethereum: "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+				sepolia: "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
+				polygon: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+				base: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+				arbitrum: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+				optimism: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+			},
+		},
+		USDT: {
+			decimals: 6,
+			addresses: {
+				ethereum: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+				polygon: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
+				arbitrum: "0xFd086bC7CD5C481DCC9C85EBE478A1C0b69FCbb9",
+				optimism: "0x94b008Aa00579c1307B0EF2c499aD98a8ce58e58",
+			},
+		},
+		DAI: {
+			decimals: 18,
+			addresses: {
+				ethereum: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
+				polygon: "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063",
+				base: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
+				arbitrum: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
+				optimism: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
+			},
+		},
+		WETH: {
+			decimals: 18,
+			addresses: {
+				ethereum: "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2",
+				polygon: "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619",
+				base: "0x4200000000000000000000000000000000000006",
+				arbitrum: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+				optimism: "0x4200000000000000000000000000000000000006",
+			},
+		},
+		WBTC: {
+			decimals: 8,
+			addresses: {
+				ethereum: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+				polygon: "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",
+				arbitrum: "0x2f2a2543B76A4166549F7AaB2e75Bef0aefC5B0f",
+				optimism: "0x68f180fcce6836688e9084f035309e29bf0a2095",
+			},
+		},
+	};
 
 type TransferIntent =
 	| {
@@ -154,12 +177,200 @@ function parseKnownTokenSymbol(value?: string): KnownTokenSymbol | undefined {
 	return undefined;
 }
 
-function resolveTokenAddressBySymbol(
-	network: EvmNetwork,
-	symbol?: KnownTokenSymbol,
-): string | undefined {
-	if (!symbol) return undefined;
-	return TOKEN_METADATA_BY_SYMBOL[symbol].addresses[network];
+function normalizeConfiguredEvmAddress(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const normalized = value.trim();
+	if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
+		return undefined;
+	}
+	return normalized;
+}
+
+function parseEvmNetworkAlias(value: string): EvmNetwork | undefined {
+	const normalized = value.trim().toLowerCase();
+	if (
+		normalized === "ethereum" ||
+		normalized === "eth" ||
+		normalized === "mainnet"
+	) {
+		return "ethereum";
+	}
+	if (normalized === "sepolia") return "sepolia";
+	if (normalized === "polygon" || normalized === "matic") return "polygon";
+	if (normalized === "base") return "base";
+	if (normalized === "arbitrum" || normalized === "arb") return "arbitrum";
+	if (normalized === "optimism" || normalized === "op") return "optimism";
+	return undefined;
+}
+
+function parseTokenDecimalsEnv(
+	value: string | undefined,
+): Partial<Record<KnownTokenSymbol, number>> {
+	const normalized = value?.trim();
+	if (!normalized) return {};
+	try {
+		const parsed = JSON.parse(normalized) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return {};
+		}
+		const map: Partial<Record<KnownTokenSymbol, number>> = {};
+		for (const [rawKey, rawValue] of Object.entries(parsed)) {
+			const symbol = parseKnownTokenSymbol(rawKey);
+			if (!symbol) continue;
+			const decimals =
+				typeof rawValue === "number" ? rawValue : Number(rawValue);
+			if (
+				Number.isFinite(decimals) &&
+				Number.isInteger(decimals) &&
+				decimals >= 0 &&
+				decimals <= 255
+			) {
+				map[symbol] = decimals;
+			}
+		}
+		return map;
+	} catch {
+		return {};
+	}
+}
+
+function parseNetworkTokenMapEnv(
+	value: string | undefined,
+): Partial<Record<KnownTokenSymbol, string>> {
+	const normalized = value?.trim();
+	if (!normalized) return {};
+	try {
+		const parsed = JSON.parse(normalized) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return {};
+		}
+		const map: Partial<Record<KnownTokenSymbol, string>> = {};
+		for (const [rawKey, rawValue] of Object.entries(parsed)) {
+			const symbol = parseKnownTokenSymbol(rawKey);
+			if (!symbol) continue;
+			const address = normalizeConfiguredEvmAddress(rawValue);
+			if (!address) continue;
+			map[symbol] = address;
+		}
+		return map;
+	} catch {
+		return {};
+	}
+}
+
+function parseGlobalTokenMapEnv(
+	value: string | undefined,
+): Partial<Record<KnownTokenSymbol, Partial<Record<EvmNetwork, string>>>> {
+	const normalized = value?.trim();
+	if (!normalized) return {};
+	try {
+		const parsed = JSON.parse(normalized) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			return {};
+		}
+		const map: Partial<
+			Record<KnownTokenSymbol, Partial<Record<EvmNetwork, string>>>
+		> = {};
+		for (const [rawKey, rawValue] of Object.entries(parsed)) {
+			const symbol = parseKnownTokenSymbol(rawKey);
+			if (!symbol) continue;
+			if (
+				!rawValue ||
+				typeof rawValue !== "object" ||
+				Array.isArray(rawValue)
+			) {
+				continue;
+			}
+			const networkMap: Partial<Record<EvmNetwork, string>> = {};
+			for (const [rawNetwork, rawAddress] of Object.entries(rawValue)) {
+				const network = parseEvmNetworkAlias(rawNetwork);
+				if (!network) continue;
+				const address = normalizeConfiguredEvmAddress(rawAddress);
+				if (!address) continue;
+				networkMap[network] = address;
+			}
+			if (Object.keys(networkMap).length > 0) {
+				map[symbol] = networkMap;
+			}
+		}
+		return map;
+	} catch {
+		return {};
+	}
+}
+
+function copyDefaultTokenMetadata(): Record<
+	KnownTokenSymbol,
+	TokenSymbolMetadata
+> {
+	return {
+		USDC: {
+			decimals: TOKEN_METADATA_BY_SYMBOL.USDC.decimals,
+			addresses: { ...TOKEN_METADATA_BY_SYMBOL.USDC.addresses },
+		},
+		USDT: {
+			decimals: TOKEN_METADATA_BY_SYMBOL.USDT.decimals,
+			addresses: { ...TOKEN_METADATA_BY_SYMBOL.USDT.addresses },
+		},
+		DAI: {
+			decimals: TOKEN_METADATA_BY_SYMBOL.DAI.decimals,
+			addresses: { ...TOKEN_METADATA_BY_SYMBOL.DAI.addresses },
+		},
+		WETH: {
+			decimals: TOKEN_METADATA_BY_SYMBOL.WETH.decimals,
+			addresses: { ...TOKEN_METADATA_BY_SYMBOL.WETH.addresses },
+		},
+		WBTC: {
+			decimals: TOKEN_METADATA_BY_SYMBOL.WBTC.decimals,
+			addresses: { ...TOKEN_METADATA_BY_SYMBOL.WBTC.addresses },
+		},
+	};
+}
+
+function resolveTokenMetadataBySymbol(): Record<
+	KnownTokenSymbol,
+	TokenSymbolMetadata
+> {
+	const resolved = copyDefaultTokenMetadata();
+	const decimalsOverrides = parseTokenDecimalsEnv(
+		process.env[EVM_TRANSFER_TOKEN_DECIMALS_ENV],
+	);
+	for (const symbol of Object.keys(decimalsOverrides)) {
+		const parsedSymbol = parseKnownTokenSymbol(symbol);
+		const decimals = parsedSymbol ? decimalsOverrides[parsedSymbol] : undefined;
+		if (parsedSymbol && decimals != null) {
+			resolved[parsedSymbol].decimals = decimals;
+		}
+	}
+
+	const globalMap = parseGlobalTokenMapEnv(
+		process.env[EVM_TRANSFER_TOKEN_MAP_ENV],
+	);
+	for (const symbol of Object.keys(globalMap)) {
+		const parsedSymbol = parseKnownTokenSymbol(symbol);
+		if (!parsedSymbol) continue;
+		const networkMap = globalMap[parsedSymbol];
+		if (!networkMap) continue;
+		for (const network of EVM_NETWORKS) {
+			const address = networkMap[network];
+			if (address) {
+				resolved[parsedSymbol].addresses[network] = address;
+			}
+		}
+	}
+
+	for (const network of EVM_NETWORKS) {
+		const envKey = EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK[network];
+		const overrides = parseNetworkTokenMapEnv(process.env[envKey]);
+		for (const symbol of Object.keys(overrides)) {
+			const parsedSymbol = parseKnownTokenSymbol(symbol);
+			const address = parsedSymbol ? overrides[parsedSymbol] : undefined;
+			if (parsedSymbol && address) {
+				resolved[parsedSymbol].addresses[network] = address;
+			}
+		}
+	}
+	return resolved;
 }
 
 function parsePositiveDecimalString(value: string, fieldName: string): string {
@@ -349,20 +560,23 @@ function normalizeIntent(
 	const intentType =
 		params.intentType ?? parsed.intentType ?? "evm.transfer.native";
 	if (intentType === "evm.transfer.erc20") {
+		const metadataBySymbol = resolveTokenMetadataBySymbol();
 		const tokenSymbol =
 			parseKnownTokenSymbol(params.tokenSymbol) ?? parsed.tokenSymbol;
 		const tokenAddressInput =
 			params.tokenAddress?.trim() ||
 			parsed.tokenAddress ||
-			resolveTokenAddressBySymbol(network, tokenSymbol);
+			(tokenSymbol
+				? metadataBySymbol[tokenSymbol].addresses[network]
+				: undefined);
 		if (!tokenAddressInput) {
 			if (tokenSymbol) {
 				throw new Error(
-					`No known ${tokenSymbol} address configured for network=${network}. Provide tokenAddress explicitly.`,
+					`No known ${tokenSymbol} address configured for network=${network}. Provide tokenAddress explicitly or set ${EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK[network]}.`,
 				);
 			}
 			throw new Error(
-				"Provide tokenAddress (or known tokenSymbol like USDC/USDT/DAI/WETH/WBTC on polygon)",
+				"Provide tokenAddress (or known tokenSymbol like USDC/USDT/DAI/WETH/WBTC with configured map)",
 			);
 		}
 		const tokenAddress = parseEvmAddress(tokenAddressInput, "tokenAddress");
@@ -381,7 +595,7 @@ function normalizeIntent(
 					"Provide amountRaw, or amountToken together with tokenSymbol/known token text for evm.transfer.erc20",
 				);
 			}
-			const decimals = TOKEN_METADATA_BY_SYMBOL[tokenSymbol].decimals;
+			const decimals = metadataBySymbol[tokenSymbol].decimals;
 			amountRaw = decimalToRaw({
 				amountDecimal: amountTokenInput,
 				decimals,

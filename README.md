@@ -64,6 +64,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `workflow cancel intent`: supports `evm.polymarket.btc5m.cancel` (analysis/simulate/execute + deterministic mainnet confirmToken)
 - `mainnet guard`: workflow execute on polygon requires `confirmMainnet=true` + correct `confirmToken`
 - `transfer symbol map`: workflow can resolve `USDC/USDT/DAI/WETH/WBTC` addresses on `ethereum/polygon/arbitrum/optimism` and `USDC/DAI/WETH` on `base` (otherwise provide `tokenAddress`)
+- `transfer symbol map override`: configurable via `EVM_TRANSFER_TOKEN_MAP` (global JSON by symbol->network->address) and `EVM_TRANSFER_TOKEN_MAP_<NETWORK>` (per-network JSON by symbol->address, e.g. `EVM_TRANSFER_TOKEN_MAP_BASE`)
+- `transfer symbol decimals override`: configurable via `EVM_TRANSFER_TOKEN_DECIMALS` (JSON by symbol->decimals, used when converting `amountToken` to `amountRaw`)
 - `ai assist`: workflow/read can auto-pick side (`up/down`) with explainable reasons, confidence, and risk-aware fallback (`avoid`)
 
 ### EVM Polymarket NL Examples (Pi/OpenClaw)
@@ -81,6 +83,13 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `在 base 把 2.5 USDC 转给 0x...，先模拟`
 - `给 0x... 转 0.001 MATIC，先分析`
 - `继续执行刚才这笔转账，确认主网执行，confirmToken EVM-XXXX`
+
+EVM symbol-map override example:
+
+```bash
+export EVM_TRANSFER_TOKEN_MAP_BASE='{"USDT":"0x1111111111111111111111111111111111111111"}'
+export EVM_TRANSFER_TOKEN_DECIMALS='{"USDC":6,"USDT":6}'
+```
 
 ## NEAR (Current)
 
