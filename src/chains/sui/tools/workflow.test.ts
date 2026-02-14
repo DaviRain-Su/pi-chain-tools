@@ -640,6 +640,157 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("shows readable risk hint for LP remove simulate when min outputs are zero", async () => {
+		const tool = getTool();
+		const poolId =
+			"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+		const positionId =
+			"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+		const result = await tool.execute("wf6b", {
+			runId: "wf-sui-06b",
+			runMode: "simulate",
+			intentType: "sui.lp.cetus.remove",
+			network: "mainnet",
+			poolId,
+			positionId,
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x2::usdc::USDC",
+			deltaLiquidity: "100",
+			minAmountA: "0",
+			minAmountB: "0",
+		});
+
+		expect(result.content[0]?.text).toContain("risk=warning");
+		expect(result.content[0]?.text).toContain("风险提示：中风险（warning）");
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.remove",
+			artifacts: {
+				simulate: {
+					riskCheck: {
+						riskBand: "warning",
+						riskEngine: "heuristic",
+					},
+				},
+			},
+		});
+	});
+
+	it("blocks mainnet high-risk swap execute when confirmRisk is missing", async () => {
+		const tool = getTool();
+		const baseParams = {
+			runId: "wf-sui-risk-01",
+			intentType: "sui.swap.cetus" as const,
+			network: "mainnet",
+			inputCoinType: "SUI",
+			outputCoinType: "USDC",
+			amountRaw: "1000000",
+			slippageBps: 1000,
+		};
+		const analysis = await tool.execute("wf-risk-analysis", {
+			...baseParams,
+			runMode: "analysis",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+
+		await expect(
+			tool.execute("wf-risk-exec", {
+				...baseParams,
+				runMode: "execute",
+				confirmMainnet: true,
+				confirmToken: token,
+			}),
+		).rejects.toThrow(/confirmRisk=true/);
+		await expect(
+			tool.execute("wf-risk-exec", {
+				...baseParams,
+				runMode: "execute",
+				confirmMainnet: true,
+				confirmToken: token,
+			}),
+		).rejects.toThrow(/风险提示/);
+		expect(executeMocks.swapCetusExecute).not.toHaveBeenCalled();
+	});
+
+	it("allows mainnet high-risk swap execute when confirmRisk phrase is provided", async () => {
+		const tool = getTool();
+		const baseParams = {
+			runId: "wf-sui-risk-02",
+			intentType: "sui.swap.cetus" as const,
+			network: "mainnet",
+			inputCoinType: "SUI",
+			outputCoinType: "USDC",
+			amountRaw: "1000000",
+			slippageBps: 1000,
+		};
+		const analysis = await tool.execute("wf-risk2-analysis", {
+			...baseParams,
+			runMode: "analysis",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+
+		const execute = await tool.execute("wf-risk2-exec", {
+			...baseParams,
+			runMode: "execute",
+			intentText: "继续执行刚才这笔，我接受风险继续执行",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.swapCetusExecute).toHaveBeenCalledTimes(1);
+		expect(execute.content[0]?.text).toContain("risk=critical");
+		expect(execute.content[0]?.text).toContain("风险提示：高风险（critical）");
+		expect(execute.details).toMatchObject({
+			intentType: "sui.swap.cetus",
+			artifacts: {
+				execute: {
+					riskCheck: {
+						riskBand: "critical",
+						riskEngine: "heuristic",
+						confirmRiskAccepted: true,
+					},
+				},
+			},
+		});
+	});
+
+	it("supports natural follow-up high-risk execute with confirm token + risk phrase in intentText", async () => {
+		const tool = getTool();
+		const baseParams = {
+			runId: "wf-sui-risk-03",
+			intentType: "sui.swap.cetus" as const,
+			network: "mainnet",
+			inputCoinType: "SUI",
+			outputCoinType: "USDC",
+			amountRaw: "1000000",
+			slippageBps: 1000,
+		};
+		const analysis = await tool.execute("wf-risk3-analysis", {
+			...baseParams,
+			runMode: "analysis",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+
+		const execute = await tool.execute("wf-risk3-exec", {
+			runId: "wf-sui-risk-03",
+			runMode: "execute",
+			intentText: `继续执行刚才这笔，确认主网执行，我接受风险继续执行，confirmToken ${token}`,
+		});
+
+		expect(executeMocks.swapCetusExecute).toHaveBeenCalledTimes(1);
+		expect(execute.content[0]?.text).toContain("risk=critical");
+		expect(execute.details).toMatchObject({
+			intentType: "sui.swap.cetus",
+			artifacts: {
+				execute: {
+					riskCheck: {
+						riskBand: "critical",
+						confirmRiskAccepted: true,
+					},
+				},
+			},
+		});
+	});
+
 	it("executes LP remove after mainnet confirmation", async () => {
 		const tool = getTool();
 		const poolId =

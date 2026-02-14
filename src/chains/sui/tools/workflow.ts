@@ -114,6 +114,9 @@ type ParsedIntentHints = {
 	deltaLiquidity?: string;
 	minAmountA?: string;
 	minAmountB?: string;
+	confirmMainnet?: boolean;
+	confirmToken?: string;
+	confirmRisk?: boolean;
 };
 
 type WorkflowParams = {
@@ -151,6 +154,7 @@ type WorkflowParams = {
 	apiKey?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
+	confirmRisk?: boolean;
 	waitForLocalExecution?: boolean;
 };
 
@@ -191,6 +195,7 @@ type StableLayerWorkflowParams = {
 	usdcCoinType?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
+	confirmRisk?: boolean;
 	waitForLocalExecution?: boolean;
 };
 
@@ -242,6 +247,7 @@ type CetusFarmsWorkflowParams = {
 	positionNftId?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
+	confirmRisk?: boolean;
 	waitForLocalExecution?: boolean;
 };
 
@@ -299,8 +305,26 @@ type SuiDefiWorkflowParams = {
 	positionNftId?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
+	confirmRisk?: boolean;
 	waitForLocalExecution?: boolean;
 };
+
+type SuiWorkflowRiskBand = "safe" | "warning" | "critical" | "unknown";
+
+type SuiWorkflowRiskLevel = "low" | "medium" | "high" | "unknown";
+
+type SuiWorkflowRiskCheck = {
+	riskBand: SuiWorkflowRiskBand;
+	riskLevel: SuiWorkflowRiskLevel;
+	riskEngine: "heuristic";
+	requiresExplicitRiskAcceptance: boolean;
+	confirmRiskAccepted: boolean | null;
+	reasonCodes: string[];
+	notes: string[];
+};
+
+const DEFAULT_SUI_SWAP_RISK_WARNING_SLIPPAGE_BPS = 300;
+const DEFAULT_SUI_SWAP_RISK_CRITICAL_SLIPPAGE_BPS = 1000;
 
 type CetusClmmSdkLike = {
 	Position: {
@@ -555,6 +579,155 @@ function parseSwapAmountRawFromText(params: {
 	return params.fallbackAmountRaw;
 }
 
+function extractConfirmTokenFromText(text?: string): string | undefined {
+	if (!text?.trim()) return undefined;
+	const explicit =
+		text.match(/\bconfirmToken\s*[:= ]\s*(SUI-[A-Za-z0-9]+)\b/i)?.[1] ??
+		text.match(/\b(SUI-[A-Za-z0-9]{8,})\b/i)?.[1];
+	return explicit?.trim();
+}
+
+function hasConfirmMainnetPhrase(text?: string): boolean {
+	if (!text?.trim()) return false;
+	const lower = text.toLowerCase();
+	return (
+		lower.includes("确认主网执行") ||
+		lower.includes("确认主网") ||
+		lower.includes("confirm mainnet") ||
+		lower.includes("confirmmainnet=true") ||
+		lower.includes("confirmmainnet true")
+	);
+}
+
+function hasConfirmRiskPhrase(text?: string): boolean {
+	if (!text?.trim()) return false;
+	const lower = text.toLowerCase();
+	return (
+		lower.includes("确认风险执行") ||
+		lower.includes("确认风险") ||
+		lower.includes("确认高风险执行") ||
+		lower.includes("确认风险继续执行") ||
+		lower.includes("接受风险执行") ||
+		lower.includes("接受高风险执行") ||
+		lower.includes("我接受风险") ||
+		lower.includes("我已知晓风险") ||
+		lower.includes("风险已知晓") ||
+		lower.includes("高风险也执行") ||
+		lower.includes("强制执行") ||
+		lower.includes("accept risk") ||
+		lower.includes("accept the risk") ||
+		lower.includes("i accept risk") ||
+		lower.includes("risk accepted") ||
+		lower.includes("confirm risk") ||
+		lower.includes("confirm risk execute") ||
+		lower.includes("proceed with risk") ||
+		lower.includes("force execute") ||
+		lower.includes("force execution") ||
+		lower.includes("confirmrisk=true") ||
+		lower.includes("confirmrisk true")
+	);
+}
+
+function resolveSuiRiskLevelFromBand(
+	riskBand: SuiWorkflowRiskBand,
+): SuiWorkflowRiskLevel {
+	if (riskBand === "critical") return "high";
+	if (riskBand === "warning") return "medium";
+	if (riskBand === "safe") return "low";
+	return "unknown";
+}
+
+function parseNonNegativeBigInt(value: string): bigint | null {
+	const normalized = value.trim();
+	if (!/^\d+$/.test(normalized)) return null;
+	return BigInt(normalized);
+}
+
+function buildSuiRiskReadableHint(risk: SuiWorkflowRiskCheck): string | null {
+	if (risk.riskBand === "safe") return null;
+	const label =
+		risk.riskBand === "critical"
+			? "高风险"
+			: risk.riskBand === "warning"
+				? "中风险"
+				: "未知风险";
+	const reasons =
+		risk.notes.length > 0 ? `原因：${risk.notes.join("；")}。` : "";
+	const confirmText =
+		risk.confirmRiskAccepted === true
+			? "已确认风险执行。"
+			: risk.confirmRiskAccepted === false
+				? "未确认风险执行。"
+				: "";
+	return `风险提示：${label}（${risk.riskBand}）。${reasons}${confirmText}`.trim();
+}
+
+function assessSuiIntentRisk(
+	intent: SuiWorkflowIntent,
+	confirmRiskAccepted: boolean | null,
+): SuiWorkflowRiskCheck {
+	const reasonCodes: string[] = [];
+	const notes: string[] = [];
+	let riskBand: SuiWorkflowRiskBand = "safe";
+
+	if (intent.type === "sui.swap.cetus") {
+		const slippageBps = intent.slippageBps;
+		if (slippageBps >= DEFAULT_SUI_SWAP_RISK_CRITICAL_SLIPPAGE_BPS) {
+			riskBand = "critical";
+			reasonCodes.push("swap_high_slippage_critical");
+			notes.push(
+				`swap slippage=${slippageBps}bps (>=${DEFAULT_SUI_SWAP_RISK_CRITICAL_SLIPPAGE_BPS}bps)`,
+			);
+		} else if (slippageBps >= DEFAULT_SUI_SWAP_RISK_WARNING_SLIPPAGE_BPS) {
+			riskBand = "warning";
+			reasonCodes.push("swap_high_slippage_warning");
+			notes.push(
+				`swap slippage=${slippageBps}bps (>=${DEFAULT_SUI_SWAP_RISK_WARNING_SLIPPAGE_BPS}bps)`,
+			);
+		}
+	}
+
+	if (intent.type === "sui.lp.cetus.add") {
+		const slippageBps = intent.slippageBps;
+		if (slippageBps >= DEFAULT_SUI_SWAP_RISK_CRITICAL_SLIPPAGE_BPS) {
+			riskBand = "critical";
+			reasonCodes.push("lp_add_high_slippage_critical");
+			notes.push(
+				`LP add slippage=${slippageBps}bps (>=${DEFAULT_SUI_SWAP_RISK_CRITICAL_SLIPPAGE_BPS}bps)`,
+			);
+		} else if (slippageBps >= DEFAULT_SUI_SWAP_RISK_WARNING_SLIPPAGE_BPS) {
+			riskBand = "warning";
+			reasonCodes.push("lp_add_high_slippage_warning");
+			notes.push(
+				`LP add slippage=${slippageBps}bps (>=${DEFAULT_SUI_SWAP_RISK_WARNING_SLIPPAGE_BPS}bps)`,
+			);
+		}
+	}
+
+	if (intent.type === "sui.lp.cetus.remove") {
+		const minAmountA = parseNonNegativeBigInt(intent.minAmountA);
+		const minAmountB = parseNonNegativeBigInt(intent.minAmountB);
+		if (minAmountA === 0n && minAmountB === 0n) {
+			if (riskBand === "safe") riskBand = "warning";
+			reasonCodes.push("lp_remove_zero_min_amounts");
+			notes.push(
+				"LP remove minAmountA/minAmountB are both 0 (no min output guard)",
+			);
+		}
+	}
+
+	return {
+		riskBand,
+		riskLevel: resolveSuiRiskLevelFromBand(riskBand),
+		riskEngine: "heuristic",
+		requiresExplicitRiskAcceptance:
+			riskBand === "warning" || riskBand === "critical",
+		confirmRiskAccepted,
+		reasonCodes,
+		notes,
+	};
+}
+
 function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
 	const lower = text.toLowerCase();
@@ -595,6 +768,14 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		text.match(/(?:minAmountA|min_a|minA)\s*[:= ]\s*(\d+)/i) ?? null;
 	const minAmountBMatch =
 		text.match(/(?:minAmountB|min_b|minB)\s*[:= ]\s*(\d+)/i) ?? null;
+	const controlHints: Pick<
+		ParsedIntentHints,
+		"confirmMainnet" | "confirmToken" | "confirmRisk"
+	> = {
+		confirmMainnet: hasConfirmMainnetPhrase(text) ? true : undefined,
+		confirmToken: extractConfirmTokenFromText(text),
+		confirmRisk: hasConfirmRiskPhrase(text) ? true : undefined,
+	};
 
 	if (
 		/(add liquidity|provide liquidity|open position|increase liquidity|增加流动性|添加流动性|加流动性|加池|做市|开仓|加仓)/i.test(
@@ -602,6 +783,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		)
 	) {
 		return {
+			...controlHints,
 			intentType: "sui.lp.cetus.add",
 			poolId: poolLabelMatch?.[1] || objectIdMatches[0],
 			positionId: positionLabelMatch?.[1] || objectIdMatches[1],
@@ -620,6 +802,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		)
 	) {
 		return {
+			...controlHints,
 			intentType: "sui.lp.cetus.remove",
 			poolId: poolLabelMatch?.[1] || objectIdMatches[0],
 			positionId: positionLabelMatch?.[1] || objectIdMatches[1],
@@ -635,6 +818,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		const inputCoinType = coinTypeCandidates[0];
 		const outputCoinType = coinTypeCandidates[1];
 		return {
+			...controlHints,
 			intentType: "sui.swap.cetus",
 			inputCoinType,
 			outputCoinType,
@@ -649,12 +833,14 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	if (/(transfer|send|转账|发送|转给|转)/i.test(lower)) {
 		if (suiAmountMatch) {
 			return {
+				...controlHints,
 				intentType: "sui.transfer.sui",
 				toAddress: objectIdMatches[0],
 				amountSui: Number(suiAmountMatch[1]),
 			};
 		}
 		return {
+			...controlHints,
 			intentType: "sui.transfer.coin",
 			toAddress: objectIdMatches[0],
 			coinType: coinTypeCandidates[0],
@@ -662,7 +848,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		};
 	}
 
-	return {};
+	return controlHints;
 }
 
 function parseStableLayerIntentText(
@@ -1132,9 +1318,30 @@ function intentsMatch(a: unknown, b: unknown): boolean {
 }
 
 function hasCoreIntentInput(params: WorkflowParams): boolean {
+	const parsedFromText = parseIntentText(params.intentText);
+	const hasActionableIntentFromText = Boolean(
+		parsedFromText.intentType ||
+			parsedFromText.toAddress ||
+			parsedFromText.amountSui != null ||
+			parsedFromText.amountRaw ||
+			parsedFromText.coinType ||
+			parsedFromText.inputCoinType ||
+			parsedFromText.outputCoinType ||
+			parsedFromText.poolId ||
+			parsedFromText.positionId ||
+			parsedFromText.coinTypeA ||
+			parsedFromText.coinTypeB ||
+			parsedFromText.tickLower != null ||
+			parsedFromText.tickUpper != null ||
+			parsedFromText.amountA ||
+			parsedFromText.amountB ||
+			parsedFromText.deltaLiquidity ||
+			parsedFromText.minAmountA ||
+			parsedFromText.minAmountB,
+	);
 	return Boolean(
 		params.intentType ||
-			params.intentText ||
+			hasActionableIntentFromText ||
 			params.toAddress?.trim() ||
 			params.amountSui != null ||
 			params.amountRaw?.trim() ||
@@ -1231,6 +1438,53 @@ function shortenSummaryValue(value: string): string {
 	return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
 }
 
+function resolveSuiRiskCheckNode(value: unknown): SuiWorkflowRiskCheck | null {
+	if (!isRecordObject(value)) return null;
+	const band = value.riskBand;
+	const level = value.riskLevel;
+	const engine = value.riskEngine;
+	if (
+		(band !== "safe" &&
+			band !== "warning" &&
+			band !== "critical" &&
+			band !== "unknown") ||
+		(level !== "low" &&
+			level !== "medium" &&
+			level !== "high" &&
+			level !== "unknown") ||
+		engine !== "heuristic"
+	) {
+		return null;
+	}
+	const confirmRiskAccepted =
+		typeof value.confirmRiskAccepted === "boolean"
+			? value.confirmRiskAccepted
+			: null;
+	const requiresExplicitRiskAcceptance =
+		value.requiresExplicitRiskAcceptance === true;
+	const reasonCodes = Array.isArray(value.reasonCodes)
+		? value.reasonCodes.filter(
+				(item): item is string =>
+					typeof item === "string" && item.trim().length > 0,
+			)
+		: [];
+	const notes = Array.isArray(value.notes)
+		? value.notes.filter(
+				(item): item is string =>
+					typeof item === "string" && item.trim().length > 0,
+			)
+		: [];
+	return {
+		riskBand: band,
+		riskLevel: level,
+		riskEngine: "heuristic",
+		requiresExplicitRiskAcceptance,
+		confirmRiskAccepted,
+		reasonCodes,
+		notes,
+	};
+}
+
 function buildSuiExecuteSummaryLine(
 	intentType: string,
 	executeDetails: unknown,
@@ -1258,6 +1512,17 @@ function buildSuiExecuteSummaryLine(
 		parts.push(
 			`localExecution=${details.confirmedLocalExecution ? "confirmed" : "pending"}`,
 		);
+	}
+	const riskCheck = resolveSuiRiskCheckNode(details.riskCheck);
+	if (riskCheck) {
+		parts.push(`risk=${riskCheck.riskBand}`);
+		parts.push(`riskLevel=${riskCheck.riskLevel}`);
+		parts.push(`riskEngine=${riskCheck.riskEngine}`);
+		if (riskCheck.confirmRiskAccepted === true) {
+			parts.push("confirmRisk=accepted");
+		} else if (riskCheck.confirmRiskAccepted === false) {
+			parts.push("confirmRisk=not_accepted");
+		}
 	}
 	return parts.join(" ");
 }
@@ -1323,7 +1588,9 @@ function formatExecuteSummaryText(
 		executeArtifact.summaryLine.trim()
 			? executeArtifact.summaryLine.trim()
 			: `${intentType} executed`;
-	return `Workflow executed: ${summaryLine}`;
+	const riskCheck = resolveSuiRiskCheckNode(executeArtifact.riskCheck);
+	const riskHint = riskCheck ? buildSuiRiskReadableHint(riskCheck) : null;
+	return `Workflow executed: ${summaryLine}${riskHint ? ` ${riskHint}` : ""}`;
 }
 
 async function exportUnsignedPayload(
@@ -1363,22 +1630,39 @@ function formatSimulationSummary(params: {
 		unsignedTransactionBytesBase64?: string;
 		unsignedPayloadError?: string;
 	};
+	riskCheck?: SuiWorkflowRiskCheck;
 }): string {
+	const riskHint = params.riskCheck
+		? buildSuiRiskReadableHint(params.riskCheck)
+		: null;
+	const riskSuffix =
+		params.riskCheck && params.riskCheck.riskBand !== "safe"
+			? ` risk=${params.riskCheck.riskBand}${riskHint ? ` ${riskHint}` : ""}`
+			: "";
 	if (params.unsignedPayload.unsignedTransactionBytesBase64) {
-		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported (execute can proceed with local signer)`;
+		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported (execute can proceed with local signer)${riskSuffix}`;
 	}
 	if (params.unsignedPayload.unsignedPayloadError) {
-		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=unavailable`;
+		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=unavailable${riskSuffix}`;
 	}
-	return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress}`;
+	return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress}${riskSuffix}`;
 }
 
 function buildSuiAnalysisSummaryLine(
 	intentType: string,
 	needsMainnetConfirmation: boolean,
 	confirmToken: string,
+	riskCheck?: SuiWorkflowRiskCheck,
 ): string {
 	const parts = [intentType, "analysis=ready"];
+	if (riskCheck) {
+		parts.push(`risk=${riskCheck.riskBand}`);
+		parts.push(`riskLevel=${riskCheck.riskLevel}`);
+		parts.push("riskEngine=heuristic");
+		if (riskCheck.requiresExplicitRiskAcceptance) {
+			parts.push("riskGate=confirmRiskOnWarning");
+		}
+	}
 	if (needsMainnetConfirmation) {
 		parts.push(`mainnetGuard=on confirmToken=${confirmToken}`);
 	}
@@ -1393,12 +1677,18 @@ function buildSuiSimulationSummaryLine(params: {
 		unsignedTransactionBytesBase64?: string;
 		unsignedPayloadError?: string;
 	};
+	riskCheck?: SuiWorkflowRiskCheck;
 }): string {
 	const parts = [
 		params.intentType,
 		`simulate=${params.status}`,
 		`signer=${shortenSummaryValue(params.signerAddress)}`,
 	];
+	if (params.riskCheck) {
+		parts.push(`risk=${params.riskCheck.riskBand}`);
+		parts.push(`riskLevel=${params.riskCheck.riskLevel}`);
+		parts.push("riskEngine=heuristic");
+	}
 	if (params.unsignedPayload.unsignedTransactionBytesBase64) {
 		parts.push("unsignedPayload=exported");
 	} else if (params.unsignedPayload.unsignedPayloadError) {
@@ -2115,10 +2405,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
+				confirmRisk: Type.Optional(Type.Boolean()),
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as WorkflowParams;
 				const runMode = parseRunMode(params.runMode);
+				const intentHints = parseIntentText(params.intentText);
 				const priorSession =
 					runMode === "execute"
 						? readWorkflowSession("w3rt_run_sui_workflow_v0", params.runId)
@@ -2137,21 +2429,29 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					priorSession?.intent
 						? (priorSession.intent as SuiWorkflowIntent)
 						: normalizeIntent(params);
+				const effectiveConfirmMainnet =
+					params.confirmMainnet === true || intentHints.confirmMainnet === true;
+				const providedConfirmTokenRaw =
+					params.confirmToken?.trim() || intentHints.confirmToken?.trim();
+				const effectiveConfirmRisk =
+					params.confirmRisk === true || intentHints.confirmRisk === true;
 				const needsMainnetConfirmation = network === "mainnet";
 				const confirmToken = createConfirmToken(runId, network, intent);
 				const hasSessionConfirmation =
 					runMode === "execute" &&
-					!params.confirmToken &&
+					!providedConfirmTokenRaw &&
 					priorSession?.runId === runId &&
 					priorSession.network === network &&
 					intentsMatch(priorSession.intent, intent);
 				const plan = ["analysis", "simulate", "execute"];
+				const analysisRiskCheck = assessSuiIntentRisk(intent, null);
 
 				if (runMode === "analysis") {
 					const analysisSummaryLine = buildSuiAnalysisSummaryLine(
 						intent.type,
 						needsMainnetConfirmation,
 						confirmToken,
+						analysisRiskCheck,
 					);
 					rememberWorkflowSession({
 						route: "w3rt_run_sui_workflow_v0",
@@ -2178,6 +2478,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								analysis: {
 									intent,
 									plan,
+									riskCheck: analysisRiskCheck,
 									summaryLine: analysisSummaryLine,
 									summary: buildSuiWorkflowPhaseSummary({
 										phase: "analysis",
@@ -2192,6 +2493,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				}
 
 				if (runMode === "simulate") {
+					const simulateRiskCheck = assessSuiIntentRisk(intent, null);
 					const signer = resolveSuiKeypair();
 					const sender = signer.toSuiAddress();
 					const { tx, artifacts } = await buildSimulation(
@@ -2223,6 +2525,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						status,
 						signerAddress: sender,
 						unsignedPayload,
+						riskCheck: simulateRiskCheck,
 					});
 					return {
 						content: [
@@ -2233,6 +2536,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									status,
 									signerAddress: sender,
 									unsignedPayload,
+									riskCheck: simulateRiskCheck,
 								}),
 							},
 						],
@@ -2249,6 +2553,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									signerAddress: sender,
 									status,
 									error,
+									riskCheck: simulateRiskCheck,
 									...artifacts,
 									...unsignedPayload,
 									summaryLine: simulateSummaryLine,
@@ -2265,12 +2570,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				}
 
 				if (needsMainnetConfirmation) {
-					if (params.confirmMainnet !== true) {
+					if (effectiveConfirmMainnet !== true) {
 						throw new Error(
 							"Mainnet workflow execute is blocked. Set confirmMainnet=true.",
 						);
 					}
-					const providedConfirmToken = params.confirmToken?.trim();
+					const providedConfirmToken = providedConfirmTokenRaw;
 					if (
 						(!providedConfirmToken || providedConfirmToken !== confirmToken) &&
 						!hasSessionConfirmation
@@ -2280,11 +2585,34 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						);
 					}
 				}
+				const executeRiskCheck = assessSuiIntentRisk(
+					intent,
+					!!effectiveConfirmRisk,
+				);
+				if (
+					needsMainnetConfirmation &&
+					executeRiskCheck.requiresExplicitRiskAcceptance &&
+					effectiveConfirmRisk !== true
+				) {
+					const riskHint = buildSuiRiskReadableHint(executeRiskCheck);
+					throw new Error(
+						`Mainnet workflow risk gate blocked execute. ${riskHint ? `${riskHint} ` : ""}Set confirmRisk=true (or say "我接受风险继续执行").`,
+					);
+				}
 
 				const executeResult = await executeIntent(intent, params, network);
+				const executeDetails = isRecordObject(executeResult.details)
+					? {
+							...executeResult.details,
+							riskCheck: executeRiskCheck,
+						}
+					: {
+							details: executeResult.details ?? null,
+							riskCheck: executeRiskCheck,
+						};
 				const executeArtifact = attachExecuteSummary(
 					intent.type,
-					executeResult.details ?? null,
+					executeDetails,
 				);
 				rememberWorkflowSession({
 					route: "w3rt_run_sui_workflow_v0",
@@ -2340,6 +2668,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
+				confirmRisk: Type.Optional(Type.Boolean()),
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as StableLayerWorkflowParams;
@@ -2578,6 +2907,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
+				confirmRisk: Type.Optional(Type.Boolean()),
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as CetusFarmsWorkflowParams;
@@ -2848,6 +3178,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
+				confirmRisk: Type.Optional(Type.Boolean()),
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as SuiDefiWorkflowParams;

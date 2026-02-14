@@ -171,6 +171,43 @@ describe("sui_getBalance", () => {
 		});
 	});
 
+	it("uses fundsInAddressBalance as effective balance when larger", async () => {
+		const getBalance = vi.fn().mockResolvedValue({
+			coinType: "0x2::usdc::USDC",
+			coinObjectCount: 0,
+			lockedBalance: {},
+			totalBalance: "0",
+			fundsInAddressBalance: "10186",
+		});
+		const getCoinMetadata = vi.fn().mockResolvedValue({
+			decimals: 6,
+			symbol: "USDC",
+			name: "USD Coin",
+			description: "USD Coin",
+			iconUrl: null,
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({ getBalance, getCoinMetadata });
+		runtimeMocks.formatCoinAmount.mockReturnValue("0.010186");
+
+		const tool = getTool("sui_getBalance");
+		const result = await tool.execute("t2-funds", {
+			owner: "0xfunds",
+			coinType: "0x2::usdc::USDC",
+		});
+
+		expect(runtimeMocks.formatCoinAmount).toHaveBeenCalledWith("10186", 6);
+		expect(result.content[0]?.text).toContain("USDC");
+		expect(result.content[0]?.text).toContain("coinObjects=0, inAddress=10186");
+		expect(result.details).toMatchObject({
+			owner: "0xfunds",
+			coinType: "0x2::usdc::USDC",
+			totalBalance: "0",
+			effectiveBalance: "10186",
+			fundsInAddressBalance: "10186",
+			uiAmount: "0.010186",
+		});
+	});
+
 	it("uses local default owner and returns all assets when coinType is omitted", async () => {
 		const getAllBalances = vi.fn().mockResolvedValue([
 			{
@@ -378,7 +415,7 @@ describe("sui_getPortfolio", () => {
 		expect(getCoinMetadata).toHaveBeenCalledTimes(2);
 		expect(runtimeMocks.formatCoinAmount).toHaveBeenCalledWith("2500000000", 9);
 		expect(runtimeMocks.formatCoinAmount).toHaveBeenCalledWith("2000000", 6);
-		expect(result.content[0]?.text).toContain("2 asset(s)");
+		expect(result.content[0]?.text).toContain("Portfolio: 2 assets");
 		expect(result.content[0]?.text).toContain("SUI");
 		expect(result.content[0]?.text).toContain("USDC");
 		expect(result.details).toMatchObject({
@@ -390,6 +427,65 @@ describe("sui_getPortfolio", () => {
 				totalBalance: "2500000000",
 				uiAmount: "2.5",
 			},
+		});
+	});
+
+	it("keeps asset visible when totalBalance is zero but fundsInAddressBalance is positive", async () => {
+		const getAllBalances = vi.fn().mockResolvedValue([
+			{
+				coinType: "0x2::sui::SUI",
+				coinObjectCount: 2,
+				totalBalance: "353050933",
+				lockedBalance: {},
+			},
+			{
+				coinType: "0x2::usdc::USDC",
+				coinObjectCount: 0,
+				totalBalance: "0",
+				fundsInAddressBalance: "10186",
+				lockedBalance: {},
+			},
+		]);
+		const getCoinMetadata = vi
+			.fn()
+			.mockImplementation(async ({ coinType }: { coinType: string }) =>
+				coinType === "0x2::usdc::USDC"
+					? {
+							decimals: 6,
+							symbol: "USDC",
+							name: "USD Coin",
+							description: "USD Coin",
+							iconUrl: null,
+						}
+					: null,
+			);
+		runtimeMocks.getSuiClient.mockReturnValue({
+			getAllBalances,
+			getCoinMetadata,
+		});
+		runtimeMocks.formatCoinAmount.mockImplementation((value: string) =>
+			value === "353050933" ? "0.353050933" : "0.010186",
+		);
+
+		const tool = getTool("sui_getPortfolio");
+		const result = await tool.execute("p1-funds", {
+			owner: "0xportfolio",
+			network: "mainnet",
+		});
+
+		expect(result.content[0]?.text).toContain("USDC: 0.010186");
+		expect(result.content[0]?.text).toContain("coinObjects=0, inAddress=10186");
+		expect(result.details).toMatchObject({
+			assetCount: 2,
+			assets: expect.arrayContaining([
+				expect.objectContaining({
+					coinType: "0x2::usdc::USDC",
+					totalBalance: "0",
+					effectiveBalance: "10186",
+					fundsInAddressBalance: "10186",
+					uiAmount: "0.010186",
+				}),
+			]),
 		});
 	});
 

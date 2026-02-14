@@ -76,6 +76,7 @@ type SuiDefiPositionsParams = {
 type SuiPortfolioAsset = {
 	coinType: string;
 	totalBalance: string;
+	effectiveBalance: string;
 	uiAmount: string | null;
 	decimals: number | null;
 	coinObjectCount: number;
@@ -130,6 +131,56 @@ function parseNonNegativeBigInt(value: string): bigint {
 		throw new Error("balance must be a non-negative integer string");
 	}
 	return BigInt(normalized);
+}
+
+function parseOptionalNonNegativeBigInt(value: unknown): bigint | null {
+	if (typeof value !== "string") return null;
+	const normalized = value.trim();
+	if (!/^\d+$/.test(normalized)) return null;
+	return BigInt(normalized);
+}
+
+function getEffectiveBalanceRaw(entry: {
+	totalBalance: string;
+	fundsInAddressBalance?: string | null;
+}): bigint {
+	const totalRaw = parseNonNegativeBigInt(entry.totalBalance);
+	const fundsRaw = parseOptionalNonNegativeBigInt(entry.fundsInAddressBalance);
+	if (fundsRaw == null) return totalRaw;
+	return fundsRaw > totalRaw ? fundsRaw : totalRaw;
+}
+
+function hasAnyPositiveBalance(entry: {
+	totalBalance: string;
+	fundsInAddressBalance?: string | null;
+}): boolean {
+	return getEffectiveBalanceRaw(entry) > 0n;
+}
+
+function formatRawBalanceNote(asset: {
+	totalBalance: string;
+	effectiveBalance: string;
+	fundsInAddressBalance: string | null;
+}): string {
+	if (
+		asset.fundsInAddressBalance &&
+		asset.fundsInAddressBalance !== asset.totalBalance
+	) {
+		return `${asset.effectiveBalance} raw (coinObjects=${asset.totalBalance}, inAddress=${asset.fundsInAddressBalance})`;
+	}
+	return `${asset.effectiveBalance} raw`;
+}
+
+function formatPortfolioAssetLine(
+	index: number,
+	asset: SuiPortfolioAsset,
+): string {
+	const symbol = asset.metadata?.symbol || fallbackCoinSymbol(asset.coinType);
+	const rawNote = formatRawBalanceNote(asset);
+	if (asset.uiAmount) {
+		return `${index + 1}. ${symbol}: ${asset.uiAmount} (${rawNote})`;
+	}
+	return `${index + 1}. ${shortCoinType(asset.coinType)}: ${rawNote}`;
 }
 
 function resolveAggregatorEnv(network: string): Env {
@@ -443,12 +494,11 @@ async function buildPortfolioSummary(params: {
 	const allBalances = await client.getAllBalances({ owner: params.owner });
 	const filteredBalances = allBalances
 		.filter((entry) => {
-			const amount = parseNonNegativeBigInt(entry.totalBalance);
-			return includeZeroBalances || amount > 0n;
+			return includeZeroBalances || hasAnyPositiveBalance(entry);
 		})
 		.sort((a, b) => {
-			const aAmount = parseNonNegativeBigInt(a.totalBalance);
-			const bAmount = parseNonNegativeBigInt(b.totalBalance);
+			const aAmount = getEffectiveBalanceRaw(a);
+			const bAmount = getEffectiveBalanceRaw(b);
 			if (aAmount === bAmount) return a.coinType.localeCompare(b.coinType);
 			return aAmount > bAmount ? -1 : 1;
 		})
@@ -483,6 +533,10 @@ async function buildPortfolioSummary(params: {
 			typeof entryWithFunds.fundsInAddressBalance === "string"
 				? entryWithFunds.fundsInAddressBalance
 				: null;
+		const effectiveBalance = getEffectiveBalanceRaw({
+			totalBalance: entry.totalBalance,
+			fundsInAddressBalance,
+		}).toString();
 		const decimals =
 			entry.coinType === SUI_COIN_TYPE
 				? 9
@@ -491,11 +545,12 @@ async function buildPortfolioSummary(params: {
 					: null;
 		const uiAmount =
 			typeof decimals === "number"
-				? formatCoinAmount(entry.totalBalance, decimals)
+				? formatCoinAmount(effectiveBalance, decimals)
 				: null;
 		return {
 			coinType: entry.coinType,
 			totalBalance: entry.totalBalance,
+			effectiveBalance,
 			uiAmount,
 			decimals,
 			coinObjectCount: entry.coinObjectCount,
@@ -566,18 +621,55 @@ export function createSuiReadTools() {
 						owner,
 						coinType: requestedCoinType,
 					});
+					const balanceWithFunds = balance as typeof balance & {
+						fundsInAddressBalance?: unknown;
+					};
 					const coinType =
 						balance.coinType || requestedCoinType || SUI_COIN_TYPE;
 					const totalBalance = balance.totalBalance;
-					const uiAmount =
-						coinType === SUI_COIN_TYPE
-							? formatCoinAmount(totalBalance, 9)
+					const fundsInAddressBalance =
+						typeof balanceWithFunds.fundsInAddressBalance === "string"
+							? balanceWithFunds.fundsInAddressBalance
 							: null;
+					const effectiveBalance = getEffectiveBalanceRaw({
+						totalBalance,
+						fundsInAddressBalance,
+					}).toString();
+					let symbol: string | null = null;
+					let decimals: number | null = null;
+					if (coinType === SUI_COIN_TYPE) {
+						symbol = "SUI";
+						decimals = 9;
+					} else {
+						try {
+							const metadata = await client.getCoinMetadata?.({ coinType });
+							symbol = metadata?.symbol?.trim() || null;
+							decimals =
+								typeof metadata?.decimals === "number"
+									? metadata.decimals
+									: null;
+						} catch {
+							symbol = null;
+							decimals = null;
+						}
+					}
+					const uiAmount =
+						typeof decimals === "number"
+							? formatCoinAmount(effectiveBalance, decimals)
+							: null;
+					const symbolText = symbol || fallbackCoinSymbol(coinType);
+					const rawNote = formatRawBalanceNote({
+						totalBalance,
+						effectiveBalance,
+						fundsInAddressBalance,
+					});
 
 					const text =
 						coinType === SUI_COIN_TYPE
-							? `Balance: ${uiAmount} SUI (${totalBalance} MIST)`
-							: `Balance: ${totalBalance} (${coinType})`;
+							? `Balance: ${uiAmount ?? formatCoinAmount(effectiveBalance, 9)} SUI (${rawNote.replace(" raw", " MIST")})`
+							: uiAmount
+								? `Balance: ${uiAmount} ${symbolText} (${rawNote})`
+								: `Balance: ${rawNote} (${coinType})`;
 
 					return {
 						content: [{ type: "text", text }],
@@ -585,9 +677,13 @@ export function createSuiReadTools() {
 							owner,
 							coinType,
 							totalBalance,
+							effectiveBalance,
 							uiAmount,
+							decimals,
+							symbol,
 							coinObjectCount: balance.coinObjectCount,
 							lockedBalance: balance.lockedBalance,
+							fundsInAddressBalance,
 							network,
 							rpcUrl,
 							mode: "singleCoin",
@@ -609,17 +705,7 @@ export function createSuiReadTools() {
 				];
 
 				for (const [index, asset] of previewAssets.entries()) {
-					const symbol =
-						asset.metadata?.symbol || fallbackCoinSymbol(asset.coinType);
-					if (asset.uiAmount) {
-						lines.push(
-							`${index + 1}. ${symbol}: ${asset.uiAmount} (${asset.totalBalance} raw)`,
-						);
-						continue;
-					}
-					lines.push(
-						`${index + 1}. ${shortCoinType(asset.coinType)}: ${asset.totalBalance}`,
-					);
+					lines.push(formatPortfolioAssetLine(index, asset));
 				}
 				if (portfolio.assetCount > previewAssets.length) {
 					lines.push(
@@ -1263,22 +1349,17 @@ export function createSuiReadTools() {
 					includeMetadata: params.includeMetadata,
 				});
 				const previewAssets = portfolio.assets.slice(0, HUMAN_READABLE_LIMIT);
+				const suiUi = portfolio.suiBalance?.uiAmount ?? "0";
+				const suiRaw = portfolio.suiBalance?.effectiveBalance ?? "0";
 				const lines = [
-					`Portfolio (${network}) for ${owner}: ${portfolio.assetCount} asset(s)`,
+					`Portfolio: ${portfolio.assetCount} assets (SUI=${suiUi} / ${suiRaw} MIST)`,
+					`owner: ${owner}`,
+					`network: ${network}`,
+					"Wallet assets (>0):",
 				];
 
 				for (const [index, asset] of previewAssets.entries()) {
-					const symbol =
-						asset.metadata?.symbol || fallbackCoinSymbol(asset.coinType);
-					if (asset.uiAmount) {
-						lines.push(
-							`${index + 1}. ${symbol}: ${asset.uiAmount} (${asset.totalBalance} raw)`,
-						);
-						continue;
-					}
-					lines.push(
-						`${index + 1}. ${shortCoinType(asset.coinType)}: ${asset.totalBalance}`,
-					);
+					lines.push(formatPortfolioAssetLine(index, asset));
 				}
 				if (portfolio.assetCount > previewAssets.length) {
 					lines.push(

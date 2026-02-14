@@ -206,7 +206,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 
 - `read`: `sui_getBalance` (SUI or custom `coinType`)
 - `read`: `sui_getDefiPositions` (aggregated wallet + Cetus farms/vault positions snapshot)
-- `read`: `sui_getPortfolio` (multi-asset balances with optional metadata)
+- `read`: `sui_getPortfolio` (multi-asset balances with optional metadata + grouped human-readable output)
+- `read portfolio balance mode`: `sui_getBalance`/`sui_getPortfolio` now use effective balance `max(totalBalance, fundsInAddressBalance)` so assets like USDC are not hidden when coin-object balance is `0` but in-address funds are non-zero
 - `read`: `sui_getSwapQuote` (Cetus aggregator quote + route details on mainnet/testnet)
 - `read`: `sui_getStableLayerSupply` (Stable Layer total supply + optional per-coin supply on mainnet/testnet)
 - `read`: `sui_getCetusFarmsPools` / `sui_getCetusFarmsPositions` / `sui_getCetusVaultsBalances` (Cetus v2 farms + vaults read primitives on mainnet/testnet)
@@ -225,6 +226,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `workflow`: `w3rt_run_sui_stablelayer_workflow_v0` (analysis/simulate/execute for stable-layer mint/burn/claim with deterministic mainnet confirmToken)
 - `workflow`: `w3rt_run_sui_cetus_farms_workflow_v0` (analysis/simulate/execute for Cetus v2 farms stake/unstake/harvest with deterministic mainnet confirmToken)
 - `workflow`: `w3rt_run_sui_defi_workflow_v0` (unified DeFi router workflow; auto-routes to core/stablelayer/cetus-farms flows)
+- `workflow risk gate (core)`: mainnet high-risk core actions (currently high-slippage swap / risky LP params) require explicit risk confirmation (`confirmRisk=true` or natural language like `我接受风险继续执行`)
+- `workflow readable risk hint (core)`: core workflow simulate/execute text now includes `风险提示：...` short hints to improve non-JSON readability
 - `workflow phase summary`: Sui workflow analysis/simulate/execute artifacts include `summaryLine` (concise one-line replay for PI/OpenClaw narration)
 - `workflow execute summary`: Sui execute artifacts now include `summaryLine` (concise `intent + digest/status` output for PI/OpenClaw narration)
 - `rpc`: `sui_rpc` (generic Sui JSON-RPC passthrough with dangerous method safety guard)
@@ -241,6 +244,8 @@ Use unified router tool `w3rt_run_sui_defi_workflow_v0`:
   - `intentText: "claim farm rewards pool: 0xabc nft: 0xdef"`
 - StableLayer Mint (analysis):
   - `intentText: "mint stable coin 0x...::btc_usdc::BtcUSDC amount 1000000"`
+- High-risk swap execute (natural-language override):
+  - `intentText: "继续执行刚才这笔，确认主网执行，我接受风险继续执行，confirmToken SUI-..."`
 
 Recommended execution flow on mainnet:
 1. `runMode=analysis` -> capture `confirmToken`
@@ -329,7 +334,7 @@ Then ask naturally:
 Notes:
 
 - Sui is Move-based, not ERC20-based; assets are identified by `coinType`.
-- `sui_getBalance` without `coinType` returns all non-zero assets (including USDC if present).
+- `sui_getBalance` without `coinType` returns all non-zero assets (including USDC if present), and treats `fundsInAddressBalance` as effective balance when larger than `totalBalance`.
 
 ### 4) Sui signer config (no `fromPrivateKey` needed)
 
