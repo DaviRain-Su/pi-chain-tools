@@ -86,6 +86,7 @@ type NearPortfolioExposureRow = {
 	symbol: string;
 	walletRawAmount: string | null;
 	walletUiAmount: string | null;
+	walletEstimatedUsd: number | null;
 	inWallet: boolean;
 };
 
@@ -728,7 +729,12 @@ function summarizePortfolioRoleTokens(
 	const rows = normalized.map((tokenId) => {
 		const asset = assetByTokenId.get(tokenId);
 		if (asset) {
-			return `${asset.symbol}=${asset.uiAmount ?? `${asset.rawAmount} raw`}`;
+			const amountText = asset.uiAmount ?? `${asset.rawAmount} raw`;
+			const usdText =
+				asset.estimatedUsd != null
+					? ` (~${formatUsdOrFallback(asset.estimatedUsd)})`
+					: "";
+			return `${asset.symbol}=${amountText}${usdText}`;
 		}
 		return shortAccountId(tokenId);
 	});
@@ -781,6 +787,7 @@ function buildPortfolioExposureRows(
 			symbol,
 			walletRawAmount,
 			walletUiAmount,
+			walletEstimatedUsd: asset?.estimatedUsd ?? null,
 			inWallet,
 		};
 	});

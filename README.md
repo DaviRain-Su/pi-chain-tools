@@ -61,6 +61,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `portfolio DeFi summary`: `near_getPortfolio` now adds a readable exposure line for Ref deposits and Burrow supplied/collateral/borrowed token sets
 - `portfolio grouped readability`: `near_getPortfolio` text output is grouped into `Wallet assets (>0)` / `DeFi tracked tokens` / `Asset details`
 - `portfolio USD valuation`: `near_getPortfolio` now estimates wallet USD value (best-effort via NEAR Intents token prices) and returns structured `details.valuation`
+- `portfolio value ranking`: wallet/display sections now prioritize higher USD-estimated assets and include `Top wallet assets by USD`
 - `read`: `near_getLendingMarketsBurrow` (Burrow lending market list with capability flags + supply/borrow APR + readable amounts)
 - `read`: `near_getLendingPositionsBurrow` (Burrow account supplied/collateral/borrowed snapshot with readable token rows + risk summary)
 - `read`: `near_getRefDeposits` (Ref exchange deposited balances, readable token symbols + raw/ui amounts)
