@@ -191,4 +191,37 @@ describe("w3rt_run_evm_transfer_workflow_v0", () => {
 			},
 		});
 	});
+
+	it("resolves symbol-based erc20 transfer on base network", async () => {
+		const tool = getTool();
+		await tool.execute("wf7", {
+			runMode: "simulate",
+			network: "base",
+			intentText:
+				"把 2.5 USDC 转给 0x000000000000000000000000000000000000dEaD，先模拟",
+		});
+		expect(executeMocks.transferErc20Execute).toHaveBeenCalledWith(
+			"wf-evm-transfer-simulate",
+			expect.objectContaining({
+				network: "base",
+				dryRun: true,
+				tokenAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+				amountRaw: "2500000",
+			}),
+		);
+	});
+
+	it("fails when symbol has no configured address on selected network", async () => {
+		const tool = getTool();
+		await expect(
+			tool.execute("wf8", {
+				runMode: "simulate",
+				network: "base",
+				intentText:
+					"把 1 USDT 转给 0x000000000000000000000000000000000000dEaD，先模拟",
+			}),
+		).rejects.toThrow(
+			"No known USDT address configured for network=base. Provide tokenAddress explicitly.",
+		);
+	});
 });

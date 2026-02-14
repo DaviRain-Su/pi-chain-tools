@@ -60,9 +60,10 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `evm_transferNative` (native token transfer, default `dryRun=true`, execute requires `confirmMainnet=true`)
 - `execute`: `evm_transferErc20` (ERC20 transfer by `tokenAddress + amountRaw`, default `dryRun=true`, execute requires `confirmMainnet=true`)
 - `workflow`: `w3rt_run_evm_polymarket_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken)
-- `workflow`: `w3rt_run_evm_transfer_workflow_v0` (native/ERC20 transfer workflow with analysis/simulate/execute + deterministic mainnet confirmToken)
+- `workflow`: `w3rt_run_evm_transfer_workflow_v0` (native/ERC20 transfer workflow with analysis/simulate/execute + deterministic mainnet confirmToken; supports `tokenSymbol + amountToken` for mapped tokens)
 - `workflow cancel intent`: supports `evm.polymarket.btc5m.cancel` (analysis/simulate/execute + deterministic mainnet confirmToken)
 - `mainnet guard`: workflow execute on polygon requires `confirmMainnet=true` + correct `confirmToken`
+- `transfer symbol map`: workflow can resolve `USDC/USDT/DAI/WETH/WBTC` addresses on `ethereum/polygon/arbitrum/optimism` and `USDC/DAI/WETH` on `base` (otherwise provide `tokenAddress`)
 - `ai assist`: workflow/read can auto-pick side (`up/down`) with explainable reasons, confidence, and risk-aware fallback (`avoid`)
 
 ### EVM Polymarket NL Examples (Pi/OpenClaw)
@@ -77,6 +78,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `继续撤单，确认主网执行，confirmToken EVM-XXXX`
 - `给 0x... 转 0.001 MATIC，先预览`
 - `把 1000000 raw USDC（Polygon）转到 0x...，确认主网执行`
+- `在 base 把 2.5 USDC 转给 0x...，先模拟`
 - `给 0x... 转 0.001 MATIC，先分析`
 - `继续执行刚才这笔转账，确认主网执行，confirmToken EVM-XXXX`
 
@@ -546,7 +548,8 @@ ACP handshake tool:
 Policy tools:
 
 - `w3rt_getPolicy_v0`: read runtime execution policy (`schema = w3rt.policy.v1`)
-- `w3rt_setPolicy_v0`: update runtime execution policy (current scope: `evm.transfer`)
+- `w3rt_setPolicy_v0`: update runtime execution policy (current scope: `evm.transfer`, supports templates `production_safe` / `open_dev`)
+- `w3rt_getPolicyAudit_v0`: read recent policy update audit log (`schema = w3rt.policy.audit.v1`)
 
 Natural language examples:
 
@@ -555,8 +558,10 @@ Natural language examples:
 - `给我 OpenClaw 可用的能力清单`
 - `给我 ACP 握手信息并附带能力清单`
 - `只返回中低风险且可执行的能力清单`
+- `把转账策略应用 production_safe 模板`
 - `把转账策略改成 allowlist，只允许 0x...`
 - `查询当前转账策略`
+- `查询最近 10 条转账策略审计日志`
 
 ### 10) Troubleshooting
 
@@ -660,8 +665,9 @@ Deploy with GitHub Pages:
 - Recommended startup order:
   1. `w3rt_getCapabilityHandshake_v0`
   2. `w3rt_getPolicy_v0`
-  3. `w3rt_setPolicy_v0` (switch transfer to allowlist for production)
-  4. run workflow analysis/simulate before execute
+  3. `w3rt_setPolicy_v0` (apply `production_safe` template for production)
+  4. `w3rt_getPolicyAudit_v0` (optional, verify policy update record)
+  5. run workflow analysis/simulate before execute
 
 ## PR Required Checks
 

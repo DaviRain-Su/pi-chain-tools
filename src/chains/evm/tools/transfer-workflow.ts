@@ -22,31 +22,50 @@ const TOKEN_METADATA_BY_SYMBOL: Record<
 	USDC: {
 		decimals: 6,
 		addresses: {
+			ethereum: "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+			sepolia: "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
 			polygon: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+			base: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+			arbitrum: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+			optimism: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
 		},
 	},
 	USDT: {
 		decimals: 6,
 		addresses: {
+			ethereum: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
 			polygon: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
+			arbitrum: "0xFd086bC7CD5C481DCC9C85EBE478A1C0b69FCbb9",
+			optimism: "0x94b008Aa00579c1307B0EF2c499aD98a8ce58e58",
 		},
 	},
 	DAI: {
 		decimals: 18,
 		addresses: {
+			ethereum: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
 			polygon: "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063",
+			base: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
+			arbitrum: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
+			optimism: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1",
 		},
 	},
 	WETH: {
 		decimals: 18,
 		addresses: {
+			ethereum: "0xC02aaA39b223FE8D0A0E5C4F27eAD9083C756Cc2",
 			polygon: "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619",
+			base: "0x4200000000000000000000000000000000000006",
+			arbitrum: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+			optimism: "0x4200000000000000000000000000000000000006",
 		},
 	},
 	WBTC: {
 		decimals: 8,
 		addresses: {
+			ethereum: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
 			polygon: "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",
+			arbitrum: "0x2f2a2543B76A4166549F7AaB2e75Bef0aefC5B0f",
+			optimism: "0x68f180fcce6836688e9084f035309e29bf0a2095",
 		},
 	},
 };
@@ -526,7 +545,7 @@ export function createEvmTransferWorkflowTools() {
 			name: "w3rt_run_evm_transfer_workflow_v0",
 			label: "w3rt Run EVM Transfer Workflow v0",
 			description:
-				"Deterministic EVM transfer workflow entrypoint for native/ERC20 transfers: analysis -> simulate -> execute.",
+				"Deterministic EVM transfer workflow entrypoint for native/ERC20 transfers (supports tokenSymbol+amountToken for mapped tokens): analysis -> simulate -> execute.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: Type.Optional(

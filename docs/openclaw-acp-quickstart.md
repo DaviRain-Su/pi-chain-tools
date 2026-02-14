@@ -40,18 +40,14 @@ Read from `details`:
 
 ## 3) Transfer policy hardening (recommended)
 
-Before enabling execute on EVM transfer tools, set policy to allowlist:
+Before enabling execute on EVM transfer tools, apply production-safe template:
 
 - tool: `w3rt_setPolicy_v0`
 
 ```json
 {
   "scope": "evm.transfer",
-  "mode": "allowlist",
-  "enforceOn": "mainnet_like",
-  "allowedRecipients": [
-    "0x000000000000000000000000000000000000dEaD"
-  ],
+  "template": "production_safe",
   "updatedBy": "openclaw-agent",
   "note": "production bootstrap"
 }
@@ -60,6 +56,7 @@ Before enabling execute on EVM transfer tools, set policy to allowlist:
 Verify:
 
 - tool: `w3rt_getPolicy_v0`
+- optional audit verify tool: `w3rt_getPolicyAudit_v0` (for example `{"scope":"evm.transfer","limit":5}`)
 
 ## 4) First workflows
 
@@ -118,9 +115,18 @@ Verify:
   - correct `confirmToken`
   - recipient passes transfer policy (allowlist mode)
 
+- symbol-based ERC20 analysis (no explicit tokenAddress needed for mapped symbols/networks):
+
+```json
+{
+  "runMode": "analysis",
+  "network": "base",
+  "intentText": "把 2.5 USDC 转给 0x000000000000000000000000000000000000dEaD，先分析"
+}
+```
+
 ## 5) Natural-language prompts
 
 - `帮我分析 BTC 5m，建议买涨还是买跌`
 - `把 0.001 MATIC 转到 0x...，先模拟`
 - `继续执行刚才这笔，确认主网执行`
-
