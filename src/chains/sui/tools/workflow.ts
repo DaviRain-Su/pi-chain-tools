@@ -1262,20 +1262,55 @@ function buildSuiExecuteSummaryLine(
 	return parts.join(" ");
 }
 
+function buildSuiWorkflowPhaseSummary(params: {
+	phase: "analysis" | "simulate" | "execute";
+	intentType: string;
+	status: string;
+	line: string;
+}) {
+	return {
+		schema: "w3rt.workflow.summary.v1",
+		phase: params.phase,
+		intentType: params.intentType,
+		status: params.status,
+		line: params.line,
+	};
+}
+
+function resolveSuiExecuteStatus(executeDetails: unknown): string {
+	if (!isRecordObject(executeDetails)) {
+		return "submitted";
+	}
+	const status =
+		typeof executeDetails.status === "string" && executeDetails.status.trim()
+			? executeDetails.status.trim()
+			: null;
+	if (status) return status;
+	return "submitted";
+}
+
 function attachExecuteSummary(
 	intentType: string,
 	executeDetails: unknown,
 ): Record<string, unknown> {
 	const summaryLine = buildSuiExecuteSummaryLine(intentType, executeDetails);
+	const summary = buildSuiWorkflowPhaseSummary({
+		phase: "execute",
+		intentType,
+		status: resolveSuiExecuteStatus(executeDetails),
+		line: summaryLine,
+	});
 	if (isRecordObject(executeDetails)) {
 		return {
 			...executeDetails,
 			summaryLine,
+			summary,
 		};
 	}
 	return {
 		details: executeDetails ?? null,
 		summaryLine,
+		summary,
 	};
 }
 
@@ -2113,6 +2148,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				const plan = ["analysis", "simulate", "execute"];
 
 				if (runMode === "analysis") {
+					const analysisSummaryLine = buildSuiAnalysisSummaryLine(
+						intent.type,
+						needsMainnetConfirmation,
+						confirmToken,
+					);
 					rememberWorkflowSession({
 						route: "w3rt_run_sui_workflow_v0",
 						runId,
@@ -2138,11 +2178,13 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								analysis: {
 									intent,
 									plan,
-									summaryLine: buildSuiAnalysisSummaryLine(
-										intent.type,
-										needsMainnetConfirmation,
-										confirmToken,
-									),
+									summaryLine: analysisSummaryLine,
+									summary: buildSuiWorkflowPhaseSummary({
+										phase: "analysis",
+										intentType: intent.type,
+										status: "ready",
+										line: analysisSummaryLine,
+									}),
 								},
 							},
 						},
@@ -2176,6 +2218,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						network,
 						intent,
 					});
+					const simulateSummaryLine = buildSuiSimulationSummaryLine({
+						intentType: intent.type,
+						status,
+						signerAddress: sender,
+						unsignedPayload,
+					});
 					return {
 						content: [
 							{
@@ -2203,11 +2251,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									error,
 									...artifacts,
 									...unsignedPayload,
-									summaryLine: buildSuiSimulationSummaryLine({
+									summaryLine: simulateSummaryLine,
+									summary: buildSuiWorkflowPhaseSummary({
+										phase: "simulate",
 										intentType: intent.type,
 										status,
-										signerAddress: sender,
-										unsignedPayload,
+										line: simulateSummaryLine,
 									}),
 								},
 							},
@@ -2328,6 +2377,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				const plan = ["analysis", "simulate", "execute"];
 
 				if (runMode === "analysis") {
+					const analysisSummaryLine = buildSuiAnalysisSummaryLine(
+						intent.type,
+						needsMainnetConfirmation,
+						confirmToken,
+					);
 					rememberWorkflowSession({
 						route: "w3rt_run_sui_stablelayer_workflow_v0",
 						runId,
@@ -2354,11 +2408,13 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								analysis: {
 									intent,
 									plan,
-									summaryLine: buildSuiAnalysisSummaryLine(
-										intent.type,
-										needsMainnetConfirmation,
-										confirmToken,
-									),
+									summaryLine: analysisSummaryLine,
+									summary: buildSuiWorkflowPhaseSummary({
+										phase: "analysis",
+										intentType: intent.type,
+										status: "ready",
+										line: analysisSummaryLine,
+									}),
 								},
 							},
 						},
@@ -2392,6 +2448,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						network,
 						intent,
 					});
+					const simulateSummaryLine = buildSuiSimulationSummaryLine({
+						intentType: intent.type,
+						status,
+						signerAddress: sender,
+						unsignedPayload,
+					});
 					return {
 						content: [
 							{
@@ -2420,11 +2482,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									error,
 									...artifacts,
 									...unsignedPayload,
-									summaryLine: buildSuiSimulationSummaryLine({
+									summaryLine: simulateSummaryLine,
+									summary: buildSuiWorkflowPhaseSummary({
+										phase: "simulate",
 										intentType: intent.type,
 										status,
-										signerAddress: sender,
-										unsignedPayload,
+										line: simulateSummaryLine,
 									}),
 								},
 							},
@@ -2552,6 +2615,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				const plan = ["analysis", "simulate", "execute"];
 
 				if (runMode === "analysis") {
+					const analysisSummaryLine = buildSuiAnalysisSummaryLine(
+						intent.type,
+						needsMainnetConfirmation,
+						confirmToken,
+					);
 					rememberWorkflowSession({
 						route: "w3rt_run_sui_cetus_farms_workflow_v0",
 						runId,
@@ -2578,11 +2646,13 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								analysis: {
 									intent,
 									plan,
-									summaryLine: buildSuiAnalysisSummaryLine(
-										intent.type,
-										needsMainnetConfirmation,
-										confirmToken,
-									),
+									summaryLine: analysisSummaryLine,
+									summary: buildSuiWorkflowPhaseSummary({
+										phase: "analysis",
+										intentType: intent.type,
+										status: "ready",
+										line: analysisSummaryLine,
+									}),
 								},
 							},
 						},
@@ -2617,6 +2687,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						network,
 						intent,
 					});
+					const simulateSummaryLine = buildSuiSimulationSummaryLine({
+						intentType: intent.type,
+						status,
+						signerAddress: sender,
+						unsignedPayload,
+					});
 					return {
 						content: [
 							{
@@ -2645,11 +2721,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									error,
 									...artifacts,
 									...unsignedPayload,
-									summaryLine: buildSuiSimulationSummaryLine({
+									summaryLine: simulateSummaryLine,
+									summary: buildSuiWorkflowPhaseSummary({
+										phase: "simulate",
 										intentType: intent.type,
 										status,
-										signerAddress: sender,
-										unsignedPayload,
+										line: simulateSummaryLine,
 									}),
 								},
 							},

@@ -325,6 +325,11 @@ describe("w3rt_run_sui_workflow_v0", () => {
 					summaryLine: expect.stringContaining(
 						"sui.transfer.sui analysis=ready",
 					),
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "analysis",
+						intentType: "sui.transfer.sui",
+					},
 				},
 			},
 			intent: {
@@ -365,6 +370,11 @@ describe("w3rt_run_sui_workflow_v0", () => {
 					summaryLine: expect.stringContaining(
 						"sui.transfer.sui simulate=success",
 					),
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "simulate",
+						intentType: "sui.transfer.sui",
+					},
 				},
 			},
 		});
@@ -440,6 +450,11 @@ describe("w3rt_run_sui_workflow_v0", () => {
 				execute: {
 					digest: "0xexec",
 					summaryLine: expect.stringContaining("sui.transfer.sui executed"),
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "execute",
+						intentType: "sui.transfer.sui",
+					},
 				},
 			},
 		});
@@ -712,6 +727,11 @@ describe("w3rt_run_sui_stablelayer_workflow_v0", () => {
 					summaryLine: expect.stringContaining(
 						"sui.stablelayer.mint simulate=success",
 					),
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "simulate",
+						intentType: "sui.stablelayer.mint",
+					},
 				},
 			},
 		});
@@ -852,6 +872,11 @@ describe("w3rt_run_sui_cetus_farms_workflow_v0", () => {
 					summaryLine: expect.stringContaining(
 						"sui.cetus.farms.unstake simulate=success",
 					),
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "simulate",
+						intentType: "sui.cetus.farms.unstake",
+					},
 				},
 			},
 		});
@@ -889,6 +914,11 @@ describe("w3rt_run_sui_cetus_farms_workflow_v0", () => {
 					summaryLine: expect.stringContaining(
 						"sui.cetus.farms.harvest executed",
 					),
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "execute",
+						intentType: "sui.cetus.farms.harvest",
+					},
 				},
 			},
 		});

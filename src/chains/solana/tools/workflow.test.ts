@@ -292,11 +292,31 @@ describe("w3rt_run_workflow_v0", () => {
 			(
 				result.details as {
 					artifacts?: {
-						analysis?: { intent?: { type?: string }; summaryLine?: string };
+						analysis?: {
+							intent?: { type?: string };
+							summaryLine?: string;
+							summary?: { phase?: string; schema?: string };
+						};
 					};
 				}
 			).artifacts?.analysis?.summaryLine,
 		).toContain("solana.transfer.sol analysis=ready");
+		expect(
+			(
+				result.details as {
+					artifacts?: {
+						analysis?: {
+							intent?: { type?: string };
+							summaryLine?: string;
+							summary?: { phase?: string; schema?: string };
+						};
+					};
+				}
+			).artifacts?.analysis?.summary,
+		).toMatchObject({
+			schema: "w3rt.workflow.summary.v1",
+			phase: "analysis",
+		});
 	});
 
 	it("parses transfer intentText and infers intentType", async () => {
@@ -428,6 +448,11 @@ describe("w3rt_run_workflow_v0", () => {
 					summaryLine: expect.stringContaining(
 						"solana.read.tokenBalance simulate=ok",
 					),
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "simulate",
+						intentType: "solana.read.tokenBalance",
+					},
 					context: {
 						intentType: "solana.read.tokenBalance",
 						address,
@@ -1167,6 +1192,11 @@ describe("w3rt_run_workflow_v0", () => {
 				execute: {
 					signature: "kamino-deposit-sig",
 					summaryLine: expect.stringContaining("solana.lend.kamino.deposit"),
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "execute",
+						intentType: "solana.lend.kamino.deposit",
+					},
 					guardChecks: {
 						approvalRequired: true,
 						confirmMainnetProvided: true,

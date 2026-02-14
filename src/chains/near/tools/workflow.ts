@@ -3822,6 +3822,50 @@ function buildWorkflowExecuteOneLineSummary(
 	return `${intentType} ${buildExecuteResultSummary(executeArtifact)}`.trim();
 }
 
+function buildWorkflowPhaseSummary(params: {
+	phase: "analysis" | "simulate" | "execute";
+	intentType: NearWorkflowIntent["type"];
+	status: string;
+	line: string;
+}) {
+	return {
+		schema: "w3rt.workflow.summary.v1",
+		phase: params.phase,
+		intentType: params.intentType,
+		status: params.status,
+		line: params.line,
+	};
+}
+
+function resolveWorkflowExecuteStatus(
+	executeArtifact: Record<string, unknown>,
+): string {
+	const directStatus =
+		typeof executeArtifact.status === "string" && executeArtifact.status.trim()
+			? executeArtifact.status.trim()
+			: null;
+	if (directStatus) return directStatus;
+
+	const finalExecutionStatus =
+		typeof executeArtifact.finalExecutionStatus === "string" &&
+		executeArtifact.finalExecutionStatus.trim()
+			? executeArtifact.finalExecutionStatus.trim()
+			: null;
+	if (finalExecutionStatus) return finalExecutionStatus;
+
+	if (isObjectRecord(executeArtifact.statusTracking)) {
+		const tracking = executeArtifact.statusTracking;
+		const latestStatus = isObjectRecord(tracking.latestStatus)
+			? tracking.latestStatus
+			: null;
+		if (latestStatus && typeof latestStatus.status === "string") {
+			return latestStatus.status;
+		}
+	}
+
+	return "submitted";
+}
+
 function attachExecuteSummaryLine(
 	intentType: NearWorkflowIntent["type"],
 	executeArtifact: unknown,
@@ -3833,15 +3877,107 @@ function attachExecuteSummaryLine(
 		typeof executeArtifact.summaryLine === "string"
 			? executeArtifact.summaryLine.trim()
 			: "";
-	if (existingSummary.length > 0) {
-		return executeArtifact;
-	}
+	const summaryLine =
+		existingSummary.length > 0
+			? existingSummary
+			: buildWorkflowExecuteOneLineSummary(intentType, executeArtifact);
+	const status = resolveWorkflowExecuteStatus(executeArtifact);
 	return {
 		...executeArtifact,
-		summaryLine: buildWorkflowExecuteOneLineSummary(
+		summaryLine,
+		summary: buildWorkflowPhaseSummary({
+			phase: "execute",
 			intentType,
-			executeArtifact,
-		),
+			status,
+			line: summaryLine,
+		}),
+	};
+}
+
+function resolveWorkflowSimulateStatus(
+	simulateArtifact: Record<string, unknown>,
+): string {
+	const status =
+		typeof simulateArtifact.status === "string" &&
+		simulateArtifact.status.trim()
+			? simulateArtifact.status.trim()
+			: null;
+	if (status) {
+		return status;
+	}
+	if (typeof simulateArtifact.ok === "boolean") {
+		return simulateArtifact.ok ? "success" : "failed";
+	}
+	return "unknown";
+}
+
+function buildWorkflowAnalysisSummary(
+	intentType: NearWorkflowIntent["type"],
+	approvalRequired: boolean,
+	confirmToken: string | null,
+) {
+	const summaryLine = buildWorkflowAnalysisOneLineSummary(
+		intentType,
+		approvalRequired,
+		confirmToken,
+	);
+	return {
+		summaryLine,
+		summary: buildWorkflowPhaseSummary({
+			phase: "analysis",
+			intentType,
+			status: "ready",
+			line: summaryLine,
+		}),
+	};
+}
+
+function buildWorkflowSimulateSummary(
+	intentType: NearWorkflowIntent["type"],
+	simulateArtifact: Record<string, unknown>,
+) {
+	const summaryLine = buildWorkflowSimulateOneLineSummary(
+		intentType,
+		simulateArtifact,
+	);
+	return {
+		summaryLine,
+		summary: buildWorkflowPhaseSummary({
+			phase: "simulate",
+			intentType,
+			status: resolveWorkflowSimulateStatus(simulateArtifact),
+			line: summaryLine,
+		}),
+	};
+}
+
+function attachSimulateSummaryLine(
+	intentType: NearWorkflowIntent["type"],
+	simulateArtifact: unknown,
+): unknown {
+	if (!isObjectRecord(simulateArtifact)) {
+		return simulateArtifact;
+	}
+	const existingSummary =
+		typeof simulateArtifact.summaryLine === "string"
+			? simulateArtifact.summaryLine.trim()
+			: "";
+	if (existingSummary.length > 0 && isObjectRecord(simulateArtifact.summary)) {
+		return simulateArtifact;
+	}
+	const workflowSummary = buildWorkflowSimulateSummary(
+		intentType,
+		simulateArtifact,
+	);
+	return {
+		...simulateArtifact,
+		summaryLine:
+			existingSummary.length > 0
+				? existingSummary
+				: workflowSummary.summaryLine,
+		summary: isObjectRecord(simulateArtifact.summary)
+			? simulateArtifact.summary
+			: workflowSummary.summary,
 	};
 }
 
@@ -3922,29 +4058,6 @@ function buildWorkflowSimulateOneLineSummary(
 	return buildSimulateResultSummary(intentType, simulateArtifact)
 		.replace(/^Workflow simulated:\s*/i, "")
 		.trim();
-}
-
-function attachSimulateSummaryLine(
-	intentType: NearWorkflowIntent["type"],
-	simulateArtifact: unknown,
-): unknown {
-	if (!isObjectRecord(simulateArtifact)) {
-		return simulateArtifact;
-	}
-	const existingSummary =
-		typeof simulateArtifact.summaryLine === "string"
-			? simulateArtifact.summaryLine.trim()
-			: "";
-	if (existingSummary.length > 0) {
-		return simulateArtifact;
-	}
-	return {
-		...simulateArtifact,
-		summaryLine: buildWorkflowSimulateOneLineSummary(
-			intentType,
-			simulateArtifact,
-		),
-	};
 }
 
 function workflowRunModeSchema() {
@@ -4310,6 +4423,11 @@ export function createNearWorkflowTools() {
 					: null;
 
 				if (runMode === "analysis") {
+					const analysisSummary = buildWorkflowAnalysisSummary(
+						intent.type,
+						approvalRequired,
+						confirmToken,
+					);
 					rememberWorkflowSession({
 						runId,
 						network,
@@ -4332,11 +4450,7 @@ export function createNearWorkflowTools() {
 							artifacts: {
 								analysis: {
 									status: "ready",
-									summaryLine: buildWorkflowAnalysisOneLineSummary(
-										intent.type,
-										approvalRequired,
-										confirmToken,
-									),
+									...analysisSummary,
 								},
 							},
 						},

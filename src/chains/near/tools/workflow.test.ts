@@ -661,6 +661,11 @@ describe("w3rt_run_near_workflow_v0", () => {
 				simulate: {
 					status: "success",
 					summaryLine: expect.stringContaining("near.transfer.near"),
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "simulate",
+						intentType: "near.transfer.near",
+					},
 				},
 			},
 		});
@@ -697,6 +702,12 @@ describe("w3rt_run_near_workflow_v0", () => {
 					summaryLine: expect.stringContaining(
 						"near.transfer.near analysis=ready",
 					),
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "analysis",
+						intentType: "near.transfer.near",
+						status: "ready",
+					},
 				},
 			},
 		});
@@ -720,6 +731,11 @@ describe("w3rt_run_near_workflow_v0", () => {
 				execute: {
 					txHash: "near-exec-hash",
 					summaryLine: expect.stringContaining("near.transfer.near"),
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "execute",
+						intentType: "near.transfer.near",
+					},
 				},
 			},
 		});

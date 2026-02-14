@@ -995,6 +995,21 @@ function buildSimulationSummaryLine(params: {
 	return parts.join(" ");
 }
 
+function buildWorkflowPhaseSummary(params: {
+	phase: "analysis" | "simulate" | "execute";
+	intentType: WorkflowIntentType;
+	status: string;
+	line: string;
+}) {
+	return {
+		schema: "w3rt.workflow.summary.v1",
+		phase: params.phase,
+		intentType: params.intentType,
+		status: params.status,
+		line: params.line,
+	};
+}
+
 function parsePositiveNumber(value: string): number | null {
 	const parsed = Number.parseFloat(value);
 	if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -9666,6 +9681,11 @@ export function createSolanaWorkflowTools() {
 				const approvalRequired =
 					network === "mainnet-beta" && !isReadIntent(intent);
 				const plan = createWorkflowPlan(intent.type);
+				const analysisSummaryLine = buildAnalysisSummaryLine({
+					intentType: intent.type,
+					approvalRequired,
+					confirmToken: approvalRequired ? confirmToken : null,
+				});
 
 				const analysisArtifact = {
 					stage: "analysis",
@@ -9674,10 +9694,12 @@ export function createSolanaWorkflowTools() {
 					signer: signerPublicKey,
 					network,
 					runMode,
-					summaryLine: buildAnalysisSummaryLine({
+					summaryLine: analysisSummaryLine,
+					summary: buildWorkflowPhaseSummary({
+						phase: "analysis",
 						intentType: intent.type,
-						approvalRequired,
-						confirmToken: approvalRequired ? confirmToken : null,
+						status: "ready",
+						line: analysisSummaryLine,
 					}),
 				};
 				const approvalArtifact = {
@@ -9724,6 +9746,12 @@ export function createSolanaWorkflowTools() {
 
 				if (isReadIntent(intent)) {
 					const readResult = await executeReadIntent(network, intent);
+					const readSimulationSummaryLine = buildSimulationSummaryLine({
+						intentType: intent.type,
+						ok: true,
+						readOnly: true,
+						error: null,
+					});
 					const simulationArtifact = {
 						stage: "simulate",
 						ok: true,
@@ -9732,11 +9760,12 @@ export function createSolanaWorkflowTools() {
 						unitsConsumed: null,
 						version: null,
 						context: readResult.details,
-						summaryLine: buildSimulationSummaryLine({
+						summaryLine: readSimulationSummaryLine,
+						summary: buildWorkflowPhaseSummary({
+							phase: "simulate",
 							intentType: intent.type,
-							ok: true,
-							readOnly: true,
-							error: null,
+							status: "success",
+							line: readSimulationSummaryLine,
 						}),
 					};
 					if (runMode === "simulate") {
@@ -9794,6 +9823,13 @@ export function createSolanaWorkflowTools() {
 								execute: {
 									stage: "execute",
 									read: true,
+									summaryLine: `${intent.type} executed readOnly=true`,
+									summary: buildWorkflowPhaseSummary({
+										phase: "execute",
+										intentType: intent.type,
+										status: "success",
+										line: `${intent.type} executed readOnly=true`,
+									}),
 									guardChecks: {
 										readOnly: true,
 										approvalRequired: false,
@@ -9827,6 +9863,17 @@ export function createSolanaWorkflowTools() {
 						ok: prepared.simulation.ok,
 						readOnly: false,
 						error: prepared.simulation.err,
+					}),
+					summary: buildWorkflowPhaseSummary({
+						phase: "simulate",
+						intentType: intent.type,
+						status: prepared.simulation.ok ? "success" : "failed",
+						line: buildSimulationSummaryLine({
+							intentType: intent.type,
+							ok: prepared.simulation.ok,
+							readOnly: false,
+							error: prepared.simulation.err,
+						}),
 					}),
 				};
 
@@ -9908,6 +9955,18 @@ export function createSolanaWorkflowTools() {
 						signatures: execution.signatures,
 						confirmed: execution.confirmed,
 						approvalRequired,
+					}),
+					summary: buildWorkflowPhaseSummary({
+						phase: "execute",
+						intentType: intent.type,
+						status: execution.confirmed ? "confirmed" : "submitted",
+						line: buildExecuteSummaryLine({
+							intentType: intent.type,
+							signature: execution.signature,
+							signatures: execution.signatures,
+							confirmed: execution.confirmed,
+							approvalRequired,
+						}),
 					}),
 				};
 				const monitorArtifact = {

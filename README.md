@@ -15,6 +15,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `src/chains/near`: NEAR runtime + grouped tools
 - `src/chains/evm`: EVM runtime + grouped tool skeleton
 - `src/pi`: Pi-specific adapter entrypoints
+- Workflow artifact summaries use a stable schema: `summaryLine` (string) + `summary` (`schema = w3rt.workflow.summary.v1`)
 
 ## Solana Tool Groups
 
