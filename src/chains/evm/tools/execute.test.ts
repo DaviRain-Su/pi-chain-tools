@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setEvmTransferPolicy } from "../policy.js";
 
 const clobMocks = vi.hoisted(() => ({
 	createOrDeriveApiKey: vi.fn(),
@@ -114,6 +115,12 @@ function mockJsonRpcFetch() {
 beforeEach(() => {
 	vi.clearAllMocks();
 	global.fetch = ORIGINAL_FETCH;
+	setEvmTransferPolicy({
+		mode: "open",
+		enforceOn: "mainnet_like",
+		clearRecipients: true,
+		updatedBy: "execute.test.beforeEach",
+	});
 	process.env.POLYMARKET_PRIVATE_KEY =
 		"0x59c6995e998f97a5a0044976f6b5d8f8a3dfcc5f4f2f72f5f6f4f0f6f8f9f0a1";
 	process.env.POLYMARKET_FUNDER = "0x0000000000000000000000000000000000000001";
@@ -356,5 +363,24 @@ describe("evm execute tools", () => {
 				dryRun: false,
 			}),
 		).rejects.toThrow("Mainnet transfer blocked");
+	});
+
+	it("blocks transfer when allowlist policy denies recipient", async () => {
+		setEvmTransferPolicy({
+			mode: "allowlist",
+			enforceOn: "mainnet_like",
+			allowedRecipients: ["0x000000000000000000000000000000000000beef"],
+			updatedBy: "execute.test.policy",
+		});
+		const tool = getTool("evm_transferNative");
+		await expect(
+			tool.execute("t9", {
+				network: "polygon",
+				toAddress: "0x000000000000000000000000000000000000dEaD",
+				amountNative: 0.001,
+				dryRun: false,
+				confirmMainnet: true,
+			}),
+		).rejects.toThrow("Transfer blocked by policy");
 	});
 });

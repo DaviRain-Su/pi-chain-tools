@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { setEvmTransferPolicy } from "../../evm/policy.js";
 
 vi.mock("../../evm/toolset.js", () => ({
 	createEvmToolset: () => ({
@@ -62,6 +63,46 @@ function getTool(name: string): ReadTool {
 }
 
 describe("meta capability tools", () => {
+	it("reads and updates transfer policy", async () => {
+		setEvmTransferPolicy({
+			mode: "open",
+			enforceOn: "mainnet_like",
+			clearRecipients: true,
+			updatedBy: "meta.read.test.setup",
+		});
+		const setTool = getTool("w3rt_setPolicy_v0");
+		const setResult = await setTool.execute("meta-policy-set", {
+			scope: "evm.transfer",
+			mode: "allowlist",
+			enforceOn: "all",
+			allowedRecipients: ["0x000000000000000000000000000000000000beef"],
+			updatedBy: "meta.read.test",
+			note: "lock transfer target",
+		});
+		expect(setResult.content[0]?.text).toContain("Policy updated");
+		expect(setResult.details).toMatchObject({
+			schema: "w3rt.policy.v1",
+			scope: "evm.transfer",
+			policy: {
+				mode: "allowlist",
+				enforceOn: "all",
+				allowedRecipients: ["0x000000000000000000000000000000000000beef"],
+			},
+		});
+
+		const getToolInstance = getTool("w3rt_getPolicy_v0");
+		const getResult = await getToolInstance.execute("meta-policy-get", {});
+		expect(getResult.content[0]?.text).toContain("mode=allowlist");
+		expect(getResult.details).toMatchObject({
+			schema: "w3rt.policy.v1",
+			scope: "evm.transfer",
+			policy: {
+				mode: "allowlist",
+				enforceOn: "all",
+			},
+		});
+	});
+
 	it("returns all chains by default", async () => {
 		const tool = getTool("w3rt_getCapabilities_v0");
 		const result = await tool.execute("meta-1", {});
@@ -169,6 +210,13 @@ describe("meta capability tools", () => {
 			},
 			capabilityDigest: {
 				chainCount: 4,
+			},
+			policyDigest: {
+				evmTransfer: expect.objectContaining({
+					mode: expect.any(String),
+					enforceOn: expect.any(String),
+					allowlistCount: expect.any(Number),
+				}),
 			},
 			capabilities: expect.objectContaining({
 				schema: "w3rt.capabilities.v1",

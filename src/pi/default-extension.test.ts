@@ -15,6 +15,8 @@ describe("defaultExtension", () => {
 
 		expect(names).toContain("w3rt_getCapabilities_v0");
 		expect(names).toContain("w3rt_getCapabilityHandshake_v0");
+		expect(names).toContain("w3rt_getPolicy_v0");
+		expect(names).toContain("w3rt_setPolicy_v0");
 		expect(names).toContain("solana_getBalance");
 		expect(names).toContain("w3rt_run_workflow_v0");
 		expect(names).toContain("sui_getBalance");

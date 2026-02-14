@@ -2,6 +2,10 @@ import { Wallet } from "@ethersproject/wallet";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
+	evaluateEvmTransferPolicy,
+	isMainnetLikeEvmNetwork,
+} from "../policy.js";
+import {
 	getPolymarketClobBaseUrl,
 	getPolymarketGeoblockStatus,
 	getPolymarketMarketBySlug,
@@ -259,10 +263,6 @@ function toHexQuantity(value: bigint): string {
 		throw new Error("hex quantity cannot be negative");
 	}
 	return `0x${value.toString(16)}`;
-}
-
-function isMainnetLike(network: ReturnType<typeof parseEvmNetwork>): boolean {
-	return network !== "sepolia";
 }
 
 function parseDecimalToUnits(
@@ -853,7 +853,7 @@ export function createEvmExecuteTools() {
 			}),
 			async execute(_toolCallId, params) {
 				const network = parseEvmNetwork(params.network);
-				const mainnetLike = isMainnetLike(network);
+				const mainnetLike = isMainnetLikeEvmNetwork(network);
 				const dryRun = params.dryRun !== false;
 				if (!dryRun && mainnetLike && params.confirmMainnet !== true) {
 					throw new Error(
@@ -861,6 +861,11 @@ export function createEvmExecuteTools() {
 					);
 				}
 				const toAddress = parseEvmAddress(params.toAddress, "toAddress");
+				const policyCheck = evaluateEvmTransferPolicy({
+					network,
+					toAddress,
+					transferType: "native",
+				});
 				const amountWei = params.amountWei?.trim()
 					? BigInt(parsePositiveIntegerString(params.amountWei, "amountWei"))
 					: params.amountNative != null
@@ -891,8 +896,12 @@ export function createEvmExecuteTools() {
 							amountWei: amountWei.toString(),
 							amountNative: formatNativeAmountFromWei(amountWei),
 							mainnetLike,
+							policyCheck,
 						},
 					};
+				}
+				if (!policyCheck.allowed) {
+					throw new Error(`Transfer blocked by policy: ${policyCheck.reason}`);
 				}
 
 				const privateKey = resolveEvmPrivateKey(params.fromPrivateKey);
@@ -947,6 +956,7 @@ export function createEvmExecuteTools() {
 						nonce: nonce.toString(),
 						gasPriceWei: gasPriceWei.toString(),
 						gasLimit: gasLimit.toString(),
+						policyCheck,
 						txHash,
 					},
 				};
@@ -972,7 +982,7 @@ export function createEvmExecuteTools() {
 			}),
 			async execute(_toolCallId, params) {
 				const network = parseEvmNetwork(params.network);
-				const mainnetLike = isMainnetLike(network);
+				const mainnetLike = isMainnetLikeEvmNetwork(network);
 				const dryRun = params.dryRun !== false;
 				if (!dryRun && mainnetLike && params.confirmMainnet !== true) {
 					throw new Error(
@@ -987,6 +997,12 @@ export function createEvmExecuteTools() {
 				const amountRaw = BigInt(
 					parsePositiveIntegerString(params.amountRaw, "amountRaw"),
 				);
+				const policyCheck = evaluateEvmTransferPolicy({
+					network,
+					toAddress,
+					transferType: "erc20",
+					tokenAddress,
+				});
 				const data = buildErc20TransferData(toAddress, amountRaw);
 				const rpcUrl = getEvmRpcEndpoint(network, params.rpcUrl);
 
@@ -1007,8 +1023,12 @@ export function createEvmExecuteTools() {
 							amountRaw: amountRaw.toString(),
 							data,
 							mainnetLike,
+							policyCheck,
 						},
 					};
+				}
+				if (!policyCheck.allowed) {
+					throw new Error(`Transfer blocked by policy: ${policyCheck.reason}`);
 				}
 
 				const privateKey = resolveEvmPrivateKey(params.fromPrivateKey);
@@ -1066,6 +1086,7 @@ export function createEvmExecuteTools() {
 						gasPriceWei: gasPriceWei.toString(),
 						gasLimit: gasLimit.toString(),
 						data,
+						policyCheck,
 						txHash,
 					},
 				};

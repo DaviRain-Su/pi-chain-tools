@@ -1,6 +1,10 @@
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import type { ChainToolset } from "../../../core/types.js";
+import {
+	getEvmTransferPolicy,
+	setEvmTransferPolicy,
+} from "../../evm/policy.js";
 import { createEvmToolset } from "../../evm/toolset.js";
 import { createNearToolset } from "../../near/toolset.js";
 import { createSolanaWorkflowToolset } from "../../solana/workflow-toolset.js";
@@ -483,6 +487,15 @@ function handshakeText(params: {
 	return `ACP handshake ready:${clientText} server=${SERVER_NAME}@${SERVER_VERSION} chains=${params.digest.chainCount} workflows=${params.digest.workflowCount} intents=${params.digest.intentCount} includeCapabilities=${params.includesCapabilities}`;
 }
 
+function summarizeTransferPolicyText(params: {
+	mode: string;
+	enforceOn: string;
+	allowedRecipients: string[];
+	version: number;
+}): string {
+	return `Transfer policy: mode=${params.mode} enforceOn=${params.enforceOn} allowlist=${params.allowedRecipients.length} version=${params.version}`;
+}
+
 export function createMetaReadTools() {
 	return [
 		defineTool({
@@ -588,6 +601,17 @@ export function createMetaReadTools() {
 					},
 					query,
 					capabilityDigest: catalog.digest,
+					policyDigest: {
+						evmTransfer: (() => {
+							const transferPolicy = getEvmTransferPolicy();
+							return {
+								mode: transferPolicy.mode,
+								enforceOn: transferPolicy.enforceOn,
+								allowlistCount: transferPolicy.allowedRecipients.length,
+								version: transferPolicy.version,
+							};
+						})(),
+					},
 					capabilities,
 				};
 				return {
@@ -602,6 +626,77 @@ export function createMetaReadTools() {
 						},
 					],
 					details,
+				};
+			},
+		}),
+		defineTool({
+			name: "w3rt_getPolicy_v0",
+			label: "w3rt Get Policy v0",
+			description:
+				"Get runtime execution policy used by workflow/execute tools (currently EVM transfer policy).",
+			parameters: Type.Object({
+				scope: Type.Optional(Type.Literal("evm.transfer")),
+			}),
+			async execute(_toolCallId, _params) {
+				const transferPolicy = getEvmTransferPolicy();
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeTransferPolicyText(transferPolicy),
+						},
+					],
+					details: {
+						schema: "w3rt.policy.v1",
+						scope: "evm.transfer",
+						policy: transferPolicy,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: "w3rt_setPolicy_v0",
+			label: "w3rt Set Policy v0",
+			description:
+				"Update runtime execution policy (currently EVM transfer policy).",
+			parameters: Type.Object({
+				scope: Type.Optional(Type.Literal("evm.transfer")),
+				mode: Type.Optional(
+					Type.Union([Type.Literal("open"), Type.Literal("allowlist")]),
+				),
+				enforceOn: Type.Optional(
+					Type.Union([Type.Literal("mainnet_like"), Type.Literal("all")]),
+				),
+				allowedRecipients: Type.Optional(
+					Type.Array(Type.String({ minLength: 42, maxLength: 42 }), {
+						maxItems: 200,
+					}),
+				),
+				clearRecipients: Type.Optional(Type.Boolean()),
+				updatedBy: Type.Optional(Type.String()),
+				note: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const next = setEvmTransferPolicy({
+					mode: params.mode,
+					enforceOn: params.enforceOn,
+					allowedRecipients: params.allowedRecipients,
+					clearRecipients: params.clearRecipients,
+					updatedBy: params.updatedBy,
+					note: params.note,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Policy updated: ${summarizeTransferPolicyText(next)}`,
+						},
+					],
+					details: {
+						schema: "w3rt.policy.v1",
+						scope: "evm.transfer",
+						policy: next,
+					},
 				};
 			},
 		}),

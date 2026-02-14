@@ -543,6 +543,11 @@ ACP handshake tool:
 - Purpose: protocol-level handshake/negotiation payload (`schema = w3rt.capability.handshake.v1`)
 - Includes protocol info (`acp-tools`), server version, capability digest, and optional embedded capability catalog
 
+Policy tools:
+
+- `w3rt_getPolicy_v0`: read runtime execution policy (`schema = w3rt.policy.v1`)
+- `w3rt_setPolicy_v0`: update runtime execution policy (current scope: `evm.transfer`)
+
 Natural language examples:
 
 - `列出你支持的所有链和工作流能力`
@@ -550,6 +555,8 @@ Natural language examples:
 - `给我 OpenClaw 可用的能力清单`
 - `给我 ACP 握手信息并附带能力清单`
 - `只返回中低风险且可执行的能力清单`
+- `把转账策略改成 allowlist，只允许 0x...`
+- `查询当前转账策略`
 
 ### 10) Troubleshooting
 

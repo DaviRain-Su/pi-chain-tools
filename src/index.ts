@@ -101,6 +101,20 @@ export {
 } from "./chains/evm/runtime.js";
 export type { EvmNetwork } from "./chains/evm/runtime.js";
 export {
+	evaluateEvmTransferPolicy,
+	getEvmTransferPolicy,
+	isMainnetLikeEvmNetwork,
+	setEvmTransferPolicy,
+} from "./chains/evm/policy.js";
+export type {
+	EvmTransferPolicy,
+	EvmTransferPolicyCheck,
+	EvmTransferPolicyCheckInput,
+	EvmTransferPolicyEnforceOn,
+	EvmTransferPolicyMode,
+	EvmTransferPolicyUpdate,
+} from "./chains/evm/policy.js";
+export {
 	getPolymarketBtc5mAdvice,
 	getPolymarketBtc5mMarkets,
 	getPolymarketGeoblockStatus,
