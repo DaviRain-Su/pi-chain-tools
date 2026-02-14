@@ -108,12 +108,14 @@ type NearIntentsBlockchain =
 	| "op"
 	| "avax"
 	| "cardano"
+	| "stellar"
 	| "ltc"
 	| "xlayer"
 	| "monad"
 	| "bch"
 	| "adi"
 	| "plasma"
+	| "scroll"
 	| "starknet"
 	| "aleo";
 
@@ -214,6 +216,42 @@ type NearIntentsAnyInputWithdrawal = {
 	raw: Record<string, unknown>;
 };
 
+type NearIntentsExplorerTransaction = {
+	originAsset: string | null;
+	destinationAsset: string | null;
+	depositAddress: string | null;
+	depositAddressAndMemo: string | null;
+	recipient: string | null;
+	status: string | null;
+	createdAt: string | null;
+	createdAtTimestamp: number | null;
+	intentHashes: string | null;
+	referral: string | null;
+	amountIn: string | null;
+	amountInFormatted: string | null;
+	amountInUsd: string | null;
+	amountOut: string | null;
+	amountOutFormatted: string | null;
+	amountOutUsd: string | null;
+	refundTo: string | null;
+	refundReason: string | null;
+	senders: string[];
+	nearTxHashes: string[];
+	originChainTxHashes: string[];
+	destinationChainTxHashes: string[];
+	raw: Record<string, unknown>;
+};
+
+type NearIntentsExplorerTransactionsResponse = {
+	data: NearIntentsExplorerTransaction[];
+	page: number | null;
+	perPage: number | null;
+	total: number | null;
+	totalPages: number | null;
+	nextPage: number | null;
+	prevPage: number | null;
+};
+
 type NearIntentsBadRequest = {
 	message?: string;
 	statusCode?: number;
@@ -242,6 +280,48 @@ const DEFAULT_NEAR_PORTFOLIO_FT_BY_NETWORK: Record<
 };
 
 const DEFAULT_NEAR_INTENTS_API_BASE_URL = "https://1click.chaindefuser.com";
+const DEFAULT_NEAR_INTENTS_EXPLORER_API_BASE_URL =
+	"https://explorer.near-intents.org";
+const NEAR_INTENTS_EXPLORER_STATUS_VALUES = [
+	"FAILED",
+	"INCOMPLETE_DEPOSIT",
+	"PENDING_DEPOSIT",
+	"PROCESSING",
+	"REFUNDED",
+	"SUCCESS",
+] as const;
+const NEAR_INTENTS_EXPLORER_CHAIN_VALUES = [
+	"near",
+	"eth",
+	"base",
+	"arb",
+	"btc",
+	"sol",
+	"ton",
+	"doge",
+	"xrp",
+	"zec",
+	"gnosis",
+	"bera",
+	"bsc",
+	"pol",
+	"tron",
+	"sui",
+	"op",
+	"avax",
+	"cardano",
+	"stellar",
+	"aptos",
+	"ltc",
+	"monad",
+	"xlayer",
+	"starknet",
+	"bch",
+	"adi",
+	"plasma",
+	"scroll",
+	"aleo",
+] as const;
 
 function parseUnsignedBigInt(value: string, fieldName: string): bigint {
 	const normalized = value.trim();
@@ -466,12 +546,46 @@ function parseIntentsWithdrawalsLimit(value: number | undefined): number {
 	return Math.min(50, parsePositiveInt(value, "limit"));
 }
 
+function parseIntentsExplorerPerPage(value: number | undefined): number {
+	if (value == null) return 20;
+	return Math.min(1_000, parsePositiveInt(value, "perPage"));
+}
+
+function parseIntentsExplorerStatuses(
+	value: string[] | undefined,
+): string | undefined {
+	if (!Array.isArray(value) || value.length === 0) return undefined;
+	const allowed = new Set<string>(NEAR_INTENTS_EXPLORER_STATUS_VALUES);
+	const normalized = dedupeStrings(
+		value.map((entry) => entry.trim().toUpperCase()).filter(Boolean),
+	);
+	for (const status of normalized) {
+		if (!allowed.has(status)) {
+			throw new Error(
+				`statuses contains unsupported value '${status}' (allowed: ${[...allowed].join(", ")})`,
+			);
+		}
+	}
+	return normalized.join(",");
+}
+
 function parseOptionalPositiveInt(
 	value: number | undefined,
 	fieldName: string,
 ): number | undefined {
 	if (value == null) return undefined;
 	return parsePositiveInt(value, fieldName);
+}
+
+function parseOptionalNonNegativeNumber(
+	value: number | undefined,
+	fieldName: string,
+): number | undefined {
+	if (value == null) return undefined;
+	if (!Number.isFinite(value) || value < 0) {
+		throw new Error(`${fieldName} must be a number >= 0`);
+	}
+	return value;
 }
 
 function parseOptionalIsoDatetime(
@@ -485,6 +599,21 @@ function parseOptionalIsoDatetime(
 		throw new Error(`${fieldName} must be a valid ISO datetime string`);
 	}
 	return parsed.toISOString();
+}
+
+function parseOptionalNearIntentsChain(
+	value: string | undefined,
+	fieldName: string,
+): string | undefined {
+	const normalized = value?.trim().toLowerCase();
+	if (!normalized) return undefined;
+	const allowed = new Set<string>(NEAR_INTENTS_EXPLORER_CHAIN_VALUES);
+	if (!allowed.has(normalized)) {
+		throw new Error(
+			`${fieldName} must be one of: ${NEAR_INTENTS_EXPLORER_CHAIN_VALUES.join(", ")}`,
+		);
+	}
+	return normalized;
 }
 
 function parseIntentsSlippageTolerance(value: number | undefined): number {
@@ -524,6 +653,14 @@ function resolveNearIntentsApiBaseUrl(endpoint?: string): string {
 	return selected.endsWith("/") ? selected.slice(0, -1) : selected;
 }
 
+function resolveNearIntentsExplorerApiBaseUrl(endpoint?: string): string {
+	const explicit = endpoint?.trim();
+	const fromEnv = process.env.NEAR_INTENTS_EXPLORER_API_BASE_URL?.trim();
+	const selected =
+		explicit || fromEnv || DEFAULT_NEAR_INTENTS_EXPLORER_API_BASE_URL;
+	return selected.endsWith("/") ? selected.slice(0, -1) : selected;
+}
+
 function resolveNearIntentsHeaders(params: {
 	apiKey?: string;
 	jwt?: string;
@@ -535,6 +672,23 @@ function resolveNearIntentsHeaders(params: {
 	if (apiKey) headers["x-api-key"] = apiKey;
 	if (jwt) headers.Authorization = `Bearer ${jwt}`;
 	return headers;
+}
+
+function resolveNearIntentsExplorerHeaders(params: {
+	jwt?: string;
+}): Record<string, string> {
+	const jwt =
+		params.jwt?.trim() ||
+		process.env.NEAR_INTENTS_EXPLORER_JWT?.trim() ||
+		process.env.NEAR_INTENTS_JWT?.trim();
+	if (!jwt) {
+		throw new Error(
+			"near_getIntentsExplorerTransactions requires jwt (pass jwt or set NEAR_INTENTS_EXPLORER_JWT/NEAR_INTENTS_JWT)",
+		);
+	}
+	return {
+		Authorization: `Bearer ${jwt}`,
+	};
 }
 
 function buildNearIntentsUrl(params: {
@@ -630,6 +784,97 @@ function normalizeNearIntentsAnyInputWithdrawals(value: unknown): {
 		total:
 			typeof root.total === "number" && Number.isFinite(root.total)
 				? Math.floor(root.total)
+				: null,
+	};
+}
+
+function normalizeNearIntentsExplorerTransactions(
+	value: unknown,
+): NearIntentsExplorerTransactionsResponse {
+	const root =
+		value && typeof value === "object"
+			? (value as Record<string, unknown>)
+			: {};
+	const dataSource = Array.isArray(root.data) ? root.data : [];
+	const data = dataSource
+		.filter(
+			(entry): entry is Record<string, unknown> =>
+				Boolean(entry) && typeof entry === "object",
+		)
+		.map((entry) => ({
+			originAsset: pickOptionalText(entry, "originAsset"),
+			destinationAsset: pickOptionalText(entry, "destinationAsset"),
+			depositAddress: pickOptionalText(entry, "depositAddress"),
+			depositAddressAndMemo: pickOptionalText(entry, "depositAddressAndMemo"),
+			recipient: pickOptionalText(entry, "recipient"),
+			status: pickOptionalText(entry, "status"),
+			createdAt: pickOptionalText(entry, "createdAt"),
+			createdAtTimestamp:
+				typeof entry.createdAtTimestamp === "number" &&
+				Number.isFinite(entry.createdAtTimestamp)
+					? Math.floor(entry.createdAtTimestamp)
+					: null,
+			intentHashes: pickOptionalText(entry, "intentHashes"),
+			referral: pickOptionalText(entry, "referral"),
+			amountIn: pickOptionalText(entry, "amountIn"),
+			amountInFormatted: pickOptionalText(entry, "amountInFormatted"),
+			amountInUsd: pickOptionalText(entry, "amountInUsd"),
+			amountOut: pickOptionalText(entry, "amountOut"),
+			amountOutFormatted: pickOptionalText(entry, "amountOutFormatted"),
+			amountOutUsd: pickOptionalText(entry, "amountOutUsd"),
+			refundTo: pickOptionalText(entry, "refundTo"),
+			refundReason: pickOptionalText(entry, "refundReason"),
+			senders: Array.isArray(entry.senders)
+				? entry.senders
+						.filter((sender): sender is string => typeof sender === "string")
+						.map((sender) => sender.trim())
+						.filter(Boolean)
+				: [],
+			nearTxHashes: Array.isArray(entry.nearTxHashes)
+				? entry.nearTxHashes
+						.filter((txHash): txHash is string => typeof txHash === "string")
+						.map((txHash) => txHash.trim())
+						.filter(Boolean)
+				: [],
+			originChainTxHashes: Array.isArray(entry.originChainTxHashes)
+				? entry.originChainTxHashes
+						.filter((txHash): txHash is string => typeof txHash === "string")
+						.map((txHash) => txHash.trim())
+						.filter(Boolean)
+				: [],
+			destinationChainTxHashes: Array.isArray(entry.destinationChainTxHashes)
+				? entry.destinationChainTxHashes
+						.filter((txHash): txHash is string => typeof txHash === "string")
+						.map((txHash) => txHash.trim())
+						.filter(Boolean)
+				: [],
+			raw: entry,
+		}));
+	return {
+		data,
+		page:
+			typeof root.page === "number" && Number.isFinite(root.page)
+				? Math.floor(root.page)
+				: null,
+		perPage:
+			typeof root.perPage === "number" && Number.isFinite(root.perPage)
+				? Math.floor(root.perPage)
+				: null,
+		total:
+			typeof root.total === "number" && Number.isFinite(root.total)
+				? Math.floor(root.total)
+				: null,
+		totalPages:
+			typeof root.totalPages === "number" && Number.isFinite(root.totalPages)
+				? Math.floor(root.totalPages)
+				: null,
+		nextPage:
+			typeof root.nextPage === "number" && Number.isFinite(root.nextPage)
+				? Math.floor(root.nextPage)
+				: null,
+		prevPage:
+			typeof root.prevPage === "number" && Number.isFinite(root.prevPage)
+				? Math.floor(root.prevPage)
 				: null,
 	};
 }
@@ -2059,6 +2304,243 @@ export function createNearReadTools() {
 						destinationSymbol,
 						request: quoteRequest,
 						quoteResponse: quoteResponse.payload,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}getIntentsExplorerTransactions`,
+			label: "NEAR Intents Explorer Transactions",
+			description:
+				"List NEAR Intents Explorer transactions (/v0/transactions-pages). Requires JWT auth.",
+			parameters: Type.Object({
+				page: Type.Optional(
+					Type.Number({
+						description: "Page number (default 1).",
+					}),
+				),
+				perPage: Type.Optional(
+					Type.Number({
+						description: "Rows per page (default 20, max 1000).",
+					}),
+				),
+				search: Type.Optional(
+					Type.String({
+						description:
+							"Search by deposit address, recipient, sender, or tx hash.",
+					}),
+				),
+				fromChainId: Type.Optional(
+					Type.String({
+						description: "Origin chain filter (e.g. near/eth/base/sol/sui).",
+					}),
+				),
+				toChainId: Type.Optional(
+					Type.String({
+						description:
+							"Destination chain filter (e.g. near/eth/base/sol/sui).",
+					}),
+				),
+				fromTokenId: Type.Optional(
+					Type.String({
+						description:
+							"Origin token filter (asset id); overrides fromChainId at API side.",
+					}),
+				),
+				toTokenId: Type.Optional(
+					Type.String({
+						description:
+							"Destination token filter (asset id); overrides toChainId/fromTokenId at API side.",
+					}),
+				),
+				referral: Type.Optional(Type.String()),
+				affiliate: Type.Optional(Type.String()),
+				statuses: Type.Optional(
+					Type.Array(
+						Type.String({
+							description:
+								"Status values: FAILED, INCOMPLETE_DEPOSIT, PENDING_DEPOSIT, PROCESSING, REFUNDED, SUCCESS.",
+						}),
+					),
+				),
+				showTestTxs: Type.Optional(Type.Boolean()),
+				minUsdPrice: Type.Optional(
+					Type.Number({
+						description: "Min USD filter (>= 0).",
+					}),
+				),
+				maxUsdPrice: Type.Optional(
+					Type.Number({
+						description: "Max USD filter (>= 0).",
+					}),
+				),
+				startTimestamp: Type.Optional(
+					Type.String({
+						description:
+							"Start timestamp ISO string (inclusive filter window).",
+					}),
+				),
+				endTimestamp: Type.Optional(
+					Type.String({
+						description: "End timestamp ISO string (non-inclusive filter).",
+					}),
+				),
+				apiBaseUrl: Type.Optional(
+					Type.String({
+						description:
+							"Explorer API base URL override (default https://explorer.near-intents.org).",
+					}),
+				),
+				jwt: Type.Optional(
+					Type.String({
+						description:
+							"Bearer JWT for explorer API (fallback env NEAR_INTENTS_EXPLORER_JWT / NEAR_INTENTS_JWT).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const baseUrl = resolveNearIntentsExplorerApiBaseUrl(params.apiBaseUrl);
+				const authHeaders = resolveNearIntentsExplorerHeaders({
+					jwt: params.jwt,
+				});
+				const page = parseOptionalPositiveInt(params.page, "page");
+				const perPage = parseIntentsExplorerPerPage(params.perPage);
+				const startTimestamp = parseOptionalIsoDatetime(
+					params.startTimestamp,
+					"startTimestamp",
+				);
+				const endTimestamp = parseOptionalIsoDatetime(
+					params.endTimestamp,
+					"endTimestamp",
+				);
+				if (startTimestamp && endTimestamp && startTimestamp >= endTimestamp) {
+					throw new Error("startTimestamp must be earlier than endTimestamp");
+				}
+				const minUsdPrice = parseOptionalNonNegativeNumber(
+					params.minUsdPrice,
+					"minUsdPrice",
+				);
+				const maxUsdPrice = parseOptionalNonNegativeNumber(
+					params.maxUsdPrice,
+					"maxUsdPrice",
+				);
+				if (
+					minUsdPrice != null &&
+					maxUsdPrice != null &&
+					minUsdPrice > maxUsdPrice
+				) {
+					throw new Error("minUsdPrice must be <= maxUsdPrice");
+				}
+				const statuses = parseIntentsExplorerStatuses(params.statuses);
+				const fromChainId = parseOptionalNearIntentsChain(
+					params.fromChainId,
+					"fromChainId",
+				);
+				const toChainId = parseOptionalNearIntentsChain(
+					params.toChainId,
+					"toChainId",
+				);
+				const response = await fetchNearIntentsJson<unknown>({
+					baseUrl,
+					path: "/api/v0/transactions-pages",
+					method: "GET",
+					query: {
+						page: page != null ? String(page) : undefined,
+						perPage: String(perPage),
+						search: params.search?.trim() || undefined,
+						fromChainId,
+						fromTokenId: params.fromTokenId?.trim() || undefined,
+						toChainId,
+						toTokenId: params.toTokenId?.trim() || undefined,
+						referral: params.referral?.trim() || undefined,
+						affiliate: params.affiliate?.trim() || undefined,
+						statuses,
+						showTestTxs:
+							typeof params.showTestTxs === "boolean"
+								? String(params.showTestTxs)
+								: undefined,
+						minUsdPrice: minUsdPrice != null ? String(minUsdPrice) : undefined,
+						maxUsdPrice: maxUsdPrice != null ? String(maxUsdPrice) : undefined,
+						startTimestamp,
+						endTimestamp,
+					},
+					headers: authHeaders,
+				});
+				const normalized = normalizeNearIntentsExplorerTransactions(
+					response.payload,
+				);
+				const lines = [
+					`Intents explorer txs: ${normalized.data.length} item(s) page=${normalized.page ?? page ?? 1}/${normalized.totalPages ?? "?"} total=${normalized.total ?? "unknown"}`,
+				];
+				const activeFilters = [
+					fromChainId ? `fromChainId=${fromChainId}` : null,
+					toChainId ? `toChainId=${toChainId}` : null,
+					params.search?.trim() ? `search=${params.search.trim()}` : null,
+					statuses ? `statuses=${statuses}` : null,
+					minUsdPrice != null ? `minUsd=${minUsdPrice}` : null,
+					maxUsdPrice != null ? `maxUsd=${maxUsdPrice}` : null,
+				].filter((entry): entry is string => Boolean(entry));
+				if (activeFilters.length > 0) {
+					lines.push(`Filters: ${activeFilters.join(" | ")}`);
+				}
+				const shown = normalized.data.slice(0, 10);
+				for (const [index, tx] of shown.entries()) {
+					const amountIn = tx.amountInFormatted ?? tx.amountIn ?? "unknown";
+					const amountOut = tx.amountOutFormatted ?? tx.amountOut ?? "unknown";
+					const originAsset = tx.originAsset ?? "unknown";
+					const destinationAsset = tx.destinationAsset ?? "unknown";
+					lines.push(
+						`${index + 1}. [${tx.status ?? "UNKNOWN"}] ${amountIn} -> ${amountOut} (${originAsset} -> ${destinationAsset})`,
+					);
+					lines.push(
+						`   recipient=${tx.recipient ? shortAccountId(tx.recipient) : "unknown"} deposit=${tx.depositAddress ? shortAccountId(tx.depositAddress) : "unknown"} time=${tx.createdAt ?? "unknown"}`,
+					);
+					if (tx.refundReason) {
+						lines.push(`   refundReason=${tx.refundReason}`);
+					}
+				}
+				if (normalized.data.length > shown.length) {
+					lines.push(
+						`... ${normalized.data.length - shown.length} more tx(s) not shown`,
+					);
+				}
+				if (normalized.data.length === 0) {
+					lines.push("No transactions matched current filters.");
+				}
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						apiBaseUrl: baseUrl,
+						endpoint: response.url,
+						httpStatus: response.status,
+						filters: {
+							page: page ?? 1,
+							perPage,
+							search: params.search?.trim() || null,
+							fromChainId: fromChainId ?? null,
+							toChainId: toChainId ?? null,
+							fromTokenId: params.fromTokenId?.trim() || null,
+							toTokenId: params.toTokenId?.trim() || null,
+							referral: params.referral?.trim() || null,
+							affiliate: params.affiliate?.trim() || null,
+							statuses: statuses ?? null,
+							showTestTxs:
+								typeof params.showTestTxs === "boolean"
+									? params.showTestTxs
+									: null,
+							minUsdPrice: minUsdPrice ?? null,
+							maxUsdPrice: maxUsdPrice ?? null,
+							startTimestamp: startTimestamp ?? null,
+							endTimestamp: endTimestamp ?? null,
+						},
+						page: normalized.page,
+						perPage: normalized.perPage,
+						total: normalized.total,
+						totalPages: normalized.totalPages,
+						nextPage: normalized.nextPage,
+						prevPage: normalized.prevPage,
+						transactions: normalized.data,
+						raw: response.payload,
 					},
 				};
 			},

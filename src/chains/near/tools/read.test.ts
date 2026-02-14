@@ -83,6 +83,9 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	restMocks.fetch.mockReset();
 	vi.stubGlobal("fetch", restMocks.fetch as unknown as typeof fetch);
+	Reflect.deleteProperty(process.env, "NEAR_INTENTS_JWT");
+	Reflect.deleteProperty(process.env, "NEAR_INTENTS_EXPLORER_JWT");
+	Reflect.deleteProperty(process.env, "NEAR_INTENTS_EXPLORER_API_BASE_URL");
 	runtimeMocks.parseNearNetwork.mockReturnValue("mainnet");
 	runtimeMocks.getNearRpcEndpoint.mockReturnValue(
 		"https://rpc.mainnet.near.org",
@@ -750,6 +753,132 @@ describe("near_getIntentsQuote", () => {
 			originSymbol: "wNEAR",
 			destinationSymbol: "USDC",
 		});
+	});
+});
+
+describe("near_getIntentsExplorerTransactions", () => {
+	it("returns paginated explorer transactions with readable summary", async () => {
+		process.env.NEAR_INTENTS_EXPLORER_JWT = "jwt-test-token";
+		mockFetchJsonOnce(200, {
+			data: [
+				{
+					originAsset: "nep141:wrap.near",
+					destinationAsset: "nep141:usdc.near",
+					depositAddress: "deposit-address-1",
+					depositAddressAndMemo: "deposit-address-1_123",
+					recipient: "alice.near",
+					status: "SUCCESS",
+					createdAt: "2026-02-14T12:00:00.000Z",
+					createdAtTimestamp: 1771060800,
+					intentHashes: "intent-hash-1",
+					referral: "ref-1",
+					amountIn: "10000000000000000000000",
+					amountInFormatted: "0.01",
+					amountInUsd: "0.03",
+					amountOut: "10000",
+					amountOutFormatted: "0.01",
+					amountOutUsd: "0.01",
+					refundTo: "alice.near",
+					senders: ["alice.near"],
+					nearTxHashes: ["near-hash-1"],
+					originChainTxHashes: ["origin-hash-1"],
+					destinationChainTxHashes: ["destination-hash-1"],
+				},
+				{
+					originAsset: "nep141:usdt.tether-token.near",
+					destinationAsset: "nep141:wrap.near",
+					depositAddress: "deposit-address-2",
+					recipient: "bob.near",
+					status: "PROCESSING",
+					createdAt: "2026-02-14T12:05:00.000Z",
+					createdAtTimestamp: 1771061100,
+					amountInFormatted: "1",
+					amountOutFormatted: "0.98",
+					refundReason: "NO_LIQUIDITY",
+					senders: ["0xabc"],
+					nearTxHashes: [],
+					originChainTxHashes: [],
+					destinationChainTxHashes: [],
+				},
+			],
+			page: 2,
+			perPage: 2,
+			total: 5,
+			totalPages: 3,
+			nextPage: 3,
+			prevPage: 1,
+		});
+		const tool = getTool("near_getIntentsExplorerTransactions");
+		const result = await tool.execute("near-read-intents-explorer-1", {
+			page: 2,
+			perPage: 2,
+			search: "alice",
+			fromChainId: "near",
+			toChainId: "eth",
+			statuses: ["SUCCESS", "PROCESSING"],
+			minUsdPrice: 1,
+			maxUsdPrice: 10,
+		});
+
+		const [url, init] = restMocks.fetch.mock.calls[0] ?? [];
+		expect(String(url)).toContain(
+			"https://explorer.near-intents.org/api/v0/transactions-pages",
+		);
+		expect(String(url)).toContain("page=2");
+		expect(String(url)).toContain("perPage=2");
+		expect(String(url)).toContain("fromChainId=near");
+		expect(String(url)).toContain("toChainId=eth");
+		expect(String(url)).toContain("search=alice");
+		expect(String(url)).toContain("statuses=SUCCESS%2CPROCESSING");
+		expect(String(url)).toContain("minUsdPrice=1");
+		expect(String(url)).toContain("maxUsdPrice=10");
+		expect(init).toMatchObject({
+			method: "GET",
+			headers: expect.objectContaining({
+				Authorization: "Bearer jwt-test-token",
+			}),
+		});
+		expect(result.content[0]?.text).toContain(
+			"Intents explorer txs: 2 item(s)",
+		);
+		expect(result.content[0]?.text).toContain("[SUCCESS]");
+		expect(result.content[0]?.text).toContain("[PROCESSING]");
+		expect(result.details).toMatchObject({
+			total: 5,
+			totalPages: 3,
+			nextPage: 3,
+			prevPage: 1,
+			transactions: [
+				{
+					status: "SUCCESS",
+				},
+				{
+					status: "PROCESSING",
+					refundReason: "NO_LIQUIDITY",
+				},
+			],
+		});
+	});
+
+	it("requires jwt for explorer API", async () => {
+		const tool = getTool("near_getIntentsExplorerTransactions");
+		await expect(
+			tool.execute("near-read-intents-explorer-2", {}),
+		).rejects.toThrow("requires jwt");
+		expect(restMocks.fetch).not.toHaveBeenCalled();
+	});
+
+	it("surfaces explorer API errors", async () => {
+		process.env.NEAR_INTENTS_EXPLORER_JWT = "jwt-test-token";
+		mockFetchJsonOnce(429, {
+			message: "Rate limit exceeded",
+		});
+		const tool = getTool("near_getIntentsExplorerTransactions");
+		await expect(
+			tool.execute("near-read-intents-explorer-3", {
+				perPage: 5,
+			}),
+		).rejects.toThrow("Rate limit exceeded");
 	});
 });
 

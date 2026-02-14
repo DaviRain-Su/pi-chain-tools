@@ -58,6 +58,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `near_getSwapQuoteRef` (Ref/Rhea quote: explicit pool/direct/two-hop route; supports token symbols like `NEAR`/`USDC`)
 - `read`: `near_getIntentsTokens` (NEAR Intents 1Click `/v0/tokens`, filterable supported-asset list)
 - `read`: `near_getIntentsQuote` (NEAR Intents 1Click `/v0/quote`, defaults to `dry=true` for safe preview)
+- `read`: `near_getIntentsExplorerTransactions` (NEAR Intents Explorer `/api/v0/transactions-pages`, supports status/chain/time filters; requires JWT)
 - `read`: `near_getIntentsStatus` (NEAR Intents 1Click `/v0/status` by `depositAddress`/`depositMemo` or `correlationId`)
 - `read`: `near_getIntentsAnyInputWithdrawals` (NEAR Intents 1Click `/v0/any-input/withdrawals` for ANY_INPUT withdrawal records)
 - `compose`: `near_buildTransferNearTransaction` (unsigned native transfer payload, local signing)
@@ -129,6 +130,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `帮我查一下 NEAR Intents 支持的 near 链 USDC 资产`
 - Intents Quote (read, dry preview):
   - `帮我用 NEAR Intents 预估把 wNEAR 换成 USDC，amount=10000000000000000000000（dry）`
+- Intents Explorer Transactions (read):
+  - `帮我查一下 NEAR Intents 最近 20 笔交易，筛选状态 SUCCESS/PROCESSING`
 - Intents Status (read):
   - `帮我查一下 NEAR Intents 这个 depositAddress 的状态：0x...`
   - `帮我查一下 NEAR Intents 这个 correlationId 的状态：corr-...`
@@ -371,6 +374,8 @@ Natural language confirmation example:
   - `继续执行刚才这笔，确认主网执行`
 - Intents quote (read):
   - `帮我用 NEAR Intents 预估把 NEAR 换成 USDC，amount=10000000000000000000000（dry）`
+- Intents explorer txs (read):
+  - `帮我查一下 NEAR Intents Explorer 最近 20 笔 near -> eth 的交易`
 - Intents workflow simulate:
   - `通过 intents 把 NEAR 换成 USDC，amountRaw 10000000000000000000000，先模拟`
 - Intents workflow execute (submit deposit):
