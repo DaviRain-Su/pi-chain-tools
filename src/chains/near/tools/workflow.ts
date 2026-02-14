@@ -273,6 +273,7 @@ type WorkflowParams = {
 	attachedDepositYoctoNear?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
+	confirmRisk?: boolean;
 	publicKey?: string;
 	privateKey?: string;
 };
@@ -315,6 +316,7 @@ type ParsedIntentHints = {
 	waitForFinalStatus?: boolean;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
+	confirmRisk?: boolean;
 	withdrawAll?: boolean;
 	autoWithdraw?: boolean;
 	asCollateral?: boolean;
@@ -472,7 +474,21 @@ type NearIntentsOutcomeSummary = {
 	remediation: string[];
 };
 
-type NearBurrowWorkflowRiskBand = "safe" | "warning" | "critical";
+type NearBurrowWorkflowRiskBand = "safe" | "warning" | "critical" | "unknown";
+
+type NearBurrowRiskHealthSummary = {
+	weightedCollateralUsd: number | null;
+	borrowedUsd: number | null;
+	healthFactor: number | null;
+	liquidationDistanceRatio: number | null;
+	pricedCollateralAssetCount: number;
+	pricedBorrowedAssetCount: number;
+	unpricedAssetCount: number;
+	priceUpdatedAtLatest: string | null;
+	notes: string[];
+	valuationError: string | null;
+	riskBand: NearBurrowWorkflowRiskBand;
+};
 
 const WORKFLOW_SESSION_BY_RUN_ID = new Map<string, WorkflowSessionRecord>();
 let latestWorkflowSession: WorkflowSessionRecord | null = null;
@@ -483,6 +499,8 @@ const DEFAULT_INTENTS_STATUS_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_INTENTS_STATUS_TIMEOUT_MS = 45_000;
 const DEFAULT_BURROW_WORKFLOW_RISK_WARNING_RATIO = 0.6;
 const DEFAULT_BURROW_WORKFLOW_RISK_CRITICAL_RATIO = 0.85;
+const DEFAULT_BURROW_WORKFLOW_RISK_WARNING_HEALTH_FACTOR = 1.2;
+const DEFAULT_BURROW_WORKFLOW_RISK_CRITICAL_HEALTH_FACTOR = 1.0;
 
 function rememberWorkflowSession(record: WorkflowSessionRecord): void {
 	WORKFLOW_SESSION_BY_RUN_ID.set(record.runId, record);
@@ -574,6 +592,95 @@ function resolveBurrowWorkflowRiskBand(
 	if (level === "high") return "critical";
 	if (level === "medium") return "warning";
 	return "safe";
+}
+
+function resolveBurrowWorkflowRiskBandFromHealthFactor(
+	healthFactor: number | null,
+): NearBurrowWorkflowRiskBand {
+	if (healthFactor == null || !Number.isFinite(healthFactor)) return "unknown";
+	if (healthFactor < DEFAULT_BURROW_WORKFLOW_RISK_CRITICAL_HEALTH_FACTOR) {
+		return "critical";
+	}
+	if (healthFactor < DEFAULT_BURROW_WORKFLOW_RISK_WARNING_HEALTH_FACTOR) {
+		return "warning";
+	}
+	return "safe";
+}
+
+function extractNearTokenIdFromIntentsAssetId(assetId: string): string | null {
+	const normalized = assetId.trim().toLowerCase();
+	if (!normalized.startsWith("nep141:")) return null;
+	const tokenId = normalized.slice("nep141:".length).trim();
+	return tokenId || null;
+}
+
+function buildNearWorkflowTokenPriceIndex(
+	tokens: NearIntentsToken[],
+): Map<string, NearIntentsToken> {
+	const byTokenId = new Map<string, NearIntentsToken>();
+	for (const token of tokens) {
+		if (
+			token.blockchain.trim().toLowerCase() !== "near" ||
+			!Number.isFinite(token.price) ||
+			token.price <= 0
+		) {
+			continue;
+		}
+		const tokenIdFromAssetId = extractNearTokenIdFromIntentsAssetId(
+			token.assetId,
+		);
+		const tokenIdFromAddress =
+			typeof token.contractAddress === "string"
+				? token.contractAddress.trim().toLowerCase()
+				: "";
+		const tokenId = tokenIdFromAddress || tokenIdFromAssetId;
+		if (!tokenId || byTokenId.has(tokenId)) continue;
+		byTokenId.set(tokenId, token);
+	}
+	return byTokenId;
+}
+
+function parseTokenRawAmountToApproxNumber(
+	rawAmount: string,
+	decimals: number,
+): number | null {
+	if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
+		return null;
+	}
+	const normalized = rawAmount.trim();
+	if (!/^\d+$/.test(normalized)) return null;
+	const trimmed = normalized.replace(/^0+/, "") || "0";
+	if (trimmed === "0") return 0;
+
+	if (decimals === 0) {
+		const parsed = Number(trimmed);
+		return Number.isFinite(parsed) ? parsed : null;
+	}
+
+	let decimalText: string;
+	if (trimmed.length > decimals) {
+		const whole = trimmed.slice(0, trimmed.length - decimals);
+		const fraction = trimmed
+			.slice(trimmed.length - decimals)
+			.replace(/0+$/, "")
+			.slice(0, 12);
+		decimalText = fraction ? `${whole}.${fraction}` : whole;
+	} else {
+		const leadingZeros = "0".repeat(decimals - trimmed.length);
+		const fraction = `${leadingZeros}${trimmed}`
+			.replace(/0+$/, "")
+			.slice(0, 12);
+		decimalText = fraction ? `0.${fraction}` : "0";
+	}
+	const parsed = Number(decimalText);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeBurrowCollateralFactor(volatilityRatio: unknown): number {
+	if (!Number.isFinite(volatilityRatio)) return 0;
+	const normalized = Math.floor(volatilityRatio as number);
+	if (normalized <= 0) return 0;
+	return Math.min(1, normalized / 10_000);
 }
 
 function normalizeConfirmTokenValue(
@@ -1440,6 +1547,14 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		lower.includes("confirm mainnet") ||
 		lower.includes("confirmmainnet=true") ||
 		lower.includes("confirmmainnet true");
+	const wantsConfirmRisk =
+		lower.includes("确认风险执行") ||
+		lower.includes("确认风险") ||
+		lower.includes("接受风险执行") ||
+		lower.includes("accept risk") ||
+		lower.includes("confirm risk") ||
+		lower.includes("confirmrisk=true") ||
+		lower.includes("confirmrisk true");
 	const hasLpKeyword =
 		lower.includes("lp") ||
 		lower.includes("liquidity") ||
@@ -1631,6 +1746,7 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		hints.waitForFinalStatus = true;
 	}
 	if (wantsConfirmMainnet) hints.confirmMainnet = true;
+	if (wantsConfirmRisk) hints.confirmRisk = true;
 	if (
 		lower.includes("any input") ||
 		lower.includes("any_input") ||
@@ -2975,6 +3091,7 @@ async function resolveBurrowTokenAndAssetForWorkflow(params: {
 	tokenId: string;
 	extraDecimals: number;
 	asset: BurrowAssetDetailedView;
+	marketsByToken: Map<string, BurrowAssetDetailedView>;
 }> {
 	const burrowContractId = getBurrowContractId(
 		params.network,
@@ -3003,11 +3120,22 @@ async function resolveBurrowTokenAndAssetForWorkflow(params: {
 	if (!asset) {
 		throw new Error(`Burrow market not found for token: ${tokenId}`);
 	}
+	const marketsByToken = new Map<string, BurrowAssetDetailedView>();
+	for (const market of markets) {
+		if (!market || typeof market.token_id !== "string") continue;
+		const normalizedTokenId = market.token_id.trim().toLowerCase();
+		if (!normalizedTokenId) continue;
+		marketsByToken.set(normalizedTokenId, market);
+	}
+	if (!marketsByToken.has(tokenId)) {
+		marketsByToken.set(tokenId, asset);
+	}
 	return {
 		burrowContractId,
 		tokenId,
 		extraDecimals: parseBurrowExtraDecimals(asset.config?.extra_decimals),
 		asset,
+		marketsByToken,
 	};
 }
 
@@ -3076,6 +3204,43 @@ function countBurrowPositionAssetsBySide(params: {
 	return count;
 }
 
+function collectBurrowPositionInnerBySide(params: {
+	positions?: BurrowAccountAllPositionsView["positions"];
+	side: "collateral" | "borrowed";
+}): Map<string, bigint> {
+	const amountsByToken = new Map<string, bigint>();
+	if (!params.positions) return amountsByToken;
+	for (const position of Object.values(params.positions)) {
+		if (!position || typeof position !== "object") continue;
+		const assets = position[params.side];
+		if (!Array.isArray(assets)) continue;
+		for (const asset of assets) {
+			if (
+				!asset ||
+				typeof asset !== "object" ||
+				typeof asset.token_id !== "string" ||
+				typeof asset.balance !== "string"
+			) {
+				continue;
+			}
+			const tokenId = asset.token_id.trim().toLowerCase();
+			if (!tokenId) continue;
+			let innerAmount: bigint;
+			try {
+				innerAmount = parseNonNegativeBigInt(asset.balance, "burrow.balance");
+			} catch {
+				continue;
+			}
+			if (innerAmount <= 0n) continue;
+			amountsByToken.set(
+				tokenId,
+				(amountsByToken.get(tokenId) ?? 0n) + innerAmount,
+			);
+		}
+	}
+	return amountsByToken;
+}
+
 function burrowInnerToRawString(
 	innerAmount: bigint,
 	extraDecimals: number,
@@ -3083,6 +3248,180 @@ function burrowInnerToRawString(
 	const extra = parseBurrowExtraDecimals(extraDecimals);
 	if (extra <= 0) return innerAmount.toString();
 	return (innerAmount / 10n ** BigInt(extra)).toString();
+}
+
+async function evaluateBurrowWorkflowHealth(params: {
+	network: string;
+	rpcUrl?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+	jwt?: string;
+	marketsByToken: Map<string, BurrowAssetDetailedView>;
+	collateralInnerByToken: Map<string, bigint>;
+	borrowedInnerByToken: Map<string, bigint>;
+}): Promise<NearBurrowRiskHealthSummary> {
+	try {
+		const tokensResponse = await fetchNearIntentsJson<NearIntentsToken[]>({
+			baseUrl: resolveNearIntentsApiBaseUrl(params.apiBaseUrl),
+			path: "/v0/tokens",
+			method: "GET",
+			headers: resolveNearIntentsHeaders({
+				apiKey: params.apiKey,
+				jwt: params.jwt,
+			}),
+		});
+		const tokens = normalizeNearIntentsTokens(tokensResponse.payload);
+		const priceIndex = buildNearWorkflowTokenPriceIndex(tokens);
+		let weightedCollateralUsd = 0;
+		let borrowedUsd = 0;
+		let pricedCollateralAssetCount = 0;
+		let pricedBorrowedAssetCount = 0;
+		let unpricedAssetCount = 0;
+		let latestPriceUpdatedAtMs: number | null = null;
+
+		for (const [tokenId, collateralInner] of params.collateralInnerByToken) {
+			if (collateralInner <= 0n) continue;
+			const market = params.marketsByToken.get(tokenId);
+			const pricedToken = priceIndex.get(tokenId);
+			if (!market || !pricedToken) {
+				unpricedAssetCount += 1;
+				continue;
+			}
+			const rawAmount = burrowInnerToRawString(
+				collateralInner,
+				parseBurrowExtraDecimals(market.config?.extra_decimals),
+			);
+			const amount = parseTokenRawAmountToApproxNumber(
+				rawAmount,
+				pricedToken.decimals,
+			);
+			if (amount == null || amount <= 0) {
+				unpricedAssetCount += 1;
+				continue;
+			}
+			const collateralFactor = normalizeBurrowCollateralFactor(
+				market.config?.volatility_ratio,
+			);
+			weightedCollateralUsd += amount * pricedToken.price * collateralFactor;
+			pricedCollateralAssetCount += 1;
+			const parsedUpdatedAt = Date.parse(pricedToken.priceUpdatedAt);
+			if (!Number.isNaN(parsedUpdatedAt)) {
+				if (
+					latestPriceUpdatedAtMs == null ||
+					parsedUpdatedAt > latestPriceUpdatedAtMs
+				) {
+					latestPriceUpdatedAtMs = parsedUpdatedAt;
+				}
+			}
+		}
+
+		for (const [tokenId, borrowedInner] of params.borrowedInnerByToken) {
+			if (borrowedInner <= 0n) continue;
+			const market = params.marketsByToken.get(tokenId);
+			const pricedToken = priceIndex.get(tokenId);
+			if (!market || !pricedToken) {
+				unpricedAssetCount += 1;
+				continue;
+			}
+			const rawAmount = burrowInnerToRawString(
+				borrowedInner,
+				parseBurrowExtraDecimals(market.config?.extra_decimals),
+			);
+			const amount = parseTokenRawAmountToApproxNumber(
+				rawAmount,
+				pricedToken.decimals,
+			);
+			if (amount == null || amount <= 0) {
+				unpricedAssetCount += 1;
+				continue;
+			}
+			borrowedUsd += amount * pricedToken.price;
+			pricedBorrowedAssetCount += 1;
+			const parsedUpdatedAt = Date.parse(pricedToken.priceUpdatedAt);
+			if (!Number.isNaN(parsedUpdatedAt)) {
+				if (
+					latestPriceUpdatedAtMs == null ||
+					parsedUpdatedAt > latestPriceUpdatedAtMs
+				) {
+					latestPriceUpdatedAtMs = parsedUpdatedAt;
+				}
+			}
+		}
+
+		const healthFactor =
+			borrowedUsd > 0 && Number.isFinite(weightedCollateralUsd)
+				? weightedCollateralUsd / borrowedUsd
+				: null;
+		const liquidationDistanceRatio =
+			healthFactor == null ? null : healthFactor - 1;
+		const riskBand =
+			borrowedUsd <= 0
+				? "safe"
+				: resolveBurrowWorkflowRiskBandFromHealthFactor(healthFactor);
+		const notes: string[] = [];
+		if (borrowedUsd > 0 && healthFactor == null) {
+			notes.push(
+				"Health factor unavailable (insufficient priced collateral/debt).",
+			);
+		}
+		if (unpricedAssetCount > 0) {
+			notes.push(
+				`Risk valuation has ${unpricedAssetCount} unpriced asset(s); health factor may be conservative.`,
+			);
+		}
+		if (
+			healthFactor != null &&
+			Number.isFinite(healthFactor) &&
+			healthFactor < DEFAULT_BURROW_WORKFLOW_RISK_CRITICAL_HEALTH_FACTOR
+		) {
+			notes.push(
+				`Health factor ${healthFactor.toFixed(4)} is below ${DEFAULT_BURROW_WORKFLOW_RISK_CRITICAL_HEALTH_FACTOR.toFixed(2)} (critical).`,
+			);
+		} else if (
+			healthFactor != null &&
+			Number.isFinite(healthFactor) &&
+			healthFactor < DEFAULT_BURROW_WORKFLOW_RISK_WARNING_HEALTH_FACTOR
+		) {
+			notes.push(
+				`Health factor ${healthFactor.toFixed(4)} is below ${DEFAULT_BURROW_WORKFLOW_RISK_WARNING_HEALTH_FACTOR.toFixed(2)} (warning).`,
+			);
+		}
+
+		return {
+			weightedCollateralUsd:
+				pricedCollateralAssetCount > 0 ? weightedCollateralUsd : null,
+			borrowedUsd: pricedBorrowedAssetCount > 0 ? borrowedUsd : null,
+			healthFactor,
+			liquidationDistanceRatio,
+			pricedCollateralAssetCount,
+			pricedBorrowedAssetCount,
+			unpricedAssetCount,
+			priceUpdatedAtLatest:
+				latestPriceUpdatedAtMs == null
+					? null
+					: new Date(latestPriceUpdatedAtMs).toISOString(),
+			notes,
+			valuationError: null,
+			riskBand,
+		};
+	} catch (error) {
+		return {
+			weightedCollateralUsd: null,
+			borrowedUsd: null,
+			healthFactor: null,
+			liquidationDistanceRatio: null,
+			pricedCollateralAssetCount: 0,
+			pricedBorrowedAssetCount: 0,
+			unpricedAssetCount:
+				params.collateralInnerByToken.size + params.borrowedInnerByToken.size,
+			priceUpdatedAtLatest: null,
+			notes: [
+				"Health factor unavailable because risk valuation data could not be fetched.",
+			],
+			valuationError: error instanceof Error ? error.message : String(error),
+			riskBand: "unknown",
+		};
+	}
 }
 
 async function simulateNearTransfer(params: {
@@ -4264,6 +4603,9 @@ async function simulateBurrowBorrow(params: {
 	network: string;
 	rpcUrl?: string;
 	fromAccountId?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+	jwt?: string;
 }): Promise<{
 	status: "success" | "market_unavailable" | "insufficient_collateral";
 	fromAccountId: string;
@@ -4278,13 +4620,19 @@ async function simulateBurrowBorrow(params: {
 	borrowedAssetCount: number;
 	riskLevel: "low" | "medium" | "high";
 	riskBand: NearBurrowWorkflowRiskBand;
+	riskEngine: "health_factor" | "heuristic";
+	healthFactor: number | null;
+	liquidationDistanceRatio: number | null;
+	weightedCollateralUsd: number | null;
+	borrowedUsd: number | null;
+	healthSummary: NearBurrowRiskHealthSummary | null;
 	riskNotes: string[];
 }> {
 	const fromAccountId = resolveNearAccountId(
 		params.intent.fromAccountId ?? params.fromAccountId,
 		params.network,
 	);
-	const { burrowContractId, tokenId, extraDecimals, asset } =
+	const { burrowContractId, tokenId, extraDecimals, asset, marketsByToken } =
 		await resolveBurrowTokenAndAssetForWorkflow({
 			network: params.network,
 			rpcUrl: params.rpcUrl,
@@ -4308,6 +4656,47 @@ async function simulateBurrowBorrow(params: {
 		positions: snapshot?.positions,
 		side: "borrowed",
 	});
+	const collateralInnerByToken = collectBurrowPositionInnerBySide({
+		positions: snapshot?.positions,
+		side: "collateral",
+	});
+	const borrowedInnerByToken = collectBurrowPositionInnerBySide({
+		positions: snapshot?.positions,
+		side: "borrowed",
+	});
+	borrowedInnerByToken.set(
+		tokenId,
+		(borrowedInnerByToken.get(tokenId) ?? 0n) +
+			parseNonNegativeBigInt(amountInner, "amountInner"),
+	);
+	const healthSummary = await evaluateBurrowWorkflowHealth({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		apiBaseUrl: params.apiBaseUrl,
+		apiKey: params.apiKey,
+		jwt: params.jwt,
+		marketsByToken,
+		collateralInnerByToken,
+		borrowedInnerByToken,
+	});
+	const heuristicRiskLevel: "low" | "medium" | "high" =
+		collateralAssetCount <= 0
+			? "high"
+			: borrowedAssetCount > 0
+				? "medium"
+				: "low";
+	const riskBand =
+		healthSummary.riskBand !== "unknown"
+			? healthSummary.riskBand
+			: resolveBurrowWorkflowRiskBand(heuristicRiskLevel);
+	const riskLevel: "low" | "medium" | "high" =
+		riskBand === "critical"
+			? "high"
+			: riskBand === "warning"
+				? "medium"
+				: riskBand === "safe"
+					? "low"
+					: heuristicRiskLevel;
 	const riskNotes: string[] = [];
 	if (collateralAssetCount <= 0) {
 		riskNotes.push(
@@ -4319,13 +4708,9 @@ async function simulateBurrowBorrow(params: {
 			"Existing Burrow debt detected; monitor health before increasing leverage.",
 		);
 	}
-	const riskLevel: "low" | "medium" | "high" =
-		collateralAssetCount <= 0
-			? "high"
-			: borrowedAssetCount > 0
-				? "medium"
-				: "low";
-	const riskBand = resolveBurrowWorkflowRiskBand(riskLevel);
+	riskNotes.push(...healthSummary.notes);
+	const riskEngine: "health_factor" | "heuristic" =
+		healthSummary.riskBand === "unknown" ? "heuristic" : "health_factor";
 	return {
 		status: !canBorrow
 			? "market_unavailable"
@@ -4344,6 +4729,12 @@ async function simulateBurrowBorrow(params: {
 		borrowedAssetCount,
 		riskLevel,
 		riskBand,
+		riskEngine,
+		healthFactor: healthSummary.healthFactor,
+		liquidationDistanceRatio: healthSummary.liquidationDistanceRatio,
+		weightedCollateralUsd: healthSummary.weightedCollateralUsd,
+		borrowedUsd: healthSummary.borrowedUsd,
+		healthSummary,
 		riskNotes,
 	};
 }
@@ -4430,6 +4821,9 @@ async function simulateBurrowWithdraw(params: {
 	network: string;
 	rpcUrl?: string;
 	fromAccountId?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+	jwt?: string;
 }): Promise<{
 	status:
 		| "success"
@@ -4453,13 +4847,19 @@ async function simulateBurrowWithdraw(params: {
 	borrowedAssetCount: number;
 	riskLevel: "low" | "medium" | "high";
 	riskBand: NearBurrowWorkflowRiskBand;
+	riskEngine: "health_factor" | "heuristic";
+	healthFactor: number | null;
+	liquidationDistanceRatio: number | null;
+	weightedCollateralUsd: number | null;
+	borrowedUsd: number | null;
+	healthSummary: NearBurrowRiskHealthSummary | null;
 	riskNotes: string[];
 }> {
 	const fromAccountId = resolveNearAccountId(
 		params.intent.fromAccountId ?? params.fromAccountId,
 		params.network,
 	);
-	const { burrowContractId, tokenId, extraDecimals, asset } =
+	const { burrowContractId, tokenId, extraDecimals, asset, marketsByToken } =
 		await resolveBurrowTokenAndAssetForWorkflow({
 			network: params.network,
 			rpcUrl: params.rpcUrl,
@@ -4496,6 +4896,49 @@ async function simulateBurrowWithdraw(params: {
 	});
 	const usesCollateralPortion = requiredInner > suppliedInner;
 	const requiresRiskCheck = borrowedAssetCount > 0 && usesCollateralPortion;
+	const collateralInnerByToken = collectBurrowPositionInnerBySide({
+		positions: snapshot?.positions,
+		side: "collateral",
+	});
+	const borrowedInnerByToken = collectBurrowPositionInnerBySide({
+		positions: snapshot?.positions,
+		side: "borrowed",
+	});
+	if (usesCollateralPortion && collateralInnerByToken.has(tokenId)) {
+		const current = collateralInnerByToken.get(tokenId) ?? 0n;
+		const consumeInner = requiredInner - suppliedInner;
+		collateralInnerByToken.set(
+			tokenId,
+			current > consumeInner ? current - consumeInner : 0n,
+		);
+	}
+	const healthSummary = await evaluateBurrowWorkflowHealth({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		apiBaseUrl: params.apiBaseUrl,
+		apiKey: params.apiKey,
+		jwt: params.jwt,
+		marketsByToken,
+		collateralInnerByToken,
+		borrowedInnerByToken,
+	});
+	const heuristicRiskLevel: "low" | "medium" | "high" = requiresRiskCheck
+		? "high"
+		: borrowedAssetCount > 0
+			? "medium"
+			: "low";
+	const riskBand =
+		healthSummary.riskBand !== "unknown"
+			? healthSummary.riskBand
+			: resolveBurrowWorkflowRiskBand(heuristicRiskLevel);
+	const riskLevel: "low" | "medium" | "high" =
+		riskBand === "critical"
+			? "high"
+			: riskBand === "warning"
+				? "medium"
+				: riskBand === "safe"
+					? "low"
+					: heuristicRiskLevel;
 	const riskNotes: string[] = [];
 	if (requiresRiskCheck) {
 		riskNotes.push(
@@ -4506,12 +4949,9 @@ async function simulateBurrowWithdraw(params: {
 			"Debt exists on Burrow. Prefer small withdraws from non-collateral supply first.",
 		);
 	}
-	const riskLevel: "low" | "medium" | "high" = requiresRiskCheck
-		? "high"
-		: borrowedAssetCount > 0
-			? "medium"
-			: "low";
-	const riskBand = resolveBurrowWorkflowRiskBand(riskLevel);
+	riskNotes.push(...healthSummary.notes);
+	const riskEngine: "health_factor" | "heuristic" =
+		healthSummary.riskBand === "unknown" ? "heuristic" : "health_factor";
 	return {
 		status: !canWithdraw
 			? "market_unavailable"
@@ -4538,6 +4978,12 @@ async function simulateBurrowWithdraw(params: {
 		borrowedAssetCount,
 		riskLevel,
 		riskBand,
+		riskEngine,
+		healthFactor: healthSummary.healthFactor,
+		liquidationDistanceRatio: healthSummary.liquidationDistanceRatio,
+		weightedCollateralUsd: healthSummary.weightedCollateralUsd,
+		borrowedUsd: healthSummary.borrowedUsd,
+		healthSummary,
 		riskNotes,
 	};
 }
@@ -5178,6 +5624,7 @@ function buildWorkflowAnalysisOneLineSummary(
 	) {
 		parts.push("riskCheck=simulate");
 		parts.push(`riskPolicy=${buildBurrowWorkflowRiskPolicyLabel()}`);
+		parts.push("riskGate=confirmRiskOnWarning");
 	}
 	if (approvalRequired) {
 		parts.push(`mainnetGuard=on confirmToken=${confirmToken ?? "N/A"}`);
@@ -5215,6 +5662,10 @@ function buildSimulateResultSummary(
 		intentType === "near.lend.burrow.borrow" ||
 		intentType === "near.lend.burrow.withdraw"
 	) {
+		const riskEngine =
+			typeof simulateResult.riskEngine === "string"
+				? simulateResult.riskEngine
+				: null;
 		const riskLevel =
 			typeof simulateResult.riskLevel === "string"
 				? simulateResult.riskLevel
@@ -5241,9 +5692,26 @@ function buildSimulateResultSummary(
 						typeof note === "string" && note.trim().length > 0,
 				).length
 			: 0;
+		const healthFactor =
+			typeof simulateResult.healthFactor === "number" &&
+			Number.isFinite(simulateResult.healthFactor)
+				? simulateResult.healthFactor
+				: null;
+		const liquidationDistanceRatio =
+			typeof simulateResult.liquidationDistanceRatio === "number" &&
+			Number.isFinite(simulateResult.liquidationDistanceRatio)
+				? simulateResult.liquidationDistanceRatio
+				: null;
 		const parts = [`Workflow simulated: ${intentType} status=${statusText}`];
+		if (riskEngine) parts.push(`riskEngine=${riskEngine}`);
 		if (riskBand) parts.push(`risk=${riskBand}`);
 		if (riskLevel) parts.push(`riskLevel=${riskLevel}`);
+		if (healthFactor != null) parts.push(`hf=${healthFactor.toFixed(4)}`);
+		if (liquidationDistanceRatio != null) {
+			parts.push(
+				`liqDistance=${formatBurrowWorkflowRatioPercent(liquidationDistanceRatio)}`,
+			);
+		}
 		if (collateralAssetCount != null) {
 			parts.push(`collateralAssets=${collateralAssetCount}`);
 		}
@@ -5420,6 +5888,7 @@ export function createNearWorkflowTools() {
 				attachedDepositYoctoNear: Type.Optional(Type.String()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
+				confirmRisk: Type.Optional(Type.Boolean()),
 				publicKey: Type.Optional(Type.String()),
 				privateKey: Type.Optional(Type.String()),
 			}),
@@ -5808,6 +6277,9 @@ export function createNearWorkflowTools() {
 														network,
 														rpcUrl: params.rpcUrl,
 														fromAccountId: params.fromAccountId,
+														apiBaseUrl: params.apiBaseUrl,
+														apiKey: params.apiKey,
+														jwt: params.jwt,
 													})
 												: intent.type === "near.lend.burrow.repay"
 													? await simulateBurrowRepay({
@@ -5822,6 +6294,9 @@ export function createNearWorkflowTools() {
 																network,
 																rpcUrl: params.rpcUrl,
 																fromAccountId: params.fromAccountId,
+																apiBaseUrl: params.apiBaseUrl,
+																apiKey: params.apiKey,
+																jwt: params.jwt,
 															})
 														: intent.type === "near.lp.ref.add"
 															? await simulateRefAddLiquidity({
@@ -5986,6 +6461,114 @@ export function createNearWorkflowTools() {
 					throw new Error(
 						`Invalid confirmToken for runId=${runId}. expected=${confirmToken} provided=${providedConfirmToken ?? "null"}.`,
 					);
+				}
+				const effectiveConfirmRisk =
+					typeof params.confirmRisk === "boolean"
+						? params.confirmRisk
+						: hints.confirmRisk;
+				let burrowExecuteRiskCheck: Record<string, unknown> | null = null;
+				if (
+					network === "mainnet" &&
+					(intent.type === "near.lend.burrow.borrow" ||
+						intent.type === "near.lend.burrow.withdraw")
+				) {
+					let riskGateBlockMessage: string | null = null;
+					try {
+						const riskPrecheck =
+							intent.type === "near.lend.burrow.borrow"
+								? await simulateBurrowBorrow({
+										intent,
+										network,
+										rpcUrl: params.rpcUrl,
+										fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+										apiBaseUrl: params.apiBaseUrl,
+										apiKey: params.apiKey,
+										jwt: params.jwt,
+									})
+								: await simulateBurrowWithdraw({
+										intent,
+										network,
+										rpcUrl: params.rpcUrl,
+										fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+										apiBaseUrl: params.apiBaseUrl,
+										apiKey: params.apiKey,
+										jwt: params.jwt,
+									});
+						const riskBand =
+							typeof riskPrecheck.riskBand === "string"
+								? riskPrecheck.riskBand
+								: "unknown";
+						const riskLevel =
+							typeof riskPrecheck.riskLevel === "string"
+								? riskPrecheck.riskLevel
+								: "unknown";
+						const riskEngine =
+							typeof riskPrecheck.riskEngine === "string"
+								? riskPrecheck.riskEngine
+								: "heuristic";
+						const healthFactor =
+							typeof riskPrecheck.healthFactor === "number" &&
+							Number.isFinite(riskPrecheck.healthFactor)
+								? riskPrecheck.healthFactor
+								: null;
+						const liquidationDistanceRatio =
+							typeof riskPrecheck.liquidationDistanceRatio === "number" &&
+							Number.isFinite(riskPrecheck.liquidationDistanceRatio)
+								? riskPrecheck.liquidationDistanceRatio
+								: null;
+						const riskNotes = Array.isArray(riskPrecheck.riskNotes)
+							? riskPrecheck.riskNotes
+									.filter(
+										(note): note is string =>
+											typeof note === "string" && note.trim().length > 0,
+									)
+									.slice(0, 4)
+							: [];
+						burrowExecuteRiskCheck = {
+							status: riskPrecheck.status,
+							riskBand,
+							riskLevel,
+							riskEngine,
+							healthFactor,
+							liquidationDistanceRatio,
+							riskNotes,
+							checkedAt: new Date().toISOString(),
+							confirmRiskAccepted: effectiveConfirmRisk === true,
+						};
+						const requiresExplicitRiskAcceptance =
+							riskBand === "warning" || riskBand === "critical";
+						if (
+							requiresExplicitRiskAcceptance &&
+							effectiveConfirmRisk !== true
+						) {
+							const hfText =
+								healthFactor == null ? "n/a" : healthFactor.toFixed(4);
+							const liqText =
+								liquidationDistanceRatio == null
+									? "n/a"
+									: formatBurrowWorkflowRatioPercent(liquidationDistanceRatio);
+							const noteText =
+								riskNotes.length > 0 ? ` notes=${riskNotes.join(" | ")}` : "";
+							riskGateBlockMessage = `Burrow execute blocked by risk gate: intent=${intent.type} risk=${riskBand} level=${riskLevel} hf=${hfText} liqDistance=${liqText}. Pass confirmRisk=true to proceed.${noteText}`;
+						}
+					} catch (error) {
+						burrowExecuteRiskCheck = {
+							status: "precheck_error",
+							riskBand: "unknown",
+							riskLevel: "unknown",
+							riskEngine: "heuristic",
+							healthFactor: null,
+							liquidationDistanceRatio: null,
+							riskNotes: [
+								`Risk precheck failed: ${error instanceof Error ? error.message : String(error)}`,
+							],
+							checkedAt: new Date().toISOString(),
+							confirmRiskAccepted: effectiveConfirmRisk === true,
+						};
+					}
+					if (riskGateBlockMessage) {
+						throw new Error(riskGateBlockMessage);
+					}
 				}
 				let submitTxHash =
 					typeof params.txHash === "string" && params.txHash.trim()
@@ -6348,7 +6931,7 @@ export function createNearWorkflowTools() {
 								}
 							})()
 						: null;
-				const executeArtifact =
+				const executeArtifactBase =
 					intent.type === "near.swap.intents" && executeDetails
 						? (() => {
 								const baseArtifact = {
@@ -6383,14 +6966,34 @@ export function createNearWorkflowTools() {
 								};
 							})()
 						: (executeDetails ?? null);
+				const executeArtifact =
+					burrowExecuteRiskCheck && isObjectRecord(executeArtifactBase)
+						? {
+								...executeArtifactBase,
+								riskCheck: burrowExecuteRiskCheck,
+							}
+						: burrowExecuteRiskCheck
+							? {
+									execute: executeArtifactBase,
+									riskCheck: burrowExecuteRiskCheck,
+								}
+							: executeArtifactBase;
 				const executeArtifactWithSummary = attachExecuteSummaryLine(
 					intent.type,
 					executeArtifact,
 				);
-				const executeSummaryText =
+				const executeSummaryTextBase =
 					intent.type === "near.swap.intents"
 						? buildIntentsExecuteReadableText(executeArtifactWithSummary)
 						: `Workflow executed: ${intent.type} ${buildExecuteResultSummary(executeArtifactWithSummary)}`;
+				const executeSummaryRiskSuffix =
+					(intent.type === "near.lend.burrow.borrow" ||
+						intent.type === "near.lend.burrow.withdraw") &&
+					burrowExecuteRiskCheck &&
+					typeof burrowExecuteRiskCheck.riskBand === "string"
+						? ` risk=${burrowExecuteRiskCheck.riskBand}`
+						: "";
+				const executeSummaryText = `${executeSummaryTextBase}${executeSummaryRiskSuffix}`;
 				return {
 					content: [
 						{

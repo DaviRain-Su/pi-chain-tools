@@ -3309,6 +3309,117 @@ describe("w3rt_run_near_workflow_v0", () => {
 		expect(result.content[0]?.text).toContain("borrowedAssets=1");
 	});
 
+	it("simulates burrow borrow with health-factor risk engine details", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "818",
+				block_height: 818,
+				logs: [],
+				result: encodeJsonResult([
+					{
+						token_id: "wrap.near",
+						supplied: { shares: "0", balance: "0" },
+						borrowed: { shares: "0", balance: "0" },
+						config: {
+							extra_decimals: 0,
+							can_deposit: true,
+							can_use_as_collateral: true,
+							can_borrow: true,
+							can_withdraw: true,
+							volatility_ratio: 8000,
+						},
+					},
+					{
+						token_id: "usdc.tether-token.near",
+						supplied: { shares: "0", balance: "0" },
+						borrowed: { shares: "0", balance: "0" },
+						config: {
+							extra_decimals: 0,
+							can_deposit: true,
+							can_use_as_collateral: true,
+							can_borrow: true,
+							can_withdraw: true,
+							volatility_ratio: 9500,
+						},
+					},
+				]),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "819",
+				block_height: 819,
+				logs: [],
+				result: encodeJsonResult({
+					account_id: "alice.near",
+					supplied: [],
+					positions: {
+						REGULAR: {
+							collateral: [
+								{
+									token_id: "wrap.near",
+									balance: "150",
+									shares: "150",
+								},
+							],
+							borrowed: [
+								{
+									token_id: "usdc.tether-token.near",
+									balance: "10",
+									shares: "10",
+								},
+							],
+						},
+					},
+				}),
+			});
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "nep141:wrap.near",
+					decimals: 0,
+					blockchain: "near",
+					symbol: "wNEAR",
+					price: 1,
+					priceUpdatedAt: "2026-02-14T00:00:00.000Z",
+					contractAddress: "wrap.near",
+				},
+				{
+					assetId: "nep141:usdc.tether-token.near",
+					decimals: 0,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-02-14T00:00:00.000Z",
+					contractAddress: "usdc.tether-token.near",
+				},
+			],
+		});
+		const tool = getTool();
+		const result = await tool.execute("near-wf-burrow-4-sim-hf", {
+			runId: "wf-near-burrow-04-sim-hf",
+			runMode: "simulate",
+			intentType: "near.lend.burrow.borrow",
+			network: "mainnet",
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "100",
+		});
+
+		const simulateArtifact = (
+			result.details as {
+				artifacts?: { simulate?: Record<string, unknown> };
+			}
+		).artifacts?.simulate;
+		expect(simulateArtifact?.riskEngine).toBe("health_factor");
+		expect(simulateArtifact?.riskBand).toBe("warning");
+		expect(simulateArtifact?.healthFactor).toBeCloseTo(120 / 110, 4);
+		expect(String(simulateArtifact?.summaryLine ?? "")).toContain(
+			"riskEngine=health_factor",
+		);
+		expect(String(simulateArtifact?.summaryLine ?? "")).toContain("hf=1.0909");
+		expect(result.content[0]?.text).toContain("riskEngine=health_factor");
+		expect(result.content[0]?.text).toContain("hf=1.0909");
+	});
+
 	it("simulates burrow repay and reports no-debt status", async () => {
 		runtimeMocks.callNearRpc
 			.mockResolvedValueOnce({
@@ -3491,5 +3602,232 @@ describe("w3rt_run_near_workflow_v0", () => {
 				confirmMainnet: true,
 			}),
 		);
+	});
+
+	it("blocks burrow borrow execute on mainnet when risk requires confirmRisk", async () => {
+		const tool = getTool();
+		const analysis = await tool.execute("near-wf-burrow-risk-gate-analysis", {
+			runId: "wf-near-burrow-risk-gate",
+			runMode: "analysis",
+			intentType: "near.lend.burrow.borrow",
+			network: "mainnet",
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "100",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "830",
+				block_height: 830,
+				logs: [],
+				result: encodeJsonResult([
+					{
+						token_id: "wrap.near",
+						supplied: { shares: "0", balance: "0" },
+						borrowed: { shares: "0", balance: "0" },
+						config: {
+							extra_decimals: 0,
+							can_deposit: true,
+							can_use_as_collateral: true,
+							can_borrow: true,
+							can_withdraw: true,
+							volatility_ratio: 7000,
+						},
+					},
+					{
+						token_id: "usdc.tether-token.near",
+						supplied: { shares: "0", balance: "0" },
+						borrowed: { shares: "0", balance: "0" },
+						config: {
+							extra_decimals: 0,
+							can_deposit: true,
+							can_use_as_collateral: true,
+							can_borrow: true,
+							can_withdraw: true,
+							volatility_ratio: 9500,
+						},
+					},
+				]),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "831",
+				block_height: 831,
+				logs: [],
+				result: encodeJsonResult({
+					account_id: "alice.near",
+					supplied: [],
+					positions: {
+						REGULAR: {
+							collateral: [
+								{
+									token_id: "wrap.near",
+									balance: "100",
+									shares: "100",
+								},
+							],
+							borrowed: [],
+						},
+					},
+				}),
+			});
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "nep141:wrap.near",
+					decimals: 0,
+					blockchain: "near",
+					symbol: "wNEAR",
+					price: 1,
+					priceUpdatedAt: "2026-02-14T00:00:00.000Z",
+					contractAddress: "wrap.near",
+				},
+				{
+					assetId: "nep141:usdc.tether-token.near",
+					decimals: 0,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-02-14T00:00:00.000Z",
+					contractAddress: "usdc.tether-token.near",
+				},
+			],
+		});
+
+		await expect(
+			tool.execute("near-wf-burrow-risk-gate-exec", {
+				runId: "wf-near-burrow-risk-gate",
+				runMode: "execute",
+				network: "mainnet",
+				confirmMainnet: true,
+				confirmToken: token,
+			}),
+		).rejects.toThrow(/Pass confirmRisk=true to proceed/);
+		expect(executeMocks.borrowBurrowExecute).not.toHaveBeenCalled();
+	});
+
+	it("allows burrow borrow execute with confirmRisk and records riskCheck artifact", async () => {
+		const tool = getTool();
+		const analysis = await tool.execute("near-wf-burrow-risk-ok-analysis", {
+			runId: "wf-near-burrow-risk-ok",
+			runMode: "analysis",
+			intentType: "near.lend.burrow.borrow",
+			network: "mainnet",
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "100",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "832",
+				block_height: 832,
+				logs: [],
+				result: encodeJsonResult([
+					{
+						token_id: "wrap.near",
+						supplied: { shares: "0", balance: "0" },
+						borrowed: { shares: "0", balance: "0" },
+						config: {
+							extra_decimals: 0,
+							can_deposit: true,
+							can_use_as_collateral: true,
+							can_borrow: true,
+							can_withdraw: true,
+							volatility_ratio: 7000,
+						},
+					},
+					{
+						token_id: "usdc.tether-token.near",
+						supplied: { shares: "0", balance: "0" },
+						borrowed: { shares: "0", balance: "0" },
+						config: {
+							extra_decimals: 0,
+							can_deposit: true,
+							can_use_as_collateral: true,
+							can_borrow: true,
+							can_withdraw: true,
+							volatility_ratio: 9500,
+						},
+					},
+				]),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "833",
+				block_height: 833,
+				logs: [],
+				result: encodeJsonResult({
+					account_id: "alice.near",
+					supplied: [],
+					positions: {
+						REGULAR: {
+							collateral: [
+								{
+									token_id: "wrap.near",
+									balance: "100",
+									shares: "100",
+								},
+							],
+							borrowed: [],
+						},
+					},
+				}),
+			});
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "nep141:wrap.near",
+					decimals: 0,
+					blockchain: "near",
+					symbol: "wNEAR",
+					price: 1,
+					priceUpdatedAt: "2026-02-14T00:00:00.000Z",
+					contractAddress: "wrap.near",
+				},
+				{
+					assetId: "nep141:usdc.tether-token.near",
+					decimals: 0,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-02-14T00:00:00.000Z",
+					contractAddress: "usdc.tether-token.near",
+				},
+			],
+		});
+
+		const result = await tool.execute("near-wf-burrow-risk-ok-exec", {
+			runId: "wf-near-burrow-risk-ok",
+			runMode: "execute",
+			network: "mainnet",
+			confirmMainnet: true,
+			confirmToken: token,
+			confirmRisk: true,
+		});
+
+		expect(executeMocks.borrowBurrowExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				tokenId: "usdc.tether-token.near",
+				amountRaw: "100",
+				confirmMainnet: true,
+			}),
+		);
+		const executeArtifact = (
+			result.details as {
+				artifacts?: {
+					execute?: {
+						riskCheck?: Record<string, unknown>;
+						summaryLine?: string;
+					};
+				};
+			}
+		).artifacts?.execute;
+		expect(executeArtifact?.riskCheck).toMatchObject({
+			riskBand: "critical",
+			riskEngine: "health_factor",
+			confirmRiskAccepted: true,
+		});
+		expect(result.content[0]?.text).toContain("risk=critical");
 	});
 });
