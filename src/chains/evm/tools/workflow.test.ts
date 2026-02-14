@@ -301,6 +301,24 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		expect(executeMocks.placeOrderExecute).toHaveBeenCalledTimes(1);
 	});
 
+	it("infers execute runMode from '继续执行' and reuses latest session", async () => {
+		const tool = getTool();
+		const simulated = await tool.execute("wf2-auto-exec-continue", {
+			runId: "wf-evm-2-auto-exec-continue",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 12,
+			side: "up",
+		});
+		const details = simulated.details as { confirmToken: string };
+		const executed = await tool.execute("wf2-auto-exec-continue", {
+			intentText: `继续执行刚才这笔，confirmToken=${details.confirmToken}`,
+			confirmMainnet: true,
+		});
+		expect(executed.content[0]?.text).toContain("Workflow executed");
+		expect(executeMocks.placeOrderExecute).toHaveBeenCalledTimes(1);
+	});
+
 	it("simulates trade with stale requote preview", async () => {
 		const tool = getTool();
 		const result = await tool.execute("wf4-requote-sim", {

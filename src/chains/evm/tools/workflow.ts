@@ -204,7 +204,7 @@ function parseSideHint(text: string): "up" | "down" | undefined {
 function parseRunModeHint(text?: string): WorkflowRunMode | undefined {
 	if (!text?.trim()) return undefined;
 	const hasExecute =
-		/(确认主网执行|确认执行|直接执行|立即执行|现在执行|马上执行|execute|submit|live\s+order|real\s+order)/i.test(
+		/(确认主网执行|确认执行|继续执行|直接执行|立即执行|现在执行|马上执行|execute|submit|live\s+order|real\s+order)/i.test(
 			text,
 		);
 	const hasSimulate =
