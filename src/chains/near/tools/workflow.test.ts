@@ -792,6 +792,32 @@ describe("w3rt_run_near_workflow_v0", () => {
 		);
 	});
 
+	it("accepts loose confirm token text and case-insensitive token", async () => {
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-5d-sim", {
+			runId: "wf-near-05d",
+			runMode: "simulate",
+			intentType: "near.transfer.near",
+			network: "mainnet",
+			toAccountId: "bob.near",
+			amountYoctoNear: "1000",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		await tool.execute("near-wf-5d-exec", {
+			runMode: "execute",
+			intentText: `继续执行刚才这笔，确认主网执行，${token.toLowerCase()}`,
+		});
+
+		expect(executeMocks.transferNearExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				toAccountId: "bob.near",
+				amountYoctoNear: "1000",
+				confirmMainnet: true,
+			}),
+		);
+	});
+
 	it("simulates ref swap and returns quote artifact", async () => {
 		runtimeMocks.callNearRpc
 			.mockResolvedValueOnce({

@@ -472,6 +472,18 @@ function createConfirmToken(params: {
 	return `NEAR-${digest}`;
 }
 
+function normalizeConfirmTokenValue(
+	value: string | undefined,
+): string | undefined {
+	if (!value) return undefined;
+	const normalized = value.trim();
+	if (!normalized) return undefined;
+	if (/^near-[a-z0-9]+$/i.test(normalized)) {
+		return normalized.toUpperCase();
+	}
+	return normalized;
+}
+
 function parseOptionalPoolId(
 	value: number | string | undefined,
 	fieldName: string,
@@ -1162,6 +1174,7 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	const confirmTokenMatch = text.match(
 		/(?:confirmtoken|confirm token|确认令牌|确认码)\s*[:：]?\s*([a-z0-9_-]{8,})/i,
 	);
+	const confirmTokenLooseMatch = text.match(/\b(near-[a-z0-9]{8,})\b/i);
 	const amountARawMatch = text.match(
 		/(?:amounta[_\s-]*raw|amountaraw|rawa)\s*[:：]?\s*(\d+)/i,
 	);
@@ -1382,7 +1395,12 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (txHashMatch?.[1]) hints.txHash = txHashMatch[1];
 	if (!hints.txHash && txHashLooseMatch?.[1])
 		hints.txHash = txHashLooseMatch[1];
-	if (confirmTokenMatch?.[1]) hints.confirmToken = confirmTokenMatch[1];
+	if (confirmTokenMatch?.[1]) {
+		hints.confirmToken = normalizeConfirmTokenValue(confirmTokenMatch[1]);
+	}
+	if (!hints.confirmToken && confirmTokenLooseMatch?.[1]) {
+		hints.confirmToken = normalizeConfirmTokenValue(confirmTokenLooseMatch[1]);
+	}
 	if (wantsNoWaitForFinalStatus) {
 		hints.waitForFinalStatus = false;
 	} else if (wantsWaitForFinalStatus) {
@@ -4355,15 +4373,23 @@ export function createNearWorkflowTools() {
 					typeof params.confirmMainnet === "boolean"
 						? params.confirmMainnet
 						: hints.confirmMainnet;
-				const providedConfirmToken =
+				const providedConfirmTokenRaw =
 					typeof params.confirmToken === "string" && params.confirmToken.trim()
 						? params.confirmToken.trim()
 						: typeof hints.confirmToken === "string" &&
 								hints.confirmToken.trim()
 							? hints.confirmToken.trim()
 							: params.confirmToken;
+				const providedConfirmToken =
+					typeof providedConfirmTokenRaw === "string"
+						? normalizeConfirmTokenValue(providedConfirmTokenRaw)
+						: providedConfirmTokenRaw;
+				const expectedConfirmToken =
+					typeof confirmToken === "string"
+						? normalizeConfirmTokenValue(confirmToken)
+						: confirmToken;
 				assertMainnetExecutionConfirmed(network, effectiveConfirmMainnet);
-				if (approvalRequired && providedConfirmToken !== confirmToken) {
+				if (approvalRequired && providedConfirmToken !== expectedConfirmToken) {
 					throw new Error(
 						`Invalid confirmToken for runId=${runId}. expected=${confirmToken} provided=${providedConfirmToken ?? "null"}.`,
 					);
@@ -4726,7 +4752,8 @@ export function createNearWorkflowTools() {
 						approvalRequired,
 						confirmToken,
 						confirmTokenMatched:
-							!approvalRequired || providedConfirmToken === confirmToken,
+							!approvalRequired ||
+							providedConfirmToken === expectedConfirmToken,
 						artifacts: {
 							execute: executeArtifact,
 						},
