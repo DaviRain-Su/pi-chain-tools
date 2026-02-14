@@ -456,6 +456,22 @@ type RefPoolCandidateSummary = RefPoolPairCandidate;
 type WorkflowTool = ReturnType<typeof createNearExecuteTools>[number];
 type WorkflowComposeTool = ReturnType<typeof createNearComposeTools>[number];
 
+type NearIntentsOutcomeCategory =
+	| "success"
+	| "pending"
+	| "failed"
+	| "refunded"
+	| "incomplete_deposit"
+	| "unknown";
+
+type NearIntentsOutcomeSummary = {
+	category: NearIntentsOutcomeCategory;
+	sourceStatus: string | null;
+	reasonCode: string | null;
+	reason: string | null;
+	remediation: string[];
+};
+
 const WORKFLOW_SESSION_BY_RUN_ID = new Map<string, WorkflowSessionRecord>();
 let latestWorkflowSession: WorkflowSessionRecord | null = null;
 const DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS = 1000;
@@ -1077,8 +1093,10 @@ function isNearLikeTokenInput(tokenInput: string): boolean {
 function resolveBurrowActionAmountRaw(params: {
 	intentType: NearWorkflowIntent["type"];
 	tokenInput: string;
+	network?: string;
 	valueRaw?: string;
 	valueNear?: string | number;
+	valueUi?: string | number;
 }): string {
 	if (typeof params.valueRaw === "string" && params.valueRaw.trim()) {
 		return parseBurrowActionAmountRaw(params.valueRaw, "amountRaw");
@@ -1089,8 +1107,34 @@ function resolveBurrowActionAmountRaw(params: {
 			"amountNear",
 		);
 	}
+	if (params.valueUi != null) {
+		const uiValue =
+			typeof params.valueUi === "number"
+				? params.valueUi.toString()
+				: params.valueUi.trim();
+		if (!uiValue) {
+			throw new Error(`${params.intentType} amount is empty`);
+		}
+		if (isNearLikeTokenInput(params.tokenInput)) {
+			return parseBurrowActionAmountRaw(
+				toYoctoNear(uiValue).toString(),
+				"amountIn",
+			);
+		}
+		const decimals = getRefTokenDecimalsHint({
+			network: params.network,
+			tokenIdOrSymbol: params.tokenInput,
+		});
+		if (decimals == null) {
+			throw new Error(
+				`Cannot infer decimals for ${params.tokenInput}. Provide amountRaw.`,
+			);
+		}
+		const rawAmount = parseScaledDecimalToRaw(uiValue, decimals, "amountIn");
+		return parseBurrowActionAmountRaw(rawAmount, "amountIn");
+	}
 	throw new Error(
-		`${params.intentType} requires amountRaw (or provide amountNear for NEAR/wNEAR).`,
+		`${params.intentType} requires amountRaw (or provide amountNear/amountIn).`,
 	);
 }
 
@@ -1469,11 +1513,10 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 			return pair.token.toLowerCase() === hints.tokenId.toLowerCase();
 		});
 		if (amountTokenPair) {
-			if (/^\d+$/.test(amountTokenPair.amount)) {
-				hints.amountRaw = amountTokenPair.amount;
-				hints.amountInRaw = amountTokenPair.amount;
-			} else if (isNearLikeTokenInput(amountTokenPair.token)) {
+			if (isNearLikeTokenInput(amountTokenPair.token)) {
 				hints.amountNear = amountTokenPair.amount;
+			} else {
+				hints.amountInUi = amountTokenPair.amount;
 			}
 		}
 	}
@@ -1851,16 +1894,18 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 		const amountRaw = resolveBurrowActionAmountRaw({
 			intentType,
 			tokenInput,
+			network: params.network,
 			valueRaw:
 				params.amountRaw ??
 				params.amountInRaw ??
 				hints.amountRaw ??
 				hints.amountInRaw,
-			valueNear:
-				params.amountNear ??
+			valueNear: params.amountNear ?? hints.amountNear,
+			valueUi:
 				params.amountIn ??
-				hints.amountNear ??
-				hints.amountInUi,
+				hints.amountInUi ??
+				params.amountNear ??
+				hints.amountNear,
 		});
 		return {
 			type: "near.lend.burrow.supply",
@@ -1900,16 +1945,18 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 		const amountRaw = resolveBurrowActionAmountRaw({
 			intentType,
 			tokenInput,
+			network: params.network,
 			valueRaw:
 				params.amountRaw ??
 				params.amountInRaw ??
 				hints.amountRaw ??
 				hints.amountInRaw,
-			valueNear:
-				params.amountNear ??
+			valueNear: params.amountNear ?? hints.amountNear,
+			valueUi:
 				params.amountIn ??
-				hints.amountNear ??
-				hints.amountInUi,
+				hints.amountInUi ??
+				params.amountNear ??
+				hints.amountNear,
 		});
 		return {
 			type: "near.lend.burrow.borrow",
@@ -1950,16 +1997,18 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 		const amountRaw = resolveBurrowActionAmountRaw({
 			intentType,
 			tokenInput,
+			network: params.network,
 			valueRaw:
 				params.amountRaw ??
 				params.amountInRaw ??
 				hints.amountRaw ??
 				hints.amountInRaw,
-			valueNear:
-				params.amountNear ??
+			valueNear: params.amountNear ?? hints.amountNear,
+			valueUi:
 				params.amountIn ??
-				hints.amountNear ??
-				hints.amountInUi,
+				hints.amountInUi ??
+				params.amountNear ??
+				hints.amountNear,
 		});
 		return {
 			type: "near.lend.burrow.repay",
@@ -1998,16 +2047,18 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 		const amountRaw = resolveBurrowActionAmountRaw({
 			intentType,
 			tokenInput,
+			network: params.network,
 			valueRaw:
 				params.amountRaw ??
 				params.amountInRaw ??
 				hints.amountRaw ??
 				hints.amountInRaw,
-			valueNear:
-				params.amountNear ??
+			valueNear: params.amountNear ?? hints.amountNear,
+			valueUi:
 				params.amountIn ??
-				hints.amountNear ??
-				hints.amountInUi,
+				hints.amountInUi ??
+				params.amountNear ??
+				hints.amountNear,
 		});
 		const recipientInput =
 			params.recipientId ??
@@ -4567,6 +4618,158 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return Boolean(value) && typeof value === "object";
 }
 
+function normalizeIntentsStatusValue(value: unknown): string | null {
+	if (typeof value !== "string" || !value.trim()) return null;
+	return value.trim().toUpperCase();
+}
+
+function summarizeIntentsOutcome(
+	executeArtifact: unknown,
+): NearIntentsOutcomeSummary | null {
+	if (!isObjectRecord(executeArtifact)) return null;
+	const submitStatus = normalizeIntentsStatusValue(executeArtifact.status);
+	const statusTracking = isObjectRecord(executeArtifact.statusTracking)
+		? executeArtifact.statusTracking
+		: null;
+	const latestStatusNode =
+		statusTracking && isObjectRecord(statusTracking.latestStatus)
+			? statusTracking.latestStatus
+			: null;
+	const trackedStatus = normalizeIntentsStatusValue(
+		latestStatusNode?.status ?? null,
+	);
+	const sourceStatus = trackedStatus ?? submitStatus;
+	const timedOut = statusTracking?.timedOut === true;
+	const trackingLastError =
+		typeof statusTracking?.lastError === "string" &&
+		statusTracking.lastError.trim()
+			? statusTracking.lastError.trim()
+			: null;
+	const trackingHistory = Array.isArray(statusTracking?.history)
+		? statusTracking.history.filter((entry) => isObjectRecord(entry))
+		: [];
+	const historyStatuses = trackingHistory
+		.map((entry) => normalizeIntentsStatusValue(entry.status))
+		.filter((status): status is string => status != null);
+	const allHistoryNotFound =
+		historyStatuses.length > 0 &&
+		historyStatuses.every((status) => status === "NOT_FOUND");
+
+	const latestSwapDetails =
+		latestStatusNode && isObjectRecord(latestStatusNode.swapDetails)
+			? latestStatusNode.swapDetails
+			: null;
+	const refundReason =
+		typeof latestSwapDetails?.refundReason === "string" &&
+		latestSwapDetails.refundReason.trim()
+			? latestSwapDetails.refundReason.trim()
+			: null;
+
+	const anyInputWithdrawals = isObjectRecord(
+		executeArtifact.anyInputWithdrawals,
+	)
+		? executeArtifact.anyInputWithdrawals
+		: null;
+	const anyInputStatus = normalizeIntentsStatusValue(
+		anyInputWithdrawals?.status ?? null,
+	);
+	const anyInputError =
+		typeof anyInputWithdrawals?.error === "string" &&
+		anyInputWithdrawals.error.trim()
+			? anyInputWithdrawals.error.trim()
+			: null;
+
+	let category: NearIntentsOutcomeCategory = "unknown";
+	let reasonCode: string | null = null;
+	let reason: string | null = null;
+	const remediation: string[] = [];
+
+	if (sourceStatus === "SUCCESS") {
+		category = "success";
+		reasonCode = "SUCCESS";
+	} else if (
+		sourceStatus === "KNOWN_DEPOSIT_TX" ||
+		sourceStatus === "PENDING_DEPOSIT" ||
+		sourceStatus === "PROCESSING"
+	) {
+		category = "pending";
+		reasonCode = sourceStatus;
+	} else if (sourceStatus === "FAILED") {
+		category = "failed";
+		reasonCode = "FAILED";
+		reason =
+			refundReason ??
+			trackingLastError ??
+			"Execution failed on Intents backend.";
+	} else if (sourceStatus === "REFUNDED") {
+		category = "refunded";
+		reasonCode = "REFUNDED";
+		reason = refundReason ?? "Swap was refunded by Intents.";
+	} else if (sourceStatus === "INCOMPLETE_DEPOSIT") {
+		category = "incomplete_deposit";
+		reasonCode = "INCOMPLETE_DEPOSIT";
+		reason =
+			refundReason ??
+			"Deposit is incomplete (amount/address/memo mismatch or insufficient deposit).";
+	} else if (timedOut) {
+		category = "pending";
+		reasonCode = allHistoryNotFound ? "NOT_INDEXED" : "POLL_TIMEOUT";
+		reason = allHistoryNotFound
+			? "Deposit not indexed yet on Intents status API."
+			: (trackingLastError ??
+				"Status polling timed out before terminal status.");
+	} else if (submitStatus) {
+		category = "pending";
+		reasonCode = submitStatus;
+	}
+
+	if (anyInputStatus === "PENDING" && category === "success") {
+		category = "pending";
+		reasonCode = "ANY_INPUT_WITHDRAWAL_PENDING";
+		reason =
+			"Swap succeeded but ANY_INPUT withdrawal record is not available yet.";
+	}
+	if (anyInputStatus === "ERROR" && anyInputError) {
+		if (category === "success") {
+			category = "pending";
+			reasonCode = "ANY_INPUT_WITHDRAWAL_QUERY_ERROR";
+		}
+		reason = reason ?? anyInputError;
+	}
+
+	if (category === "success") {
+		remediation.push(
+			"No action required. Keep correlationId for future traceability.",
+		);
+	} else if (category === "pending") {
+		remediation.push(
+			"Use near_getIntentsStatus with correlationId or depositAddress/depositMemo to continue tracking.",
+		);
+		remediation.push(
+			"If still pending for several minutes, verify txHash + depositAddress/memo exactly match simulate output, then resubmit.",
+		);
+	} else if (category === "failed" || category === "refunded") {
+		remediation.push(
+			"Re-run simulate for latest quote/slippage, then submit a fresh deposit transaction.",
+		);
+		remediation.push(
+			"Verify depositAddress/depositMemo/amount exactly match the quote to avoid backend rejection.",
+		);
+	} else if (category === "incomplete_deposit") {
+		remediation.push(
+			"Check deposit transaction amount and memo/address against simulate output, then resubmit with correct values.",
+		);
+	}
+
+	return {
+		category,
+		sourceStatus,
+		reasonCode,
+		reason,
+		remediation,
+	};
+}
+
 function buildIntentsExecuteReadableText(executeArtifact: unknown): string {
 	const lines = ["Workflow executed: near.swap.intents"];
 	if (!isObjectRecord(executeArtifact)) {
@@ -4686,6 +4889,21 @@ function buildIntentsExecuteReadableText(executeArtifact: unknown): string {
 			}
 		}
 	}
+	const outcome = summarizeIntentsOutcome(executeArtifact);
+	if (outcome) {
+		lines.push(
+			`Outcome: ${outcome.category}${outcome.sourceStatus ? ` (status ${outcome.sourceStatus})` : ""}`,
+		);
+		if (outcome.reasonCode) {
+			lines.push(`Outcome code: ${outcome.reasonCode}`);
+		}
+		if (outcome.reason) {
+			lines.push(`Reason: ${outcome.reason}`);
+		}
+		for (const nextStep of outcome.remediation.slice(0, 2)) {
+			lines.push(`Next: ${nextStep}`);
+		}
+	}
 	return lines.join("\n");
 }
 
@@ -4743,6 +4961,12 @@ function buildIntentsExecuteOneLineSummary(executeArtifact: unknown): string {
 			? withdrawals.withdrawals.length
 			: 0;
 		parts.push(`withdrawals=${status}:${count}`);
+	}
+	const outcome = summarizeIntentsOutcome(executeArtifact);
+	if (outcome && outcome.category !== "success") {
+		parts.push(
+			`outcome=${outcome.category}${outcome.reasonCode ? `:${outcome.reasonCode}` : ""}`,
+		);
 	}
 	return parts.join(" ");
 }
@@ -6074,8 +6298,10 @@ export function createNearWorkflowTools() {
 													}
 												: null,
 								};
+								const intentsOutcome = summarizeIntentsOutcome(baseArtifact);
 								return {
 									...baseArtifact,
+									intentsOutcome,
 									summaryLine: buildIntentsExecuteOneLineSummary(baseArtifact),
 								};
 							})()

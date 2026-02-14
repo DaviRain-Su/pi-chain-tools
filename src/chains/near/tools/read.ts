@@ -64,6 +64,11 @@ type NearPortfolioFailure = {
 	error: string;
 };
 
+type NearPortfolioDiscoveryFailure = {
+	source: "ref_deposits" | "burrow_positions";
+	error: string;
+};
+
 type NearRefDepositAsset = {
 	tokenId: string;
 	symbol: string;
@@ -524,6 +529,116 @@ function normalizeFtContractIds(values: string[] | undefined): string[] {
 
 function dedupeStrings(values: string[]): string[] {
 	return [...new Set(values)];
+}
+
+function collectBurrowTokenIdsFromSnapshot(
+	snapshot: BurrowAccountAllPositionsView | null,
+): string[] {
+	if (!snapshot) return [];
+	const tokenIds: string[] = [];
+	const pushFromAssetNode = (node: unknown): void => {
+		const normalized = normalizeBurrowAccountAssetView(node);
+		if (!normalized) return;
+		const tokenId = normalized.token_id.trim().toLowerCase();
+		if (!tokenId) return;
+		try {
+			const balance = parseUnsignedBigInt(
+				normalized.balance,
+				`burrow.${tokenId}.balance`,
+			);
+			if (balance > 0n) tokenIds.push(tokenId);
+		} catch {
+			// Ignore malformed balance nodes.
+		}
+	};
+	for (const asset of Array.isArray(snapshot.supplied)
+		? snapshot.supplied
+		: []) {
+		pushFromAssetNode(asset);
+	}
+	const positions = snapshot.positions ?? {};
+	for (const positionNode of Object.values(positions)) {
+		const normalized = normalizeBurrowPositionNode(positionNode);
+		if (!normalized) continue;
+		for (const asset of normalized.collateral ?? []) {
+			pushFromAssetNode(asset);
+		}
+		for (const asset of normalized.borrowed ?? []) {
+			pushFromAssetNode(asset);
+		}
+	}
+	return dedupeStrings(tokenIds);
+}
+
+async function discoverPortfolioFtContracts(params: {
+	accountId: string;
+	network: "mainnet" | "testnet";
+	rpcUrl?: string;
+}): Promise<{
+	tokenIds: string[];
+	discoveredBySource: {
+		refDeposits: string[];
+		burrowPositions: string[];
+	};
+	failures: NearPortfolioDiscoveryFailure[];
+}> {
+	const discoveredBySource = {
+		refDeposits: [] as string[],
+		burrowPositions: [] as string[],
+	};
+	const failures: NearPortfolioDiscoveryFailure[] = [];
+	try {
+		const refContractId = getRefContractId(params.network);
+		const deposits = await queryRefDeposits({
+			accountId: params.accountId,
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			refContractId,
+		});
+		discoveredBySource.refDeposits = dedupeStrings(
+			Object.entries(deposits)
+				.filter(([tokenId, rawAmount]) => {
+					if (!tokenId) return false;
+					try {
+						return parseUnsignedBigInt(rawAmount, `deposits[${tokenId}]`) > 0n;
+					} catch {
+						return false;
+					}
+				})
+				.map(([tokenId]) => tokenId.toLowerCase()),
+		);
+	} catch (error) {
+		failures.push({
+			source: "ref_deposits",
+			error: error instanceof Error ? error.message : String(error),
+		});
+	}
+
+	try {
+		const burrowContractId = getBurrowContractId(params.network);
+		const snapshot = await fetchBurrowAccountAllPositions({
+			accountId: params.accountId,
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			burrowContractId,
+		});
+		discoveredBySource.burrowPositions =
+			collectBurrowTokenIdsFromSnapshot(snapshot);
+	} catch (error) {
+		failures.push({
+			source: "burrow_positions",
+			error: error instanceof Error ? error.message : String(error),
+		});
+	}
+
+	return {
+		tokenIds: dedupeStrings([
+			...discoveredBySource.refDeposits,
+			...discoveredBySource.burrowPositions,
+		]),
+		discoveredBySource,
+		failures,
+	};
 }
 
 function resolvePortfolioFtContracts(params: {
@@ -1829,6 +1944,12 @@ export function createNearReadTools() {
 						description: "Include zero FT balances (default false).",
 					}),
 				),
+				autoDiscoverDefiTokens: Type.Optional(
+					Type.Boolean({
+						description:
+							"Auto-discover additional FT contracts from Ref deposits and Burrow positions (default true when ftContractIds is omitted).",
+					}),
+				),
 				network: nearNetworkSchema(),
 				rpcUrl: Type.Optional(
 					Type.String({ description: "Override NEAR JSON-RPC endpoint URL" }),
@@ -1839,10 +1960,33 @@ export function createNearReadTools() {
 				const accountId = resolveNearAccountId(params.accountId, network);
 				const endpoint = getNearRpcEndpoint(network, params.rpcUrl);
 				const includeZero = params.includeZeroBalances === true;
-				const ftContractIds = resolvePortfolioFtContracts({
+				const baseFtContractIds = resolvePortfolioFtContracts({
 					network,
 					ftContractIds: params.ftContractIds,
 				});
+				const autoDiscoverDefiTokens =
+					typeof params.autoDiscoverDefiTokens === "boolean"
+						? params.autoDiscoverDefiTokens
+						: !Array.isArray(params.ftContractIds) ||
+							params.ftContractIds.length === 0;
+				const discovered = autoDiscoverDefiTokens
+					? await discoverPortfolioFtContracts({
+							accountId,
+							network,
+							rpcUrl: params.rpcUrl,
+						})
+					: {
+							tokenIds: [],
+							discoveredBySource: {
+								refDeposits: [] as string[],
+								burrowPositions: [] as string[],
+							},
+							failures: [] as NearPortfolioDiscoveryFailure[],
+						};
+				const ftContractIds = dedupeStrings([
+					...baseFtContractIds,
+					...discovered.tokenIds,
+				]);
 
 				const account = await queryViewAccount({
 					accountId,
@@ -1919,6 +2063,11 @@ export function createNearReadTools() {
 					`Portfolio: ${assets.length} assets (account ${accountId})`,
 					`NEAR: ${formatNearAmount(totalYoctoNear, 8)} (available ${formatNearAmount(availableYoctoNear, 8)}, locked ${formatNearAmount(lockedYoctoNear, 8)})`,
 				];
+				if (autoDiscoverDefiTokens) {
+					lines.push(
+						`Auto-discovered DeFi tokens: ${discovered.tokenIds.length} (Ref=${discovered.discoveredBySource.refDeposits.length}, Burrow=${discovered.discoveredBySource.burrowPositions.length})`,
+					);
+				}
 				for (const asset of assets) {
 					if (asset.kind === "native") continue;
 					const amountText =
@@ -1934,6 +2083,11 @@ export function createNearReadTools() {
 						`Skipped ${failures.length} token(s) due to query errors.`,
 					);
 				}
+				if (discovered.failures.length > 0) {
+					lines.push(
+						`Discovery skipped for ${discovered.failures.length} source(s) due to query errors.`,
+					);
+				}
 
 				return {
 					content: [{ type: "text", text: lines.join("\n") }],
@@ -1946,6 +2100,11 @@ export function createNearReadTools() {
 						network,
 						rpcEndpoint: endpoint,
 						ftContractsQueried: ftContractIds,
+						baseFtContracts: baseFtContractIds,
+						autoDiscoverDefiTokens,
+						discoveredFtContracts: discovered.tokenIds,
+						discoveredBySource: discovered.discoveredBySource,
+						discoveryFailures: discovered.failures,
 						includeZeroBalances: includeZero,
 						totalYoctoNear: totalYoctoNear.toString(),
 						availableYoctoNear: availableYoctoNear.toString(),

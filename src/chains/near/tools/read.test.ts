@@ -361,6 +361,7 @@ describe("near_getPortfolio", () => {
 		expect(result.details).toMatchObject({
 			accountId: "alice.near",
 			network: "mainnet",
+			autoDiscoverDefiTokens: false,
 			ftContractsQueried: ["usdc.fakes.near", "usdt.tether-token.near"],
 			assets: [
 				{
@@ -374,6 +375,137 @@ describe("near_getPortfolio", () => {
 					rawAmount: "1234500",
 					uiAmount: "1.2345",
 				},
+			],
+		});
+	});
+
+	it("auto-discovers DeFi tokens from Ref/Burrow into portfolio query", async () => {
+		burrowMocks.fetchBurrowAccountAllPositions.mockResolvedValue({
+			account_id: "alice.near",
+			supplied: [
+				{
+					token_id: "usdt.tether-token.near",
+					balance: "111",
+					shares: "100",
+				},
+			],
+			positions: {},
+		});
+		runtimeMocks.callNearRpc.mockImplementation(async ({ params }) => {
+			if (!params || typeof params !== "object") {
+				throw new Error("invalid params");
+			}
+			if (params.request_type === "view_account") {
+				return {
+					amount: "1000000000000000000000000",
+					block_hash: "4451",
+					block_height: 911,
+					code_hash: "11111111111111111111111111111111",
+					locked: "0",
+					storage_paid_at: 0,
+					storage_usage: 381,
+				};
+			}
+			if (params.method_name === "get_deposits") {
+				return {
+					block_hash: "4452",
+					block_height: 912,
+					logs: [],
+					result: encodeJsonResult({
+						aurora: "500",
+					}),
+				};
+			}
+			if (params.method_name === "ft_balance_of") {
+				if (params.account_id === "usdc.fakes.near") {
+					return {
+						block_hash: "4453",
+						block_height: 913,
+						logs: [],
+						result: encodeJsonResult("123"),
+					};
+				}
+				if (params.account_id === "aurora") {
+					return {
+						block_hash: "4454",
+						block_height: 914,
+						logs: [],
+						result: encodeJsonResult("500"),
+					};
+				}
+				if (params.account_id === "usdt.tether-token.near") {
+					return {
+						block_hash: "4455",
+						block_height: 915,
+						logs: [],
+						result: encodeJsonResult("111"),
+					};
+				}
+			}
+			if (params.method_name === "ft_metadata") {
+				if (params.account_id === "usdc.fakes.near") {
+					return {
+						block_hash: "4456",
+						block_height: 916,
+						logs: [],
+						result: encodeJsonResult({
+							decimals: 6,
+							symbol: "USDC",
+						}),
+					};
+				}
+				if (params.account_id === "aurora") {
+					return {
+						block_hash: "4457",
+						block_height: 917,
+						logs: [],
+						result: encodeJsonResult({
+							decimals: 18,
+							symbol: "AURORA",
+						}),
+					};
+				}
+				if (params.account_id === "usdt.tether-token.near") {
+					return {
+						block_hash: "4458",
+						block_height: 918,
+						logs: [],
+						result: encodeJsonResult({
+							decimals: 6,
+							symbol: "USDT",
+						}),
+					};
+				}
+			}
+			throw new Error(
+				`unexpected method ${String((params as { method_name?: unknown }).method_name)}`,
+			);
+		});
+		runtimeMocks.formatNearAmount.mockReturnValue("1");
+		runtimeMocks.formatTokenAmount.mockImplementation((value: string) => value);
+
+		const tool = getTool("near_getPortfolio");
+		const result = await tool.execute("near-read-portfolio-2", {
+			accountId: "alice.near",
+			network: "mainnet",
+			ftContractIds: ["usdc.fakes.near"],
+			autoDiscoverDefiTokens: true,
+		});
+
+		expect(result.content[0]?.text).toContain("Auto-discovered DeFi tokens");
+		expect(result.details).toMatchObject({
+			accountId: "alice.near",
+			autoDiscoverDefiTokens: true,
+			baseFtContracts: ["usdc.fakes.near"],
+			discoveredFtContracts: ["aurora", "usdt.tether-token.near"],
+			discoveredBySource: {
+				refDeposits: ["aurora"],
+				burrowPositions: ["usdt.tether-token.near"],
+			},
+			ftContractsQueried: [
+				"usdc.fakes.near",
+				"aurora",
+				"usdt.tether-token.near",
 			],
 		});
 	});

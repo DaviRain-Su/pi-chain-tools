@@ -1543,6 +1543,117 @@ describe("w3rt_run_near_workflow_v0", () => {
 		expect(result.content[0]?.text).toContain("Tracked status: SUCCESS");
 	});
 
+	it("classifies intents failed status with readable remediation", async () => {
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "near:wrap.near",
+					decimals: 24,
+					blockchain: "near",
+					symbol: "NEAR",
+					price: 4.2,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+				{
+					assetId: "near:usdc.tether-token.near",
+					decimals: 6,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+			],
+		});
+		mockFetchJsonOnce({
+			status: 201,
+			body: {
+				correlationId: "corr-sim-failed-1",
+				timestamp: "2026-02-13T00:00:00Z",
+				signature: "sig-failed-1",
+				quoteRequest: { dry: true },
+				quote: {
+					depositAddress: "0xnear-deposit-failed-1",
+					depositMemo: "memo-failed-1",
+					amountIn: "10000000000000000000000",
+					amountInFormatted: "0.01",
+					amountInUsd: "0.042",
+					minAmountIn: "10000000000000000000000",
+					amountOut: "41871",
+					amountOutFormatted: "0.041871",
+					amountOutUsd: "0.041871",
+					minAmountOut: "40000",
+					timeEstimate: 22,
+				},
+			},
+		});
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-8f-failed-sim", {
+			runId: "wf-near-08f-failed",
+			runMode: "simulate",
+			intentType: "near.swap.intents",
+			network: "mainnet",
+			originAsset: "NEAR",
+			destinationAsset: "USDC",
+			amountRaw: "10000000000000000000000",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		mockFetchJsonOnce({
+			status: 200,
+			body: {
+				correlationId: "corr-sim-failed-1",
+				status: "FAILED",
+				updatedAt: "2026-02-13T00:00:15Z",
+				quoteResponse: {
+					correlationId: "corr-sim-failed-1",
+					timestamp: "2026-02-13T00:00:00Z",
+					signature: "sig-failed-1",
+					quoteRequest: { dry: true },
+					quote: {
+						depositAddress: "0xnear-deposit-failed-1",
+						amountIn: "10000000000000000000000",
+						amountInFormatted: "0.01",
+						amountInUsd: "0.042",
+						minAmountIn: "10000000000000000000000",
+						amountOut: "41871",
+						amountOutFormatted: "0.041871",
+						amountOutUsd: "0.041871",
+						minAmountOut: "40000",
+						timeEstimate: 22,
+					},
+				},
+				swapDetails: {
+					refundReason: "slippage exceeded",
+				},
+			},
+		});
+		const result = await tool.execute("near-wf-8f-failed-exec", {
+			runId: "wf-near-08f-failed",
+			runMode: "execute",
+			confirmMainnet: true,
+			confirmToken: token,
+			txHash: "0xfeedbeef-failed-1",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.intents",
+			artifacts: {
+				execute: {
+					summaryLine: expect.stringContaining("outcome=failed:FAILED"),
+					intentsOutcome: {
+						category: "failed",
+						sourceStatus: "FAILED",
+						reasonCode: "FAILED",
+						reason: "slippage exceeded",
+					},
+				},
+			},
+		});
+		expect(result.content[0]?.text).toContain("Outcome: failed");
+		expect(result.content[0]?.text).toContain("Reason: slippage exceeded");
+		expect(result.content[0]?.text).toContain("Next:");
+	});
+
 	it("supports intents execute without status polling when disabled", async () => {
 		mockFetchJsonOnce({
 			status: 200,
@@ -2919,6 +3030,26 @@ describe("w3rt_run_near_workflow_v0", () => {
 				type: "near.lend.burrow.supply",
 				tokenId: "NEAR",
 				amountRaw: "1000",
+				asCollateral: true,
+			},
+		});
+	});
+
+	it("parses natural-language burrow supply ui amount for stablecoins", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-burrow-1b", {
+			runId: "wf-near-burrow-01b",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Burrow 存入 1 USDC，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lend.burrow.supply",
+			intent: {
+				type: "near.lend.burrow.supply",
+				tokenId: "USDC",
+				amountRaw: "1000000",
 				asCollateral: true,
 			},
 		});

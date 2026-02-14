@@ -85,6 +85,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `near_borrowBurrow` (Burrow `execute` borrow path, optional auto-withdraw borrowed amount to wallet)
 - `execute`: `near_repayBurrow` (Burrow repay via token `ft_transfer_call` + `OnlyRepay`)
 - `execute`: `near_withdrawBurrow` (Burrow `simple_withdraw`, supports recipient and raw->inner amount conversion by market `extra_decimals`)
+- `burrow NL amount parsing`: workflow now treats plain token amounts like `在 Burrow 存入 1 USDC` as UI amounts and auto-converts to raw by token decimals (explicit `amountRaw` still takes priority)
 - `execute`: `near_submitIntentsDeposit` (NEAR Intents `/v0/deposit/submit`, submit deposit `txHash` + `depositAddress`/`depositMemo`, mainnet safety gate)
 - `execute`: `near_broadcastSignedTransaction` (broadcast base64 signed NEAR tx via `broadcast_tx_commit`, returns `txHash`)
 - `execute`: `near_withdrawRefToken` (withdraw deposited token from Ref exchange back to wallet, optional full-balance withdraw)
@@ -95,6 +96,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `workflow execute summary`: NEAR workflow execute artifacts include `summaryLine` for concise one-line replay in PI/OpenClaw (all intents)
 - `intents execute summary`: `near.swap.intents` execute artifact now includes `summaryLine` for one-line natural-language replay in PI/OpenClaw
 - `intents execute tracking`: `near.swap.intents` execute now polls `/v0/status` by default after submit (until terminal status or timeout, and includes `correlationId` when available). Tunables: `waitForFinalStatus`, `statusPollIntervalMs`, `statusTimeoutMs`.
+- `intents failure attribution`: `near.swap.intents` execute now emits `intentsOutcome` (category/reason/remediation) and human-readable `Outcome/Reason/Next` lines for failed/refunded/incomplete/pending states.
 - `LP auto-selection UX`: when pair-based selection has multiple candidate pools, simulate returns concise alternatives (`poolCandidates`) and text summary (`alternatives=...`)
 - `LP follow-up execute`: after simulate, execute can reuse the session and switch pool by natural language (`继续执行，用第2个池子`) or structured `poolCandidateIndex`
 - `swap safety rails`: `slippageBps` is safety-limited (default max `1000` bps via `NEAR_SWAP_MAX_SLIPPAGE_BPS`), and custom `minAmountOutRaw` cannot be lower than quote-safe minimum
