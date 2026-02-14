@@ -81,6 +81,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `帮我分析 BTC 5m，建议买涨还是买跌`
 - `买 BTC 5分钟涨 20 USDC，先分析`
 - `买 BTC 5分钟涨 20 USDC，保守，先模拟`
+- `买 BTC 5分钟涨 20 USDC，更保守一点，先模拟`
 - `继续上一笔，先模拟`
 - `继续刚才这笔，确认主网执行，confirmToken EVM-XXXX`
 - `查一下我 BTC 5分钟的挂单`

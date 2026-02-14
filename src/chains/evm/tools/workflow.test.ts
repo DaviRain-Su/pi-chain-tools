@@ -859,6 +859,24 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		});
 	});
 
+	it("interprets relative risk profile language like 更保守一点", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5-risk-profile-relative", {
+			runId: "wf-evm-5-risk-profile-relative",
+			runMode: "simulate",
+			network: "polygon",
+			intentText: "买 BTC 5分钟涨 20 USDC，更保守一点，先模拟",
+		});
+		expect(result.content[0]?.text).toContain("Workflow simulated");
+		expect(result.details).toMatchObject({
+			intentType: "evm.polymarket.btc5m.trade",
+			intent: {
+				riskProfile: "conservative",
+				maxSpreadBps: 40,
+			},
+		});
+	});
+
 	it("keeps explicit guard values over risk profile defaults", async () => {
 		const tool = getTool();
 		const result = await tool.execute("wf5-risk-profile-override", {

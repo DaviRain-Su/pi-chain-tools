@@ -472,9 +472,18 @@ function parseRequoteMaxAttemptsHint(text?: string): number | undefined {
 
 function parseRiskProfileHint(text?: string): PolymarketRiskProfile | undefined {
 	if (!text?.trim()) return undefined;
-	if (/(保守|稳健|稳妥|低风险|谨慎|谨慎点)/i.test(text)) return "conservative";
-	if (/(激进|冒进|进攻|高风险|快进)/i.test(text)) return "aggressive";
-	if (/(平衡|中性|普通|标准|常规|均衡)/i.test(text)) return "balanced";
+	if (/(更|再|偏).{0,3}(保守|稳健|稳妥|低风险|谨慎点)/i.test(text))
+		return "conservative";
+	if (/(更|再|偏).{0,3}(激进|冒进|进攻|高风险|冒险)/i.test(text))
+		return "aggressive";
+	if (/(更|再|偏).{0,3}(平衡|中性|普通|标准|常规|均衡)/i.test(text))
+		return "balanced";
+	if (/(保守|稳健|稳妥|低风险|谨慎|谨慎点)/i.test(text))
+		return "conservative";
+	if (/(激进|冒进|进攻|高风险|快进)/i.test(text))
+		return "aggressive";
+	if (/(平衡|中性|普通|标准|常规|均衡)/i.test(text))
+		return "balanced";
 	return undefined;
 }
 
@@ -1088,6 +1097,18 @@ function buildTradeSummaryLine(params: {
 	}
 	if (params.intent.requoteMaxAttempts != null) {
 		parts.push(`requoteMaxAttempts=${params.intent.requoteMaxAttempts}`);
+	}
+	if (params.intent.maxSpreadBps != null) {
+		parts.push(`maxSpreadBps=${params.intent.maxSpreadBps}`);
+	}
+	if (params.intent.minDepthUsd != null) {
+		parts.push(`minDepthUsd=${params.intent.minDepthUsd}`);
+	}
+	if (params.intent.maxStakeUsd != null) {
+		parts.push(`maxStakeUsd=${params.intent.maxStakeUsd}`);
+	}
+	if (params.intent.minConfidence != null) {
+		parts.push(`minConfidence=${params.intent.minConfidence}`);
 	}
 	if (params.staleTargets != null) {
 		parts.push(`staleTargets=${params.staleTargets}`);
