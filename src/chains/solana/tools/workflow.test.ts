@@ -282,10 +282,21 @@ describe("w3rt_run_workflow_v0", () => {
 		expect(
 			(
 				result.details as {
-					artifacts?: { analysis?: { intent?: { type?: string } } };
+					artifacts?: {
+						analysis?: { intent?: { type?: string }; summaryLine?: string };
+					};
 				}
 			).artifacts?.analysis?.intent?.type,
 		).toBe("solana.transfer.sol");
+		expect(
+			(
+				result.details as {
+					artifacts?: {
+						analysis?: { intent?: { type?: string }; summaryLine?: string };
+					};
+				}
+			).artifacts?.analysis?.summaryLine,
+		).toContain("solana.transfer.sol analysis=ready");
 	});
 
 	it("parses transfer intentText and infers intentType", async () => {
@@ -414,6 +425,9 @@ describe("w3rt_run_workflow_v0", () => {
 				},
 				simulate: {
 					ok: true,
+					summaryLine: expect.stringContaining(
+						"solana.read.tokenBalance simulate=ok",
+					),
 					context: {
 						intentType: "solana.read.tokenBalance",
 						address,

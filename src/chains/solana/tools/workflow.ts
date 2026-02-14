@@ -967,6 +967,34 @@ function buildExecuteSummaryLine(params: {
 	return parts.join(" ");
 }
 
+function buildAnalysisSummaryLine(params: {
+	intentType: WorkflowIntentType;
+	approvalRequired: boolean;
+	confirmToken: string | null;
+}): string {
+	const parts = [params.intentType, "analysis=ready"];
+	if (params.approvalRequired) {
+		parts.push(`mainnetGuard=on confirmToken=${params.confirmToken ?? "N/A"}`);
+	}
+	return parts.join(" ");
+}
+
+function buildSimulationSummaryLine(params: {
+	intentType: WorkflowIntentType;
+	ok: boolean;
+	readOnly: boolean;
+	error: unknown;
+}): string {
+	const parts = [params.intentType, `simulate=${params.ok ? "ok" : "failed"}`];
+	if (params.readOnly) {
+		parts.push("readOnly=true");
+	}
+	if (!params.ok && params.error != null) {
+		parts.push("error=present");
+	}
+	return parts.join(" ");
+}
+
 function parsePositiveNumber(value: string): number | null {
 	const parsed = Number.parseFloat(value);
 	if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -9646,6 +9674,11 @@ export function createSolanaWorkflowTools() {
 					signer: signerPublicKey,
 					network,
 					runMode,
+					summaryLine: buildAnalysisSummaryLine({
+						intentType: intent.type,
+						approvalRequired,
+						confirmToken: approvalRequired ? confirmToken : null,
+					}),
 				};
 				const approvalArtifact = {
 					stage: "approval",
@@ -9699,6 +9732,12 @@ export function createSolanaWorkflowTools() {
 						unitsConsumed: null,
 						version: null,
 						context: readResult.details,
+						summaryLine: buildSimulationSummaryLine({
+							intentType: intent.type,
+							ok: true,
+							readOnly: true,
+							error: null,
+						}),
 					};
 					if (runMode === "simulate") {
 						return {
@@ -9783,6 +9822,12 @@ export function createSolanaWorkflowTools() {
 					unitsConsumed: prepared.simulation.unitsConsumed,
 					version: prepared.version,
 					context: prepared.context,
+					summaryLine: buildSimulationSummaryLine({
+						intentType: intent.type,
+						ok: prepared.simulation.ok,
+						readOnly: false,
+						error: prepared.simulation.err,
+					}),
 				};
 
 				if (runMode === "simulate") {

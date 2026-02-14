@@ -660,6 +660,7 @@ describe("w3rt_run_near_workflow_v0", () => {
 			artifacts: {
 				simulate: {
 					status: "success",
+					summaryLine: expect.stringContaining("near.transfer.near"),
 				},
 			},
 		});
@@ -689,6 +690,15 @@ describe("w3rt_run_near_workflow_v0", () => {
 			network: "mainnet",
 			toAccountId: "bob.near",
 			amountYoctoNear: "1000",
+		});
+		expect(analysis.details).toMatchObject({
+			artifacts: {
+				analysis: {
+					summaryLine: expect.stringContaining(
+						"near.transfer.near analysis=ready",
+					),
+				},
+			},
 		});
 		const token = (analysis.details as { confirmToken: string }).confirmToken;
 		const result = await tool.execute("near-wf-4-execute", {

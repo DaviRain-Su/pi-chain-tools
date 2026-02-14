@@ -35,6 +35,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - Meteora DLMM LP lifecycle compose/execute/workflow support (add/remove)
 - Meteora add-liquidity supports UI amount inputs (`totalXAmountUi`/`totalYAmountUi`) and natural-language x/y token amounts
 - Workflow can auto-resolve Orca/Meteora position ids for LP intents when the owner has a single matching position (fewer structured params needed)
+- workflow phase summary: Solana analysis/simulate/execute artifacts include `summaryLine` for concise one-line replay
 - workflow execute summary: Solana execute artifacts now include `summaryLine` for one-line replay (`intent + signature + confirmation/guard`)
 - Native stake operation tools: create+delegate/delegate/authorize/deactivate/withdraw
 - Workflow/read support for `solana.read.defiPositions` + `solana_getDefiPositions`
@@ -78,6 +79,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `near_addLiquidityRef` (Ref LP add-liquidity, includes optional auto register + token deposit to Ref exchange; supports auto pool selection by token pair when `poolId` is omitted)
 - `execute`: `near_removeLiquidityRef` (Ref LP remove-liquidity; supports auto pool selection by token pair when `poolId` is omitted, plus `autoWithdraw=true` to auto-withdraw pool tokens)
 - `workflow`: `w3rt_run_near_workflow_v0` (analysis/compose/simulate/execute + deterministic mainnet confirmToken; compose currently supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove` / `near.ref.withdraw`; full workflow intents include `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks; intents execute accepts either `txHash` or `signedTxBase64` and can auto-broadcast first; `swapType=ANY_INPUT` execute also attempts `/v0/any-input/withdrawals` and returns readable withdrawal artifacts)
+- `workflow phase summary`: NEAR workflow analysis/simulate/execute artifacts include `summaryLine` for concise one-line replay in PI/OpenClaw
 - `workflow execute summary`: NEAR workflow execute artifacts include `summaryLine` for concise one-line replay in PI/OpenClaw (all intents)
 - `intents execute summary`: `near.swap.intents` execute artifact now includes `summaryLine` for one-line natural-language replay in PI/OpenClaw
 - `intents execute tracking`: `near.swap.intents` execute now polls `/v0/status` by default after submit (until terminal status or timeout, and includes `correlationId` when available). Tunables: `waitForFinalStatus`, `statusPollIntervalMs`, `statusTimeoutMs`.
@@ -178,6 +180,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `workflow`: `w3rt_run_sui_stablelayer_workflow_v0` (analysis/simulate/execute for stable-layer mint/burn/claim with deterministic mainnet confirmToken)
 - `workflow`: `w3rt_run_sui_cetus_farms_workflow_v0` (analysis/simulate/execute for Cetus v2 farms stake/unstake/harvest with deterministic mainnet confirmToken)
 - `workflow`: `w3rt_run_sui_defi_workflow_v0` (unified DeFi router workflow; auto-routes to core/stablelayer/cetus-farms flows)
+- `workflow phase summary`: Sui workflow analysis/simulate/execute artifacts include `summaryLine` (concise one-line replay for PI/OpenClaw narration)
 - `workflow execute summary`: Sui execute artifacts now include `summaryLine` (concise `intent + digest/status` output for PI/OpenClaw narration)
 - `rpc`: `sui_rpc` (generic Sui JSON-RPC passthrough with dangerous method safety guard)
 

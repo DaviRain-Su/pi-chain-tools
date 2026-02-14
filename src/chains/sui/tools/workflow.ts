@@ -1338,6 +1338,40 @@ function formatSimulationSummary(params: {
 	return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress}`;
 }
 
+function buildSuiAnalysisSummaryLine(
+	intentType: string,
+	needsMainnetConfirmation: boolean,
+	confirmToken: string,
+): string {
+	const parts = [intentType, "analysis=ready"];
+	if (needsMainnetConfirmation) {
+		parts.push(`mainnetGuard=on confirmToken=${confirmToken}`);
+	}
+	return parts.join(" ");
+}
+
+function buildSuiSimulationSummaryLine(params: {
+	intentType: string;
+	status: string;
+	signerAddress: string;
+	unsignedPayload: {
+		unsignedTransactionBytesBase64?: string;
+		unsignedPayloadError?: string;
+	};
+}): string {
+	const parts = [
+		params.intentType,
+		`simulate=${params.status}`,
+		`signer=${shortenSummaryValue(params.signerAddress)}`,
+	];
+	if (params.unsignedPayload.unsignedTransactionBytesBase64) {
+		parts.push("unsignedPayload=exported");
+	} else if (params.unsignedPayload.unsignedPayloadError) {
+		parts.push("unsignedPayload=unavailable");
+	}
+	return parts.join(" ");
+}
+
 async function resolveCoinObjectIdsForAmount(
 	client: ReturnType<typeof getSuiClient>,
 	owner: string,
@@ -2104,6 +2138,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								analysis: {
 									intent,
 									plan,
+									summaryLine: buildSuiAnalysisSummaryLine(
+										intent.type,
+										needsMainnetConfirmation,
+										confirmToken,
+									),
 								},
 							},
 						},
@@ -2164,6 +2203,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									error,
 									...artifacts,
 									...unsignedPayload,
+									summaryLine: buildSuiSimulationSummaryLine({
+										intentType: intent.type,
+										status,
+										signerAddress: sender,
+										unsignedPayload,
+									}),
 								},
 							},
 						},
@@ -2309,6 +2354,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								analysis: {
 									intent,
 									plan,
+									summaryLine: buildSuiAnalysisSummaryLine(
+										intent.type,
+										needsMainnetConfirmation,
+										confirmToken,
+									),
 								},
 							},
 						},
@@ -2370,6 +2420,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									error,
 									...artifacts,
 									...unsignedPayload,
+									summaryLine: buildSuiSimulationSummaryLine({
+										intentType: intent.type,
+										status,
+										signerAddress: sender,
+										unsignedPayload,
+									}),
 								},
 							},
 						},
@@ -2522,6 +2578,11 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								analysis: {
 									intent,
 									plan,
+									summaryLine: buildSuiAnalysisSummaryLine(
+										intent.type,
+										needsMainnetConfirmation,
+										confirmToken,
+									),
 								},
 							},
 						},
@@ -2584,6 +2645,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									error,
 									...artifacts,
 									...unsignedPayload,
+									summaryLine: buildSuiSimulationSummaryLine({
+										intentType: intent.type,
+										status,
+										signerAddress: sender,
+										unsignedPayload,
+									}),
 								},
 							},
 						},

@@ -3845,6 +3845,18 @@ function attachExecuteSummaryLine(
 	};
 }
 
+function buildWorkflowAnalysisOneLineSummary(
+	intentType: NearWorkflowIntent["type"],
+	approvalRequired: boolean,
+	confirmToken: string | null,
+): string {
+	const parts = [intentType, "analysis=ready"];
+	if (approvalRequired) {
+		parts.push(`mainnetGuard=on confirmToken=${confirmToken ?? "N/A"}`);
+	}
+	return parts.join(" ");
+}
+
 function buildSimulateResultSummary(
 	intentType: NearWorkflowIntent["type"],
 	simulateResult: unknown,
@@ -3901,6 +3913,38 @@ function buildSimulateResultSummary(
 		}
 	}
 	return `Workflow simulated: ${intentType} status=${statusText}`;
+}
+
+function buildWorkflowSimulateOneLineSummary(
+	intentType: NearWorkflowIntent["type"],
+	simulateArtifact: unknown,
+): string {
+	return buildSimulateResultSummary(intentType, simulateArtifact)
+		.replace(/^Workflow simulated:\s*/i, "")
+		.trim();
+}
+
+function attachSimulateSummaryLine(
+	intentType: NearWorkflowIntent["type"],
+	simulateArtifact: unknown,
+): unknown {
+	if (!isObjectRecord(simulateArtifact)) {
+		return simulateArtifact;
+	}
+	const existingSummary =
+		typeof simulateArtifact.summaryLine === "string"
+			? simulateArtifact.summaryLine.trim()
+			: "";
+	if (existingSummary.length > 0) {
+		return simulateArtifact;
+	}
+	return {
+		...simulateArtifact,
+		summaryLine: buildWorkflowSimulateOneLineSummary(
+			intentType,
+			simulateArtifact,
+		),
+	};
 }
 
 function workflowRunModeSchema() {
@@ -4288,6 +4332,11 @@ export function createNearWorkflowTools() {
 							artifacts: {
 								analysis: {
 									status: "ready",
+									summaryLine: buildWorkflowAnalysisOneLineSummary(
+										intent.type,
+										approvalRequired,
+										confirmToken,
+									),
 								},
 							},
 						},
@@ -4438,6 +4487,10 @@ export function createNearWorkflowTools() {
 						confirmToken: sessionConfirmToken,
 						poolCandidates: sessionPoolCandidates,
 					});
+					const simulateArtifactWithSummary = attachSimulateSummaryLine(
+						intent.type,
+						simulateArtifact,
+					);
 					return {
 						content: [
 							{
@@ -4454,7 +4507,7 @@ export function createNearWorkflowTools() {
 							approvalRequired,
 							confirmToken: sessionConfirmToken,
 							artifacts: {
-								simulate: simulateArtifact,
+								simulate: simulateArtifactWithSummary,
 							},
 						},
 					};

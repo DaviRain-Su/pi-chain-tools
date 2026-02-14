@@ -320,6 +320,13 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		expect(result.details).toMatchObject({
 			runId: "wf-sui-01",
 			intentType: "sui.transfer.sui",
+			artifacts: {
+				analysis: {
+					summaryLine: expect.stringContaining(
+						"sui.transfer.sui analysis=ready",
+					),
+				},
+			},
 			intent: {
 				type: "sui.transfer.sui",
 				toAddress: destination,
@@ -355,6 +362,9 @@ describe("w3rt_run_sui_workflow_v0", () => {
 			artifacts: {
 				simulate: {
 					status: "success",
+					summaryLine: expect.stringContaining(
+						"sui.transfer.sui simulate=success",
+					),
 				},
 			},
 		});
@@ -699,6 +709,9 @@ describe("w3rt_run_sui_stablelayer_workflow_v0", () => {
 				simulate: {
 					status: "success",
 					amountUsdcRaw: "1000000",
+					summaryLine: expect.stringContaining(
+						"sui.stablelayer.mint simulate=success",
+					),
 				},
 			},
 		});
@@ -836,6 +849,9 @@ describe("w3rt_run_sui_cetus_farms_workflow_v0", () => {
 					status: "success",
 					poolId,
 					positionNftId,
+					summaryLine: expect.stringContaining(
+						"sui.cetus.farms.unstake simulate=success",
+					),
 				},
 			},
 		});
