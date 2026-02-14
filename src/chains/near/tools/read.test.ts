@@ -113,6 +113,7 @@ beforeEach(() => {
 	Reflect.deleteProperty(process.env, "NEAR_INTENTS_JWT");
 	Reflect.deleteProperty(process.env, "NEAR_INTENTS_EXPLORER_JWT");
 	Reflect.deleteProperty(process.env, "NEAR_INTENTS_EXPLORER_API_BASE_URL");
+	process.env.NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS = "0";
 	runtimeMocks.parseNearNetwork.mockReturnValue("mainnet");
 	runtimeMocks.getNearRpcEndpoint.mockReturnValue(
 		"https://rpc.mainnet.near.org",
@@ -387,6 +388,7 @@ describe("near_getPortfolio", () => {
 			accountId: "alice.near",
 			network: "mainnet",
 			autoDiscoverDefiTokens: false,
+			includeDefiBreakdown: false,
 			ftContractsQueried: ["usdc.fakes.near", "usdt.tether-token.near"],
 			walletNonZeroFtAssets: [
 				{
@@ -408,6 +410,13 @@ describe("near_getPortfolio", () => {
 				priceUpdatedAtOldest: "2026-01-01T00:00:00.000Z",
 			},
 			defiExposure: {
+				refDeposits: [],
+				burrowSupplied: [],
+				burrowCollateral: [],
+				burrowBorrowed: [],
+			},
+			defiBreakdown: {
+				enabled: false,
 				refDeposits: [],
 				burrowSupplied: [],
 				burrowCollateral: [],
@@ -638,6 +647,8 @@ describe("near_getPortfolio", () => {
 
 		expect(result.content[0]?.text).toContain("Auto-discovered DeFi tokens");
 		expect(result.content[0]?.text).toContain("DeFi exposure:");
+		expect(result.content[0]?.text).toContain("DeFi totals (USD):");
+		expect(result.content[0]?.text).toContain("DeFi balances (amount / ~USD):");
 		expect(result.content[0]?.text).toContain("DeFi tracked tokens:");
 		expect(result.content[0]?.text).toContain("Ref deposits 1");
 		expect(result.content[0]?.text).toContain("Burrow supplied 1");
@@ -645,6 +656,7 @@ describe("near_getPortfolio", () => {
 		expect(result.details).toMatchObject({
 			accountId: "alice.near",
 			autoDiscoverDefiTokens: true,
+			includeDefiBreakdown: true,
 			baseFtContracts: ["usdc.fakes.near"],
 			discoveredFtContracts: ["aurora", "usdt.tether-token.near"],
 			discoveredBySource: {
@@ -668,6 +680,21 @@ describe("near_getPortfolio", () => {
 					{
 						tokenId: "usdt.tether-token.near",
 						inWallet: true,
+					},
+				],
+			},
+			defiBreakdown: {
+				enabled: true,
+				refDeposits: [
+					{
+						tokenId: "aurora",
+						rawAmount: "500",
+					},
+				],
+				burrowSupplied: [
+					{
+						tokenId: "usdt.tether-token.near",
+						rawAmount: "111",
 					},
 				],
 			},

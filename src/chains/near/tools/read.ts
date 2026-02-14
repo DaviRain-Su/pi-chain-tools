@@ -103,6 +103,17 @@ type NearPortfolioValuationAsset = {
 	priceUpdatedAt: string;
 };
 
+type NearPortfolioDefiAmountRow = {
+	tokenId: string;
+	symbol: string;
+	rawAmount: string;
+	uiAmount: string | null;
+	estimatedUsd: number | null;
+	walletRawAmount: string | null;
+	walletUiAmount: string | null;
+	walletEstimatedUsd: number | null;
+};
+
 type NearPortfolioValuationCacheEntry = {
 	fetchedAtMs: number;
 	endpoint: string;
@@ -813,6 +824,175 @@ function buildPortfolioExposureRows(
 	});
 }
 
+function addRawAmountToMap(
+	target: Map<string, bigint>,
+	tokenId: string,
+	rawAmount: string,
+): void {
+	const normalizedTokenId = tokenId.trim().toLowerCase();
+	if (!normalizedTokenId) return;
+	const parsed = parseUnsignedBigInt(
+		rawAmount,
+		`rawAmount[${normalizedTokenId}]`,
+	);
+	if (parsed <= 0n) return;
+	target.set(normalizedTokenId, (target.get(normalizedTokenId) ?? 0n) + parsed);
+}
+
+function collectBurrowRawAmountsByRole(params: {
+	snapshot: BurrowAccountAllPositionsView | null;
+	extraDecimalsByToken: Map<string, number>;
+}): {
+	supplied: Map<string, bigint>;
+	collateral: Map<string, bigint>;
+	borrowed: Map<string, bigint>;
+} {
+	const supplied = new Map<string, bigint>();
+	const collateral = new Map<string, bigint>();
+	const borrowed = new Map<string, bigint>();
+	if (!params.snapshot) {
+		return { supplied, collateral, borrowed };
+	}
+	const addFromAssetNode = (
+		target: Map<string, bigint>,
+		assetNode: unknown,
+		context: string,
+	): void => {
+		const normalized = normalizeBurrowAccountAssetView(assetNode);
+		if (!normalized) return;
+		const tokenId = normalized.token_id.trim().toLowerCase();
+		if (!tokenId) return;
+		const inner = parseUnsignedBigInt(
+			normalized.balance,
+			`${context}.${tokenId}`,
+		);
+		if (inner <= 0n) return;
+		const extraDecimals = params.extraDecimalsByToken.get(tokenId) ?? 0;
+		const rawAmount = fromBurrowInnerAmount(inner.toString(), extraDecimals);
+		addRawAmountToMap(target, tokenId, rawAmount);
+	};
+	for (const assetNode of Array.isArray(params.snapshot.supplied)
+		? params.snapshot.supplied
+		: []) {
+		addFromAssetNode(supplied, assetNode, "burrow.supplied");
+	}
+	const positions = params.snapshot.positions ?? {};
+	for (const positionNode of Object.values(positions)) {
+		const normalized = normalizeBurrowPositionNode(positionNode);
+		if (!normalized) continue;
+		for (const assetNode of normalized.collateral ?? []) {
+			addFromAssetNode(collateral, assetNode, "burrow.collateral");
+		}
+		for (const assetNode of normalized.borrowed ?? []) {
+			addFromAssetNode(borrowed, assetNode, "burrow.borrowed");
+		}
+	}
+	return { supplied, collateral, borrowed };
+}
+
+function buildPortfolioDefiAmountRows(params: {
+	tokenAmounts: Map<string, bigint>;
+	assetByTokenId: Map<string, NearPortfolioAsset>;
+}): NearPortfolioDefiAmountRow[] {
+	const rows: NearPortfolioDefiAmountRow[] = [];
+	for (const [tokenId, rawAmountValue] of params.tokenAmounts) {
+		const asset = params.assetByTokenId.get(tokenId);
+		const symbol = asset?.symbol ?? shortAccountId(tokenId);
+		const rawAmount = rawAmountValue.toString();
+		let uiAmount: string | null = null;
+		if (asset?.decimals != null) {
+			try {
+				uiAmount = formatTokenAmount(rawAmount, asset.decimals, 8);
+			} catch {
+				uiAmount = null;
+			}
+		}
+		const estimatedUsd =
+			typeof asset?.priceUsd === "number" &&
+			Number.isFinite(asset.priceUsd) &&
+			asset.priceUsd >= 0
+				? (() => {
+						const amountNumber =
+							parseUiAmountNumber(uiAmount) ??
+							rawAmountToApproxNumber(rawAmount, asset.decimals);
+						if (
+							amountNumber == null ||
+							!Number.isFinite(amountNumber) ||
+							amountNumber < 0
+						) {
+							return null;
+						}
+						return amountNumber * asset.priceUsd;
+					})()
+				: null;
+		rows.push({
+			tokenId,
+			symbol,
+			rawAmount,
+			uiAmount,
+			estimatedUsd,
+			walletRawAmount: asset?.rawAmount ?? null,
+			walletUiAmount: asset?.uiAmount ?? null,
+			walletEstimatedUsd: asset?.estimatedUsd ?? null,
+		});
+	}
+	rows.sort((left, right) => {
+		const leftUsd =
+			typeof left.estimatedUsd === "number" &&
+			Number.isFinite(left.estimatedUsd)
+				? left.estimatedUsd
+				: null;
+		const rightUsd =
+			typeof right.estimatedUsd === "number" &&
+			Number.isFinite(right.estimatedUsd)
+				? right.estimatedUsd
+				: null;
+		if (leftUsd != null && rightUsd != null && leftUsd !== rightUsd) {
+			return leftUsd > rightUsd ? -1 : 1;
+		}
+		if (leftUsd != null && rightUsd == null) return -1;
+		if (leftUsd == null && rightUsd != null) return 1;
+		return left.symbol.localeCompare(right.symbol);
+	});
+	return rows;
+}
+
+function summarizeDefiRowsUsd(rows: NearPortfolioDefiAmountRow[]): {
+	totalUsd: number | null;
+	pricedCount: number;
+	totalCount: number;
+	fullyPriced: boolean;
+} {
+	const priced = rows
+		.map((row) => row.estimatedUsd)
+		.filter(
+			(value): value is number =>
+				typeof value === "number" && Number.isFinite(value),
+		);
+	const totalUsd =
+		rows.length === 0
+			? 0
+			: priced.length === 0
+				? null
+				: priced.reduce((sum, value) => sum + value, 0);
+	return {
+		totalUsd,
+		pricedCount: priced.length,
+		totalCount: rows.length,
+		fullyPriced: rows.length === 0 || priced.length === rows.length,
+	};
+}
+
+function formatPortfolioDefiAmountRow(row: NearPortfolioDefiAmountRow): string {
+	const amountText =
+		row.uiAmount == null ? `${row.rawAmount} raw` : `${row.uiAmount}`;
+	const usdText =
+		row.estimatedUsd == null
+			? ""
+			: ` (~${formatUsdOrFallback(row.estimatedUsd)})`;
+	return `${row.symbol}: ${amountText}${usdText}`;
+}
+
 function collectBurrowTokenIdsFromSnapshot(
 	snapshot: BurrowAccountAllPositionsView | null,
 ): string[] {
@@ -895,6 +1075,8 @@ async function discoverPortfolioFtContracts(params: {
 		burrowPositions: string[];
 	};
 	discoveredByRole: NearPortfolioDiscoveryByRole;
+	refDepositsRaw: Record<string, string>;
+	burrowSnapshot: BurrowAccountAllPositionsView | null;
 	failures: NearPortfolioDiscoveryFailure[];
 }> {
 	const discoveredBySource = {
@@ -907,6 +1089,8 @@ async function discoverPortfolioFtContracts(params: {
 		burrowCollateral: [],
 		burrowBorrowed: [],
 	};
+	let refDepositsRaw: Record<string, string> = {};
+	let burrowSnapshot: BurrowAccountAllPositionsView | null = null;
 	const failures: NearPortfolioDiscoveryFailure[] = [];
 	try {
 		const refContractId = getRefContractId(params.network);
@@ -916,6 +1100,7 @@ async function discoverPortfolioFtContracts(params: {
 			rpcUrl: params.rpcUrl,
 			refContractId,
 		});
+		refDepositsRaw = deposits;
 		discoveredBySource.refDeposits = dedupeStrings(
 			Object.entries(deposits)
 				.filter(([tokenId, rawAmount]) => {
@@ -944,6 +1129,7 @@ async function discoverPortfolioFtContracts(params: {
 			rpcUrl: params.rpcUrl,
 			burrowContractId,
 		});
+		burrowSnapshot = snapshot;
 		const burrowByRole = collectBurrowTokenIdsByRoleFromSnapshot(snapshot);
 		discoveredByRole.burrowSupplied = burrowByRole.supplied;
 		discoveredByRole.burrowCollateral = burrowByRole.collateral;
@@ -964,6 +1150,8 @@ async function discoverPortfolioFtContracts(params: {
 		]),
 		discoveredBySource,
 		discoveredByRole,
+		refDepositsRaw,
+		burrowSnapshot,
 		failures,
 	};
 }
@@ -2348,6 +2536,12 @@ export function createNearReadTools() {
 							"Auto-discover additional FT contracts from Ref deposits and Burrow positions (default true when ftContractIds is omitted).",
 					}),
 				),
+				includeDefiBreakdown: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include Ref/Burrow quantity breakdown and wallet/ref/burrow/net summary (default follows autoDiscoverDefiTokens).",
+					}),
+				),
 				includeValuationUsd: Type.Optional(
 					Type.Boolean({
 						description:
@@ -2401,6 +2595,10 @@ export function createNearReadTools() {
 						? params.autoDiscoverDefiTokens
 						: !Array.isArray(params.ftContractIds) ||
 							params.ftContractIds.length === 0;
+				const includeDefiBreakdown =
+					typeof params.includeDefiBreakdown === "boolean"
+						? params.includeDefiBreakdown
+						: autoDiscoverDefiTokens;
 				const discovered = autoDiscoverDefiTokens
 					? await discoverPortfolioFtContracts({
 							accountId,
@@ -2419,6 +2617,8 @@ export function createNearReadTools() {
 								burrowCollateral: [] as string[],
 								burrowBorrowed: [] as string[],
 							} as NearPortfolioDiscoveryByRole,
+							refDepositsRaw: {} as Record<string, string>,
+							burrowSnapshot: null as BurrowAccountAllPositionsView | null,
 							failures: [] as NearPortfolioDiscoveryFailure[],
 						};
 				const ftContractIds = dedupeStrings([
@@ -2684,6 +2884,163 @@ export function createNearReadTools() {
 						assetByTokenId,
 					),
 				};
+				const defiBreakdown = {
+					enabled: includeDefiBreakdown,
+					refDeposits: [] as NearPortfolioDefiAmountRow[],
+					burrowSupplied: [] as NearPortfolioDefiAmountRow[],
+					burrowCollateral: [] as NearPortfolioDefiAmountRow[],
+					burrowBorrowed: [] as NearPortfolioDefiAmountRow[],
+					totals: {
+						walletUsd:
+							typeof valuation.totalWalletUsd === "number" &&
+							Number.isFinite(valuation.totalWalletUsd)
+								? valuation.totalWalletUsd
+								: null,
+						refDepositsUsd: null as number | null,
+						burrowSuppliedUsd: null as number | null,
+						burrowBorrowedUsd: null as number | null,
+						netUsd: null as number | null,
+						coverage: {
+							refDeposits: {
+								priced: 0,
+								total: 0,
+								fullyPriced: false,
+							},
+							burrowSupplied: {
+								priced: 0,
+								total: 0,
+								fullyPriced: false,
+							},
+							burrowBorrowed: {
+								priced: 0,
+								total: 0,
+								fullyPriced: false,
+							},
+						},
+					},
+					failures: [] as string[],
+				};
+				if (includeDefiBreakdown) {
+					try {
+						const refDepositsRaw = autoDiscoverDefiTokens
+							? discovered.refDepositsRaw
+							: await queryRefDeposits({
+									accountId,
+									network,
+									rpcUrl: params.rpcUrl,
+									refContractId: getRefContractId(network),
+								});
+						const refDepositMap = new Map<string, bigint>();
+						for (const [tokenId, rawAmount] of Object.entries(refDepositsRaw)) {
+							try {
+								addRawAmountToMap(refDepositMap, tokenId, rawAmount);
+							} catch {
+								// Ignore malformed ref deposit amounts.
+							}
+						}
+						defiBreakdown.refDeposits = buildPortfolioDefiAmountRows({
+							tokenAmounts: refDepositMap,
+							assetByTokenId,
+						});
+					} catch (error) {
+						defiBreakdown.failures.push(
+							`refDeposits: ${error instanceof Error ? error.message : String(error)}`,
+						);
+					}
+					try {
+						const burrowSnapshot = autoDiscoverDefiTokens
+							? discovered.burrowSnapshot
+							: await fetchBurrowAccountAllPositions({
+									accountId,
+									network,
+									rpcUrl: params.rpcUrl,
+									burrowContractId: getBurrowContractId(network),
+								});
+						const extraDecimalsByToken = new Map<string, number>();
+						try {
+							const burrowMarkets = await fetchBurrowAssetsPagedDetailed({
+								network,
+								rpcUrl: params.rpcUrl,
+								burrowContractId: getBurrowContractId(network),
+								fromIndex: 0,
+								limit: 200,
+							});
+							for (const market of burrowMarkets) {
+								const tokenId =
+									typeof market?.token_id === "string"
+										? market.token_id.trim().toLowerCase()
+										: "";
+								if (!tokenId) continue;
+								extraDecimalsByToken.set(
+									tokenId,
+									parseBurrowExtraDecimals(market.config?.extra_decimals),
+								);
+							}
+						} catch (error) {
+							defiBreakdown.failures.push(
+								`burrowExtraDecimals: ${error instanceof Error ? error.message : String(error)}`,
+							);
+						}
+						const burrowRaw = collectBurrowRawAmountsByRole({
+							snapshot: burrowSnapshot,
+							extraDecimalsByToken,
+						});
+						defiBreakdown.burrowSupplied = buildPortfolioDefiAmountRows({
+							tokenAmounts: burrowRaw.supplied,
+							assetByTokenId,
+						});
+						defiBreakdown.burrowCollateral = buildPortfolioDefiAmountRows({
+							tokenAmounts: burrowRaw.collateral,
+							assetByTokenId,
+						});
+						defiBreakdown.burrowBorrowed = buildPortfolioDefiAmountRows({
+							tokenAmounts: burrowRaw.borrowed,
+							assetByTokenId,
+						});
+					} catch (error) {
+						defiBreakdown.failures.push(
+							`burrowPositions: ${error instanceof Error ? error.message : String(error)}`,
+						);
+					}
+					const refTotals = summarizeDefiRowsUsd(defiBreakdown.refDeposits);
+					const burrowSuppliedTotals = summarizeDefiRowsUsd(
+						defiBreakdown.burrowSupplied,
+					);
+					const burrowBorrowedTotals = summarizeDefiRowsUsd(
+						defiBreakdown.burrowBorrowed,
+					);
+					defiBreakdown.totals.refDepositsUsd = refTotals.totalUsd;
+					defiBreakdown.totals.burrowSuppliedUsd =
+						burrowSuppliedTotals.totalUsd;
+					defiBreakdown.totals.burrowBorrowedUsd =
+						burrowBorrowedTotals.totalUsd;
+					defiBreakdown.totals.coverage.refDeposits = {
+						priced: refTotals.pricedCount,
+						total: refTotals.totalCount,
+						fullyPriced: refTotals.fullyPriced,
+					};
+					defiBreakdown.totals.coverage.burrowSupplied = {
+						priced: burrowSuppliedTotals.pricedCount,
+						total: burrowSuppliedTotals.totalCount,
+						fullyPriced: burrowSuppliedTotals.fullyPriced,
+					};
+					defiBreakdown.totals.coverage.burrowBorrowed = {
+						priced: burrowBorrowedTotals.pricedCount,
+						total: burrowBorrowedTotals.totalCount,
+						fullyPriced: burrowBorrowedTotals.fullyPriced,
+					};
+					const walletUsd = defiBreakdown.totals.walletUsd;
+					const refUsd = defiBreakdown.totals.refDepositsUsd;
+					const suppliedUsd = defiBreakdown.totals.burrowSuppliedUsd;
+					const borrowedUsd = defiBreakdown.totals.burrowBorrowedUsd;
+					defiBreakdown.totals.netUsd =
+						walletUsd != null &&
+						refUsd != null &&
+						suppliedUsd != null &&
+						borrowedUsd != null
+							? walletUsd + refUsd + suppliedUsd - borrowedUsd
+							: null;
+				}
 				if (includeValuationUsd) {
 					if (valuation.totalWalletUsd != null) {
 						lines.push(
@@ -2744,6 +3101,54 @@ export function createNearReadTools() {
 								: "";
 						lines.push(
 							`- ${asset.symbol}: ${amountText}${usdText} on ${asset.contractId ?? "unknown"}`,
+						);
+					}
+				}
+				if (includeDefiBreakdown) {
+					const formatUsdTotal = (value: number | null): string =>
+						value == null ? "n/a" : formatUsdOrFallback(value);
+					lines.push(
+						`DeFi totals (USD): wallet=${formatUsdTotal(defiBreakdown.totals.walletUsd)} ref=${formatUsdTotal(defiBreakdown.totals.refDepositsUsd)} burrowSupplied=${formatUsdTotal(defiBreakdown.totals.burrowSuppliedUsd)} burrowBorrowed=${formatUsdTotal(defiBreakdown.totals.burrowBorrowedUsd)} net=${formatUsdTotal(defiBreakdown.totals.netUsd)}`,
+					);
+					lines.push("DeFi balances (amount / ~USD):");
+					const sections: Array<{
+						label: string;
+						rows: NearPortfolioDefiAmountRow[];
+					}> = [
+						{
+							label: "Ref deposits",
+							rows: defiBreakdown.refDeposits,
+						},
+						{
+							label: "Burrow supplied",
+							rows: defiBreakdown.burrowSupplied,
+						},
+						{
+							label: "Burrow collateral",
+							rows: defiBreakdown.burrowCollateral,
+						},
+						{
+							label: "Burrow borrowed",
+							rows: defiBreakdown.burrowBorrowed,
+						},
+					];
+					for (const section of sections) {
+						if (section.rows.length === 0) {
+							lines.push(`- ${section.label}: none`);
+							continue;
+						}
+						const topRows = section.rows
+							.slice(0, 6)
+							.map((row) => formatPortfolioDefiAmountRow(row));
+						const rest =
+							section.rows.length > topRows.length
+								? ` (+${section.rows.length - topRows.length} more)`
+								: "";
+						lines.push(`- ${section.label}: ${topRows.join(", ")}${rest}`);
+					}
+					if (defiBreakdown.failures.length > 0) {
+						lines.push(
+							`DeFi breakdown partial: ${defiBreakdown.failures.join(" | ")}`,
 						);
 					}
 				}
@@ -2849,9 +3254,11 @@ export function createNearReadTools() {
 						discoveredByRole: discovered.discoveredByRole,
 						walletNonZeroFtAssets,
 						defiExposure,
+						defiBreakdown,
 						valuation,
 						discoveryFailures: discovered.failures,
 						includeZeroBalances: includeZero,
+						includeDefiBreakdown,
 						includeValuationUsd,
 						valuationCacheTtlMs,
 						totalYoctoNear: totalYoctoNear.toString(),
