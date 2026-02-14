@@ -752,6 +752,36 @@ describe("w3rt_run_near_workflow_v0", () => {
 			amountRaw: "10000000000000000000000",
 		});
 		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		mockFetchJsonOnce({
+			status: 200,
+			body: {
+				correlationId: "corr-sim-2",
+				status: "SUCCESS",
+				updatedAt: "2026-02-13T00:00:05Z",
+				quoteResponse: {
+					correlationId: "corr-sim-2",
+					timestamp: "2026-02-13T00:00:00Z",
+					signature: "sig-2",
+					quoteRequest: { dry: true },
+					quote: {
+						depositAddress: "0xnear-deposit-2",
+						amountIn: "10000000000000000000000",
+						amountInFormatted: "0.01",
+						amountInUsd: "0.042",
+						minAmountIn: "10000000000000000000000",
+						amountOut: "41871",
+						amountOutFormatted: "0.041871",
+						amountOutUsd: "0.041871",
+						minAmountOut: "40000",
+						timeEstimate: 22,
+					},
+				},
+				swapDetails: {
+					amountIn: "10000000000000000000000",
+					amountOut: "41871",
+				},
+			},
+		});
 		const result = await tool.execute("near-wf-8f-exec", {
 			runId: "wf-near-08f",
 			runMode: "execute",
@@ -776,6 +806,87 @@ describe("w3rt_run_near_workflow_v0", () => {
 				execute: {
 					correlationId: "corr-exec-1",
 					status: "PENDING_DEPOSIT",
+					statusTracking: {
+						timedOut: false,
+						latestStatus: {
+							status: "SUCCESS",
+						},
+					},
+				},
+			},
+		});
+	});
+
+	it("supports intents execute without status polling when disabled", async () => {
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "near:wrap.near",
+					decimals: 24,
+					blockchain: "near",
+					symbol: "NEAR",
+					price: 4.2,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+				{
+					assetId: "near:usdc.tether-token.near",
+					decimals: 6,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+			],
+		});
+		mockFetchJsonOnce({
+			status: 201,
+			body: {
+				correlationId: "corr-sim-2b",
+				timestamp: "2026-02-13T00:00:00Z",
+				signature: "sig-2b",
+				quoteRequest: { dry: true },
+				quote: {
+					depositAddress: "0xnear-deposit-2b",
+					depositMemo: "memo-2b",
+					amountIn: "10000000000000000000000",
+					amountInFormatted: "0.01",
+					amountInUsd: "0.042",
+					minAmountIn: "10000000000000000000000",
+					amountOut: "41871",
+					amountOutFormatted: "0.041871",
+					amountOutUsd: "0.041871",
+					minAmountOut: "40000",
+					timeEstimate: 22,
+				},
+			},
+		});
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-8f2-sim", {
+			runId: "wf-near-08f2",
+			runMode: "simulate",
+			intentType: "near.swap.intents",
+			network: "mainnet",
+			originAsset: "NEAR",
+			destinationAsset: "USDC",
+			amountRaw: "10000000000000000000000",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		const result = await tool.execute("near-wf-8f2-exec", {
+			runId: "wf-near-08f2",
+			runMode: "execute",
+			confirmMainnet: true,
+			confirmToken: token,
+			txHash: "0xfeedbeef2",
+			waitForFinalStatus: false,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.intents",
+			artifacts: {
+				execute: {
+					correlationId: "corr-exec-1",
+					statusTracking: null,
 				},
 			},
 		});

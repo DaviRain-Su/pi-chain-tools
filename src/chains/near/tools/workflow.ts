@@ -177,6 +177,9 @@ type WorkflowParams = {
 	depositAddress?: string;
 	depositMemo?: string;
 	txHash?: string;
+	waitForFinalStatus?: boolean;
+	statusPollIntervalMs?: number;
+	statusTimeoutMs?: number;
 	apiBaseUrl?: string;
 	apiKey?: string;
 	jwt?: string;
@@ -224,6 +227,7 @@ type ParsedIntentHints = {
 	depositAddress?: string;
 	depositMemo?: string;
 	txHash?: string;
+	waitForFinalStatus?: boolean;
 	autoWithdraw?: boolean;
 };
 
@@ -290,6 +294,31 @@ type NearIntentsQuoteResponse = {
 	};
 };
 
+type NearIntentsStatusResponse = {
+	correlationId: string;
+	status:
+		| "KNOWN_DEPOSIT_TX"
+		| "PENDING_DEPOSIT"
+		| "INCOMPLETE_DEPOSIT"
+		| "PROCESSING"
+		| "SUCCESS"
+		| "REFUNDED"
+		| "FAILED";
+	updatedAt: string;
+	quoteResponse: NearIntentsQuoteResponse;
+	swapDetails: {
+		amountIn?: string;
+		amountInFormatted?: string;
+		amountOut?: string;
+		amountOutFormatted?: string;
+		refundedAmount?: string;
+		refundedAmountFormatted?: string;
+		refundReason?: string;
+		depositedAmount?: string;
+		depositedAmountFormatted?: string;
+	};
+};
+
 type NearIntentsBadRequest = {
 	message?: string;
 	statusCode?: number;
@@ -317,6 +346,8 @@ let latestWorkflowSession: WorkflowSessionRecord | null = null;
 const DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS = 1000;
 const HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS = 5000;
 const DEFAULT_NEAR_INTENTS_API_BASE_URL = "https://1click.chaindefuser.com";
+const DEFAULT_INTENTS_STATUS_POLL_INTERVAL_MS = 2_000;
+const DEFAULT_INTENTS_STATUS_TIMEOUT_MS = 45_000;
 
 function rememberWorkflowSession(record: WorkflowSessionRecord): void {
 	WORKFLOW_SESSION_BY_RUN_ID.set(record.runId, record);
@@ -547,6 +578,31 @@ function parseIntentsDeadline(value: string | undefined): string {
 	}
 	const fallback = new Date(Date.now() + 20 * 60 * 1000);
 	return fallback.toISOString();
+}
+
+function parseIntentsStatusPollIntervalMs(value: number | undefined): number {
+	if (value == null) return DEFAULT_INTENTS_STATUS_POLL_INTERVAL_MS;
+	if (!Number.isFinite(value) || !Number.isInteger(value)) {
+		throw new Error("statusPollIntervalMs must be an integer");
+	}
+	return Math.min(10_000, Math.max(500, value));
+}
+
+function parseIntentsStatusTimeoutMs(value: number | undefined): number {
+	if (value == null) return DEFAULT_INTENTS_STATUS_TIMEOUT_MS;
+	if (!Number.isFinite(value) || !Number.isInteger(value)) {
+		throw new Error("statusTimeoutMs must be an integer");
+	}
+	return Math.min(300_000, Math.max(3_000, value));
+}
+
+function shouldWaitForIntentsFinalStatus(
+	value: boolean | undefined,
+	hints: ParsedIntentHints,
+): boolean {
+	if (typeof value === "boolean") return value;
+	if (hints.waitForFinalStatus === true) return true;
+	return true;
 }
 
 function resolveNearIntentsApiBaseUrl(endpoint?: string): string {
@@ -1010,6 +1066,15 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		lower.includes("intents") ||
 		lower.includes("1click") ||
 		lower.includes("defuse");
+	const wantsWaitForFinalStatus =
+		lower.includes("等待完成") ||
+		lower.includes("等到完成") ||
+		lower.includes("直到完成") ||
+		lower.includes("跟踪状态") ||
+		lower.includes("持续跟踪") ||
+		lower.includes("wait for final") ||
+		lower.includes("wait completion") ||
+		lower.includes("track status");
 	const hasLpKeyword =
 		lower.includes("lp") ||
 		lower.includes("liquidity") ||
@@ -1125,6 +1190,7 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (depositAddressMatch?.[1]) hints.depositAddress = depositAddressMatch[1];
 	if (depositMemoMatch?.[1]) hints.depositMemo = depositMemoMatch[1];
 	if (txHashMatch?.[1]) hints.txHash = txHashMatch[1];
+	if (wantsWaitForFinalStatus) hints.waitForFinalStatus = true;
 	if (
 		likelyLpRemove &&
 		(lower.includes("提回") ||
@@ -2356,6 +2422,121 @@ async function simulateNearIntentsSwap(params: {
 	};
 }
 
+function extractErrorText(error: unknown): string {
+	if (error instanceof Error && typeof error.message === "string") {
+		return error.message;
+	}
+	return String(error);
+}
+
+function isNearIntentsTerminalStatus(
+	status: NearIntentsStatusResponse["status"],
+): boolean {
+	return (
+		status === "SUCCESS" ||
+		status === "FAILED" ||
+		status === "REFUNDED" ||
+		status === "INCOMPLETE_DEPOSIT"
+	);
+}
+
+function sleepMs(delayMs: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, delayMs);
+	});
+}
+
+async function pollNearIntentsStatusUntilFinal(params: {
+	baseUrl: string;
+	headers: Record<string, string>;
+	depositAddress: string;
+	depositMemo?: string;
+	timeoutMs: number;
+	intervalMs: number;
+}): Promise<{
+	timedOut: boolean;
+	attempts: number;
+	latestStatus: NearIntentsStatusResponse | null;
+	lastError: string | null;
+	history: Array<{
+		attempt: number;
+		status: NearIntentsStatusResponse["status"] | "NOT_FOUND" | "ERROR";
+		updatedAt: string | null;
+		message?: string;
+	}>;
+}> {
+	const deadlineAt = Date.now() + params.timeoutMs;
+	let attempts = 0;
+	let latestStatus: NearIntentsStatusResponse | null = null;
+	let lastError: string | null = null;
+	const history: Array<{
+		attempt: number;
+		status: NearIntentsStatusResponse["status"] | "NOT_FOUND" | "ERROR";
+		updatedAt: string | null;
+		message?: string;
+	}> = [];
+
+	while (Date.now() <= deadlineAt) {
+		attempts += 1;
+		try {
+			const response = await fetchNearIntentsJson<NearIntentsStatusResponse>({
+				baseUrl: params.baseUrl,
+				path: "/v0/status",
+				method: "GET",
+				query: {
+					depositAddress: params.depositAddress,
+					depositMemo: params.depositMemo,
+				},
+				headers: params.headers,
+			});
+			latestStatus = response.payload;
+			history.push({
+				attempt: attempts,
+				status: response.payload.status,
+				updatedAt: response.payload.updatedAt ?? null,
+			});
+			if (isNearIntentsTerminalStatus(response.payload.status)) {
+				return {
+					timedOut: false,
+					attempts,
+					latestStatus,
+					lastError,
+					history,
+				};
+			}
+		} catch (error) {
+			const message = extractErrorText(error);
+			lastError = message;
+			const isNotIndexedYet =
+				message.includes("(404)") ||
+				/deposit .*not found/i.test(message) ||
+				/not found/i.test(message);
+			history.push({
+				attempt: attempts,
+				status: isNotIndexedYet ? "NOT_FOUND" : "ERROR",
+				updatedAt: null,
+				message,
+			});
+			if (!isNotIndexedYet) {
+				throw error;
+			}
+		}
+
+		if (Date.now() + params.intervalMs > deadlineAt) {
+			break;
+		}
+		await sleepMs(params.intervalMs);
+	}
+
+	return {
+		timedOut: true,
+		attempts,
+		latestStatus,
+		lastError,
+		history,
+	};
+}
+
 function normalizePoolTokenIds(tokenIds: string[]): string[] {
 	return tokenIds
 		.map((tokenId) => tokenId.trim().toLowerCase())
@@ -2792,8 +2973,37 @@ function buildExecuteResultSummary(executeResult: unknown): string {
 	}
 	const candidate = executeResult as {
 		txHash?: unknown;
-		toAccountId?: unknown;
+		status?: unknown;
+		correlationId?: unknown;
+		statusTracking?: unknown;
 	};
+	const directStatus =
+		typeof candidate.status === "string" ? candidate.status : null;
+	const correlationId =
+		typeof candidate.correlationId === "string" &&
+		candidate.correlationId.trim()
+			? candidate.correlationId
+			: null;
+	if (directStatus || correlationId) {
+		return [
+			directStatus ? `status=${directStatus}` : null,
+			correlationId ? `correlationId=${correlationId}` : null,
+		]
+			.filter((item): item is string => item != null)
+			.join(" ");
+	}
+	if (
+		candidate.statusTracking &&
+		typeof candidate.statusTracking === "object" &&
+		typeof (candidate.statusTracking as { latestStatus?: { status?: unknown } })
+			.latestStatus?.status === "string"
+	) {
+		const tracking = candidate.statusTracking as {
+			latestStatus: { status: string };
+			timedOut?: boolean;
+		};
+		return `status=${tracking.latestStatus.status}${tracking.timedOut ? " (poll-timeout)" : ""}`;
+	}
 	const hashText =
 		typeof candidate.txHash === "string" && candidate.txHash.trim()
 			? `txHash=${candidate.txHash}`
@@ -2816,6 +3026,21 @@ function buildSimulateResultSummary(
 		typeof simulateResult.status === "string"
 			? simulateResult.status
 			: "unknown";
+	if (intentType === "near.swap.intents") {
+		const depositAddress =
+			typeof simulateResult.quoteResponse === "object" &&
+			simulateResult.quoteResponse &&
+			typeof (
+				simulateResult.quoteResponse as { quote?: { depositAddress?: unknown } }
+			).quote?.depositAddress === "string"
+				? (
+						simulateResult.quoteResponse as {
+							quote: { depositAddress: string };
+						}
+					).quote.depositAddress
+				: null;
+		return `Workflow simulated: ${intentType} status=${statusText}${depositAddress ? ` deposit=${depositAddress}` : ""}`;
+	}
 	if (
 		(intentType === "near.lp.ref.add" || intentType === "near.lp.ref.remove") &&
 		simulateResult.poolSelectionSource === "bestLiquidityPool"
@@ -2934,6 +3159,9 @@ export function createNearWorkflowTools() {
 				depositAddress: Type.Optional(Type.String()),
 				depositMemo: Type.Optional(Type.String()),
 				txHash: Type.Optional(Type.String()),
+				waitForFinalStatus: Type.Optional(Type.Boolean()),
+				statusPollIntervalMs: Type.Optional(Type.Number()),
+				statusTimeoutMs: Type.Optional(Type.Number()),
 				apiBaseUrl: Type.Optional(Type.String()),
 				apiKey: Type.Optional(Type.String()),
 				jwt: Type.Optional(Type.String()),
@@ -3237,15 +3465,18 @@ export function createNearWorkflowTools() {
 						: typeof hints.depositMemo === "string" && hints.depositMemo.trim()
 							? hints.depositMemo.trim()
 							: undefined;
+				let effectiveIntentsDepositAddress: string | undefined;
+				let effectiveIntentsDepositMemo: string | undefined;
 				if (intent.type === "near.swap.intents") {
 					if (!submitTxHash) {
 						throw new Error(
 							"near.swap.intents execute requires txHash from the deposit transaction.",
 						);
 					}
-					const effectiveDepositAddress =
+					effectiveIntentsDepositAddress =
 						submitDepositAddress ?? intent.depositAddress;
-					if (!effectiveDepositAddress) {
+					effectiveIntentsDepositMemo = submitDepositMemo ?? intent.depositMemo;
+					if (!effectiveIntentsDepositAddress) {
 						throw new Error(
 							"near.swap.intents execute requires depositAddress (use simulate output or pass depositAddress).",
 						);
@@ -3294,9 +3525,8 @@ export function createNearWorkflowTools() {
 								: intent.type === "near.swap.intents"
 									? {
 											txHash: submitTxHash,
-											depositAddress:
-												submitDepositAddress ?? intent.depositAddress,
-											depositMemo: submitDepositMemo ?? intent.depositMemo,
+											depositAddress: effectiveIntentsDepositAddress,
+											depositMemo: effectiveIntentsDepositMemo,
 											nearSenderAccount:
 												intent.accountId ?? params.fromAccountId,
 											apiBaseUrl: params.apiBaseUrl ?? intent.apiBaseUrl,
@@ -3345,6 +3575,51 @@ export function createNearWorkflowTools() {
 							txHash?: string;
 					  }
 					| undefined;
+				const shouldTrackIntentsStatus =
+					intent.type === "near.swap.intents"
+						? shouldWaitForIntentsFinalStatus(params.waitForFinalStatus, hints)
+						: false;
+				const statusTracking =
+					intent.type === "near.swap.intents" &&
+					shouldTrackIntentsStatus &&
+					effectiveIntentsDepositAddress
+						? await pollNearIntentsStatusUntilFinal({
+								baseUrl: resolveNearIntentsApiBaseUrl(
+									params.apiBaseUrl ?? intent.apiBaseUrl,
+								),
+								headers: resolveNearIntentsHeaders({
+									apiKey: params.apiKey,
+									jwt: params.jwt,
+								}),
+								depositAddress: effectiveIntentsDepositAddress,
+								depositMemo: effectiveIntentsDepositMemo,
+								intervalMs: parseIntentsStatusPollIntervalMs(
+									params.statusPollIntervalMs,
+								),
+								timeoutMs: parseIntentsStatusTimeoutMs(params.statusTimeoutMs),
+							})
+						: null;
+				const executeArtifact =
+					intent.type === "near.swap.intents" && executeDetails
+						? {
+								...(executeDetails as Record<string, unknown>),
+								depositAddress: effectiveIntentsDepositAddress ?? null,
+								depositMemo: effectiveIntentsDepositMemo ?? null,
+								statusTracking:
+									shouldTrackIntentsStatus && statusTracking
+										? statusTracking
+										: shouldTrackIntentsStatus
+											? {
+													timedOut: true,
+													attempts: 0,
+													latestStatus: null,
+													lastError:
+														"status tracking was requested but depositAddress is missing",
+													history: [],
+												}
+											: null,
+							}
+						: (executeDetails ?? null);
 				return {
 					content: [
 						{
@@ -3363,7 +3638,7 @@ export function createNearWorkflowTools() {
 						confirmTokenMatched:
 							!approvalRequired || params.confirmToken === confirmToken,
 						artifacts: {
-							execute: executeDetails ?? null,
+							execute: executeArtifact,
 						},
 					},
 				};
