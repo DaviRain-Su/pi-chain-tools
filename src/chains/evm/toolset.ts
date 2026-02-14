@@ -3,6 +3,7 @@ import { createEvmComposeTools } from "./tools/compose.js";
 import { createEvmExecuteTools } from "./tools/execute.js";
 import { createEvmReadTools } from "./tools/read.js";
 import { createEvmRpcTools } from "./tools/rpc.js";
+import { createEvmWorkflowTools } from "./tools/workflow.js";
 
 export function createEvmToolset(): ChainToolset {
 	return {
@@ -10,7 +11,10 @@ export function createEvmToolset(): ChainToolset {
 		groups: [
 			{ name: "read", tools: createEvmReadTools() },
 			{ name: "compose", tools: createEvmComposeTools() },
-			{ name: "execute", tools: createEvmExecuteTools() },
+			{
+				name: "execute",
+				tools: [...createEvmExecuteTools(), ...createEvmWorkflowTools()],
+			},
 			{ name: "rpc", tools: createEvmRpcTools() },
 		],
 	};

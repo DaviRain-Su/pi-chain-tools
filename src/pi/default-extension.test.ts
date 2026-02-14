@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import defaultExtension from "./default-extension.js";
 
 describe("defaultExtension", () => {
-	it("registers bundled Solana + Sui + NEAR tools once", () => {
+	it("registers bundled Solana + Sui + NEAR + EVM tools once", () => {
 		const names: string[] = [];
 		const registrar = {
 			registerTool(tool: { name: string }) {
@@ -19,6 +19,8 @@ describe("defaultExtension", () => {
 		expect(names).toContain("w3rt_run_sui_defi_workflow_v0");
 		expect(names).toContain("near_getBalance");
 		expect(names).toContain("w3rt_run_near_workflow_v0");
+		expect(names).toContain("evm_polymarketGetBtc5mMarkets");
+		expect(names).toContain("w3rt_run_evm_polymarket_workflow_v0");
 		expect(new Set(names).size).toBe(names.length);
 	});
 });

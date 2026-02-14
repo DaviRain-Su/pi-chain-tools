@@ -1,6 +1,6 @@
 # Gradience
 
-Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui has a practical read/compose/execute/workflow slice, NEAR has read/execute/workflow coverage (including Ref swap), and EVM skeleton is scaffolded, with a chain-agnostic grouping model:
+Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui has a practical read/compose/execute/workflow slice, NEAR has read/execute/workflow coverage (including Ref swap), and EVM now includes a Polymarket BTC 5m trading slice (read/compose/execute/workflow), with a chain-agnostic grouping model:
 
 - `read`
 - `compose`
@@ -13,7 +13,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `src/chains/solana`: Solana runtime + grouped tools
 - `src/chains/sui`: Sui runtime + grouped tools
 - `src/chains/near`: NEAR runtime + grouped tools
-- `src/chains/evm`: EVM runtime + grouped tool skeleton
+- `src/chains/evm`: EVM runtime + Polymarket BTC 5m grouped tools
 - `src/pi`: Pi-specific adapter entrypoints
 - Workflow artifact summaries use a stable schema: `summaryLine` (string) + `summary` (`schema = w3rt.workflow.summary.v1`)
 - Pi extension registration now prefers workflow `summary.line` as first response line for `w3rt_run_*` tools.
@@ -45,11 +45,33 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - Raydium Trade API quote/serialize integration (swap-base-in/out)
 - Raydium auto-priority-fee integration and multi-transaction swap execution
 
-## EVM Skeleton
+## EVM (Polymarket BTC 5m)
 
-- `read/compose/execute/rpc` group files are created
-- no concrete EVM tools are implemented yet
-- use `createEvmToolset()` as the extension point for future chains/rpcs/wallets
+- `read`: `evm_polymarketSearchMarkets` (Gamma public-search event/market scan)
+- `read`: `evm_polymarketGetMarket` (market detail by slug: outcomes/price/tokenId)
+- `read`: `evm_polymarketGetBtc5mMarkets` (active BTC 5m Up/Down market list)
+- `read`: `evm_polymarketGetOrderbook` (CLOB orderbook snapshot by tokenId)
+- `read`: `evm_polymarketGetBtc5mAdvice` (AI-style explainable side recommendation)
+- `read`: `evm_polymarketGetGeoblock` (geoblock status check)
+- `compose`: `evm_polymarketBuildBtc5mOrder` (unsigned order intent builder)
+- `execute`: `evm_polymarketPlaceOrder` (CLOB order submit, default `dryRun=true`)
+- `execute`: `evm_polymarketGetOpenOrders` (authenticated open-order list)
+- `execute`: `evm_polymarketCancelOrder` (cancel by orderId(s)/token scope/cancel-all, default `dryRun=true`)
+- `workflow`: `w3rt_run_evm_polymarket_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken)
+- `workflow cancel intent`: supports `evm.polymarket.btc5m.cancel` (analysis/simulate/execute + deterministic mainnet confirmToken)
+- `mainnet guard`: workflow execute on polygon requires `confirmMainnet=true` + correct `confirmToken`
+- `ai assist`: workflow/read can auto-pick side (`up/down`) with explainable reasons, confidence, and risk-aware fallback (`avoid`)
+
+### EVM Polymarket NL Examples (Pi/OpenClaw)
+
+- `帮我查一下 Polymarket BTC 5分钟的可交易市场`
+- `帮我分析 BTC 5m，建议买涨还是买跌`
+- `买 BTC 5分钟涨 20 USDC，先分析`
+- `继续上一笔，先模拟`
+- `继续刚才这笔，确认主网执行，confirmToken EVM-XXXX`
+- `查一下我 BTC 5分钟的挂单`
+- `取消我所有 BTC 5m 挂单，先模拟`
+- `继续撤单，确认主网执行，confirmToken EVM-XXXX`
 
 ## NEAR (Current)
 

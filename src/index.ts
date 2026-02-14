@@ -87,14 +87,31 @@ export { createSolanaWorkflowToolset } from "./chains/solana/workflow-toolset.js
 
 export {
 	EVM_TOOL_PREFIX,
+	buildUrlWithQuery as buildEvmUrlWithQuery,
 	evmNetworkSchema,
+	getEvmChainId,
+	getEvmRpcEndpoint,
+	parsePositiveIntegerString as parsePositiveEvmIntegerString,
+	parsePositiveNumber as parsePositiveEvmNumber,
 	parseEvmNetwork,
+	parseSide as parseEvmSide,
+	stringifyUnknown as stringifyEvmUnknown,
 } from "./chains/evm/runtime.js";
 export type { EvmNetwork } from "./chains/evm/runtime.js";
+export {
+	getPolymarketBtc5mAdvice,
+	getPolymarketBtc5mMarkets,
+	getPolymarketGeoblockStatus,
+	getPolymarketMarketBySlug,
+	getPolymarketOrderBook,
+	resolveBtc5mTradeSelection,
+	searchPolymarketEvents,
+} from "./chains/evm/polymarket.js";
 export { createEvmReadTools } from "./chains/evm/tools/read.js";
 export { createEvmComposeTools } from "./chains/evm/tools/compose.js";
 export { createEvmExecuteTools } from "./chains/evm/tools/execute.js";
 export { createEvmRpcTools } from "./chains/evm/tools/rpc.js";
+export { createEvmWorkflowTools } from "./chains/evm/tools/workflow.js";
 export { createEvmToolset } from "./chains/evm/toolset.js";
 
 export {

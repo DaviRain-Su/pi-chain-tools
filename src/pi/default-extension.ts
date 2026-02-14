@@ -1,4 +1,5 @@
 import type { ToolRegistrar } from "../core/types.js";
+import evmExtension from "./evm-extension.js";
 import nearExtension from "./near-extension.js";
 import solanaWorkflowExtension from "./solana-workflow-extension.js";
 import suiExtension from "./sui-extension.js";
@@ -16,4 +17,5 @@ export default function defaultExtension(pi: ToolRegistrar): void {
 	solanaWorkflowExtension(pi);
 	suiExtension(pi);
 	nearExtension(pi);
+	evmExtension(pi);
 }
