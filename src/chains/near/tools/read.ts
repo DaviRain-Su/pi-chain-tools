@@ -736,6 +736,27 @@ function summarizePortfolioRoleTokens(
 	return `${rows.slice(0, 4).join(", ")} (+${rows.length - 4} more)`;
 }
 
+function comparePortfolioAssetsForDisplay(
+	left: NearPortfolioAsset,
+	right: NearPortfolioAsset,
+): number {
+	const leftUsd =
+		typeof left.estimatedUsd === "number" && Number.isFinite(left.estimatedUsd)
+			? left.estimatedUsd
+			: null;
+	const rightUsd =
+		typeof right.estimatedUsd === "number" &&
+		Number.isFinite(right.estimatedUsd)
+			? right.estimatedUsd
+			: null;
+	if (leftUsd != null && rightUsd != null && leftUsd !== rightUsd) {
+		return leftUsd > rightUsd ? -1 : 1;
+	}
+	if (leftUsd != null && rightUsd == null) return -1;
+	if (leftUsd == null && rightUsd != null) return 1;
+	return left.symbol.localeCompare(right.symbol);
+}
+
 function normalizeTokenIdList(values: string[]): string[] {
 	return dedupeStrings(
 		values.map((entry) => entry.trim().toLowerCase()).filter(Boolean),
@@ -1378,6 +1399,10 @@ function formatUsdApprox(value: number | null): string | null {
 		minimumFractionDigits: value >= 100 ? 0 : 2,
 		maximumFractionDigits: 2,
 	});
+}
+
+function formatUsdOrFallback(value: number): string {
+	return formatUsdApprox(value) ?? `$${value.toFixed(2)}`;
 }
 
 function summarizeNearIntentsExplorerStatuses(
@@ -2506,7 +2531,7 @@ export function createNearReadTools() {
 				}
 				const walletFtAssets = ftAssets
 					.filter((asset) => hasPositiveRawAmount(asset.rawAmount))
-					.sort((left, right) => left.symbol.localeCompare(right.symbol));
+					.sort(comparePortfolioAssetsForDisplay);
 				const walletNonZeroFtAssets = walletFtAssets.map((asset) => ({
 					tokenId: asset.contractId as string,
 					symbol: asset.symbol,
@@ -2534,8 +2559,30 @@ export function createNearReadTools() {
 				if (includeValuationUsd) {
 					if (valuation.totalWalletUsd != null) {
 						lines.push(
-							`Estimated USD value (wallet): ${formatUsdApprox(valuation.totalWalletUsd) ?? `$${valuation.totalWalletUsd.toFixed(2)}`} (priced ${valuation.pricedWalletAssetCount}/${valuation.walletAssetCount} assets)`,
+							`Estimated USD value (wallet): ${formatUsdOrFallback(valuation.totalWalletUsd)} (priced ${valuation.pricedWalletAssetCount}/${valuation.walletAssetCount} assets)`,
 						);
+						const walletAssetsByValue = [
+							...(nativeAsset && hasPositiveRawAmount(nativeAsset.rawAmount)
+								? [nativeAsset]
+								: []),
+							...walletFtAssets,
+						]
+							.filter(
+								(asset): asset is NearPortfolioAsset =>
+									typeof asset.estimatedUsd === "number" &&
+									Number.isFinite(asset.estimatedUsd),
+							)
+							.sort(comparePortfolioAssetsForDisplay)
+							.slice(0, 3)
+							.map(
+								(asset) =>
+									`${asset.symbol} ${formatUsdOrFallback(asset.estimatedUsd as number)}`,
+							);
+						if (walletAssetsByValue.length > 0) {
+							lines.push(
+								`Top wallet assets by USD: ${walletAssetsByValue.join(", ")}`,
+							);
+						}
 					} else if (valuation.error) {
 						lines.push(
 							`Estimated USD value (wallet): unavailable (${valuation.error})`,
@@ -2548,7 +2595,7 @@ export function createNearReadTools() {
 				}
 				lines.push("Wallet assets (>0):");
 				lines.push(
-					`- NEAR: ${formatNearAmount(totalYoctoNear, 8)}${nativeAsset?.estimatedUsd != null ? ` (~${formatUsdApprox(nativeAsset.estimatedUsd) ?? `$${nativeAsset.estimatedUsd.toFixed(2)}`})` : ""}`,
+					`- NEAR: ${formatNearAmount(totalYoctoNear, 8)}${nativeAsset?.estimatedUsd != null ? ` (~${formatUsdOrFallback(nativeAsset.estimatedUsd)})` : ""}`,
 				);
 				if (walletFtAssets.length === 0) {
 					lines.push("- FT: none");
@@ -2560,7 +2607,7 @@ export function createNearReadTools() {
 								: `${asset.uiAmount} (raw ${asset.rawAmount})`;
 						const usdText =
 							asset.estimatedUsd != null
-								? ` (~${formatUsdApprox(asset.estimatedUsd) ?? `$${asset.estimatedUsd.toFixed(2)}`})`
+								? ` (~${formatUsdOrFallback(asset.estimatedUsd)})`
 								: "";
 						lines.push(
 							`- ${asset.symbol}: ${amountText}${usdText} on ${asset.contractId ?? "unknown"}`,
@@ -2613,7 +2660,10 @@ export function createNearReadTools() {
 					);
 				}
 				lines.push("Asset details:");
-				for (const asset of ftAssets) {
+				const ftAssetsSorted = [...ftAssets].sort(
+					comparePortfolioAssetsForDisplay,
+				);
+				for (const asset of ftAssetsSorted) {
 					const amountText =
 						asset.uiAmount == null
 							? `${asset.rawAmount} raw`
@@ -2631,7 +2681,7 @@ export function createNearReadTools() {
 						asset.priceUsd != null
 							? ` [price=$${asset.priceUsd.toLocaleString(undefined, {
 									maximumFractionDigits: 8,
-								})}${asset.estimatedUsd != null ? ` est=${formatUsdApprox(asset.estimatedUsd) ?? `$${asset.estimatedUsd.toFixed(2)}`}` : ""}]`
+								})}${asset.estimatedUsd != null ? ` est=${formatUsdOrFallback(asset.estimatedUsd)}` : ""}]`
 							: "";
 					lines.push(
 						`- ${asset.symbol}: ${amountText} on ${asset.contractId ?? "unknown"}${sourceText}${valuationText}`,
