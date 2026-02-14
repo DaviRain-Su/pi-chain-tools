@@ -193,6 +193,7 @@ type WorkflowParams = {
 	depositAddress?: string;
 	depositMemo?: string;
 	txHash?: string;
+	signedTxBase64?: string;
 	waitForFinalStatus?: boolean;
 	statusPollIntervalMs?: number;
 	statusTimeoutMs?: number;
@@ -3208,6 +3209,7 @@ function resolveExecuteTool(
 		| "near_swapRef"
 		| "near_withdrawRefToken"
 		| "near_submitIntentsDeposit"
+		| "near_broadcastSignedTransaction"
 		| "near_addLiquidityRef"
 		| "near_removeLiquidityRef",
 ): WorkflowTool {
@@ -3441,6 +3443,7 @@ export function createNearWorkflowTools() {
 				depositAddress: Type.Optional(Type.String()),
 				depositMemo: Type.Optional(Type.String()),
 				txHash: Type.Optional(Type.String()),
+				signedTxBase64: Type.Optional(Type.String()),
 				waitForFinalStatus: Type.Optional(Type.Boolean()),
 				statusPollIntervalMs: Type.Optional(Type.Number()),
 				statusTimeoutMs: Type.Optional(Type.Number()),
@@ -3913,12 +3916,17 @@ export function createNearWorkflowTools() {
 						`Invalid confirmToken for runId=${runId}. expected=${confirmToken} provided=${params.confirmToken ?? "null"}.`,
 					);
 				}
-				const submitTxHash =
+				let submitTxHash =
 					typeof params.txHash === "string" && params.txHash.trim()
 						? params.txHash.trim()
 						: typeof hints.txHash === "string" && hints.txHash.trim()
 							? hints.txHash.trim()
 							: undefined;
+				const signedTxBase64 =
+					typeof params.signedTxBase64 === "string" &&
+					params.signedTxBase64.trim()
+						? params.signedTxBase64
+						: undefined;
 				const submitDepositAddress =
 					typeof params.depositAddress === "string" &&
 					params.depositAddress.trim()
@@ -3935,10 +3943,58 @@ export function createNearWorkflowTools() {
 							: undefined;
 				let effectiveIntentsDepositAddress: string | undefined;
 				let effectiveIntentsDepositMemo: string | undefined;
+				let intentsBroadcastDetails: Record<string, unknown> | null = null;
 				if (intent.type === "near.swap.intents") {
+					if (!submitTxHash && signedTxBase64) {
+						const broadcastTool = resolveExecuteTool(
+							"near_broadcastSignedTransaction",
+						);
+						const broadcastResult = await broadcastTool.execute(
+							"near-wf-exec-intents-broadcast",
+							{
+								signedTxBase64,
+								network,
+								rpcUrl: params.rpcUrl,
+								confirmMainnet: params.confirmMainnet,
+							},
+						);
+						const broadcastResultDetails = broadcastResult.details;
+						const broadcastTxHash =
+							typeof broadcastResultDetails === "object" &&
+							broadcastResultDetails &&
+							typeof (
+								broadcastResultDetails as {
+									txHash?: unknown;
+								}
+							).txHash === "string" &&
+							(
+								broadcastResultDetails as {
+									txHash: string;
+								}
+							).txHash.trim()
+								? (
+										broadcastResultDetails as {
+											txHash: string;
+										}
+									).txHash.trim()
+								: undefined;
+						if (!broadcastTxHash) {
+							throw new Error(
+								"near_broadcastSignedTransaction did not return txHash for intents execute.",
+							);
+						}
+						submitTxHash = broadcastTxHash;
+						intentsBroadcastDetails =
+							typeof broadcastResultDetails === "object" &&
+							broadcastResultDetails
+								? (broadcastResultDetails as Record<string, unknown>)
+								: {
+										txHash: broadcastTxHash,
+									};
+					}
 					if (!submitTxHash) {
 						throw new Error(
-							"near.swap.intents execute requires txHash from the deposit transaction.",
+							"near.swap.intents execute requires txHash or signedTxBase64 from the deposit transaction.",
 						);
 					}
 					effectiveIntentsDepositAddress =
@@ -4004,7 +4060,7 @@ export function createNearWorkflowTools() {
 										}
 									: intent.type === "near.swap.intents"
 										? {
-												txHash: submitTxHash,
+												txHash: submitTxHash as string,
 												depositAddress: effectiveIntentsDepositAddress,
 												depositMemo: effectiveIntentsDepositMemo,
 												nearSenderAccount:
@@ -4083,6 +4139,11 @@ export function createNearWorkflowTools() {
 					intent.type === "near.swap.intents" && executeDetails
 						? {
 								...(executeDetails as Record<string, unknown>),
+								broadcast:
+									intentsBroadcastDetails &&
+									typeof intentsBroadcastDetails.txHash === "string"
+										? intentsBroadcastDetails
+										: null,
 								depositAddress: effectiveIntentsDepositAddress ?? null,
 								depositMemo: effectiveIntentsDepositMemo ?? null,
 								statusTracking:

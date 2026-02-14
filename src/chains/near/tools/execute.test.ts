@@ -1007,6 +1007,46 @@ describe("near_removeLiquidityRef", () => {
 	});
 });
 
+describe("near_broadcastSignedTransaction", () => {
+	it("broadcasts signed transaction via RPC", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			transaction_outcome: {
+				id: "near-broadcast-hash-1",
+			},
+		});
+		const tool = getTool("near_broadcastSignedTransaction");
+		const signedTxBase64 = Buffer.from("signed-near-transaction").toString(
+			"base64",
+		);
+		const result = await tool.execute("near-exec-broadcast-1", {
+			signedTxBase64,
+			confirmMainnet: true,
+		});
+
+		expect(runtimeMocks.callNearRpc).toHaveBeenCalledWith({
+			method: "broadcast_tx_commit",
+			network: "mainnet",
+			rpcUrl: undefined,
+			params: [signedTxBase64],
+		});
+		expect(result.details).toMatchObject({
+			network: "mainnet",
+			txHash: "near-broadcast-hash-1",
+		});
+	});
+
+	it("blocks mainnet broadcast without explicit confirmation", async () => {
+		const tool = getTool("near_broadcastSignedTransaction");
+		await expect(
+			tool.execute("near-exec-broadcast-2", {
+				signedTxBase64: Buffer.from("signed-near-transaction").toString(
+					"base64",
+				),
+			}),
+		).rejects.toThrow("confirmMainnet=true");
+	});
+});
+
 describe("near_submitIntentsDeposit", () => {
 	it("submits deposit tx hash to intents API", async () => {
 		mockFetchJsonOnce({

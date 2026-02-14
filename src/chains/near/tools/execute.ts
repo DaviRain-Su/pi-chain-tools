@@ -135,6 +135,13 @@ type NearSubmitIntentsDepositParams = {
 	jwt?: string;
 };
 
+type NearBroadcastSignedTransactionParams = {
+	signedTxBase64: string;
+	network?: string;
+	rpcUrl?: string;
+	confirmMainnet?: boolean;
+};
+
 type NearCallFunctionResult = {
 	result: number[];
 	logs: string[];
@@ -211,6 +218,23 @@ function normalizeNonEmptyText(value: string, fieldName: string): string {
 	const normalized = value.trim();
 	if (!normalized) {
 		throw new Error(`${fieldName} is required`);
+	}
+	return normalized;
+}
+
+function normalizeBase64Text(value: string, fieldName: string): string {
+	const normalized = value.trim().replace(/\s+/g, "");
+	if (!normalized) {
+		throw new Error(`${fieldName} is required`);
+	}
+	let decoded: Buffer;
+	try {
+		decoded = Buffer.from(normalized, "base64");
+	} catch {
+		throw new Error(`${fieldName} must be a valid base64 string`);
+	}
+	if (decoded.length === 0) {
+		throw new Error(`${fieldName} must be a non-empty base64 payload`);
 	}
 	return normalized;
 }
@@ -1843,6 +1867,62 @@ export function createNearExecuteTools(): RegisteredTool[] {
 						correlationId,
 						status,
 						response: responsePayload,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}broadcastSignedTransaction`,
+			label: "NEAR Broadcast Signed Transaction",
+			description:
+				"Broadcast signed NEAR transaction bytes (base64) via broadcast_tx_commit.",
+			parameters: Type.Object({
+				signedTxBase64: Type.String({
+					description: "Signed transaction bytes encoded as base64.",
+				}),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({
+						description: "Override NEAR RPC endpoint URL",
+					}),
+				),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as NearBroadcastSignedTransactionParams;
+				const network = parseNearNetwork(params.network);
+				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
+				const signedTxBase64 = normalizeBase64Text(
+					params.signedTxBase64,
+					"signedTxBase64",
+				);
+				const endpoint = getNearRpcEndpoint(network, params.rpcUrl);
+				const result = await callNearRpc<{
+					transaction_outcome?: { id?: unknown };
+				}>({
+					method: "broadcast_tx_commit",
+					network,
+					rpcUrl: params.rpcUrl,
+					params: [signedTxBase64],
+				});
+				const txHash = extractTxHash(result);
+				const explorerUrl = txHash
+					? getNearExplorerTransactionUrl(txHash, network)
+					: null;
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Signed transaction broadcasted${txHash ? `: ${txHash}` : ""}`,
+						},
+					],
+					details: {
+						network,
+						rpcEndpoint: endpoint,
+						txHash,
+						explorerUrl,
+						signedTxBase64Length: signedTxBase64.length,
+						rawResult: result,
 					},
 				};
 			},

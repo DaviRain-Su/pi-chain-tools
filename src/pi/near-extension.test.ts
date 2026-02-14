@@ -15,6 +15,7 @@ describe("nearExtension", () => {
 
 		expect(names.sort()).toEqual([
 			"near_addLiquidityRef",
+			"near_broadcastSignedTransaction",
 			"near_buildAddLiquidityRefTransaction",
 			"near_buildIntentsSwapDepositTransaction",
 			"near_buildRefWithdrawTransaction",

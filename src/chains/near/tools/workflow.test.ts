@@ -18,6 +18,7 @@ const executeMocks = vi.hoisted(() => ({
 	swapRefExecute: vi.fn(),
 	withdrawRefTokenExecute: vi.fn(),
 	submitIntentsDepositExecute: vi.fn(),
+	broadcastSignedTxExecute: vi.fn(),
 	addLiquidityRefExecute: vi.fn(),
 	removeLiquidityRefExecute: vi.fn(),
 }));
@@ -92,6 +93,13 @@ vi.mock("./execute.js", () => ({
 			description: "intents submit",
 			parameters: {},
 			execute: executeMocks.submitIntentsDepositExecute,
+		},
+		{
+			name: "near_broadcastSignedTransaction",
+			label: "broadcast signed tx",
+			description: "broadcast signed tx",
+			parameters: {},
+			execute: executeMocks.broadcastSignedTxExecute,
 		},
 		{
 			name: "near_addLiquidityRef",
@@ -253,6 +261,13 @@ beforeEach(() => {
 		details: {
 			correlationId: "corr-exec-1",
 			status: "PENDING_DEPOSIT",
+		},
+	});
+	executeMocks.broadcastSignedTxExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			txHash: "near-broadcast-hash-1",
+			network: "mainnet",
 		},
 	});
 	executeMocks.addLiquidityRefExecute.mockResolvedValue({
@@ -1301,7 +1316,107 @@ describe("w3rt_run_near_workflow_v0", () => {
 		});
 	});
 
-	it("requires txHash for intents execute", async () => {
+	it("supports intents execute with signedTxBase64 by auto-broadcasting first", async () => {
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "near:wrap.near",
+					decimals: 24,
+					blockchain: "near",
+					symbol: "NEAR",
+					price: 4.2,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+				{
+					assetId: "near:usdc.tether-token.near",
+					decimals: 6,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+			],
+		});
+		mockFetchJsonOnce({
+			status: 201,
+			body: {
+				correlationId: "corr-sim-3a",
+				timestamp: "2026-02-13T00:00:00Z",
+				signature: "sig-3a",
+				quoteRequest: { dry: true },
+				quote: {
+					depositAddress: "0xnear-deposit-3a",
+					depositMemo: "memo-3a",
+					amountIn: "10000000000000000000000",
+					amountInFormatted: "0.01",
+					amountInUsd: "0.042",
+					minAmountIn: "10000000000000000000000",
+					amountOut: "41871",
+					amountOutFormatted: "0.041871",
+					amountOutUsd: "0.041871",
+					minAmountOut: "40000",
+					timeEstimate: 22,
+				},
+			},
+		});
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-8ga-sim", {
+			runId: "wf-near-08ga",
+			runMode: "simulate",
+			intentType: "near.swap.intents",
+			network: "mainnet",
+			originAsset: "NEAR",
+			destinationAsset: "USDC",
+			amountRaw: "10000000000000000000000",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		const signedTxBase64 = Buffer.from(
+			"signed-near-transaction",
+			"utf8",
+		).toString("base64");
+		const result = await tool.execute("near-wf-8ga-exec", {
+			runId: "wf-near-08ga",
+			runMode: "execute",
+			confirmMainnet: true,
+			confirmToken: token,
+			signedTxBase64,
+			waitForFinalStatus: false,
+		});
+
+		expect(executeMocks.broadcastSignedTxExecute).toHaveBeenCalledWith(
+			"near-wf-exec-intents-broadcast",
+			expect.objectContaining({
+				signedTxBase64,
+				network: "mainnet",
+				confirmMainnet: true,
+			}),
+		);
+		expect(executeMocks.submitIntentsDepositExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				txHash: "near-broadcast-hash-1",
+				depositAddress: "0xnear-deposit-3a",
+				depositMemo: "memo-3a",
+				confirmMainnet: true,
+				network: "mainnet",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.intents",
+			artifacts: {
+				execute: {
+					correlationId: "corr-exec-1",
+					broadcast: {
+						txHash: "near-broadcast-hash-1",
+					},
+					statusTracking: null,
+				},
+			},
+		});
+	});
+
+	it("requires txHash or signedTxBase64 for intents execute", async () => {
 		mockFetchJsonOnce({
 			status: 200,
 			body: [
@@ -1362,7 +1477,7 @@ describe("w3rt_run_near_workflow_v0", () => {
 				confirmMainnet: true,
 				confirmToken: token,
 			}),
-		).rejects.toThrow("requires txHash");
+		).rejects.toThrow("requires txHash or signedTxBase64");
 	});
 
 	it("parses natural-language ref lp add intent", async () => {
