@@ -485,7 +485,7 @@ Then run these prompts:
 
 ### 10) Troubleshooting
 
-- `Cannot find module ...` (for example `@mysten/utils` / `@cetusprotocol/common-sdk`):
+- `Cannot find module ...` (for example `@mysten/utils` / `@mysten/bcs` / `@cetusprotocol/common-sdk`):
   - run `npm install` (or `bun install`) in this repo, then `/reload`
   - if still failing after dependency changes, restart Pi once
 - `Failed to load extension: import_bn.default is not a constructor`:
