@@ -16,6 +16,7 @@ import {
 import { createEvmExecuteTools } from "./execute.js";
 
 type WorkflowRunMode = "analysis" | "simulate" | "execute";
+type RequotePriceStrategy = "aggressive" | "passive" | "follow_mid";
 
 type WorkflowTradeIntent = {
 	type: "evm.polymarket.btc5m.trade";
@@ -28,6 +29,7 @@ type WorkflowTradeIntent = {
 	maxStakeUsd?: number;
 	minConfidence?: number;
 	requoteStaleOrders: boolean;
+	requotePriceStrategy?: RequotePriceStrategy;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
 	requoteMinIntervalSeconds?: number;
@@ -68,6 +70,7 @@ type WorkflowParams = {
 	orderIds?: string[];
 	cancelAll?: boolean;
 	requoteStaleOrders?: boolean;
+	requotePriceStrategy?: RequotePriceStrategy;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
 	requoteMinIntervalSeconds?: number;
@@ -87,6 +90,7 @@ type ParsedIntentHints = {
 	orderIds?: string[];
 	cancelAll?: boolean;
 	requoteStaleOrders?: boolean;
+	requotePriceStrategy?: RequotePriceStrategy;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
 	requoteMinIntervalSeconds?: number;
@@ -178,9 +182,117 @@ function parseSideHint(text: string): "up" | "down" | undefined {
 	return undefined;
 }
 
+function parseRequotePriceStrategyHint(
+	text?: string,
+): RequotePriceStrategy | undefined {
+	if (!text?.trim()) return undefined;
+	if (/(aggressive|激进|快速成交|taker)/i.test(text)) return "aggressive";
+	if (/(passive|保守|被动|maker)/i.test(text)) return "passive";
+	if (/(follow[-_\s]?mid|midpoint|中价|中间价|跟随中价)/i.test(text)) {
+		return "follow_mid";
+	}
+	return undefined;
+}
+
+function normalizeRequotePriceStrategy(
+	value?: string,
+): RequotePriceStrategy | undefined {
+	if (!value?.trim()) return undefined;
+	const normalized = value.trim().toLowerCase().replace(/-/g, "_");
+	if (
+		normalized === "aggressive" ||
+		normalized === "passive" ||
+		normalized === "follow_mid"
+	) {
+		return normalized;
+	}
+	throw new Error(
+		"requotePriceStrategy must be one of: aggressive | passive | follow_mid",
+	);
+}
+
+function resolveRequoteLimitPrice(params: {
+	orderbook: {
+		bestAsk?: { price?: number } | null;
+		bestBid?: { price?: number } | null;
+		midpoint?: number | null;
+	};
+	strategy: RequotePriceStrategy;
+}): {
+	strategy: RequotePriceStrategy;
+	limitPrice: number | null;
+	priceSource: "best_ask" | "best_bid" | "midpoint" | "none";
+} {
+	const ask = params.orderbook.bestAsk?.price;
+	const bid = params.orderbook.bestBid?.price;
+	const midpoint = params.orderbook.midpoint ?? null;
+	let chosen: number | null = null;
+	let priceSource: "best_ask" | "best_bid" | "midpoint" | "none" = "none";
+	if (params.strategy === "aggressive") {
+		if (typeof ask === "number" && Number.isFinite(ask) && ask > 0) {
+			chosen = ask;
+			priceSource = "best_ask";
+		} else if (
+			typeof midpoint === "number" &&
+			Number.isFinite(midpoint) &&
+			midpoint > 0
+		) {
+			chosen = midpoint;
+			priceSource = "midpoint";
+		} else if (typeof bid === "number" && Number.isFinite(bid) && bid > 0) {
+			chosen = bid;
+			priceSource = "best_bid";
+		}
+	} else if (params.strategy === "passive") {
+		if (typeof bid === "number" && Number.isFinite(bid) && bid > 0) {
+			chosen = bid;
+			priceSource = "best_bid";
+		} else if (
+			typeof midpoint === "number" &&
+			Number.isFinite(midpoint) &&
+			midpoint > 0
+		) {
+			chosen = midpoint;
+			priceSource = "midpoint";
+		} else if (typeof ask === "number" && Number.isFinite(ask) && ask > 0) {
+			chosen = ask;
+			priceSource = "best_ask";
+		}
+	} else {
+		if (
+			typeof midpoint === "number" &&
+			Number.isFinite(midpoint) &&
+			midpoint > 0
+		) {
+			chosen = midpoint;
+			priceSource = "midpoint";
+		} else if (typeof ask === "number" && Number.isFinite(ask) && ask > 0) {
+			chosen = ask;
+			priceSource = "best_ask";
+		} else if (typeof bid === "number" && Number.isFinite(bid) && bid > 0) {
+			chosen = bid;
+			priceSource = "best_bid";
+		}
+	}
+	if (chosen == null) {
+		return {
+			strategy: params.strategy,
+			limitPrice: null,
+			priceSource,
+		};
+	}
+	const clamped = Math.min(0.999, Math.max(0.001, Number(chosen.toFixed(6))));
+	return {
+		strategy: params.strategy,
+		limitPrice: clamped,
+		priceSource,
+	};
+}
+
 function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
 	const side = parseSideHint(text);
+	const requotePriceStrategy = parseRequotePriceStrategyHint(text);
 	const stakeMatch =
 		text.match(
 			/(?:stake|size|amount|仓位|金额|下注|下单)\s*[:= ]\s*(\d+(?:\.\d+)?)/i,
@@ -274,6 +386,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		orderIds,
 		cancelAll,
 		requoteStaleOrders: hasRequotePhrase ? true : undefined,
+		requotePriceStrategy,
 		maxAgeMinutes,
 		maxFillRatio,
 		requoteMinIntervalSeconds,
@@ -298,6 +411,7 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			(params.orderIds && params.orderIds.length > 0) ||
 			params.cancelAll === true ||
 			params.requoteStaleOrders === true ||
+			params.requotePriceStrategy != null ||
 			params.maxAgeMinutes != null ||
 			params.maxFillRatio != null ||
 			params.requoteMinIntervalSeconds != null ||
@@ -311,6 +425,7 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			(parsed.orderIds && parsed.orderIds.length > 0) ||
 			parsed.cancelAll === true ||
 			parsed.requoteStaleOrders === true ||
+			parsed.requotePriceStrategy != null ||
 			parsed.maxAgeMinutes != null ||
 			parsed.maxFillRatio != null ||
 			parsed.requoteMinIntervalSeconds != null ||
@@ -396,6 +511,8 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 	if (stakeUsdRaw == null) {
 		throw new Error("stakeUsd is required for evm.polymarket.btc5m.trade");
 	}
+	const requotePriceStrategyRaw =
+		params.requotePriceStrategy ?? parsed.requotePriceStrategy;
 	const maxAgeMinutesRaw = params.maxAgeMinutes ?? parsed.maxAgeMinutes;
 	const maxFillRatioRaw = params.maxFillRatio ?? parsed.maxFillRatio;
 	const requoteMinIntervalSecondsRaw =
@@ -441,6 +558,9 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 		maxFillRatio != null ||
 		requoteMinIntervalSeconds != null ||
 		requoteMaxAttempts != null;
+	const requotePriceStrategy = requoteStaleOrders
+		? normalizeRequotePriceStrategy(requotePriceStrategyRaw ?? "aggressive")
+		: normalizeRequotePriceStrategy(requotePriceStrategyRaw);
 	if (requoteStaleOrders && maxAgeMinutes == null && maxFillRatio == null) {
 		throw new Error(
 			"requoteStaleOrders requires at least one stale filter: maxAgeMinutes or maxFillRatio.",
@@ -472,6 +592,7 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 				? parsePositiveNumber(params.minConfidence, "minConfidence")
 				: undefined,
 		requoteStaleOrders,
+		requotePriceStrategy,
 		maxAgeMinutes,
 		maxFillRatio,
 		requoteMinIntervalSeconds,
@@ -509,6 +630,7 @@ function buildTradeSummaryLine(params: {
 	side?: "up" | "down";
 	entryPrice?: number | null;
 	shares?: number | null;
+	requoteLimitPrice?: number | null;
 	staleTargets?: number | null;
 	confirmToken?: string;
 }): string {
@@ -519,6 +641,12 @@ function buildTradeSummaryLine(params: {
 		parts.push(`entry=${params.entryPrice.toFixed(4)}`);
 	if (params.shares != null) parts.push(`shares~=${params.shares.toFixed(4)}`);
 	if (params.intent.requoteStaleOrders) parts.push("requote=stale");
+	if (params.intent.requotePriceStrategy) {
+		parts.push(`requotePriceStrategy=${params.intent.requotePriceStrategy}`);
+	}
+	if (params.requoteLimitPrice != null) {
+		parts.push(`requoteLimit=${params.requoteLimitPrice.toFixed(4)}`);
+	}
 	if (params.intent.maxAgeMinutes != null) {
 		parts.push(`maxAgeMinutes=${params.intent.maxAgeMinutes}`);
 	}
@@ -764,6 +892,13 @@ export function createEvmWorkflowTools() {
 				),
 				cancelAll: Type.Optional(Type.Boolean()),
 				requoteStaleOrders: Type.Optional(Type.Boolean()),
+				requotePriceStrategy: Type.Optional(
+					Type.Union([
+						Type.Literal("aggressive"),
+						Type.Literal("passive"),
+						Type.Literal("follow_mid"),
+					]),
+				),
 				maxAgeMinutes: Type.Optional(Type.Number({ minimum: 0.1 })),
 				maxFillRatio: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 				requoteMinIntervalSeconds: Type.Optional(Type.Number({ minimum: 0.1 })),
@@ -828,19 +963,28 @@ export function createEvmWorkflowTools() {
 					});
 					const orderbook = await getPolymarketOrderBook(trade.tokenId);
 					const entryPrice = orderbook.bestAsk?.price ?? null;
+					const requotePricing = intent.requoteStaleOrders
+						? resolveRequoteLimitPrice({
+								orderbook,
+								strategy: intent.requotePriceStrategy ?? "aggressive",
+							})
+						: null;
+					const effectiveOrderPrice = requotePricing?.limitPrice ?? entryPrice;
 					const baseStatus =
-						entryPrice == null
+						effectiveOrderPrice == null
 							? "no_liquidity"
 							: intent.maxEntryPrice != null &&
-									entryPrice > intent.maxEntryPrice
+									effectiveOrderPrice > intent.maxEntryPrice
 								? "price_too_high"
 								: "ready";
 					const estimatedShares =
-						entryPrice == null ? null : intent.stakeUsd / entryPrice;
+						effectiveOrderPrice == null
+							? null
+							: intent.stakeUsd / effectiveOrderPrice;
 					const guardEvaluation = evaluateBtc5mTradeGuards({
 						stakeUsd: intent.stakeUsd,
 						orderbook,
-						limitPrice: intent.maxEntryPrice ?? entryPrice ?? 0,
+						limitPrice: effectiveOrderPrice ?? 0,
 						orderSide: "buy",
 						adviceConfidence: trade.advice?.confidence ?? null,
 						guards: {
@@ -871,6 +1015,7 @@ export function createEvmWorkflowTools() {
 							side: trade.side,
 							entryPrice,
 							shares: estimatedShares,
+							requoteLimitPrice: requotePricing?.limitPrice ?? null,
 							confirmToken: mainnetGuardRequired ? confirmToken : undefined,
 						});
 						rememberSession({ runId, network, intent });
@@ -903,6 +1048,7 @@ export function createEvmWorkflowTools() {
 															: "planned",
 													maxAgeMinutes: intent.maxAgeMinutes ?? null,
 													maxFillRatio: intent.maxFillRatio ?? null,
+													pricing: requotePricing,
 													runtime: requoteRuntime,
 												}
 											: {
@@ -982,6 +1128,7 @@ export function createEvmWorkflowTools() {
 							side: trade.side,
 							entryPrice,
 							shares: estimatedShares,
+							requoteLimitPrice: requotePricing?.limitPrice ?? null,
 							staleTargets,
 							confirmToken: mainnetGuardRequired ? confirmToken : undefined,
 						});
@@ -1012,6 +1159,7 @@ export function createEvmWorkflowTools() {
 											enabled: intent.requoteStaleOrders,
 											status: staleRequoteStatus,
 											targetOrders: staleTargets,
+											pricing: requotePricing,
 											runtime: requoteRuntime,
 											result: staleRequotePreview,
 										},
@@ -1038,7 +1186,7 @@ export function createEvmWorkflowTools() {
 					}
 					if (simulateStatus === "price_too_high") {
 						throw new Error(
-							`Trade execute blocked: entryPrice ${entryPrice ?? "n/a"} exceeds maxEntryPrice ${intent.maxEntryPrice}.`,
+							`Trade execute blocked: entryPrice ${effectiveOrderPrice ?? "n/a"} exceeds maxEntryPrice ${intent.maxEntryPrice}.`,
 						);
 					}
 					if (simulateStatus === "guard_blocked") {
@@ -1089,6 +1237,7 @@ export function createEvmWorkflowTools() {
 						marketSlug: trade.market.slug,
 						side: trade.side,
 						stakeUsd: intent.stakeUsd,
+						limitPrice: requotePricing?.limitPrice ?? undefined,
 						maxEntryPrice: intent.maxEntryPrice,
 						maxSpreadBps: intent.maxSpreadBps,
 						minDepthUsd: intent.minDepthUsd,
@@ -1146,6 +1295,7 @@ export function createEvmWorkflowTools() {
 						side: trade.side,
 						entryPrice,
 						shares: estimatedShares,
+						requoteLimitPrice: requotePricing?.limitPrice ?? null,
 						staleTargets: staleCancelTargetOrders,
 					});
 					rememberSession({ runId, network, intent });
@@ -1167,6 +1317,7 @@ export function createEvmWorkflowTools() {
 									staleRequote: {
 										enabled: intent.requoteStaleOrders,
 										targetOrders: staleCancelTargetOrders,
+										pricing: requotePricing,
 										runtime: nextRequoteRuntime,
 										result: staleCancelResult,
 									},

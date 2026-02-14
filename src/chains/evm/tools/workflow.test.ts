@@ -301,6 +301,33 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		});
 	});
 
+	it("simulates trade with follow_mid requote pricing", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf4-requote-mid-sim", {
+			runId: "wf-evm-4-requote-mid",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 25,
+			side: "up",
+			requoteStaleOrders: true,
+			requotePriceStrategy: "follow_mid",
+			maxAgeMinutes: 30,
+		});
+		expect(result.details).toMatchObject({
+			artifacts: {
+				simulate: {
+					staleRequote: {
+						pricing: {
+							strategy: "follow_mid",
+							limitPrice: 0.5,
+							priceSource: "midpoint",
+						},
+					},
+				},
+			},
+		});
+	});
+
 	it("executes trade with stale requote cancel-before-place", async () => {
 		const tool = getTool();
 		const analyzed = await tool.execute("wf4-requote-analysis", {
@@ -341,6 +368,36 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 				},
 			},
 		});
+	});
+
+	it("executes trade with passive requote strategy and applies limitPrice", async () => {
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-requote-passive-analysis", {
+			runId: "wf-evm-4-requote-passive",
+			runMode: "analysis",
+			network: "polygon",
+			stakeUsd: 25,
+			side: "up",
+			requoteStaleOrders: true,
+			requotePriceStrategy: "passive",
+			maxAgeMinutes: 30,
+		});
+		const details = analyzed.details as { confirmToken: string };
+		await tool.execute("wf4-requote-passive-exec", {
+			runId: "wf-evm-4-requote-passive",
+			runMode: "execute",
+			network: "polygon",
+			confirmMainnet: true,
+			confirmToken: details.confirmToken,
+		});
+		expect(executeMocks.placeOrderExecute).toHaveBeenCalledWith(
+			"wf-evm-execute",
+			expect.objectContaining({
+				network: "polygon",
+				limitPrice: 0.49,
+				dryRun: false,
+			}),
+		);
 	});
 
 	it("blocks requote execute when max attempts reached", async () => {
