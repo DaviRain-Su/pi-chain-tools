@@ -3222,6 +3222,7 @@ function resolveComposeTool(
 	name:
 		| "near_buildTransferNearTransaction"
 		| "near_buildTransferFtTransaction"
+		| "near_buildSwapRefTransaction"
 		| "near_buildRefWithdrawTransaction",
 ): WorkflowComposeTool {
 	const tool = createNearComposeTools().find((entry) => entry.name === name);
@@ -3556,6 +3557,26 @@ export function createNearWorkflowTools() {
 							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
 							publicKey: params.publicKey,
 						});
+					} else if (intent.type === "near.swap.ref") {
+						const composeTool = resolveComposeTool(
+							"near_buildSwapRefTransaction",
+						);
+						composeResult = await composeTool.execute("near-wf-compose", {
+							tokenInId: intent.tokenInId,
+							tokenOutId: intent.tokenOutId,
+							amountInRaw: intent.amountInRaw,
+							minAmountOutRaw: intent.minAmountOutRaw,
+							poolId: intent.poolId,
+							slippageBps: intent.slippageBps,
+							refContractId: intent.refContractId,
+							autoRegisterOutput: intent.autoRegisterOutput,
+							gas: intent.gas,
+							attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+							network,
+							rpcUrl: params.rpcUrl,
+							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+							publicKey: params.publicKey,
+						});
 					} else if (intent.type === "near.ref.withdraw") {
 						const composeTool = resolveComposeTool(
 							"near_buildRefWithdrawTransaction",
@@ -3575,7 +3596,7 @@ export function createNearWorkflowTools() {
 						});
 					} else {
 						throw new Error(
-							`compose currently supports near.transfer.near / near.transfer.ft / near.ref.withdraw. Unsupported intentType=${intent.type}`,
+							`compose currently supports near.transfer.near / near.transfer.ft / near.swap.ref / near.ref.withdraw. Unsupported intentType=${intent.type}`,
 						);
 					}
 

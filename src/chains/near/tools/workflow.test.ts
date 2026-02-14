@@ -25,6 +25,7 @@ const executeMocks = vi.hoisted(() => ({
 const composeMocks = vi.hoisted(() => ({
 	buildTransferNearCompose: vi.fn(),
 	buildTransferFtCompose: vi.fn(),
+	buildSwapRefCompose: vi.fn(),
 	buildRefWithdrawCompose: vi.fn(),
 }));
 
@@ -121,6 +122,13 @@ vi.mock("./compose.js", () => ({
 			description: "compose ft transfer",
 			parameters: {},
 			execute: composeMocks.buildTransferFtCompose,
+		},
+		{
+			name: "near_buildSwapRefTransaction",
+			label: "compose ref swap",
+			description: "compose ref swap",
+			parameters: {},
+			execute: composeMocks.buildSwapRefCompose,
 		},
 		{
 			name: "near_buildRefWithdrawTransaction",
@@ -245,6 +253,12 @@ beforeEach(() => {
 		content: [{ type: "text", text: "ok" }],
 		details: {
 			unsignedPayload: "near-compose-transfer-ft",
+		},
+	});
+	composeMocks.buildSwapRefCompose.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			unsignedPayload: "near-compose-swap-ref",
 		},
 	});
 	composeMocks.buildRefWithdrawCompose.mockResolvedValue({
@@ -405,6 +419,41 @@ describe("w3rt_run_near_workflow_v0", () => {
 			artifacts: {
 				compose: {
 					unsignedPayload: "near-compose-transfer-near",
+				},
+			},
+		});
+	});
+
+	it("composes ref swap and returns unsigned payload artifact", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-1-compose-swap", {
+			runId: "wf-near-01-compose-swap",
+			runMode: "compose",
+			network: "mainnet",
+			intentType: "near.swap.ref",
+			tokenInId: "NEAR",
+			tokenOutId: "USDC",
+			amountInRaw: "10000000000000000000000",
+			slippageBps: 100,
+		});
+
+		expect(composeMocks.buildSwapRefCompose).toHaveBeenCalledWith(
+			"near-wf-compose",
+			expect.objectContaining({
+				tokenInId: "NEAR",
+				tokenOutId: "USDC",
+				amountInRaw: "10000000000000000000000",
+				slippageBps: 100,
+				network: "mainnet",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runMode: "compose",
+			intentType: "near.swap.ref",
+			approvalRequired: false,
+			artifacts: {
+				compose: {
+					unsignedPayload: "near-compose-swap-ref",
 				},
 			},
 		});

@@ -9,7 +9,11 @@ import {
 } from "near-api-js";
 import { defineTool } from "../../../core/types.js";
 import type { RegisteredTool } from "../../../core/types.js";
-import { getRefContractId, resolveRefTokenIds } from "../ref.js";
+import {
+	getRefContractId,
+	getRefSwapQuote,
+	resolveRefTokenIds,
+} from "../ref.js";
 import {
 	NEAR_TOOL_PREFIX,
 	callNearRpc,
@@ -34,6 +38,23 @@ type NearBuildTransferFtTransactionParams = {
 	ftContractId: string;
 	toAccountId: string;
 	amountRaw: string;
+	fromAccountId?: string;
+	publicKey?: string;
+	network?: string;
+	rpcUrl?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearBuildRefSwapTransactionParams = {
+	tokenInId: string;
+	tokenOutId: string;
+	amountInRaw: string;
+	minAmountOutRaw?: string;
+	poolId?: number | string;
+	slippageBps?: number;
+	refContractId?: string;
+	autoRegisterOutput?: boolean;
 	fromAccountId?: string;
 	publicKey?: string;
 	network?: string;
@@ -164,10 +185,14 @@ type StorageRegistrationStatus =
 	  };
 
 const DEFAULT_FUNCTION_CALL_GAS = 30_000_000_000_000n;
+const DEFAULT_REF_SWAP_GAS = 180_000_000_000_000n;
 const DEFAULT_REF_WITHDRAW_GAS = 180_000_000_000_000n;
 const DEFAULT_ATTACHED_DEPOSIT = 1n;
 const DEFAULT_FT_STORAGE_DEPOSIT_YOCTO_NEAR = 1_250_000_000_000_000_000_000n;
 const DEFAULT_STORAGE_DEPOSIT_GAS = 30_000_000_000_000n;
+const DEFAULT_NEAR_SWAP_SLIPPAGE_BPS = 50;
+const DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS = 1000;
+const HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS = 5000;
 
 function parsePositiveBigInt(value: string, fieldName: string): bigint {
 	const normalized = value.trim();
@@ -260,11 +285,101 @@ function resolveRequestGas(value?: string): string {
 	return parsePositiveBigInt(value, "gas").toString();
 }
 
+function resolveRefSwapGas(value?: string): string {
+	if (typeof value !== "string" || !value.trim()) {
+		return DEFAULT_REF_SWAP_GAS.toString();
+	}
+	return parsePositiveBigInt(value, "gas").toString();
+}
+
 function resolveRefWithdrawGas(value?: string): string {
 	if (typeof value !== "string" || !value.trim()) {
 		return DEFAULT_REF_WITHDRAW_GAS.toString();
 	}
 	return parsePositiveBigInt(value, "gas").toString();
+}
+
+function parseOptionalPoolId(value?: number | string): number | undefined {
+	if (value == null) return undefined;
+	if (typeof value === "string" && !value.trim()) return undefined;
+	const normalized = typeof value === "number" ? value : Number(value.trim());
+	if (
+		!Number.isFinite(normalized) ||
+		!Number.isInteger(normalized) ||
+		normalized < 0
+	) {
+		throw new Error("poolId must be a non-negative integer");
+	}
+	return normalized;
+}
+
+function resolveNearSwapSlippageLimitBps(): number {
+	const raw = process.env.NEAR_SWAP_MAX_SLIPPAGE_BPS?.trim();
+	if (!raw) return DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS;
+	if (!/^\d+$/.test(raw)) return DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS;
+	const parsed = Number(raw);
+	if (!Number.isFinite(parsed)) return DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS;
+	return Math.max(
+		0,
+		Math.min(HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS, Math.floor(parsed)),
+	);
+}
+
+function resolveNearSwapSlippageBps(value?: number): number {
+	if (value == null) return DEFAULT_NEAR_SWAP_SLIPPAGE_BPS;
+	if (
+		!Number.isFinite(value) ||
+		value < 0 ||
+		value > HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS
+	) {
+		throw new Error(
+			`slippageBps must be between 0 and ${HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS}`,
+		);
+	}
+	const normalized = Math.floor(value);
+	const limit = resolveNearSwapSlippageLimitBps();
+	if (normalized > limit) {
+		throw new Error(
+			`slippageBps ${normalized} exceeds configured safety limit (${limit}).`,
+		);
+	}
+	return normalized;
+}
+
+function resolveSafeMinAmountOutRaw(params: {
+	requestedMinAmountOutRaw?: string;
+	quoteAmountOutRaw: string;
+	quoteMinAmountOutRaw: string;
+}): string {
+	const quoteAmountOutRaw = parsePositiveBigInt(
+		params.quoteAmountOutRaw,
+		"quote.amountOutRaw",
+	);
+	const quoteMinAmountOutRaw = parsePositiveBigInt(
+		params.quoteMinAmountOutRaw,
+		"quote.minAmountOutRaw",
+	);
+	if (quoteMinAmountOutRaw > quoteAmountOutRaw) {
+		throw new Error(
+			"Ref quote returned invalid minAmountOutRaw > amountOutRaw",
+		);
+	}
+	if (
+		typeof params.requestedMinAmountOutRaw === "string" &&
+		params.requestedMinAmountOutRaw.trim()
+	) {
+		const requested = parsePositiveBigInt(
+			params.requestedMinAmountOutRaw,
+			"minAmountOutRaw",
+		);
+		if (requested < quoteMinAmountOutRaw) {
+			throw new Error(
+				`minAmountOutRaw is below safe minimum from quote (${quoteMinAmountOutRaw.toString()}).`,
+			);
+		}
+		return requested.toString();
+	}
+	return quoteMinAmountOutRaw.toString();
 }
 
 function resolveAttachedDeposit(value?: string): string {
@@ -814,6 +929,303 @@ export function createNearComposeTools(): RegisteredTool[] {
 							"Unsigned payload includes nonce+blockHash and expires quickly. Sign and broadcast promptly.",
 						transaction: artifact,
 						transactions: [artifact],
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}buildSwapRefTransaction`,
+			label: "NEAR Build Ref Swap Transaction",
+			description:
+				"Build unsigned Ref swap transaction payload(s) for local signing. Can include a storage_deposit pre-transaction when output token storage is missing.",
+			parameters: Type.Object({
+				tokenInId: Type.String({
+					description: "Input token contract id or symbol (e.g. NEAR/USDC).",
+				}),
+				tokenOutId: Type.String({
+					description: "Output token contract id or symbol.",
+				}),
+				amountInRaw: Type.String({
+					description: "Input amount in raw integer string.",
+				}),
+				minAmountOutRaw: Type.Optional(
+					Type.String({
+						description:
+							"Minimum output in raw integer string. If omitted, use quote-safe minimum.",
+					}),
+				),
+				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				slippageBps: Type.Optional(
+					Type.Number({
+						description:
+							"Slippage bps used by quote when minAmountOutRaw is omitted (default 50).",
+					}),
+				),
+				refContractId: Type.Optional(
+					Type.String({
+						description:
+							"Ref contract id override (default mainnet v2.ref-finance.near).",
+					}),
+				),
+				autoRegisterOutput: Type.Optional(
+					Type.Boolean({
+						description:
+							"If true, include storage_deposit pre-transaction when output token storage is missing (default true).",
+					}),
+				),
+				fromAccountId: Type.Optional(
+					Type.String({
+						description:
+							"Signer account id. If omitted, resolve from env/credentials.",
+					}),
+				),
+				publicKey: Type.Optional(
+					Type.String({
+						description:
+							"Public key used for nonce/access-key lookup, e.g. ed25519:.... If omitted, auto-select from account access keys.",
+					}),
+				),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				gas: Type.Optional(
+					Type.String({
+						description:
+							"Gas in yoctoGas for ft_transfer_call swap (default 180000000000000 / 180 Tgas).",
+					}),
+				),
+				attachedDepositYoctoNear: Type.Optional(
+					Type.String({
+						description:
+							"Attached deposit in yoctoNEAR for ft_transfer_call (default 1).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as NearBuildRefSwapTransactionParams;
+				const network = parseNearNetwork(params.network);
+				const signerAccountId = resolveNearAccountId(
+					params.fromAccountId,
+					network,
+				);
+				const tokenInInput = normalizeNonEmptyText(
+					params.tokenInId,
+					"tokenInId",
+				);
+				const tokenOutInput = normalizeNonEmptyText(
+					params.tokenOutId,
+					"tokenOutId",
+				);
+				const amountInRaw = parsePositiveBigInt(
+					params.amountInRaw,
+					"amountInRaw",
+				).toString();
+				const slippageBps = resolveNearSwapSlippageBps(params.slippageBps);
+				const gas = resolveRefSwapGas(params.gas);
+				const deposit = resolveAttachedDeposit(params.attachedDepositYoctoNear);
+				const keyState = await resolveComposeAccessKeyState({
+					accountId: signerAccountId,
+					publicKey: params.publicKey,
+					network,
+					rpcUrl: params.rpcUrl,
+				});
+				const refContractId = getRefContractId(network, params.refContractId);
+				const poolId = parseOptionalPoolId(params.poolId);
+				const quote = await getRefSwapQuote({
+					network,
+					rpcUrl: params.rpcUrl,
+					refContractId,
+					tokenInId: tokenInInput,
+					tokenOutId: tokenOutInput,
+					amountInRaw,
+					poolId,
+					slippageBps,
+				});
+				const quoteActions =
+					Array.isArray(quote.actions) && quote.actions.length > 0
+						? quote.actions
+						: [
+								{
+									poolId: quote.poolId,
+									tokenInId: quote.tokenInId,
+									tokenOutId: quote.tokenOutId,
+									amountInRaw: quote.amountInRaw,
+								},
+							];
+				const firstAction = quoteActions[0];
+				const lastAction = quoteActions[quoteActions.length - 1];
+				if (!firstAction || !lastAction) {
+					throw new Error("Ref quote returned an empty action list");
+				}
+				const tokenInId = normalizeAccountId(
+					firstAction.tokenInId,
+					"tokenInId",
+				);
+				const tokenOutId = normalizeAccountId(
+					lastAction.tokenOutId,
+					"tokenOutId",
+				);
+				if (tokenInId === tokenOutId) {
+					throw new Error("tokenInId and tokenOutId must be different");
+				}
+				const minAmountOutRaw = resolveSafeMinAmountOutRaw({
+					requestedMinAmountOutRaw: params.minAmountOutRaw,
+					quoteAmountOutRaw: quote.amountOutRaw,
+					quoteMinAmountOutRaw: quote.minAmountOutRaw,
+				});
+				const autoRegisterOutput = params.autoRegisterOutput !== false;
+				const storageRegistration =
+					autoRegisterOutput === true
+						? await queryStorageRegistrationStatus({
+								network,
+								rpcUrl: params.rpcUrl,
+								ftContractId: tokenOutId,
+								accountId: signerAccountId,
+							})
+						: null;
+				const artifacts: UnsignedTransactionArtifact[] = [];
+				let nextNonce = keyState.nextNonce;
+
+				if (
+					autoRegisterOutput &&
+					storageRegistration &&
+					storageRegistration.status === "needs_registration"
+				) {
+					const storageDepositActionSummary: ActionSummary = {
+						type: "FunctionCall",
+						methodName: "storage_deposit",
+						args: {
+							account_id: signerAccountId,
+							registration_only: true,
+						},
+						gas: DEFAULT_STORAGE_DEPOSIT_GAS.toString(),
+						depositYoctoNear: storageRegistration.estimatedDepositYoctoNear,
+					};
+					artifacts.push(
+						createUnsignedTransactionArtifact({
+							label: "storage_deposit",
+							signerAccountId,
+							signerPublicKey: keyState.signerPublicKey,
+							receiverId: tokenOutId,
+							nonce: nextNonce,
+							blockHash: keyState.blockHash,
+							actions: [
+								actions.functionCall(
+									"storage_deposit",
+									{
+										account_id: signerAccountId,
+										registration_only: true,
+									},
+									DEFAULT_STORAGE_DEPOSIT_GAS,
+									parseNonNegativeBigInt(
+										storageRegistration.estimatedDepositYoctoNear,
+										"estimatedDepositYoctoNear",
+									),
+								),
+							],
+							actionSummaries: [storageDepositActionSummary],
+						}),
+					);
+					nextNonce += 1n;
+				}
+
+				const swapActionsPayload = quoteActions.map((action, index) => {
+					const routeTokenInId = normalizeAccountId(
+						action.tokenInId,
+						"tokenInId",
+					);
+					const routeTokenOutId = normalizeAccountId(
+						action.tokenOutId,
+						"tokenOutId",
+					);
+					const routeAmountInRaw =
+						typeof action.amountInRaw === "string" && action.amountInRaw.trim()
+							? parsePositiveBigInt(
+									action.amountInRaw,
+									"route.amountInRaw",
+								).toString()
+							: amountInRaw;
+					return {
+						pool_id: action.poolId,
+						token_in: routeTokenInId,
+						...(index === 0 ? { amount_in: routeAmountInRaw } : {}),
+						token_out: routeTokenOutId,
+						min_amount_out:
+							index === quoteActions.length - 1 ? minAmountOutRaw : "0",
+					};
+				});
+				const swapActionSummary: ActionSummary = {
+					type: "FunctionCall",
+					methodName: "ft_transfer_call",
+					args: {
+						receiver_id: refContractId,
+						amount: amountInRaw,
+						msg: JSON.stringify({
+							force: 0,
+							actions: swapActionsPayload,
+						}),
+					},
+					gas,
+					depositYoctoNear: deposit,
+				};
+				artifacts.push(
+					createUnsignedTransactionArtifact({
+						label: "ref_swap",
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						receiverId: tokenInId,
+						nonce: nextNonce,
+						blockHash: keyState.blockHash,
+						actions: [
+							actions.functionCall(
+								"ft_transfer_call",
+								{
+									receiver_id: refContractId,
+									amount: amountInRaw,
+									msg: JSON.stringify({
+										force: 0,
+										actions: swapActionsPayload,
+									}),
+								},
+								BigInt(gas),
+								BigInt(deposit),
+							),
+						],
+						actionSummaries: [swapActionSummary],
+					}),
+				);
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Unsigned Ref swap built: ${amountInRaw} raw ${tokenInId} -> ${tokenOutId} (${quoteActions.length} hop(s), txCount=${artifacts.length}).`,
+						},
+					],
+					details: {
+						network,
+						rpcEndpoint: getNearRpcEndpoint(network, params.rpcUrl),
+						refContractId,
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						accessKeySource: keyState.source,
+						accessKeyPermission: keyState.permission,
+						blockHeight: keyState.blockHeight,
+						tokenInId,
+						tokenOutId,
+						amountInRaw,
+						minAmountOutRaw,
+						poolId: quote.poolId,
+						slippageBps,
+						source: quote.source,
+						routeActions: quoteActions,
+						autoRegisterOutput,
+						storageRegistration,
+						transactionCount: artifacts.length,
+						requiresLocalSignature: true,
+						expirationNote:
+							"Unsigned payload includes nonce+blockHash and expires quickly. Sign and broadcast promptly in listed order.",
+						transaction: artifacts[artifacts.length - 1] ?? null,
+						transactions: artifacts,
 					},
 				};
 			},
