@@ -165,4 +165,30 @@ describe("w3rt_run_evm_transfer_workflow_v0", () => {
 			intentType: "evm.transfer.erc20",
 		});
 	});
+
+	it("parses symbol-based erc20 transfer from intentText", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf6", {
+			runMode: "simulate",
+			network: "polygon",
+			intentText:
+				"把 1.25 USDC 转给 0x000000000000000000000000000000000000dEaD，先模拟",
+		});
+		expect(executeMocks.transferErc20Execute).toHaveBeenCalledWith(
+			"wf-evm-transfer-simulate",
+			expect.objectContaining({
+				dryRun: true,
+				tokenAddress: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+				amountRaw: "1250000",
+				toAddress: "0x000000000000000000000000000000000000dEaD",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			intentType: "evm.transfer.erc20",
+			intent: {
+				tokenSymbol: "USDC",
+				amountRaw: "1250000",
+			},
+		});
+	});
 });

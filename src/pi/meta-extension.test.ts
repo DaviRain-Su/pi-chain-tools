@@ -17,6 +17,7 @@ describe("metaExtension", () => {
 		expect(names).toContain("w3rt_getCapabilityHandshake_v0");
 		expect(names).toContain("w3rt_getPolicy_v0");
 		expect(names).toContain("w3rt_setPolicy_v0");
+		expect(names).toContain("w3rt_getPolicyAudit_v0");
 		expect(new Set(names).size).toBe(names.length);
 	});
 });

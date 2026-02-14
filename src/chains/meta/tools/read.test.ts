@@ -83,6 +83,7 @@ describe("meta capability tools", () => {
 		expect(setResult.details).toMatchObject({
 			schema: "w3rt.policy.v1",
 			scope: "evm.transfer",
+			template: null,
 			policy: {
 				mode: "allowlist",
 				enforceOn: "all",
@@ -100,6 +101,46 @@ describe("meta capability tools", () => {
 				mode: "allowlist",
 				enforceOn: "all",
 			},
+		});
+	});
+
+	it("applies policy template and reads audit log", async () => {
+		const setTool = getTool("w3rt_setPolicy_v0");
+		const setResult = await setTool.execute("meta-policy-template", {
+			scope: "evm.transfer",
+			template: "production_safe",
+			updatedBy: "meta.read.test.template",
+			note: "template apply",
+		});
+		expect(setResult.content[0]?.text).toContain(
+			"Policy template applied (production_safe)",
+		);
+		expect(setResult.details).toMatchObject({
+			schema: "w3rt.policy.v1",
+			scope: "evm.transfer",
+			template: "production_safe",
+			policy: {
+				mode: "allowlist",
+				enforceOn: "mainnet_like",
+			},
+		});
+
+		const auditTool = getTool("w3rt_getPolicyAudit_v0");
+		const auditResult = await auditTool.execute("meta-policy-audit", {
+			scope: "evm.transfer",
+			limit: 1,
+		});
+		expect(auditResult.content[0]?.text).toContain("Transfer policy audit:");
+		expect(auditResult.details).toMatchObject({
+			schema: "w3rt.policy.audit.v1",
+			scope: "evm.transfer",
+			records: [
+				{
+					action: "apply_template",
+					template: "production_safe",
+					actor: "meta.read.test.template",
+				},
+			],
 		});
 	});
 

@@ -2,7 +2,9 @@ import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import type { ChainToolset } from "../../../core/types.js";
 import {
+	applyEvmTransferPolicyTemplate,
 	getEvmTransferPolicy,
+	getEvmTransferPolicyAuditLog,
 	setEvmTransferPolicy,
 } from "../../evm/policy.js";
 import { createEvmToolset } from "../../evm/toolset.js";
@@ -496,6 +498,29 @@ function summarizeTransferPolicyText(params: {
 	return `Transfer policy: mode=${params.mode} enforceOn=${params.enforceOn} allowlist=${params.allowedRecipients.length} version=${params.version}`;
 }
 
+function summarizeTransferPolicyAuditText(
+	records: ReturnType<typeof getEvmTransferPolicyAuditLog>,
+): string {
+	if (records.length === 0) {
+		return "Transfer policy audit: no records.";
+	}
+	const lines = [
+		`Transfer policy audit: ${records.length} record(s), latest first.`,
+	];
+	for (const [index, record] of records.entries()) {
+		lines.push(
+			`${index + 1}. action=${record.action} template=${record.template ?? "(none)"} actor=${record.actor ?? "(unknown)"} at=${record.at}`,
+		);
+		lines.push(
+			`   before: mode=${record.before.mode} enforceOn=${record.before.enforceOn} allowlist=${record.before.allowedRecipients.length} version=${record.before.version}`,
+		);
+		lines.push(
+			`   after: mode=${record.after.mode} enforceOn=${record.after.enforceOn} allowlist=${record.after.allowedRecipients.length} version=${record.after.version}`,
+		);
+	}
+	return lines.join("\n");
+}
+
 function buildHandshakeBootstrap(params: {
 	clientName: string | null;
 	query: CapabilityQuery;
@@ -568,9 +593,7 @@ function buildHandshakeBootstrap(params: {
 			required: false,
 			params: {
 				scope: "evm.transfer",
-				mode: "allowlist",
-				enforceOn: "mainnet_like",
-				allowedRecipients: ["0x000000000000000000000000000000000000dEaD"],
+				template: "production_safe",
 				note: "bootstrap hardening template",
 				updatedBy: clientName,
 			},
@@ -800,6 +823,12 @@ export function createMetaReadTools() {
 				"Update runtime execution policy (currently EVM transfer policy).",
 			parameters: Type.Object({
 				scope: Type.Optional(Type.Literal("evm.transfer")),
+				template: Type.Optional(
+					Type.Union([
+						Type.Literal("production_safe"),
+						Type.Literal("open_dev"),
+					]),
+				),
 				mode: Type.Optional(
 					Type.Union([Type.Literal("open"), Type.Literal("allowlist")]),
 				),
@@ -816,25 +845,63 @@ export function createMetaReadTools() {
 				note: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, params) {
-				const next = setEvmTransferPolicy({
-					mode: params.mode,
-					enforceOn: params.enforceOn,
-					allowedRecipients: params.allowedRecipients,
-					clearRecipients: params.clearRecipients,
-					updatedBy: params.updatedBy,
-					note: params.note,
-				});
+				const next = params.template
+					? applyEvmTransferPolicyTemplate({
+							template: params.template,
+							updatedBy: params.updatedBy,
+							note: params.note,
+						})
+					: setEvmTransferPolicy({
+							mode: params.mode,
+							enforceOn: params.enforceOn,
+							allowedRecipients: params.allowedRecipients,
+							clearRecipients: params.clearRecipients,
+							updatedBy: params.updatedBy,
+							note: params.note,
+						});
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Policy updated: ${summarizeTransferPolicyText(next)}`,
+							text:
+								params.template != null
+									? `Policy template applied (${params.template}): ${summarizeTransferPolicyText(next)}`
+									: `Policy updated: ${summarizeTransferPolicyText(next)}`,
 						},
 					],
 					details: {
 						schema: "w3rt.policy.v1",
 						scope: "evm.transfer",
 						policy: next,
+						template: params.template ?? null,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: "w3rt_getPolicyAudit_v0",
+			label: "w3rt Get Policy Audit v0",
+			description:
+				"Read runtime policy audit log (currently EVM transfer policy updates/templates).",
+			parameters: Type.Object({
+				scope: Type.Optional(Type.Literal("evm.transfer")),
+				limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+			}),
+			async execute(_toolCallId, params) {
+				const records = getEvmTransferPolicyAuditLog({
+					limit: params.limit,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeTransferPolicyAuditText(records),
+						},
+					],
+					details: {
+						schema: "w3rt.policy.audit.v1",
+						scope: "evm.transfer",
+						records,
 					},
 				};
 			},

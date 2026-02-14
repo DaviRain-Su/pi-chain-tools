@@ -3,6 +3,7 @@ import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
 	EVM_TOOL_PREFIX,
+	type EvmNetwork,
 	evmNetworkSchema,
 	parseEvmNetwork,
 	parsePositiveIntegerString,
@@ -12,6 +13,43 @@ import {
 import { createEvmExecuteTools } from "./execute.js";
 
 type WorkflowRunMode = "analysis" | "simulate" | "execute";
+type KnownTokenSymbol = "USDC" | "USDT" | "DAI" | "WETH" | "WBTC";
+
+const TOKEN_METADATA_BY_SYMBOL: Record<
+	KnownTokenSymbol,
+	{ decimals: number; addresses: Partial<Record<EvmNetwork, string>> }
+> = {
+	USDC: {
+		decimals: 6,
+		addresses: {
+			polygon: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+		},
+	},
+	USDT: {
+		decimals: 6,
+		addresses: {
+			polygon: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
+		},
+	},
+	DAI: {
+		decimals: 18,
+		addresses: {
+			polygon: "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063",
+		},
+	},
+	WETH: {
+		decimals: 18,
+		addresses: {
+			polygon: "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619",
+		},
+	},
+	WBTC: {
+		decimals: 8,
+		addresses: {
+			polygon: "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",
+		},
+	},
+};
 
 type TransferIntent =
 	| {
@@ -23,6 +61,7 @@ type TransferIntent =
 	| {
 			type: "evm.transfer.erc20";
 			tokenAddress: string;
+			tokenSymbol?: string;
 			toAddress: string;
 			amountRaw: string;
 	  };
@@ -35,9 +74,11 @@ type WorkflowParams = {
 	intentText?: string;
 	toAddress?: string;
 	tokenAddress?: string;
+	tokenSymbol?: string;
 	amountNative?: number;
 	amountWei?: string;
 	amountRaw?: string;
+	amountToken?: string;
 	rpcUrl?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
@@ -48,9 +89,11 @@ type ParsedIntentHints = {
 	intentType?: TransferIntent["type"];
 	toAddress?: string;
 	tokenAddress?: string;
+	tokenSymbol?: KnownTokenSymbol;
 	amountNative?: number;
 	amountWei?: string;
 	amountRaw?: string;
+	amountToken?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
 };
@@ -73,6 +116,69 @@ type ExecuteTool = {
 
 const SESSION_BY_RUN_ID = new Map<string, WorkflowSessionRecord>();
 let latestSession: WorkflowSessionRecord | null = null;
+
+function normalizeTokenSymbol(value: string): string {
+	return value
+		.trim()
+		.toUpperCase()
+		.replace(/[^A-Z0-9]/g, "");
+}
+
+function parseKnownTokenSymbol(value?: string): KnownTokenSymbol | undefined {
+	if (!value?.trim()) return undefined;
+	const normalized = normalizeTokenSymbol(value);
+	if (normalized === "USDC" || normalized === "USDCE") return "USDC";
+	if (normalized === "USDT") return "USDT";
+	if (normalized === "DAI") return "DAI";
+	if (normalized === "WETH") return "WETH";
+	if (normalized === "WBTC") return "WBTC";
+	return undefined;
+}
+
+function resolveTokenAddressBySymbol(
+	network: EvmNetwork,
+	symbol?: KnownTokenSymbol,
+): string | undefined {
+	if (!symbol) return undefined;
+	return TOKEN_METADATA_BY_SYMBOL[symbol].addresses[network];
+}
+
+function parsePositiveDecimalString(value: string, fieldName: string): string {
+	const normalized = value.trim();
+	if (!/^\d+(?:\.\d+)?$/.test(normalized)) {
+		throw new Error(`${fieldName} must be a positive decimal string`);
+	}
+	if (/^0(?:\.0+)?$/.test(normalized)) {
+		throw new Error(`${fieldName} must be greater than 0`);
+	}
+	return normalized;
+}
+
+function decimalToRaw(params: {
+	amountDecimal: string;
+	decimals: number;
+	fieldName: string;
+}): string {
+	const normalized = parsePositiveDecimalString(
+		params.amountDecimal,
+		params.fieldName,
+	);
+	const [whole, fractional = ""] = normalized.split(".");
+	if (fractional.length > params.decimals) {
+		throw new Error(
+			`${params.fieldName} has too many decimal places for token decimals=${params.decimals}`,
+		);
+	}
+	const scale = 10n ** BigInt(params.decimals);
+	const wholePart = BigInt(whole);
+	const fractionalText = fractional.padEnd(params.decimals, "0");
+	const fractionalPart = fractionalText ? BigInt(fractionalText) : 0n;
+	const raw = wholePart * scale + fractionalPart;
+	if (raw <= 0n) {
+		throw new Error(`${params.fieldName} must be greater than 0`);
+	}
+	return raw.toString();
+}
 
 function parseRunMode(value?: string): WorkflowRunMode {
 	if (value === "simulate" || value === "execute") return value;
@@ -133,6 +239,10 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	const tokenAddressMatch =
 		text.match(/\btoken(?:Address)?\s*[:= ]\s*(0x[a-fA-F0-9]{40})\b/i)?.[1] ??
 		undefined;
+	const tokenSymbolMatch =
+		text.match(/\btoken(?:Symbol)?\s*[:= ]\s*([A-Za-z0-9._-]{2,16})\b/i)?.[1] ??
+		text.match(/\b(USDC(?:\.E)?|USDT|DAI|WETH|WBTC)\b/i)?.[1] ??
+		undefined;
 	const toAddressMatch =
 		text.match(
 			/(?:to|给|转给|收款地址)\s*[:： ]\s*(0x[a-fA-F0-9]{40})/i,
@@ -145,13 +255,22 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		text.match(/\bamountWei\s*[:= ]\s*(\d+)/i)?.[1] ??
 		text.match(/\bwei\s*[:= ]\s*(\d+)/i)?.[1] ??
 		undefined;
+	const amountTokenMatch =
+		text.match(/\bamount(?:Token)?\s*[:= ]\s*(\d+(?:\.\d+)?)\b/i)?.[1] ??
+		text.match(
+			/(\d+(?:\.\d+)?)\s*(?:USDC(?:\.E)?|USDT|DAI|WETH|WBTC)\b/i,
+		)?.[1] ??
+		undefined;
 	const amountNativeMatch =
 		text.match(/(\d+(?:\.\d+)?)\s*(?:matic|eth|native|主币|原生币)/i)?.[1] ??
 		text.match(/(?:转|给|send|transfer)\s*(\d+(?:\.\d+)?)/i)?.[1] ??
 		undefined;
 	const lower = text.toLowerCase();
+	const knownTokenSymbol = parseKnownTokenSymbol(tokenSymbolMatch);
 	const erc20Hint =
-		/(erc20|usdc|usdt|token\s+transfer|代币转账)/i.test(text) ||
+		/(erc20|token\s+transfer|代币转账)/i.test(text) ||
+		knownTokenSymbol != null ||
+		tokenAddressMatch != null ||
 		(amountRawMatch != null && lower.includes("raw"));
 
 	const tokenAddress = tokenAddressMatch || undefined;
@@ -168,12 +287,14 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		intentType: erc20Hint ? "evm.transfer.erc20" : undefined,
 		toAddress,
 		tokenAddress,
+		tokenSymbol: knownTokenSymbol,
 		amountNative:
 			amountNativeMatch != null
 				? Number.parseFloat(amountNativeMatch)
 				: undefined,
 		amountWei: amountWeiMatch,
 		amountRaw: amountRawMatch,
+		amountToken: amountTokenMatch,
 		confirmMainnet: hasConfirmMainnetPhrase(text) ? true : undefined,
 		confirmToken: extractConfirmTokenFromText(text),
 	};
@@ -185,38 +306,73 @@ function hasIntentInput(params: WorkflowParams): boolean {
 		params.intentType ||
 			params.toAddress?.trim() ||
 			params.tokenAddress?.trim() ||
+			params.tokenSymbol?.trim() ||
 			params.amountNative != null ||
 			params.amountWei?.trim() ||
 			params.amountRaw?.trim() ||
+			params.amountToken?.trim() ||
 			parsed.intentType ||
 			parsed.toAddress ||
 			parsed.tokenAddress ||
+			parsed.tokenSymbol ||
 			parsed.amountNative != null ||
 			parsed.amountWei ||
-			parsed.amountRaw,
+			parsed.amountRaw ||
+			parsed.amountToken,
 	);
 }
 
-function normalizeIntent(params: WorkflowParams): TransferIntent {
+function normalizeIntent(
+	params: WorkflowParams,
+	network: EvmNetwork,
+): TransferIntent {
 	const parsed = parseIntentText(params.intentText);
 	const intentType =
 		params.intentType ?? parsed.intentType ?? "evm.transfer.native";
 	if (intentType === "evm.transfer.erc20") {
-		const tokenAddress = parseEvmAddress(
-			params.tokenAddress?.trim() || parsed.tokenAddress || "",
-			"tokenAddress",
-		);
+		const tokenSymbol =
+			parseKnownTokenSymbol(params.tokenSymbol) ?? parsed.tokenSymbol;
+		const tokenAddressInput =
+			params.tokenAddress?.trim() ||
+			parsed.tokenAddress ||
+			resolveTokenAddressBySymbol(network, tokenSymbol);
+		if (!tokenAddressInput) {
+			if (tokenSymbol) {
+				throw new Error(
+					`No known ${tokenSymbol} address configured for network=${network}. Provide tokenAddress explicitly.`,
+				);
+			}
+			throw new Error(
+				"Provide tokenAddress (or known tokenSymbol like USDC/USDT/DAI/WETH/WBTC on polygon)",
+			);
+		}
+		const tokenAddress = parseEvmAddress(tokenAddressInput, "tokenAddress");
 		const toAddress = parseEvmAddress(
 			params.toAddress?.trim() || parsed.toAddress || "",
 			"toAddress",
 		);
-		const amountRaw = parsePositiveIntegerString(
-			params.amountRaw?.trim() || parsed.amountRaw || "",
-			"amountRaw",
-		);
+		const amountRawInput = params.amountRaw?.trim() || parsed.amountRaw;
+		let amountRaw: string;
+		if (amountRawInput) {
+			amountRaw = parsePositiveIntegerString(amountRawInput, "amountRaw");
+		} else {
+			const amountTokenInput = params.amountToken?.trim() || parsed.amountToken;
+			if (!amountTokenInput || !tokenSymbol) {
+				throw new Error(
+					"Provide amountRaw, or amountToken together with tokenSymbol/known token text for evm.transfer.erc20",
+				);
+			}
+			const decimals = TOKEN_METADATA_BY_SYMBOL[tokenSymbol].decimals;
+			amountRaw = decimalToRaw({
+				amountDecimal: amountTokenInput,
+				decimals,
+				fieldName: "amountToken",
+			});
+		}
 		return {
 			type: "evm.transfer.erc20",
 			tokenAddress,
+			...(tokenSymbol ? { tokenSymbol } : {}),
 			toAddress,
 			amountRaw,
 		};
@@ -288,7 +444,12 @@ function buildSummaryLine(params: {
 			parts.push(`amountWei=${params.intent.amountWei}`);
 		}
 	} else {
-		parts.push(`token=${params.intent.tokenAddress}`);
+		parts.push(
+			`token=${params.intent.tokenSymbol ?? params.intent.tokenAddress}`,
+		);
+		if (params.intent.tokenSymbol) {
+			parts.push(`tokenAddress=${params.intent.tokenAddress}`);
+		}
 		parts.push(`to=${params.intent.toAddress}`);
 		parts.push(`amountRaw=${params.intent.amountRaw}`);
 	}
@@ -385,11 +546,13 @@ export function createEvmTransferWorkflowTools() {
 				intentText: Type.Optional(Type.String()),
 				toAddress: Type.Optional(Type.String()),
 				tokenAddress: Type.Optional(Type.String()),
+				tokenSymbol: Type.Optional(Type.String()),
 				amountNative: Type.Optional(
 					Type.Number({ minimum: 0.000000000000000001 }),
 				),
 				amountWei: Type.Optional(Type.String()),
 				amountRaw: Type.Optional(Type.String()),
+				amountToken: Type.Optional(Type.String()),
 				rpcUrl: Type.Optional(Type.String()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
@@ -414,7 +577,7 @@ export function createEvmTransferWorkflowTools() {
 					!hasIntentInput(params) &&
 					priorSession?.intent
 						? priorSession.intent
-						: normalizeIntent(params);
+						: normalizeIntent(params, network);
 				const confirmToken = createConfirmToken(runId, network, intent);
 				const providedConfirmToken =
 					params.confirmToken?.trim() || parsedHints.confirmToken?.trim();
