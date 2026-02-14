@@ -75,7 +75,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `near_withdrawRefToken` (withdraw deposited token from Ref exchange back to wallet, optional full-balance withdraw)
 - `execute`: `near_addLiquidityRef` (Ref LP add-liquidity, includes optional auto register + token deposit to Ref exchange; supports auto pool selection by token pair when `poolId` is omitted)
 - `execute`: `near_removeLiquidityRef` (Ref LP remove-liquidity; supports auto pool selection by token pair when `poolId` is omitted, plus `autoWithdraw=true` to auto-withdraw pool tokens)
-- `workflow`: `w3rt_run_near_workflow_v0` (analysis/compose/simulate/execute + deterministic mainnet confirmToken; compose currently supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove` / `near.ref.withdraw`; full workflow intents include `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks; intents execute accepts either `txHash` or `signedTxBase64` and can auto-broadcast first)
+- `workflow`: `w3rt_run_near_workflow_v0` (analysis/compose/simulate/execute + deterministic mainnet confirmToken; compose currently supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove` / `near.ref.withdraw`; full workflow intents include `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks; intents execute accepts either `txHash` or `signedTxBase64` and can auto-broadcast first; `swapType=ANY_INPUT` execute also attempts `/v0/any-input/withdrawals` and returns readable withdrawal artifacts)
 - `intents execute tracking`: `near.swap.intents` execute now polls `/v0/status` by default after submit (until terminal status or timeout). Tunables: `waitForFinalStatus`, `statusPollIntervalMs`, `statusTimeoutMs`.
 - `LP auto-selection UX`: when pair-based selection has multiple candidate pools, simulate returns concise alternatives (`poolCandidates`) and text summary (`alternatives=...`)
 - `LP follow-up execute`: after simulate, execute can reuse the session and switch pool by natural language (`继续执行，用第2个池子`) or structured `poolCandidateIndex`
@@ -135,6 +135,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `帮我查一下 NEAR Intents 这个 depositAddress 的 ANY_INPUT 提现记录：0x...`
 - Intents Swap (workflow simulate):
   - `intentText: "通过 intents 把 NEAR 换成 USDC，amountRaw 10000000000000000000000，先模拟"`
+- Intents Swap ANY_INPUT (workflow analysis/simulate):
+  - `intentText: "通过 intents any input 把 NEAR 换成 USDC，amountRaw 10000000000000000000000，先模拟"`
 - Intents Swap (workflow execute submit):
   - `intentText: "继续执行刚才这笔 intents 兑换，txHash 0x..."` (with same `runId`, `runMode=execute`, and prior simulate output that includes `depositAddress`/`depositMemo`)
 - Intents Swap (workflow execute with signed tx):

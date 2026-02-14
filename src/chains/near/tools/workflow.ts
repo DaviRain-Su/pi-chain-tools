@@ -243,6 +243,7 @@ type ParsedIntentHints = {
 	refContractId?: string;
 	recipient?: string;
 	refundTo?: string;
+	swapType?: NearIntentsSwapType;
 	depositAddress?: string;
 	depositMemo?: string;
 	txHash?: string;
@@ -337,6 +338,29 @@ type NearIntentsStatusResponse = {
 		depositedAmount?: string;
 		depositedAmountFormatted?: string;
 	};
+};
+
+type NearIntentsAnyInputWithdrawalsResponse = {
+	asset?: string;
+	recipient?: string;
+	affiliateRecipient?: string;
+	withdrawals?: unknown;
+	page?: number;
+	limit?: number;
+	total?: number;
+};
+
+type NearIntentsAnyInputWithdrawal = {
+	status: string | null;
+	amountOut: string | null;
+	amountOutFormatted: string | null;
+	amountOutUsd: string | null;
+	withdrawFee: string | null;
+	withdrawFeeFormatted: string | null;
+	withdrawFeeUsd: string | null;
+	timestamp: string | null;
+	hash: string | null;
+	raw: Record<string, unknown>;
 };
 
 type NearIntentsBadRequest = {
@@ -681,6 +705,71 @@ function resolveNearIntentsErrorMessage(
 		}
 	}
 	return fallback;
+}
+
+function pickOptionalText(
+	value: Record<string, unknown>,
+	key: string,
+): string | null {
+	const candidate = value[key];
+	return typeof candidate === "string" && candidate.trim() ? candidate : null;
+}
+
+function normalizeNearIntentsAnyInputWithdrawals(value: unknown): {
+	asset: string | null;
+	recipient: string | null;
+	affiliateRecipient: string | null;
+	withdrawals: NearIntentsAnyInputWithdrawal[];
+	page: number | null;
+	limit: number | null;
+	total: number | null;
+} {
+	const root =
+		value && typeof value === "object"
+			? (value as Record<string, unknown>)
+			: {};
+	const rawWithdrawalsSource = Array.isArray(root.withdrawals)
+		? root.withdrawals
+		: root.withdrawals && typeof root.withdrawals === "object"
+			? [root.withdrawals]
+			: Array.isArray(value)
+				? value
+				: [];
+	const withdrawals: NearIntentsAnyInputWithdrawal[] = rawWithdrawalsSource
+		.filter(
+			(entry): entry is Record<string, unknown> =>
+				Boolean(entry) && typeof entry === "object",
+		)
+		.map((entry) => ({
+			status: pickOptionalText(entry, "status"),
+			amountOut: pickOptionalText(entry, "amountOut"),
+			amountOutFormatted: pickOptionalText(entry, "amountOutFormatted"),
+			amountOutUsd: pickOptionalText(entry, "amountOutUsd"),
+			withdrawFee: pickOptionalText(entry, "withdrawFee"),
+			withdrawFeeFormatted: pickOptionalText(entry, "withdrawFeeFormatted"),
+			withdrawFeeUsd: pickOptionalText(entry, "withdrawFeeUsd"),
+			timestamp: pickOptionalText(entry, "timestamp"),
+			hash: pickOptionalText(entry, "hash"),
+			raw: entry,
+		}));
+	return {
+		asset: pickOptionalText(root, "asset"),
+		recipient: pickOptionalText(root, "recipient"),
+		affiliateRecipient: pickOptionalText(root, "affiliateRecipient"),
+		withdrawals,
+		page:
+			typeof root.page === "number" && Number.isFinite(root.page)
+				? Math.floor(root.page)
+				: null,
+		limit:
+			typeof root.limit === "number" && Number.isFinite(root.limit)
+				? Math.floor(root.limit)
+				: null,
+		total:
+			typeof root.total === "number" && Number.isFinite(root.total)
+				? Math.floor(root.total)
+				: null,
+	};
 }
 
 async function fetchNearIntentsJson<T>(params: {
@@ -1100,7 +1189,10 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	const likelyIntents =
 		lower.includes("intents") ||
 		lower.includes("1click") ||
-		lower.includes("defuse");
+		lower.includes("defuse") ||
+		lower.includes("any input") ||
+		lower.includes("any_input") ||
+		lower.includes("任意输入");
 	const hasRefKeyword =
 		lower.includes("ref") || lower.includes("rhea") || lower.includes("交易所");
 	const hasWithdrawAction =
@@ -1243,6 +1335,13 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (depositMemoMatch?.[1]) hints.depositMemo = depositMemoMatch[1];
 	if (txHashMatch?.[1]) hints.txHash = txHashMatch[1];
 	if (wantsWaitForFinalStatus) hints.waitForFinalStatus = true;
+	if (
+		lower.includes("any input") ||
+		lower.includes("any_input") ||
+		lower.includes("任意输入")
+	) {
+		hints.swapType = "ANY_INPUT";
+	}
 	if (
 		lower.includes("全部") ||
 		lower.includes("all") ||
@@ -1736,7 +1835,7 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 			fromAccountId,
 			recipient,
 			refundTo,
-			swapType: params.swapType ?? "EXACT_INPUT",
+			swapType: params.swapType ?? hints.swapType ?? "EXACT_INPUT",
 			slippageTolerance: parseIntentsSlippageTolerance(
 				params.slippageTolerance ?? hints.slippageTolerance,
 			),
@@ -2796,6 +2895,49 @@ async function pollNearIntentsStatusUntilFinal(params: {
 		latestStatus,
 		lastError,
 		history,
+	};
+}
+
+async function queryNearIntentsAnyInputWithdrawals(params: {
+	baseUrl: string;
+	headers: Record<string, string>;
+	depositAddress: string;
+	depositMemo?: string;
+}): Promise<{
+	endpoint: string;
+	httpStatus: number;
+	asset: string | null;
+	recipient: string | null;
+	affiliateRecipient: string | null;
+	page: number | null;
+	limit: number | null;
+	total: number | null;
+	withdrawals: NearIntentsAnyInputWithdrawal[];
+}> {
+	const response =
+		await fetchNearIntentsJson<NearIntentsAnyInputWithdrawalsResponse>({
+			baseUrl: params.baseUrl,
+			path: "/v0/any-input/withdrawals",
+			method: "GET",
+			query: {
+				depositAddress: params.depositAddress,
+				depositMemo: params.depositMemo,
+				limit: "50",
+				sortOrder: "desc",
+			},
+			headers: params.headers,
+		});
+	const normalized = normalizeNearIntentsAnyInputWithdrawals(response.payload);
+	return {
+		endpoint: response.url,
+		httpStatus: response.status,
+		asset: normalized.asset,
+		recipient: normalized.recipient,
+		affiliateRecipient: normalized.affiliateRecipient,
+		page: normalized.page,
+		limit: normalized.limit,
+		total: normalized.total,
+		withdrawals: normalized.withdrawals,
 	};
 }
 
@@ -4135,6 +4277,39 @@ export function createNearWorkflowTools() {
 								timeoutMs: parseIntentsStatusTimeoutMs(params.statusTimeoutMs),
 							})
 						: null;
+				const anyInputWithdrawals =
+					intent.type === "near.swap.intents" &&
+					intent.swapType === "ANY_INPUT" &&
+					effectiveIntentsDepositAddress
+						? await (async () => {
+								const baseUrl = resolveNearIntentsApiBaseUrl(
+									params.apiBaseUrl ?? intent.apiBaseUrl,
+								);
+								const headers = resolveNearIntentsHeaders({
+									apiKey: params.apiKey,
+									jwt: params.jwt,
+								});
+								try {
+									const queryResult = await queryNearIntentsAnyInputWithdrawals(
+										{
+											baseUrl,
+											headers,
+											depositAddress: effectiveIntentsDepositAddress,
+											depositMemo: effectiveIntentsDepositMemo,
+										},
+									);
+									return {
+										status: "success",
+										...queryResult,
+									};
+								} catch (error) {
+									return {
+										status: "error",
+										error: extractErrorText(error),
+									};
+								}
+							})()
+						: null;
 				const executeArtifact =
 					intent.type === "near.swap.intents" && executeDetails
 						? {
@@ -4146,6 +4321,7 @@ export function createNearWorkflowTools() {
 										: null,
 								depositAddress: effectiveIntentsDepositAddress ?? null,
 								depositMemo: effectiveIntentsDepositMemo ?? null,
+								anyInputWithdrawals,
 								statusTracking:
 									shouldTrackIntentsStatus && statusTracking
 										? statusTracking
