@@ -598,6 +598,26 @@ describe("w3rt_run_near_workflow_v0", () => {
 		});
 	});
 
+	it("passes autoWithdraw flag when composing ref remove-liquidity", async () => {
+		const tool = getTool();
+		await tool.execute("near-wf-1-compose-lp-remove-aw", {
+			runId: "wf-near-01-compose-lp-remove-aw",
+			runMode: "compose",
+			network: "mainnet",
+			intentType: "near.lp.ref.remove",
+			poolId: 7,
+			shares: "1000",
+			autoWithdraw: true,
+		});
+
+		expect(composeMocks.buildRemoveLiquidityRefCompose).toHaveBeenCalledWith(
+			"near-wf-compose",
+			expect.objectContaining({
+				autoWithdraw: true,
+			}),
+		);
+	});
+
 	it("simulates native transfer and returns artifacts", async () => {
 		const tool = getTool();
 		const result = await tool.execute("near-wf-2", {

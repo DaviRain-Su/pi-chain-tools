@@ -565,6 +565,63 @@ describe("near compose tools", () => {
 		});
 	});
 
+	it("returns auto-withdraw follow-up templates in remove-liquidity compose", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			keys: [
+				{
+					public_key: TEST_PUBLIC_KEY,
+					access_key: {
+						nonce: 40,
+						permission: "FullAccess",
+					},
+				},
+			],
+			block_hash: TEST_BLOCK_HASH,
+			block_height: 131,
+		});
+		const tool = getTool("near_buildRemoveLiquidityRefTransaction");
+		const result = await tool.execute("near-compose-lp-remove-2", {
+			network: "mainnet",
+			fromAccountId: "alice.near",
+			poolId: 7,
+			shares: "1000",
+			autoWithdraw: true,
+		});
+
+		expect(result.content[0]?.text).toContain(
+			"Auto-withdraw follow-up templates prepared",
+		);
+		expect(result.details).toMatchObject({
+			autoWithdraw: true,
+			autoRegisterReceiver: true,
+			autoWithdrawFollowUps: [
+				{
+					step: 1,
+					tokenId: "wrap.near",
+					tool: "near_buildRefWithdrawTransaction",
+					params: {
+						tokenId: "wrap.near",
+						withdrawAll: true,
+						refContractId: "v2.ref-finance.near",
+						fromAccountId: "alice.near",
+					},
+				},
+				{
+					step: 2,
+					tokenId: "usdc.tether-token.near",
+					tool: "near_buildRefWithdrawTransaction",
+					params: {
+						tokenId: "usdc.tether-token.near",
+						withdrawAll: true,
+						refContractId: "v2.ref-finance.near",
+						fromAccountId: "alice.near",
+					},
+				},
+			],
+			transactionCount: 1,
+		});
+	});
+
 	it("builds unsigned ref swap transaction with storage_deposit pre-transaction", async () => {
 		runtimeMocks.callNearRpc
 			.mockResolvedValueOnce({

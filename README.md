@@ -64,7 +64,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `compose`: `near_buildIntentsSwapDepositTransaction` (unsigned NEAR Intents deposit tx from `/v0/quote`, local signing)
 - `compose`: `near_buildSwapRefTransaction` (unsigned Ref swap payload(s), can include output-token `storage_deposit` pre-tx)
 - `compose`: `near_buildAddLiquidityRefTransaction` (unsigned Ref add-liquidity tx set, optional pre-registration/deposit steps)
-- `compose`: `near_buildRemoveLiquidityRefTransaction` (unsigned Ref remove-liquidity tx, supports shares/shareBps)
+- `compose`: `near_buildRemoveLiquidityRefTransaction` (unsigned Ref remove-liquidity tx, supports shares/shareBps; when `autoWithdraw=true` returns post-remove withdraw compose templates)
 - `compose`: `near_buildRefWithdrawTransaction` (unsigned Ref withdraw payload(s), can include `storage_deposit` pre-tx when needed)
 - `execute`: `near_transferNear` (local credentials/env signer, mainnet safety gate)
 - `execute`: `near_transferFt` (NEP-141 `ft_transfer`, supports custom gas/deposit, mainnet safety gate)
@@ -116,7 +116,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `near_buildIntentsSwapDepositTransaction` with `fromAccountId`, `originAsset`, `destinationAsset`, `amount`
 - Compose unsigned Ref LP add/remove (tools):
   - `near_buildAddLiquidityRefTransaction` with `poolId` (or pair), `amountARaw`, `amountBRaw`
-  - `near_buildRemoveLiquidityRefTransaction` with `poolId`, `shares` (or `shareBps`)
+  - `near_buildRemoveLiquidityRefTransaction` with `poolId`, `shares` (or `shareBps`); set `autoWithdraw=true` to get post-remove withdraw templates
 - Compose unsigned Ref withdraw (tool):
   - `near_buildRefWithdrawTransaction` with `fromAccountId`, `tokenId`, `amountRaw` (or `withdrawAll=true`)
 - Ref Deposits (read):

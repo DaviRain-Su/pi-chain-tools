@@ -2276,11 +2276,8 @@ export function createNearComposeTools(): RegisteredTool[] {
 			async execute(_toolCallId, rawParams) {
 				const params =
 					rawParams as NearBuildRefRemoveLiquidityTransactionParams;
-				if (params.autoWithdraw === true) {
-					throw new Error(
-						"autoWithdraw=true is not supported in compose mode yet. Compose remove first, then use Ref withdraw compose for token withdrawals.",
-					);
-				}
+				const autoWithdraw = params.autoWithdraw === true;
+				const autoRegisterReceiver = params.autoRegisterReceiver !== false;
 				const network = parseNearNetwork(params.network);
 				const signerAccountId = resolveNearAccountId(
 					params.fromAccountId,
@@ -2427,11 +2424,32 @@ export function createNearComposeTools(): RegisteredTool[] {
 						},
 					],
 				});
+				const autoWithdrawFollowUps = autoWithdraw
+					? poolTokenIds.map((tokenId, index) => ({
+							step: index + 1,
+							tokenId,
+							tool: `${NEAR_TOOL_PREFIX}buildRefWithdrawTransaction`,
+							description: `After remove_liquidity confirmation, withdraw all ${tokenId} deposits from Ref to wallet.`,
+							params: {
+								tokenId,
+								withdrawAll: true,
+								refContractId,
+								autoRegisterReceiver,
+								gas: params.gas?.trim() || undefined,
+								attachedDepositYoctoNear:
+									params.attachedDepositYoctoNear?.trim() || undefined,
+								network,
+								rpcUrl: params.rpcUrl,
+								fromAccountId: signerAccountId,
+								publicKey: params.publicKey ?? keyState.signerPublicKey,
+							},
+						}))
+					: [];
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Unsigned Ref remove_liquidity built: pool=${poolId} shares=${shareResolution.shares}.`,
+							text: `Unsigned Ref remove_liquidity built: pool=${poolId} shares=${shareResolution.shares}.${autoWithdraw ? " Auto-withdraw follow-up templates prepared." : ""}`,
 						},
 					],
 					details: {
@@ -2453,6 +2471,12 @@ export function createNearComposeTools(): RegisteredTool[] {
 						shares: shareResolution.shares,
 						availableShares: shareResolution.availableShares,
 						shareBpsUsed: shareResolution.shareBpsUsed,
+						autoWithdraw,
+						autoRegisterReceiver,
+						autoWithdrawFollowUps,
+						autoWithdrawNote: autoWithdraw
+							? "Follow-up withdraw transactions require the remove_liquidity tx to be confirmed first. Use provided templates to compose and sign those withdrawals."
+							: null,
 						gas: removeLiquidityGas,
 						attachedDepositYoctoNear: removeLiquidityDeposit,
 						transactionCount: 1,
