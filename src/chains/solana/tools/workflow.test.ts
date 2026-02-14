@@ -3207,6 +3207,63 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 	});
 
+	it("replays prior analysis intent when execute call is a continuation", async () => {
+		const signer = Keypair.generate();
+		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);
+		const destination = Keypair.generate().publicKey.toBase58();
+		const runId = "run-swap-cont";
+		const tool = getWorkflowTool();
+
+		await tool.execute("wf-transfer-analysis-replay", {
+			runId,
+			runMode: "analysis",
+			intentType: "solana.transfer.sol",
+			toAddress: destination,
+			amountSol: 0.01,
+		});
+
+		const connection = {
+			getLatestBlockhash: vi.fn().mockResolvedValue({
+				blockhash: "11111111111111111111111111111111",
+				lastValidBlockHeight: 1,
+			}),
+			simulateTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+					logs: [],
+					unitsConsumed: 130,
+				},
+			}),
+			sendRawTransaction: vi.fn().mockResolvedValue("signature-continue"),
+			confirmTransaction: vi.fn().mockResolvedValue({
+				value: {
+					err: null,
+				},
+			}),
+		};
+		runtimeMocks.getConnection.mockReturnValue(connection);
+
+		const executed = await tool.execute("wf-transfer-execute-replay", {
+			runId,
+			runMode: "execute",
+		});
+
+		expect(executed.details).toMatchObject({
+			runId,
+			status: "executed",
+			artifacts: {
+				execute: {
+					stage: "execute",
+					signatures: ["signature-continue"],
+				},
+				approval: {
+					required: false,
+				},
+			},
+		});
+		expect(connection.sendRawTransaction).toHaveBeenCalledTimes(1);
+	});
+
 	it("analyzes Orca increase-liquidity workflow intent", async () => {
 		const signer = Keypair.generate();
 		runtimeMocks.resolveSecretKey.mockReturnValue(signer.secretKey);

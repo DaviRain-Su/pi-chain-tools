@@ -783,7 +783,43 @@ function parseRunMode(value?: string): WorkflowRunMode {
 	if (value === "analysis" || value === "simulate" || value === "execute") {
 		return value;
 	}
-	return "execute";
+	return "analysis";
+}
+
+function parseRunModeHint(text?: string): WorkflowRunMode | undefined {
+	if (!text?.trim()) return undefined;
+	const hasExecute =
+		/(确认主网执行|确认执行|继续执行|直接执行|立即执行|现在执行|马上执行|execute|submit|real\s+order|live\s+order|\bnow\b.*\bexecute\b)/i.test(
+			text,
+		);
+	const hasSimulate =
+		/(先模拟|模拟一下|先仿真|先dry\s*run|dry\s*run|simulate|先试跑|先试一下|先预演|先演练)/i.test(
+			text,
+		);
+	const hasAnalysis =
+		/(先分析|分析一下|先评估|先看分析|analysis|analyze|先看一下|先检查)/i.test(
+			text,
+		);
+
+	if (hasSimulate && !hasExecute) return "simulate";
+	if (hasAnalysis && !hasExecute && !hasSimulate) return "analysis";
+	if (hasExecute && !hasSimulate && !hasAnalysis) return "execute";
+	if (hasSimulate && hasExecute) {
+		if (
+			/(先模拟|先仿真|先dry\s*run|先试跑|先试一下|先预演|先演练)/i.test(text)
+		) {
+			return "simulate";
+		}
+		return "execute";
+	}
+	if (hasAnalysis && hasExecute) {
+		if (/(先分析|先看一下|先检查)/i.test(text)) return "analysis";
+		return "execute";
+	}
+	if (hasExecute) return "execute";
+	if (hasSimulate) return "simulate";
+	if (hasAnalysis) return "analysis";
+	return undefined;
 }
 
 function ensureString(value: unknown, field: string): string {
@@ -814,7 +850,33 @@ function normalizeStakeSeed(value: unknown, runId: string): string {
 	return sanitized;
 }
 
-function createRunId(): string {
+type WorkflowSessionRecord = {
+	runId: string;
+	network: string;
+	intent: WorkflowIntent;
+};
+
+const WORKFLOW_SESSION_BY_RUN_ID = new Map<string, WorkflowSessionRecord>();
+let latestWorkflowSession: WorkflowSessionRecord | null = null;
+
+function rememberWorkflowSession(record: WorkflowSessionRecord): void {
+	WORKFLOW_SESSION_BY_RUN_ID.set(record.runId, record);
+	latestWorkflowSession = record;
+}
+
+function readWorkflowSession(runId?: string): WorkflowSessionRecord | null {
+	if (!runId?.trim()) {
+		return latestWorkflowSession;
+	}
+	const found = WORKFLOW_SESSION_BY_RUN_ID.get(runId.trim());
+	if (found) {
+		return found;
+	}
+	return null;
+}
+
+function createRunId(input?: string): string {
+	if (input?.trim()) return input.trim();
 	return `w3rt_${Date.now().toString(36)}_${randomBytes(4).toString("hex")}`;
 }
 
@@ -1016,6 +1078,40 @@ function parsePositiveNumber(value: string): number | null {
 		return null;
 	}
 	return parsed;
+}
+
+function hasIntentValue(value: unknown): boolean {
+	if (value == null) return false;
+	if (typeof value === "string") return value.trim().length > 0;
+	if (typeof value === "number" || typeof value === "boolean") return true;
+	if (Array.isArray(value)) return value.length > 0;
+	if (value instanceof Object) {
+		return Object.keys(value).length > 0;
+	}
+	return false;
+}
+
+function hasIntentInputs(params: Record<string, unknown>): boolean {
+	const parsedFromText = parseIntentTextFields(params.intentText);
+	if (Object.keys(parsedFromText).length > 0) return true;
+	const ignoredKeys = new Set([
+		"runId",
+		"runMode",
+		"intentText",
+		"network",
+		"fromSecretKey",
+		"commitment",
+		"skipPreflight",
+		"maxRetries",
+		"confirm",
+		"confirmMainnet",
+		"confirmToken",
+	]);
+	for (const [key, value] of Object.entries(params)) {
+		if (ignoredKeys.has(key)) continue;
+		if (hasIntentValue(value)) return true;
+	}
+	return false;
 }
 
 function hasAllPositionsHint(intentText: string): boolean {
@@ -9661,22 +9757,38 @@ export function createSolanaWorkflowTools() {
 				feeAccount: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, params) {
-				const runMode = parseRunMode(params.runMode);
-				const network = parseNetwork(params.network);
+				const runMode = parseRunMode(
+					params.runMode ?? parseRunModeHint(params.intentText),
+				);
+				const requestParams = params as Record<string, unknown>;
+				const hasCoreIntentInputs = hasIntentInputs(requestParams);
+				const priorSession =
+					runMode === "execute" ? readWorkflowSession(params.runId) : null;
+				if (runMode === "execute" && !priorSession && !hasCoreIntentInputs) {
+					throw new Error(
+						"No prior workflow session found. Provide intent parameters or run analysis/simulate first.",
+					);
+				}
 				const signer = Keypair.fromSecretKey(
 					resolveSecretKey(params.fromSecretKey),
 				);
 				const signerPublicKey = signer.publicKey.toBase58();
-				const runId =
-					typeof params.runId === "string" && params.runId.trim().length > 0
-						? params.runId.trim()
-						: createRunId();
-				const intent = await normalizeIntent(
-					params as Record<string, unknown>,
-					signerPublicKey,
-					network,
-					runId,
+				const sessionNetwork =
+					runMode === "execute" ? priorSession?.network : undefined;
+				const network = parseNetwork(params.network ?? sessionNetwork);
+				const runId = createRunId(
+					params.runId ||
+						(runMode === "execute" ? priorSession?.runId : undefined),
 				);
+				const intent =
+					runMode === "execute" && !hasCoreIntentInputs && priorSession
+						? priorSession.intent
+						: await normalizeIntent(
+								requestParams,
+								signerPublicKey,
+								network,
+								runId,
+							);
 				const confirmToken = createConfirmToken(runId, network, intent);
 				const approvalRequired =
 					network === "mainnet-beta" && !isReadIntent(intent);
@@ -9712,6 +9824,11 @@ export function createSolanaWorkflowTools() {
 				};
 
 				if (runMode === "analysis") {
+					rememberWorkflowSession({
+						runId,
+						network,
+						intent,
+					});
 					const tokenText =
 						approvalRequired && approvalArtifact.confirmToken
 							? approvalArtifact.confirmToken
@@ -9769,6 +9886,11 @@ export function createSolanaWorkflowTools() {
 						}),
 					};
 					if (runMode === "simulate") {
+						rememberWorkflowSession({
+							runId,
+							network,
+							intent,
+						});
 						return {
 							content: [
 								{
@@ -9878,6 +10000,11 @@ export function createSolanaWorkflowTools() {
 				};
 
 				if (runMode === "simulate") {
+					rememberWorkflowSession({
+						runId,
+						network,
+						intent,
+					});
 					const tokenText =
 						approvalRequired && approvalArtifact.confirmToken
 							? approvalArtifact.confirmToken
