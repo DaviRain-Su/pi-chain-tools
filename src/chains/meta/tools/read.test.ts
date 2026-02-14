@@ -191,6 +191,12 @@ describe("meta capability tools", () => {
 	});
 
 	it("returns ACP handshake with embedded capabilities by default", async () => {
+		setEvmTransferPolicy({
+			mode: "open",
+			enforceOn: "mainnet_like",
+			clearRecipients: true,
+			updatedBy: "meta.read.test.handshake",
+		});
 		const tool = getTool("w3rt_getCapabilityHandshake_v0");
 		const result = await tool.execute("meta-3", {
 			clientName: "openclaw-agent",
@@ -218,6 +224,24 @@ describe("meta capability tools", () => {
 					allowlistCount: expect.any(Number),
 				}),
 			},
+			bootstrap: {
+				schema: "w3rt.bootstrap.v1",
+				target: "openclaw",
+				policyStatus: expect.objectContaining({
+					hardeningNeeded: true,
+				}),
+				startupSequence: expect.arrayContaining([
+					expect.objectContaining({
+						tool: "w3rt_getCapabilities_v0",
+					}),
+					expect.objectContaining({
+						tool: "w3rt_getPolicy_v0",
+					}),
+					expect.objectContaining({
+						tool: "w3rt_setPolicy_v0",
+					}),
+				]),
+			},
 			capabilities: expect.objectContaining({
 				schema: "w3rt.capabilities.v1",
 			}),
@@ -225,6 +249,12 @@ describe("meta capability tools", () => {
 	});
 
 	it("returns handshake without embedded capabilities when disabled", async () => {
+		setEvmTransferPolicy({
+			mode: "allowlist",
+			enforceOn: "mainnet_like",
+			allowedRecipients: ["0x000000000000000000000000000000000000beef"],
+			updatedBy: "meta.read.test.handshake.noembed",
+		});
 		const tool = getTool("w3rt_getCapabilityHandshake_v0");
 		const result = await tool.execute("meta-4", {
 			includeCapabilities: false,
@@ -236,6 +266,11 @@ describe("meta capability tools", () => {
 			query: {
 				chain: "evm",
 				executableOnly: true,
+			},
+			bootstrap: {
+				policyStatus: expect.objectContaining({
+					hardeningNeeded: false,
+				}),
 			},
 			capabilities: undefined,
 		});

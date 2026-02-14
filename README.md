@@ -654,6 +654,15 @@ Deploy with GitHub Pages:
 3. Select branch `main` and folder `/docs`.
 4. Save and wait for the published URL.
 
+## OpenClaw ACP Quickstart
+
+- Quickstart doc: `docs/openclaw-acp-quickstart.md`
+- Recommended startup order:
+  1. `w3rt_getCapabilityHandshake_v0`
+  2. `w3rt_getPolicy_v0`
+  3. `w3rt_setPolicy_v0` (switch transfer to allowlist for production)
+  4. run workflow analysis/simulate before execute
+
 ## PR Required Checks
 
 To enforce CI as merge-gate on `main`:

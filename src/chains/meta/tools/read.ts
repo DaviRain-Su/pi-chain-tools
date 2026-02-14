@@ -496,6 +496,141 @@ function summarizeTransferPolicyText(params: {
 	return `Transfer policy: mode=${params.mode} enforceOn=${params.enforceOn} allowlist=${params.allowedRecipients.length} version=${params.version}`;
 }
 
+function buildHandshakeBootstrap(params: {
+	clientName: string | null;
+	query: CapabilityQuery;
+	transferPolicy: ReturnType<typeof getEvmTransferPolicy>;
+}): {
+	schema: "w3rt.bootstrap.v1";
+	target: "openclaw";
+	recommendedCapabilityFilter: {
+		chain: CapabilityQuery["chain"];
+		executableOnly: boolean;
+		maxRisk: RiskLevel;
+	};
+	policyStatus: {
+		evmTransferMode: string;
+		evmTransferEnforceOn: string;
+		evmTransferAllowlistCount: number;
+		hardeningNeeded: boolean;
+	};
+	startupSequence: Array<{
+		order: number;
+		tool: string;
+		purpose: string;
+		required: boolean;
+		params: Record<string, unknown>;
+	}>;
+	firstPrompts: string[];
+	executionNotes: string[];
+} {
+	const hardeningNeeded =
+		params.transferPolicy.mode === "open" ||
+		(params.transferPolicy.mode === "allowlist" &&
+			params.transferPolicy.allowedRecipients.length === 0);
+	const clientName = params.clientName || "openclaw-agent";
+	const startupSequence: Array<{
+		order: number;
+		tool: string;
+		purpose: string;
+		required: boolean;
+		params: Record<string, unknown>;
+	}> = [
+		{
+			order: 1,
+			tool: "w3rt_getCapabilities_v0",
+			purpose: "Load executable capability catalog for routing.",
+			required: true,
+			params: {
+				chain: params.query.chain,
+				executableOnly: true,
+				maxRisk: params.query.maxRisk,
+				includeExamples: true,
+				includeToolNames: false,
+			},
+		},
+		{
+			order: 2,
+			tool: "w3rt_getPolicy_v0",
+			purpose: "Read runtime transfer policy before enabling execute paths.",
+			required: true,
+			params: {
+				scope: "evm.transfer",
+			},
+		},
+	];
+	if (hardeningNeeded) {
+		startupSequence.push({
+			order: 3,
+			tool: "w3rt_setPolicy_v0",
+			purpose:
+				"Harden transfer policy to allowlist mode before production execution.",
+			required: false,
+			params: {
+				scope: "evm.transfer",
+				mode: "allowlist",
+				enforceOn: "mainnet_like",
+				allowedRecipients: ["0x000000000000000000000000000000000000dEaD"],
+				note: "bootstrap hardening template",
+				updatedBy: clientName,
+			},
+		});
+	}
+	const orderBase = startupSequence.length + 1;
+	startupSequence.push(
+		{
+			order: orderBase,
+			tool: "w3rt_run_evm_polymarket_workflow_v0",
+			purpose: "Run first safe analysis/simulate cycle before execute.",
+			required: true,
+			params: {
+				runMode: "analysis",
+				network: "polygon",
+				intentType: "evm.polymarket.btc5m.trade",
+				stakeUsd: 20,
+			},
+		},
+		{
+			order: orderBase + 1,
+			tool: "w3rt_run_evm_transfer_workflow_v0",
+			purpose: "Run transfer analysis flow with confirm token safety gate.",
+			required: false,
+			params: {
+				runMode: "analysis",
+				network: "polygon",
+				intentType: "evm.transfer.native",
+				toAddress: "0x000000000000000000000000000000000000dEaD",
+				amountNative: 0.001,
+			},
+		},
+	);
+	return {
+		schema: "w3rt.bootstrap.v1",
+		target: "openclaw",
+		recommendedCapabilityFilter: {
+			chain: params.query.chain,
+			executableOnly: true,
+			maxRisk: params.query.maxRisk,
+		},
+		policyStatus: {
+			evmTransferMode: params.transferPolicy.mode,
+			evmTransferEnforceOn: params.transferPolicy.enforceOn,
+			evmTransferAllowlistCount: params.transferPolicy.allowedRecipients.length,
+			hardeningNeeded,
+		},
+		startupSequence,
+		firstPrompts: [
+			"帮我分析 BTC 5m 市场，建议买涨还是买跌",
+			"把 0.001 MATIC 转到 0x...，先模拟",
+			"继续执行刚才这笔，确认主网执行",
+		],
+		executionNotes: [
+			"Execute paths are guarded by confirmMainnet + confirmToken in workflow tools.",
+			"For transfers, policy allowlist should be configured before production use.",
+		],
+	};
+}
+
 export function createMetaReadTools() {
 	return [
 		defineTool({
@@ -576,9 +711,15 @@ export function createMetaReadTools() {
 				const query = parseCapabilityQuery(params);
 				const includeCapabilities = params.includeCapabilities !== false;
 				const catalog = buildCapabilityDetails(query);
+				const transferPolicy = getEvmTransferPolicy();
 				const capabilities = includeCapabilities
 					? capabilityDetailsPayload(catalog)
 					: undefined;
+				const bootstrap = buildHandshakeBootstrap({
+					clientName: params.clientName?.trim() || null,
+					query,
+					transferPolicy,
+				});
 				const details = {
 					schema: HANDSHAKE_SCHEMA,
 					generatedAt: new Date().toISOString(),
@@ -602,16 +743,14 @@ export function createMetaReadTools() {
 					query,
 					capabilityDigest: catalog.digest,
 					policyDigest: {
-						evmTransfer: (() => {
-							const transferPolicy = getEvmTransferPolicy();
-							return {
-								mode: transferPolicy.mode,
-								enforceOn: transferPolicy.enforceOn,
-								allowlistCount: transferPolicy.allowedRecipients.length,
-								version: transferPolicy.version,
-							};
-						})(),
+						evmTransfer: {
+							mode: transferPolicy.mode,
+							enforceOn: transferPolicy.enforceOn,
+							allowlistCount: transferPolicy.allowedRecipients.length,
+							version: transferPolicy.version,
+						},
 					},
+					bootstrap,
 					capabilities,
 				};
 				return {
