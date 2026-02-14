@@ -375,6 +375,64 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		).toBe(true);
 	});
 
+	it("infers execute runMode from natural-language follow-up intentText", async () => {
+		const tool = getTool();
+		const destination =
+			"0x3333333333333333333333333333333333333333333333333333333333333333";
+		const analysis = await tool.execute("sui-runmode-analysis", {
+			runId: "wf-sui-runmode-01",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: `转 0.000001 SUI 到 ${destination}`,
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+
+		const executed = await tool.execute("sui-runmode-exec", {
+			runId: "wf-sui-runmode-01",
+			intentText: "继续执行刚才这笔，确认主网执行",
+			network: "mainnet",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.transferSuiExecute).toHaveBeenCalledTimes(1);
+		expect(executed.details).toMatchObject({
+			intentType: "sui.transfer.sui",
+			artifacts: {
+				execute: {
+					digest: "0xexec",
+				},
+			},
+		});
+	});
+
+	it("infers simulate runMode from intentText", async () => {
+		const tool = getTool();
+		const destination =
+			"0x4444444444444444444444444444444444444444444444444444444444444444";
+		const result = await tool.execute("sui-runmode-sim", {
+			runId: "wf-sui-runmode-02",
+			network: "mainnet",
+			intentText: `先模拟 转 0.000001 SUI 到 ${destination}`,
+		});
+
+		expect(result.content[0]?.text).toContain("Workflow simulated");
+		expect(result.details).toMatchObject({
+			network: "mainnet",
+			intentType: "sui.transfer.sui",
+			artifacts: {
+				simulate: {
+					status: "success",
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "simulate",
+						intentType: "sui.transfer.sui",
+					},
+				},
+			},
+		});
+	});
+
 	it("simulates transaction and returns artifacts", async () => {
 		const tool = getTool();
 		const destination =
