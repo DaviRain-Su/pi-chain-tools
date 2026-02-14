@@ -472,6 +472,8 @@ type NearIntentsOutcomeSummary = {
 	remediation: string[];
 };
 
+type NearBurrowWorkflowRiskBand = "safe" | "warning" | "critical";
+
 const WORKFLOW_SESSION_BY_RUN_ID = new Map<string, WorkflowSessionRecord>();
 let latestWorkflowSession: WorkflowSessionRecord | null = null;
 const DEFAULT_NEAR_SWAP_MAX_SLIPPAGE_BPS = 1000;
@@ -479,6 +481,8 @@ const HARD_MAX_NEAR_SWAP_SLIPPAGE_BPS = 5000;
 const DEFAULT_NEAR_INTENTS_API_BASE_URL = "https://1click.chaindefuser.com";
 const DEFAULT_INTENTS_STATUS_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_INTENTS_STATUS_TIMEOUT_MS = 45_000;
+const DEFAULT_BURROW_WORKFLOW_RISK_WARNING_RATIO = 0.6;
+const DEFAULT_BURROW_WORKFLOW_RISK_CRITICAL_RATIO = 0.85;
 
 function rememberWorkflowSession(record: WorkflowSessionRecord): void {
 	WORKFLOW_SESSION_BY_RUN_ID.set(record.runId, record);
@@ -554,6 +558,22 @@ function createConfirmToken(params: {
 		.slice(0, 10)
 		.toUpperCase();
 	return `NEAR-${digest}`;
+}
+
+function formatBurrowWorkflowRatioPercent(value: number): string {
+	return `${(value * 100).toFixed(2)}%`;
+}
+
+function buildBurrowWorkflowRiskPolicyLabel(): string {
+	return `warning>=${formatBurrowWorkflowRatioPercent(DEFAULT_BURROW_WORKFLOW_RISK_WARNING_RATIO)} critical>=${formatBurrowWorkflowRatioPercent(DEFAULT_BURROW_WORKFLOW_RISK_CRITICAL_RATIO)}`;
+}
+
+function resolveBurrowWorkflowRiskBand(
+	level: "low" | "medium" | "high",
+): NearBurrowWorkflowRiskBand {
+	if (level === "high") return "critical";
+	if (level === "medium") return "warning";
+	return "safe";
 }
 
 function normalizeConfirmTokenValue(
@@ -4257,6 +4277,7 @@ async function simulateBurrowBorrow(params: {
 	collateralAssetCount: number;
 	borrowedAssetCount: number;
 	riskLevel: "low" | "medium" | "high";
+	riskBand: NearBurrowWorkflowRiskBand;
 	riskNotes: string[];
 }> {
 	const fromAccountId = resolveNearAccountId(
@@ -4304,6 +4325,7 @@ async function simulateBurrowBorrow(params: {
 			: borrowedAssetCount > 0
 				? "medium"
 				: "low";
+	const riskBand = resolveBurrowWorkflowRiskBand(riskLevel);
 	return {
 		status: !canBorrow
 			? "market_unavailable"
@@ -4321,6 +4343,7 @@ async function simulateBurrowBorrow(params: {
 		collateralAssetCount,
 		borrowedAssetCount,
 		riskLevel,
+		riskBand,
 		riskNotes,
 	};
 }
@@ -4429,6 +4452,7 @@ async function simulateBurrowWithdraw(params: {
 	collateralInner: string;
 	borrowedAssetCount: number;
 	riskLevel: "low" | "medium" | "high";
+	riskBand: NearBurrowWorkflowRiskBand;
 	riskNotes: string[];
 }> {
 	const fromAccountId = resolveNearAccountId(
@@ -4487,6 +4511,7 @@ async function simulateBurrowWithdraw(params: {
 		: borrowedAssetCount > 0
 			? "medium"
 			: "low";
+	const riskBand = resolveBurrowWorkflowRiskBand(riskLevel);
 	return {
 		status: !canWithdraw
 			? "market_unavailable"
@@ -4512,6 +4537,7 @@ async function simulateBurrowWithdraw(params: {
 		collateralInner: collateralInner.toString(),
 		borrowedAssetCount,
 		riskLevel,
+		riskBand,
 		riskNotes,
 	};
 }
@@ -5146,6 +5172,13 @@ function buildWorkflowAnalysisOneLineSummary(
 	confirmToken: string | null,
 ): string {
 	const parts = [intentType, "analysis=ready"];
+	if (
+		intentType === "near.lend.burrow.borrow" ||
+		intentType === "near.lend.burrow.withdraw"
+	) {
+		parts.push("riskCheck=simulate");
+		parts.push(`riskPolicy=${buildBurrowWorkflowRiskPolicyLabel()}`);
+	}
 	if (approvalRequired) {
 		parts.push(`mainnetGuard=on confirmToken=${confirmToken ?? "N/A"}`);
 	}
@@ -5177,6 +5210,50 @@ function buildSimulateResultSummary(
 					).quote.depositAddress
 				: null;
 		return `Workflow simulated: ${intentType} status=${statusText}${depositAddress ? ` deposit=${depositAddress}` : ""}`;
+	}
+	if (
+		intentType === "near.lend.burrow.borrow" ||
+		intentType === "near.lend.burrow.withdraw"
+	) {
+		const riskLevel =
+			typeof simulateResult.riskLevel === "string"
+				? simulateResult.riskLevel
+				: null;
+		const riskBand =
+			typeof simulateResult.riskBand === "string"
+				? simulateResult.riskBand
+				: riskLevel === "high" || riskLevel === "medium" || riskLevel === "low"
+					? resolveBurrowWorkflowRiskBand(riskLevel)
+					: null;
+		const collateralAssetCount =
+			typeof simulateResult.collateralAssetCount === "number" &&
+			Number.isFinite(simulateResult.collateralAssetCount)
+				? Math.max(0, Math.floor(simulateResult.collateralAssetCount))
+				: null;
+		const borrowedAssetCount =
+			typeof simulateResult.borrowedAssetCount === "number" &&
+			Number.isFinite(simulateResult.borrowedAssetCount)
+				? Math.max(0, Math.floor(simulateResult.borrowedAssetCount))
+				: null;
+		const riskNotesCount = Array.isArray(simulateResult.riskNotes)
+			? simulateResult.riskNotes.filter(
+					(note): note is string =>
+						typeof note === "string" && note.trim().length > 0,
+				).length
+			: 0;
+		const parts = [`Workflow simulated: ${intentType} status=${statusText}`];
+		if (riskBand) parts.push(`risk=${riskBand}`);
+		if (riskLevel) parts.push(`riskLevel=${riskLevel}`);
+		if (collateralAssetCount != null) {
+			parts.push(`collateralAssets=${collateralAssetCount}`);
+		}
+		if (borrowedAssetCount != null) {
+			parts.push(`borrowedAssets=${borrowedAssetCount}`);
+		}
+		if (riskNotesCount > 0) {
+			parts.push(`riskNotes=${riskNotesCount}`);
+		}
+		return parts.join(" ");
 	}
 	if (
 		(intentType === "near.lp.ref.add" || intentType === "near.lp.ref.remove") &&

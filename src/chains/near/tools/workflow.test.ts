@@ -3161,6 +3161,16 @@ describe("w3rt_run_near_workflow_v0", () => {
 				withdrawToWallet: true,
 			},
 		});
+		const analysisSummaryLine =
+			(
+				result.details as {
+					artifacts?: { analysis?: { summaryLine?: string } };
+				}
+			).artifacts?.analysis?.summaryLine ?? "";
+		expect(analysisSummaryLine).toContain("riskCheck=simulate");
+		expect(analysisSummaryLine).toContain(
+			"riskPolicy=warning>=60.00% critical>=85.00%",
+		);
 	});
 
 	it("simulates burrow borrow and reports insufficient collateral", async () => {
@@ -3212,9 +3222,91 @@ describe("w3rt_run_near_workflow_v0", () => {
 					tokenId: "wrap.near",
 					collateralAssetCount: 0,
 					riskLevel: "high",
+					riskBand: "critical",
+					summaryLine: expect.stringContaining("risk=critical"),
 				},
 			},
 		});
+		expect(result.content[0]?.text).toContain("risk=critical");
+		expect(result.content[0]?.text).toContain("riskLevel=high");
+		expect(result.content[0]?.text).toContain("collateralAssets=0");
+	});
+
+	it("simulates burrow borrow and reports warning risk when existing debt exists", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "816",
+				block_height: 816,
+				logs: [],
+				result: encodeJsonResult([
+					{
+						token_id: "wrap.near",
+						supplied: { shares: "0", balance: "0" },
+						borrowed: { shares: "0", balance: "0" },
+						config: {
+							extra_decimals: 0,
+							can_deposit: true,
+							can_use_as_collateral: true,
+							can_borrow: true,
+							can_withdraw: true,
+						},
+					},
+				]),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "817",
+				block_height: 817,
+				logs: [],
+				result: encodeJsonResult({
+					account_id: "alice.near",
+					supplied: [],
+					positions: {
+						REGULAR: {
+							collateral: [
+								{
+									token_id: "wrap.near",
+									balance: "900",
+									shares: "800",
+								},
+							],
+							borrowed: [
+								{
+									token_id: "usdc.tether-token.near",
+									balance: "10",
+									shares: "8",
+								},
+							],
+						},
+					},
+				}),
+			});
+		const tool = getTool();
+		const result = await tool.execute("near-wf-burrow-4-sim-warning", {
+			runId: "wf-near-burrow-04-sim-warning",
+			runMode: "simulate",
+			intentType: "near.lend.burrow.borrow",
+			network: "mainnet",
+			tokenId: "NEAR",
+			amountRaw: "1000",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lend.burrow.borrow",
+			artifacts: {
+				simulate: {
+					status: "success",
+					tokenId: "wrap.near",
+					collateralAssetCount: 1,
+					borrowedAssetCount: 1,
+					riskLevel: "medium",
+					riskBand: "warning",
+					summaryLine: expect.stringContaining("risk=warning"),
+				},
+			},
+		});
+		expect(result.content[0]?.text).toContain("risk=warning");
+		expect(result.content[0]?.text).toContain("collateralAssets=1");
+		expect(result.content[0]?.text).toContain("borrowedAssets=1");
 	});
 
 	it("simulates burrow repay and reports no-debt status", async () => {
@@ -3351,9 +3443,13 @@ describe("w3rt_run_near_workflow_v0", () => {
 					collateralInner: "900",
 					borrowedAssetCount: 1,
 					riskLevel: "high",
+					riskBand: "critical",
+					summaryLine: expect.stringContaining("risk=critical"),
 				},
 			},
 		});
+		expect(result.content[0]?.text).toContain("risk=critical");
+		expect(result.content[0]?.text).toContain("borrowedAssets=1");
 	});
 
 	it("executes burrow withdraw after confirm token validation", async () => {
@@ -3367,6 +3463,13 @@ describe("w3rt_run_near_workflow_v0", () => {
 			amountRaw: "1000",
 			recipientId: "bob.near",
 		});
+		const analysisSummaryLine =
+			(
+				analysis.details as {
+					artifacts?: { analysis?: { summaryLine?: string } };
+				}
+			).artifacts?.analysis?.summaryLine ?? "";
+		expect(analysisSummaryLine).toContain("riskCheck=simulate");
 		const token = (analysis.details as { confirmToken: string }).confirmToken;
 		await tool.execute("near-wf-burrow-6-execute", {
 			runId: "wf-near-burrow-06",
