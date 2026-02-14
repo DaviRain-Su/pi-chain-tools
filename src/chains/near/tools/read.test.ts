@@ -302,6 +302,26 @@ describe("near_getFtBalance", () => {
 
 describe("near_getPortfolio", () => {
 	it("returns native + non-zero FT assets", async () => {
+		mockFetchJsonOnce(200, [
+			{
+				assetId: "nep141:wrap.near",
+				decimals: 24,
+				blockchain: "near",
+				symbol: "NEAR",
+				price: 5,
+				priceUpdatedAt: "2026-01-01T00:00:00.000Z",
+				contractAddress: "wrap.near",
+			},
+			{
+				assetId: "nep141:usdc.fakes.near",
+				decimals: 6,
+				blockchain: "near",
+				symbol: "USDC",
+				price: 1,
+				priceUpdatedAt: "2026-01-01T00:00:00.000Z",
+				contractAddress: "usdc.fakes.near",
+			},
+		]);
 		runtimeMocks.callNearRpc
 			.mockResolvedValueOnce({
 				amount: "1000000000000000000000000",
@@ -357,6 +377,7 @@ describe("near_getPortfolio", () => {
 		});
 
 		expect(result.content[0]?.text).toContain("Portfolio: 2 assets");
+		expect(result.content[0]?.text).toContain("Estimated USD value (wallet)");
 		expect(result.content[0]?.text).toContain("Wallet assets (>0):");
 		expect(result.content[0]?.text).toContain("USDC: 1.2345");
 		expect(result.content[0]?.text).toContain("Asset details:");
@@ -373,6 +394,15 @@ describe("near_getPortfolio", () => {
 					uiAmount: "1.2345",
 				},
 			],
+			includeValuationUsd: true,
+			valuation: {
+				enabled: true,
+				currency: "USD",
+				source: "near_intents_tokens",
+				tokenCount: 2,
+				walletAssetCount: 2,
+				pricedWalletAssetCount: 2,
+			},
 			defiExposure: {
 				refDeposits: [],
 				burrowSupplied: [],
@@ -393,6 +423,10 @@ describe("near_getPortfolio", () => {
 				},
 			],
 		});
+		const valuation = (
+			result.details as { valuation?: { totalWalletUsd?: number } }
+		).valuation;
+		expect(valuation?.totalWalletUsd).toBeCloseTo(6.2345, 6);
 	});
 
 	it("auto-discovers DeFi tokens from Ref/Burrow into portfolio query", async () => {

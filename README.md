@@ -60,6 +60,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `portfolio DeFi visibility`: when `near_getPortfolio` auto-discovers tokens from Ref/Burrow, discovered tokens are kept in output even if wallet FT balance is zero (with source tags) so DeFi-held assets are still visible
 - `portfolio DeFi summary`: `near_getPortfolio` now adds a readable exposure line for Ref deposits and Burrow supplied/collateral/borrowed token sets
 - `portfolio grouped readability`: `near_getPortfolio` text output is grouped into `Wallet assets (>0)` / `DeFi tracked tokens` / `Asset details`
+- `portfolio USD valuation`: `near_getPortfolio` now estimates wallet USD value (best-effort via NEAR Intents token prices) and returns structured `details.valuation`
 - `read`: `near_getLendingMarketsBurrow` (Burrow lending market list with capability flags + supply/borrow APR + readable amounts)
 - `read`: `near_getLendingPositionsBurrow` (Burrow account supplied/collateral/borrowed snapshot with readable token rows + risk summary)
 - `read`: `near_getRefDeposits` (Ref exchange deposited balances, readable token symbols + raw/ui amounts)
@@ -399,6 +400,8 @@ Natural language confirmation example:
   - `帮我查一下 alice.near 在 usdt.tether-token.near 的余额`
 - Portfolio (include common stablecoins):
   - `帮我查一下 NEAR 主网本地钱包资产（包含 USDC/USDT）`
+- Portfolio + USD valuation:
+  - `帮我查一下 NEAR 主网本地钱包资产并估算美元价值`
 - Workflow analyze:
   - `把 0.01 NEAR 转到 bob.near，先分析`
 - Workflow simulate:

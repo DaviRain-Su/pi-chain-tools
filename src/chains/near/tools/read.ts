@@ -58,6 +58,10 @@ type NearPortfolioAsset = {
 	uiAmount: string | null;
 	decimals: number | null;
 	discoveredSources?: Array<"refDeposits" | "burrowPositions">;
+	priceUsd?: number | null;
+	estimatedUsd?: number | null;
+	valuationSourceAssetId?: string | null;
+	valuationMatchBy?: "tokenId" | "symbol";
 };
 
 type NearPortfolioFailure = {
@@ -83,6 +87,17 @@ type NearPortfolioExposureRow = {
 	walletRawAmount: string | null;
 	walletUiAmount: string | null;
 	inWallet: boolean;
+};
+
+type NearPortfolioValuationAsset = {
+	symbol: string;
+	contractId: string | null;
+	rawAmount: string;
+	uiAmount: string | null;
+	priceUsd: number;
+	estimatedUsd: number | null;
+	sourceAssetId: string;
+	matchBy: "tokenId" | "symbol";
 };
 
 type NearRefDepositAsset = {
@@ -553,6 +568,137 @@ function hasPositiveRawAmount(value: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+function parseUiAmountNumber(value: string | null): number | null {
+	if (typeof value !== "string") return null;
+	const normalized = value.trim().replace(/,/g, "");
+	if (!normalized) return null;
+	const parsed = Number(normalized);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+function rawAmountToApproxNumber(
+	rawAmount: string,
+	decimals: number | null,
+): number | null {
+	if (decimals == null || !Number.isInteger(decimals) || decimals < 0) {
+		return null;
+	}
+	const parsedRaw = Number(rawAmount);
+	if (!Number.isFinite(parsedRaw)) return null;
+	const denominator = 10 ** decimals;
+	if (!Number.isFinite(denominator) || denominator <= 0) return null;
+	return parsedRaw / denominator;
+}
+
+function extractNearTokenIdFromIntentsAssetId(assetId: string): string | null {
+	const normalized = assetId.trim().toLowerCase();
+	if (!normalized.startsWith("nep141:")) return null;
+	const tokenId = normalized.slice("nep141:".length).trim();
+	return tokenId || null;
+}
+
+function buildNearPortfolioPriceIndex(tokens: NearIntentsToken[]): {
+	byTokenId: Map<string, NearIntentsToken>;
+	bySymbol: Map<string, NearIntentsToken[]>;
+} {
+	const byTokenId = new Map<string, NearIntentsToken>();
+	const bySymbol = new Map<string, NearIntentsToken[]>();
+	for (const token of tokens) {
+		if (
+			token.blockchain.trim().toLowerCase() !== "near" ||
+			!Number.isFinite(token.price) ||
+			token.price < 0
+		) {
+			continue;
+		}
+		const tokenIdFromAssetId = extractNearTokenIdFromIntentsAssetId(
+			token.assetId,
+		);
+		const tokenIdFromAddress =
+			typeof token.contractAddress === "string"
+				? token.contractAddress.trim().toLowerCase()
+				: "";
+		const tokenId = tokenIdFromAddress || tokenIdFromAssetId;
+		if (tokenId && !byTokenId.has(tokenId)) {
+			byTokenId.set(tokenId, token);
+		}
+		const symbolKey = token.symbol.trim().toUpperCase();
+		if (!symbolKey) continue;
+		const list = bySymbol.get(symbolKey) ?? [];
+		list.push(token);
+		bySymbol.set(symbolKey, list);
+	}
+	return { byTokenId, bySymbol };
+}
+
+function resolvePortfolioAssetPrice(params: {
+	asset: NearPortfolioAsset;
+	priceIndex: {
+		byTokenId: Map<string, NearIntentsToken>;
+		bySymbol: Map<string, NearIntentsToken[]>;
+	};
+}): {
+	priceUsd: number;
+	sourceAssetId: string;
+	matchBy: "tokenId" | "symbol";
+} | null {
+	const contractId =
+		typeof params.asset.contractId === "string"
+			? params.asset.contractId.trim().toLowerCase()
+			: null;
+	if (contractId) {
+		const matched = params.priceIndex.byTokenId.get(contractId);
+		if (matched) {
+			return {
+				priceUsd: matched.price,
+				sourceAssetId: matched.assetId,
+				matchBy: "tokenId",
+			};
+		}
+	}
+	if (params.asset.kind === "native") {
+		const nativeCandidate =
+			params.priceIndex.byTokenId.get("wrap.near") ?? null;
+		if (nativeCandidate) {
+			return {
+				priceUsd: nativeCandidate.price,
+				sourceAssetId: nativeCandidate.assetId,
+				matchBy: "tokenId",
+			};
+		}
+	}
+	const symbolKey = params.asset.symbol.trim().toUpperCase();
+	if (!symbolKey) return null;
+	const bySymbol = params.priceIndex.bySymbol.get(symbolKey) ?? [];
+	if (bySymbol.length !== 1) return null;
+	const matched = bySymbol[0];
+	if (!matched) return null;
+	return {
+		priceUsd: matched.price,
+		sourceAssetId: matched.assetId,
+		matchBy: "symbol",
+	};
+}
+
+function computePortfolioAssetEstimatedUsd(
+	asset: NearPortfolioAsset,
+): number | null {
+	const priceUsd = asset.priceUsd;
+	if (
+		typeof priceUsd !== "number" ||
+		!Number.isFinite(priceUsd) ||
+		priceUsd < 0
+	) {
+		return null;
+	}
+	const uiAmount =
+		parseUiAmountNumber(asset.uiAmount) ??
+		rawAmountToApproxNumber(asset.rawAmount, asset.decimals);
+	if (uiAmount == null || !Number.isFinite(uiAmount) || uiAmount < 0)
+		return null;
+	return uiAmount * priceUsd;
 }
 
 function summarizeTokenIdsForReadableLine(
@@ -2083,6 +2229,30 @@ export function createNearReadTools() {
 							"Auto-discover additional FT contracts from Ref deposits and Burrow positions (default true when ftContractIds is omitted).",
 					}),
 				),
+				includeValuationUsd: Type.Optional(
+					Type.Boolean({
+						description:
+							"Estimate USD value using NEAR Intents token prices (default true, best-effort).",
+					}),
+				),
+				valuationApiBaseUrl: Type.Optional(
+					Type.String({
+						description:
+							"NEAR Intents API base URL override for valuation price feed (default https://1click.chaindefuser.com).",
+					}),
+				),
+				valuationApiKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional API key for valuation price feed (fallback env NEAR_INTENTS_API_KEY).",
+					}),
+				),
+				valuationJwt: Type.Optional(
+					Type.String({
+						description:
+							"Optional JWT for valuation price feed (fallback env NEAR_INTENTS_JWT).",
+					}),
+				),
 				network: nearNetworkSchema(),
 				rpcUrl: Type.Optional(
 					Type.String({ description: "Override NEAR JSON-RPC endpoint URL" }),
@@ -2093,6 +2263,7 @@ export function createNearReadTools() {
 				const accountId = resolveNearAccountId(params.accountId, network);
 				const endpoint = getNearRpcEndpoint(network, params.rpcUrl);
 				const includeZero = params.includeZeroBalances === true;
+				const includeValuationUsd = params.includeValuationUsd !== false;
 				const baseFtContractIds = resolvePortfolioFtContracts({
 					network,
 					ftContractIds: params.ftContractIds,
@@ -2167,6 +2338,9 @@ export function createNearReadTools() {
 						rawAmount: totalYoctoNear.toString(),
 						uiAmount: formatNearAmount(totalYoctoNear, 8),
 						decimals: 24,
+						priceUsd: null,
+						estimatedUsd: null,
+						valuationSourceAssetId: null,
 					},
 				];
 				const failures: NearPortfolioFailure[] = [];
@@ -2217,6 +2391,9 @@ export function createNearReadTools() {
 							decimals,
 							discoveredSources:
 								discoveredSources.length > 0 ? discoveredSources : undefined,
+							priceUsd: null,
+							estimatedUsd: null,
+							valuationSourceAssetId: null,
 						});
 					} catch (error) {
 						failures.push({
@@ -2226,10 +2403,96 @@ export function createNearReadTools() {
 					}
 				}
 
+				const valuation = {
+					enabled: includeValuationUsd,
+					currency: "USD" as const,
+					source: "near_intents_tokens" as const,
+					endpoint: null as string | null,
+					httpStatus: null as number | null,
+					tokenCount: 0,
+					walletAssetCount: 0,
+					pricedAssetCount: 0,
+					pricedWalletAssetCount: 0,
+					totalWalletUsd: null as number | null,
+					assets: [] as NearPortfolioValuationAsset[],
+					error: null as string | null,
+				};
+				if (includeValuationUsd) {
+					try {
+						const baseUrl = resolveNearIntentsApiBaseUrl(
+							params.valuationApiBaseUrl,
+						);
+						const headers = resolveNearIntentsHeaders({
+							apiKey: params.valuationApiKey,
+							jwt: params.valuationJwt,
+						});
+						const tokenResponse = await fetchNearIntentsJson<
+							NearIntentsToken[]
+						>({
+							baseUrl,
+							path: "/v0/tokens",
+							method: "GET",
+							headers,
+						});
+						const tokens = normalizeNearIntentsTokens(tokenResponse.payload);
+						valuation.endpoint = tokenResponse.url;
+						valuation.httpStatus = tokenResponse.status;
+						valuation.tokenCount = tokens.length;
+						const priceIndex = buildNearPortfolioPriceIndex(tokens);
+						valuation.walletAssetCount = assets.filter((asset) =>
+							hasPositiveRawAmount(asset.rawAmount),
+						).length;
+						for (const asset of assets) {
+							const resolved = resolvePortfolioAssetPrice({
+								asset,
+								priceIndex,
+							});
+							if (!resolved) continue;
+							asset.priceUsd = resolved.priceUsd;
+							asset.valuationSourceAssetId = resolved.sourceAssetId;
+							asset.valuationMatchBy = resolved.matchBy;
+							asset.estimatedUsd = computePortfolioAssetEstimatedUsd(asset);
+							valuation.pricedAssetCount += 1;
+							if (hasPositiveRawAmount(asset.rawAmount)) {
+								valuation.pricedWalletAssetCount += 1;
+							}
+							valuation.assets.push({
+								symbol: asset.symbol,
+								contractId: asset.contractId,
+								rawAmount: asset.rawAmount,
+								uiAmount: asset.uiAmount,
+								priceUsd: resolved.priceUsd,
+								estimatedUsd: asset.estimatedUsd,
+								sourceAssetId: resolved.sourceAssetId,
+								matchBy: resolved.matchBy,
+							});
+						}
+						const walletUsdRows = valuation.assets
+							.filter((asset) => hasPositiveRawAmount(asset.rawAmount))
+							.map((asset) => asset.estimatedUsd)
+							.filter(
+								(value): value is number =>
+									typeof value === "number" && Number.isFinite(value),
+							);
+						valuation.totalWalletUsd =
+							walletUsdRows.length > 0
+								? walletUsdRows.reduce((sum, value) => sum + value, 0)
+								: null;
+					} catch (error) {
+						const message =
+							error instanceof Error ? error.message : String(error);
+						valuation.error =
+							message.trim().length > 0
+								? `price feed request failed: ${message}`
+								: "price feed request failed";
+					}
+				}
+
 				const lines = [
 					`Portfolio: ${assets.length} assets (account ${accountId})`,
 					`NEAR: ${formatNearAmount(totalYoctoNear, 8)} (available ${formatNearAmount(availableYoctoNear, 8)}, locked ${formatNearAmount(lockedYoctoNear, 8)})`,
 				];
+				const nativeAsset = assets[0] ?? null;
 				const ftAssets = assets.filter(
 					(asset): asset is NearPortfolioAsset =>
 						asset.kind === "ft" && typeof asset.contractId === "string",
@@ -2268,8 +2531,25 @@ export function createNearReadTools() {
 						assetByTokenId,
 					),
 				};
+				if (includeValuationUsd) {
+					if (valuation.totalWalletUsd != null) {
+						lines.push(
+							`Estimated USD value (wallet): ${formatUsdApprox(valuation.totalWalletUsd) ?? `$${valuation.totalWalletUsd.toFixed(2)}`} (priced ${valuation.pricedWalletAssetCount}/${valuation.walletAssetCount} assets)`,
+						);
+					} else if (valuation.error) {
+						lines.push(
+							`Estimated USD value (wallet): unavailable (${valuation.error})`,
+						);
+					} else {
+						lines.push(
+							"Estimated USD value (wallet): unavailable (no priced assets matched)",
+						);
+					}
+				}
 				lines.push("Wallet assets (>0):");
-				lines.push(`- NEAR: ${formatNearAmount(totalYoctoNear, 8)}`);
+				lines.push(
+					`- NEAR: ${formatNearAmount(totalYoctoNear, 8)}${nativeAsset?.estimatedUsd != null ? ` (~${formatUsdApprox(nativeAsset.estimatedUsd) ?? `$${nativeAsset.estimatedUsd.toFixed(2)}`})` : ""}`,
+				);
 				if (walletFtAssets.length === 0) {
 					lines.push("- FT: none");
 				} else {
@@ -2278,8 +2558,12 @@ export function createNearReadTools() {
 							asset.uiAmount == null
 								? `${asset.rawAmount} raw`
 								: `${asset.uiAmount} (raw ${asset.rawAmount})`;
+						const usdText =
+							asset.estimatedUsd != null
+								? ` (~${formatUsdApprox(asset.estimatedUsd) ?? `$${asset.estimatedUsd.toFixed(2)}`})`
+								: "";
 						lines.push(
-							`- ${asset.symbol}: ${amountText} on ${asset.contractId ?? "unknown"}`,
+							`- ${asset.symbol}: ${amountText}${usdText} on ${asset.contractId ?? "unknown"}`,
 						);
 					}
 				}
@@ -2343,8 +2627,14 @@ export function createNearReadTools() {
 									)
 									.join("+")}]`
 							: "";
+					const valuationText =
+						asset.priceUsd != null
+							? ` [price=$${asset.priceUsd.toLocaleString(undefined, {
+									maximumFractionDigits: 8,
+								})}${asset.estimatedUsd != null ? ` est=${formatUsdApprox(asset.estimatedUsd) ?? `$${asset.estimatedUsd.toFixed(2)}`}` : ""}]`
+							: "";
 					lines.push(
-						`- ${asset.symbol}: ${amountText} on ${asset.contractId ?? "unknown"}${sourceText}`,
+						`- ${asset.symbol}: ${amountText} on ${asset.contractId ?? "unknown"}${sourceText}${valuationText}`,
 					);
 				}
 				if (failures.length > 0) {
@@ -2376,8 +2666,10 @@ export function createNearReadTools() {
 						discoveredByRole: discovered.discoveredByRole,
 						walletNonZeroFtAssets,
 						defiExposure,
+						valuation,
 						discoveryFailures: discovered.failures,
 						includeZeroBalances: includeZero,
+						includeValuationUsd,
 						totalYoctoNear: totalYoctoNear.toString(),
 						availableYoctoNear: availableYoctoNear.toString(),
 						lockedYoctoNear: lockedYoctoNear.toString(),
