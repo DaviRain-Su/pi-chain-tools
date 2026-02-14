@@ -310,6 +310,25 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		);
 	});
 
+	it("simulates stale-cancel intent from natural language with maxAgeMinutes", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5-stale-sim", {
+			runId: "wf-evm-5-stale",
+			runMode: "simulate",
+			network: "polygon",
+			intentText: "取消 BTC 5m 超过 30 分钟未成交挂单，先模拟",
+		});
+		expect(result.content[0]?.text).toContain("evm.polymarket.btc5m.cancel");
+		expect(executeMocks.cancelOrderExecute).toHaveBeenCalledWith(
+			"wf-evm-cancel-simulate",
+			expect.objectContaining({
+				network: "polygon",
+				maxAgeMinutes: 30,
+				dryRun: true,
+			}),
+		);
+	});
+
 	it("executes cancel with confirm token and calls cancel tool", async () => {
 		const tool = getTool();
 		const simulated = await tool.execute("wf6-sim", {

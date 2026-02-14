@@ -259,11 +259,37 @@ function calculateRemainingSize(order: ClobOpenOrder): number | null {
 	return Math.max(0, original - matched);
 }
 
+function normalizeEpochToMillis(value: number): number {
+	return value >= 1_000_000_000_000 ? value : value * 1000;
+}
+
+function calculateOrderAgeMinutes(
+	order: ClobOpenOrder,
+	nowMs: number,
+): number | null {
+	if (!Number.isFinite(order.created_at) || order.created_at <= 0) return null;
+	const createdAtMs = normalizeEpochToMillis(order.created_at);
+	const ageMs = nowMs - createdAtMs;
+	if (!Number.isFinite(ageMs) || ageMs < 0) return null;
+	return ageMs / 60_000;
+}
+
 function calculateOrderFillRatio(order: ClobOpenOrder): number | null {
 	const original = parseNumberText(order.original_size);
 	const matched = parseNumberText(order.size_matched);
 	if (original == null || matched == null || original <= 0) return null;
 	return Math.max(0, Math.min(1, matched / original));
+}
+
+function parseOptionalFillRatioLimit(
+	value: number | undefined,
+	fieldName: string,
+): number | null {
+	if (value == null) return null;
+	if (!Number.isFinite(value) || value < 0 || value > 1) {
+		throw new Error(`${fieldName} must be between 0 and 1`);
+	}
+	return value;
 }
 
 function deriveOrderState(order: ClobOpenOrder): string {
@@ -926,6 +952,8 @@ export function createEvmExecuteTools() {
 				side: Type.Optional(
 					Type.Union([Type.Literal("up"), Type.Literal("down")]),
 				),
+				maxAgeMinutes: Type.Optional(Type.Number({ minimum: 0.1 })),
+				maxFillRatio: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 				useAiAssist: Type.Optional(Type.Boolean()),
 				dryRun: Type.Optional(Type.Boolean()),
 				fromPrivateKey: Type.Optional(Type.String()),
@@ -956,9 +984,28 @@ export function createEvmExecuteTools() {
 						: null;
 				const tokenId = explicitTokenId || trade?.tokenId;
 				const cancelAll = params.cancelAll === true;
-				if (!cancelAll && orderIds.length === 0 && !tokenId) {
+				const maxAgeMinutes =
+					params.maxAgeMinutes != null
+						? parsePositiveNumber(params.maxAgeMinutes, "maxAgeMinutes")
+						: null;
+				const maxFillRatio = parseOptionalFillRatioLimit(
+					params.maxFillRatio,
+					"maxFillRatio",
+				);
+				const hasStaleFilter = maxAgeMinutes != null || maxFillRatio != null;
+				if (cancelAll && hasStaleFilter) {
 					throw new Error(
-						"Provide cancelAll=true, orderId/orderIds, or token scope (tokenId / marketSlug + side).",
+						"cancelAll cannot be combined with maxAgeMinutes/maxFillRatio filters.",
+					);
+				}
+				if (
+					!cancelAll &&
+					orderIds.length === 0 &&
+					!tokenId &&
+					!hasStaleFilter
+				) {
+					throw new Error(
+						"Provide cancelAll=true, orderId/orderIds, token scope (tokenId / marketSlug + side), or stale filters (maxAgeMinutes/maxFillRatio).",
 					);
 				}
 				const { client, signatureType } = await createAuthedClobClient({
@@ -974,17 +1021,36 @@ export function createEvmExecuteTools() {
 						tokenId ? { asset_id: tokenId } : undefined,
 						true,
 					)) ?? [];
+				const nowMs = Date.now();
+				const staleCandidateOrders = hasStaleFilter
+					? scopedOrders.filter((order) => {
+							const ageMinutes = calculateOrderAgeMinutes(order, nowMs);
+							const fillRatio = calculateOrderFillRatio(order);
+							const agePass =
+								maxAgeMinutes == null ||
+								(ageMinutes != null && ageMinutes >= maxAgeMinutes);
+							const ratioPass =
+								maxFillRatio == null ||
+								(fillRatio != null ? fillRatio <= maxFillRatio : true);
+							return agePass && ratioPass;
+						})
+					: scopedOrders;
 				const targetOrderIds = cancelAll
 					? scopedOrders.map((entry) => entry.id)
 					: orderIds.length > 0
 						? orderIds
-						: scopedOrders.map((entry) => entry.id);
+						: staleCandidateOrders.map((entry) => entry.id);
 				if (dryRun) {
 					const lines = [
 						`Polymarket cancel preview (${network}): targetOrders=${targetOrderIds.length}`,
 					];
 					if (cancelAll) lines.push("scope=all");
 					if (tokenId) lines.push(`token=${tokenId}`);
+					if (hasStaleFilter) {
+						lines.push(
+							`filter=maxAgeMinutes:${maxAgeMinutes ?? "none"}, maxFillRatio:${maxFillRatio ?? "none"}`,
+						);
+					}
 					if (orderIds.length > 0) {
 						lines.push(
 							`explicitOrderIds=${orderIds.map((entry) => shortId(entry)).join(", ")}`,
@@ -1008,8 +1074,11 @@ export function createEvmExecuteTools() {
 							network,
 							cancelAll,
 							tokenId: tokenId ?? null,
+							maxAgeMinutes,
+							maxFillRatio,
 							targetOrderIds,
 							orderCount: scopedOrders.length,
+							filteredOrderCount: staleCandidateOrders.length,
 						},
 					};
 				}
@@ -1036,7 +1105,7 @@ export function createEvmExecuteTools() {
 						);
 					}
 					response = await client.cancelOrders(orderIds);
-				} else if (tokenId && client.cancelMarketOrders) {
+				} else if (tokenId && !hasStaleFilter && client.cancelMarketOrders) {
 					response = await client.cancelMarketOrders({ asset_id: tokenId });
 				} else if (targetOrderIds.length > 0 && client.cancelOrders) {
 					response = await client.cancelOrders(targetOrderIds);
@@ -1055,6 +1124,8 @@ export function createEvmExecuteTools() {
 						network,
 						cancelAll,
 						tokenId: tokenId ?? null,
+						maxAgeMinutes,
+						maxFillRatio,
 						targetOrderIds,
 						signatureType,
 						response: response ?? null,

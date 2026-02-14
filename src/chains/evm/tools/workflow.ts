@@ -37,6 +37,8 @@ type WorkflowCancelIntent = {
 	side?: "up" | "down";
 	orderIds: string[];
 	cancelAll: boolean;
+	maxAgeMinutes?: number;
+	maxFillRatio?: number;
 	useAiAssist: boolean;
 };
 
@@ -60,6 +62,8 @@ type WorkflowParams = {
 	orderId?: string;
 	orderIds?: string[];
 	cancelAll?: boolean;
+	maxAgeMinutes?: number;
+	maxFillRatio?: number;
 	useAiAssist?: boolean;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
@@ -74,6 +78,8 @@ type ParsedIntentHints = {
 	orderId?: string;
 	orderIds?: string[];
 	cancelAll?: boolean;
+	maxAgeMinutes?: number;
+	maxFillRatio?: number;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
 };
@@ -153,7 +159,6 @@ function parseSideHint(text: string): "up" | "down" | undefined {
 
 function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
-	const lower = text.toLowerCase();
 	const side = parseSideHint(text);
 	const stakeMatch =
 		text.match(
@@ -184,6 +189,20 @@ function parseIntentText(text?: string): ParsedIntentHints {
 				.map((entry) => entry.trim())
 				.filter((entry) => entry.length > 0)
 		: undefined;
+	const staleMinutesMatch =
+		text.match(
+			/(?:超(?:过|出)|超过|older than|for at least)\s*(\d+(?:\.\d+)?)\s*(?:分钟|mins?|minutes?)/i,
+		)?.[1] ??
+		text.match(
+			/(\d+(?:\.\d+)?)\s*(?:分钟|mins?|minutes?)\s*(?:未成交|未成单|未成交挂单|stale|old)/i,
+		)?.[1];
+	const staleModeHint =
+		/(未成交|未成单|超时|过期挂单|stale|old\s+orders?)/i.test(text) ||
+		undefined;
+	const maxAgeMinutes =
+		staleMinutesMatch && (isCancelIntent || staleModeHint)
+			? Number.parseFloat(staleMinutesMatch)
+			: undefined;
 
 	return {
 		intentType: isCancelIntent ? "evm.polymarket.btc5m.cancel" : undefined,
@@ -194,6 +213,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		orderId: explicitOrderId,
 		orderIds,
 		cancelAll,
+		maxAgeMinutes,
 		confirmMainnet: hasConfirmMainnetPhrase(text) ? true : undefined,
 		confirmToken: extractConfirmTokenFromText(text),
 	};
@@ -213,6 +233,8 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			params.orderId?.trim() ||
 			(params.orderIds && params.orderIds.length > 0) ||
 			params.cancelAll === true ||
+			params.maxAgeMinutes != null ||
+			params.maxFillRatio != null ||
 			parsed.intentType ||
 			parsed.marketSlug ||
 			parsed.tokenId ||
@@ -220,7 +242,9 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			parsed.stakeUsd != null ||
 			parsed.orderId ||
 			(parsed.orderIds && parsed.orderIds.length > 0) ||
-			parsed.cancelAll === true,
+			parsed.cancelAll === true ||
+			parsed.maxAgeMinutes != null ||
+			parsed.maxFillRatio != null,
 	);
 }
 
@@ -256,15 +280,33 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 		const tokenId = params.tokenId?.trim() || parsed.tokenId;
 		const marketSlug = params.marketSlug?.trim() || parsed.marketSlug;
 		const side = params.side ?? parsed.side;
+		const maxAgeMinutesRaw = params.maxAgeMinutes ?? parsed.maxAgeMinutes;
+		const maxFillRatioRaw = params.maxFillRatio ?? parsed.maxFillRatio;
+		const maxAgeMinutes =
+			maxAgeMinutesRaw != null
+				? parsePositiveNumber(maxAgeMinutesRaw, "maxAgeMinutes")
+				: undefined;
+		let maxFillRatio: number | undefined;
+		if (maxFillRatioRaw != null) {
+			if (!Number.isFinite(maxFillRatioRaw)) {
+				throw new Error("maxFillRatio must be a finite number");
+			}
+			if (maxFillRatioRaw < 0 || maxFillRatioRaw > 1) {
+				throw new Error("maxFillRatio must be between 0 and 1");
+			}
+			maxFillRatio = maxFillRatioRaw;
+		}
 		if (
 			!cancelAll &&
 			orderIds.length === 0 &&
 			!tokenId &&
 			!marketSlug &&
-			!side
+			!side &&
+			maxAgeMinutes == null &&
+			maxFillRatio == null
 		) {
 			throw new Error(
-				"cancel intent requires one selector: cancelAll, orderId(s), tokenId, or (marketSlug/side).",
+				"cancel intent requires one selector: cancelAll, orderId(s), tokenId, (marketSlug/side), or stale filter (maxAgeMinutes/maxFillRatio).",
 			);
 		}
 		return {
@@ -274,6 +316,8 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 			side,
 			orderIds,
 			cancelAll,
+			maxAgeMinutes,
+			maxFillRatio,
 			useAiAssist: params.useAiAssist !== false,
 		};
 	}
@@ -368,6 +412,12 @@ function buildCancelSummaryLine(params: {
 	if (params.intent.orderIds.length > 0) {
 		parts.push(`orderIds=${params.intent.orderIds.length}`);
 	}
+	if (params.intent.maxAgeMinutes != null) {
+		parts.push(`maxAgeMinutes=${params.intent.maxAgeMinutes}`);
+	}
+	if (params.intent.maxFillRatio != null) {
+		parts.push(`maxFillRatio=${params.intent.maxFillRatio}`);
+	}
 	if (params.targetOrders != null) parts.push(`target=${params.targetOrders}`);
 	if (params.confirmToken) parts.push(`confirmToken=${params.confirmToken}`);
 	return parts.join(" ");
@@ -393,6 +443,8 @@ function buildCancelExecuteParams(
 		side: intent.side,
 		orderIds: intent.orderIds,
 		cancelAll: intent.cancelAll,
+		maxAgeMinutes: intent.maxAgeMinutes,
+		maxFillRatio: intent.maxFillRatio,
 		useAiAssist: intent.useAiAssist,
 		dryRun,
 	};
@@ -505,6 +557,8 @@ export function createEvmWorkflowTools() {
 					}),
 				),
 				cancelAll: Type.Optional(Type.Boolean()),
+				maxAgeMinutes: Type.Optional(Type.Number({ minimum: 0.1 })),
+				maxFillRatio: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 				useAiAssist: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),

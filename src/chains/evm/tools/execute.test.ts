@@ -409,6 +409,97 @@ describe("evm execute tools", () => {
 		});
 	});
 
+	it("filters stale orders in cancel preview by age/fill ratio", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		clobMocks.getOpenOrders.mockResolvedValue([
+			{
+				id: "order-old",
+				status: "LIVE",
+				market: "m1",
+				asset_id: "100001",
+				side: "BUY",
+				original_size: "20",
+				size_matched: "1",
+				price: "0.51",
+				outcome: "Up",
+				created_at: nowSec - 3600,
+				order_type: "GTC",
+			},
+			{
+				id: "order-fresh",
+				status: "LIVE",
+				market: "m1",
+				asset_id: "100001",
+				side: "BUY",
+				original_size: "20",
+				size_matched: "19",
+				price: "0.51",
+				outcome: "Up",
+				created_at: nowSec - 120,
+				order_type: "GTC",
+			},
+		]);
+		const tool = getTool("evm_polymarketCancelOrder");
+		const result = await tool.execute("t3-stale-preview", {
+			network: "polygon",
+			tokenId: "100001",
+			maxAgeMinutes: 30,
+			maxFillRatio: 0.5,
+			dryRun: true,
+		});
+		expect(result.content[0]?.text).toContain("targetOrders=1");
+		expect(result.details).toMatchObject({
+			dryRun: true,
+			targetOrderIds: ["order-old"],
+			filteredOrderCount: 1,
+		});
+	});
+
+	it("submits stale-filtered cancel via cancelOrders", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		clobMocks.getOpenOrders.mockResolvedValue([
+			{
+				id: "order-old",
+				status: "LIVE",
+				market: "m1",
+				asset_id: "100001",
+				side: "BUY",
+				original_size: "20",
+				size_matched: "1",
+				price: "0.51",
+				outcome: "Up",
+				created_at: nowSec - 7200,
+				order_type: "GTC",
+			},
+			{
+				id: "order-fresh",
+				status: "LIVE",
+				market: "m1",
+				asset_id: "100001",
+				side: "BUY",
+				original_size: "20",
+				size_matched: "0",
+				price: "0.51",
+				outcome: "Up",
+				created_at: nowSec - 30,
+				order_type: "GTC",
+			},
+		]);
+		const tool = getTool("evm_polymarketCancelOrder");
+		const result = await tool.execute("t3-stale-exec", {
+			network: "polygon",
+			tokenId: "100001",
+			maxAgeMinutes: 30,
+			dryRun: false,
+		});
+		expect(clobMocks.cancelOrders).toHaveBeenCalledWith(["order-old"]);
+		expect(clobMocks.cancelMarketOrders).not.toHaveBeenCalled();
+		expect(result.details).toMatchObject({
+			dryRun: false,
+			targetOrderIds: ["order-old"],
+		});
+	});
+
 	it("rejects cancel without selector", async () => {
 		const tool = getTool("evm_polymarketCancelOrder");
 		await expect(
