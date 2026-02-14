@@ -77,6 +77,14 @@ type NearPortfolioDiscoveryByRole = {
 	burrowBorrowed: string[];
 };
 
+type NearPortfolioExposureRow = {
+	tokenId: string;
+	symbol: string;
+	walletRawAmount: string | null;
+	walletUiAmount: string | null;
+	inWallet: boolean;
+};
+
 type NearRefDepositAsset = {
 	tokenId: string;
 	symbol: string;
@@ -580,6 +588,35 @@ function summarizePortfolioRoleTokens(
 	});
 	if (rows.length <= 4) return rows.join(", ");
 	return `${rows.slice(0, 4).join(", ")} (+${rows.length - 4} more)`;
+}
+
+function normalizeTokenIdList(values: string[]): string[] {
+	return dedupeStrings(
+		values.map((entry) => entry.trim().toLowerCase()).filter(Boolean),
+	);
+}
+
+function buildPortfolioExposureRows(
+	tokenIds: string[],
+	assetByTokenId: Map<string, NearPortfolioAsset>,
+): NearPortfolioExposureRow[] {
+	const normalized = normalizeTokenIdList(tokenIds);
+	return normalized.map((tokenId) => {
+		const asset = assetByTokenId.get(tokenId);
+		const symbol = asset?.symbol ?? shortAccountId(tokenId);
+		const walletRawAmount = asset?.rawAmount ?? null;
+		const walletUiAmount = asset?.uiAmount ?? null;
+		const inWallet = walletRawAmount
+			? hasPositiveRawAmount(walletRawAmount)
+			: false;
+		return {
+			tokenId,
+			symbol,
+			walletRawAmount,
+			walletUiAmount,
+			inWallet,
+		};
+	});
 }
 
 function collectBurrowTokenIdsFromSnapshot(
@@ -2207,6 +2244,30 @@ export function createNearReadTools() {
 				const walletFtAssets = ftAssets
 					.filter((asset) => hasPositiveRawAmount(asset.rawAmount))
 					.sort((left, right) => left.symbol.localeCompare(right.symbol));
+				const walletNonZeroFtAssets = walletFtAssets.map((asset) => ({
+					tokenId: asset.contractId as string,
+					symbol: asset.symbol,
+					rawAmount: asset.rawAmount,
+					uiAmount: asset.uiAmount,
+				}));
+				const defiExposure = {
+					refDeposits: buildPortfolioExposureRows(
+						discovered.discoveredByRole.refDeposits,
+						assetByTokenId,
+					),
+					burrowSupplied: buildPortfolioExposureRows(
+						discovered.discoveredByRole.burrowSupplied,
+						assetByTokenId,
+					),
+					burrowCollateral: buildPortfolioExposureRows(
+						discovered.discoveredByRole.burrowCollateral,
+						assetByTokenId,
+					),
+					burrowBorrowed: buildPortfolioExposureRows(
+						discovered.discoveredByRole.burrowBorrowed,
+						assetByTokenId,
+					),
+				};
 				lines.push("Wallet assets (>0):");
 				lines.push(`- NEAR: ${formatNearAmount(totalYoctoNear, 8)}`);
 				if (walletFtAssets.length === 0) {
@@ -2313,6 +2374,8 @@ export function createNearReadTools() {
 						discoveredFtContracts: discovered.tokenIds,
 						discoveredBySource: discovered.discoveredBySource,
 						discoveredByRole: discovered.discoveredByRole,
+						walletNonZeroFtAssets,
+						defiExposure,
 						discoveryFailures: discovered.failures,
 						includeZeroBalances: includeZero,
 						totalYoctoNear: totalYoctoNear.toString(),

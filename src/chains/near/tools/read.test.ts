@@ -365,6 +365,20 @@ describe("near_getPortfolio", () => {
 			network: "mainnet",
 			autoDiscoverDefiTokens: false,
 			ftContractsQueried: ["usdc.fakes.near", "usdt.tether-token.near"],
+			walletNonZeroFtAssets: [
+				{
+					tokenId: "usdc.fakes.near",
+					symbol: "USDC",
+					rawAmount: "1234500",
+					uiAmount: "1.2345",
+				},
+			],
+			defiExposure: {
+				refDeposits: [],
+				burrowSupplied: [],
+				burrowCollateral: [],
+				burrowBorrowed: [],
+			},
 			assets: [
 				{
 					kind: "native",
@@ -515,6 +529,31 @@ describe("near_getPortfolio", () => {
 				burrowCollateral: [],
 				burrowBorrowed: [],
 			},
+			walletNonZeroFtAssets: [
+				{
+					tokenId: "aurora",
+				},
+				{
+					tokenId: "usdc.fakes.near",
+				},
+				{
+					tokenId: "usdt.tether-token.near",
+				},
+			],
+			defiExposure: {
+				refDeposits: [
+					{
+						tokenId: "aurora",
+						inWallet: true,
+					},
+				],
+				burrowSupplied: [
+					{
+						tokenId: "usdt.tether-token.near",
+						inWallet: true,
+					},
+				],
+			},
 			ftContractsQueried: [
 				"usdc.fakes.near",
 				"aurora",
@@ -643,6 +682,20 @@ describe("near_getPortfolio", () => {
 				burrowSupplied: ["usdt.tether-token.near"],
 				burrowCollateral: [],
 				burrowBorrowed: [],
+			},
+			defiExposure: {
+				refDeposits: [
+					{
+						tokenId: "aurora",
+						inWallet: false,
+					},
+				],
+				burrowSupplied: [
+					{
+						tokenId: "usdt.tether-token.near",
+						inWallet: false,
+					},
+				],
 			},
 			assets: expect.arrayContaining([
 				expect.objectContaining({
