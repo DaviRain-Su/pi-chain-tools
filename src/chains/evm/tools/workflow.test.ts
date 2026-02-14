@@ -400,6 +400,89 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		);
 	});
 
+	it("retries requote repost with aggressive fallback when primary place fails", async () => {
+		executeMocks.placeOrderExecute
+			.mockRejectedValueOnce(new Error("primary place failed"))
+			.mockResolvedValueOnce({
+				content: [{ type: "text", text: "submitted fallback" }],
+				details: { orderId: "order-fallback" },
+			});
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-requote-fallback-analysis", {
+			runId: "wf-evm-4-requote-fallback",
+			runMode: "analysis",
+			network: "polygon",
+			stakeUsd: 25,
+			side: "up",
+			requoteStaleOrders: true,
+			requotePriceStrategy: "passive",
+			maxAgeMinutes: 30,
+		});
+		const details = analyzed.details as { confirmToken: string };
+		const executed = await tool.execute("wf4-requote-fallback-exec", {
+			runId: "wf-evm-4-requote-fallback",
+			runMode: "execute",
+			network: "polygon",
+			confirmMainnet: true,
+			confirmToken: details.confirmToken,
+		});
+		expect(executeMocks.placeOrderExecute).toHaveBeenNthCalledWith(
+			1,
+			"wf-evm-execute",
+			expect.objectContaining({
+				limitPrice: 0.49,
+			}),
+		);
+		expect(executeMocks.placeOrderExecute).toHaveBeenNthCalledWith(
+			2,
+			"wf-evm-execute-fallback",
+			expect.objectContaining({
+				limitPrice: 0.51,
+			}),
+		);
+		expect(executed.details).toMatchObject({
+			artifacts: {
+				execute: {
+					staleRequote: {
+						repost: {
+							usedFallback: true,
+							fallbackTried: true,
+						},
+						executedLimitPrice: 0.51,
+					},
+				},
+			},
+		});
+	});
+
+	it("fails requote execute directly when fallback mode is none", async () => {
+		executeMocks.placeOrderExecute.mockRejectedValueOnce(
+			new Error("primary place failed"),
+		);
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-requote-nofb-analysis", {
+			runId: "wf-evm-4-requote-nofb",
+			runMode: "analysis",
+			network: "polygon",
+			stakeUsd: 25,
+			side: "up",
+			requoteStaleOrders: true,
+			requotePriceStrategy: "passive",
+			requoteFallbackMode: "none",
+			maxAgeMinutes: 30,
+		});
+		const details = analyzed.details as { confirmToken: string };
+		await expect(
+			tool.execute("wf4-requote-nofb-exec", {
+				runId: "wf-evm-4-requote-nofb",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+				confirmToken: details.confirmToken,
+			}),
+		).rejects.toThrow("primary place failed");
+	});
+
 	it("blocks requote execute when max attempts reached", async () => {
 		const tool = getTool();
 		const analyzed = await tool.execute("wf4-requote-attempts-analysis", {

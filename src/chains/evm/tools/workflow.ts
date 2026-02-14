@@ -17,6 +17,7 @@ import { createEvmExecuteTools } from "./execute.js";
 
 type WorkflowRunMode = "analysis" | "simulate" | "execute";
 type RequotePriceStrategy = "aggressive" | "passive" | "follow_mid";
+type RequoteFallbackMode = "none" | "retry_aggressive";
 
 type WorkflowTradeIntent = {
 	type: "evm.polymarket.btc5m.trade";
@@ -30,6 +31,7 @@ type WorkflowTradeIntent = {
 	minConfidence?: number;
 	requoteStaleOrders: boolean;
 	requotePriceStrategy?: RequotePriceStrategy;
+	requoteFallbackMode?: RequoteFallbackMode;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
 	requoteMinIntervalSeconds?: number;
@@ -71,6 +73,7 @@ type WorkflowParams = {
 	cancelAll?: boolean;
 	requoteStaleOrders?: boolean;
 	requotePriceStrategy?: RequotePriceStrategy;
+	requoteFallbackMode?: RequoteFallbackMode;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
 	requoteMinIntervalSeconds?: number;
@@ -91,6 +94,7 @@ type ParsedIntentHints = {
 	cancelAll?: boolean;
 	requoteStaleOrders?: boolean;
 	requotePriceStrategy?: RequotePriceStrategy;
+	requoteFallbackMode?: RequoteFallbackMode;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
 	requoteMinIntervalSeconds?: number;
@@ -211,6 +215,32 @@ function normalizeRequotePriceStrategy(
 	);
 }
 
+function parseRequoteFallbackModeHint(
+	text?: string,
+): RequoteFallbackMode | undefined {
+	if (!text?.trim()) return undefined;
+	if (/(不重试|no\s+fallback|no\s+retry|不要兜底)/i.test(text)) return "none";
+	if (
+		/(失败后.*重试|fallback|兜底|保底|重试激进|retry\s+aggressive)/i.test(text)
+	) {
+		return "retry_aggressive";
+	}
+	return undefined;
+}
+
+function normalizeRequoteFallbackMode(
+	value?: string,
+): RequoteFallbackMode | undefined {
+	if (!value?.trim()) return undefined;
+	const normalized = value.trim().toLowerCase().replace(/-/g, "_");
+	if (normalized === "none" || normalized === "retry_aggressive") {
+		return normalized;
+	}
+	throw new Error(
+		"requoteFallbackMode must be one of: none | retry_aggressive",
+	);
+}
+
 function resolveRequoteLimitPrice(params: {
 	orderbook: {
 		bestAsk?: { price?: number } | null;
@@ -293,6 +323,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
 	const side = parseSideHint(text);
 	const requotePriceStrategy = parseRequotePriceStrategyHint(text);
+	const requoteFallbackMode = parseRequoteFallbackModeHint(text);
 	const stakeMatch =
 		text.match(
 			/(?:stake|size|amount|仓位|金额|下注|下单)\s*[:= ]\s*(\d+(?:\.\d+)?)/i,
@@ -387,6 +418,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		cancelAll,
 		requoteStaleOrders: hasRequotePhrase ? true : undefined,
 		requotePriceStrategy,
+		requoteFallbackMode,
 		maxAgeMinutes,
 		maxFillRatio,
 		requoteMinIntervalSeconds,
@@ -412,6 +444,7 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			params.cancelAll === true ||
 			params.requoteStaleOrders === true ||
 			params.requotePriceStrategy != null ||
+			params.requoteFallbackMode != null ||
 			params.maxAgeMinutes != null ||
 			params.maxFillRatio != null ||
 			params.requoteMinIntervalSeconds != null ||
@@ -426,6 +459,7 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			parsed.cancelAll === true ||
 			parsed.requoteStaleOrders === true ||
 			parsed.requotePriceStrategy != null ||
+			parsed.requoteFallbackMode != null ||
 			parsed.maxAgeMinutes != null ||
 			parsed.maxFillRatio != null ||
 			parsed.requoteMinIntervalSeconds != null ||
@@ -513,6 +547,8 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 	}
 	const requotePriceStrategyRaw =
 		params.requotePriceStrategy ?? parsed.requotePriceStrategy;
+	const requoteFallbackModeRaw =
+		params.requoteFallbackMode ?? parsed.requoteFallbackMode;
 	const maxAgeMinutesRaw = params.maxAgeMinutes ?? parsed.maxAgeMinutes;
 	const maxFillRatioRaw = params.maxFillRatio ?? parsed.maxFillRatio;
 	const requoteMinIntervalSecondsRaw =
@@ -561,6 +597,9 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 	const requotePriceStrategy = requoteStaleOrders
 		? normalizeRequotePriceStrategy(requotePriceStrategyRaw ?? "aggressive")
 		: normalizeRequotePriceStrategy(requotePriceStrategyRaw);
+	const requoteFallbackMode = requoteStaleOrders
+		? normalizeRequoteFallbackMode(requoteFallbackModeRaw ?? "retry_aggressive")
+		: normalizeRequoteFallbackMode(requoteFallbackModeRaw);
 	if (requoteStaleOrders && maxAgeMinutes == null && maxFillRatio == null) {
 		throw new Error(
 			"requoteStaleOrders requires at least one stale filter: maxAgeMinutes or maxFillRatio.",
@@ -593,6 +632,7 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 				: undefined,
 		requoteStaleOrders,
 		requotePriceStrategy,
+		requoteFallbackMode,
 		maxAgeMinutes,
 		maxFillRatio,
 		requoteMinIntervalSeconds,
@@ -643,6 +683,9 @@ function buildTradeSummaryLine(params: {
 	if (params.intent.requoteStaleOrders) parts.push("requote=stale");
 	if (params.intent.requotePriceStrategy) {
 		parts.push(`requotePriceStrategy=${params.intent.requotePriceStrategy}`);
+	}
+	if (params.intent.requoteFallbackMode) {
+		parts.push(`requoteFallbackMode=${params.intent.requoteFallbackMode}`);
 	}
 	if (params.requoteLimitPrice != null) {
 		parts.push(`requoteLimit=${params.requoteLimitPrice.toFixed(4)}`);
@@ -899,6 +942,9 @@ export function createEvmWorkflowTools() {
 						Type.Literal("follow_mid"),
 					]),
 				),
+				requoteFallbackMode: Type.Optional(
+					Type.Union([Type.Literal("none"), Type.Literal("retry_aggressive")]),
+				),
 				maxAgeMinutes: Type.Optional(Type.Number({ minimum: 0.1 })),
 				maxFillRatio: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 				requoteMinIntervalSeconds: Type.Optional(Type.Number({ minimum: 0.1 })),
@@ -1046,6 +1092,7 @@ export function createEvmWorkflowTools() {
 														: requoteRuntime?.blockedByCooldown
 															? "throttled"
 															: "planned",
+													fallbackMode: intent.requoteFallbackMode ?? null,
 													maxAgeMinutes: intent.maxAgeMinutes ?? null,
 													maxFillRatio: intent.maxFillRatio ?? null,
 													pricing: requotePricing,
@@ -1158,6 +1205,7 @@ export function createEvmWorkflowTools() {
 										staleRequote: {
 											enabled: intent.requoteStaleOrders,
 											status: staleRequoteStatus,
+											fallbackMode: intent.requoteFallbackMode ?? null,
 											targetOrders: staleTargets,
 											pricing: requotePricing,
 											runtime: requoteRuntime,
@@ -1232,12 +1280,12 @@ export function createEvmWorkflowTools() {
 					const executeTool = resolveExecuteTool(
 						`${EVM_TOOL_PREFIX}polymarketPlaceOrder`,
 					);
-					const executeResult = await executeTool.execute("wf-evm-execute", {
+					const buildPlaceOrderParams = (limitPrice: number | null) => ({
 						network,
 						marketSlug: trade.market.slug,
 						side: trade.side,
 						stakeUsd: intent.stakeUsd,
-						limitPrice: requotePricing?.limitPrice ?? undefined,
+						limitPrice: limitPrice ?? undefined,
 						maxEntryPrice: intent.maxEntryPrice,
 						maxSpreadBps: intent.maxSpreadBps,
 						minDepthUsd: intent.minDepthUsd,
@@ -1246,6 +1294,71 @@ export function createEvmWorkflowTools() {
 						dryRun: false,
 						useAiAssist: intent.useAiAssist,
 					});
+					let executedLimitPrice = requotePricing?.limitPrice ?? null;
+					const repost = {
+						mode: intent.requoteFallbackMode ?? null,
+						primaryError: null as string | null,
+						fallbackTried: false,
+						usedFallback: false,
+						fallbackPricing: null as ReturnType<
+							typeof resolveRequoteLimitPrice
+						> | null,
+						fallbackError: null as string | null,
+					};
+					let executeResult: {
+						content: { type: string; text: string }[];
+						details?: unknown;
+					} | null = null;
+					try {
+						executeResult = await executeTool.execute(
+							"wf-evm-execute",
+							buildPlaceOrderParams(executedLimitPrice),
+						);
+					} catch (primaryError) {
+						if (
+							intent.requoteStaleOrders &&
+							intent.requoteFallbackMode === "retry_aggressive"
+						) {
+							repost.primaryError = stringifyUnknown(primaryError);
+							const fallbackPricing = resolveRequoteLimitPrice({
+								orderbook,
+								strategy: "aggressive",
+							});
+							repost.fallbackPricing = fallbackPricing;
+							const fallbackLimit = fallbackPricing.limitPrice;
+							const canRetryWithFallback =
+								fallbackLimit != null &&
+								(executedLimitPrice == null ||
+									Math.abs(fallbackLimit - executedLimitPrice) > 1e-9);
+							if (canRetryWithFallback) {
+								repost.fallbackTried = true;
+								try {
+									executeResult = await executeTool.execute(
+										"wf-evm-execute-fallback",
+										buildPlaceOrderParams(fallbackLimit),
+									);
+									repost.usedFallback = true;
+									executedLimitPrice = fallbackLimit;
+								} catch (fallbackError) {
+									repost.fallbackError = stringifyUnknown(fallbackError);
+									throw new Error(
+										`Repost failed after stale-cancel. primary=${repost.primaryError} | fallback=${repost.fallbackError}`,
+									);
+								}
+							} else {
+								throw new Error(
+									`Repost failed after stale-cancel. primary=${repost.primaryError}`,
+								);
+							}
+						} else {
+							throw primaryError;
+						}
+					}
+					if (!executeResult) {
+						throw new Error(
+							"Unexpected empty executeResult after repost flow.",
+						);
+					}
 					let nextRequoteRuntime: ReturnType<
 						typeof readTradeRequoteRuntime
 					> | null = requoteRuntime;
@@ -1295,7 +1408,7 @@ export function createEvmWorkflowTools() {
 						side: trade.side,
 						entryPrice,
 						shares: estimatedShares,
-						requoteLimitPrice: requotePricing?.limitPrice ?? null,
+						requoteLimitPrice: executedLimitPrice,
 						staleTargets: staleCancelTargetOrders,
 					});
 					rememberSession({ runId, network, intent });
@@ -1316,8 +1429,11 @@ export function createEvmWorkflowTools() {
 									status: "submitted",
 									staleRequote: {
 										enabled: intent.requoteStaleOrders,
+										fallbackMode: intent.requoteFallbackMode ?? null,
 										targetOrders: staleCancelTargetOrders,
 										pricing: requotePricing,
+										executedLimitPrice,
+										repost,
 										runtime: nextRequoteRuntime,
 										result: staleCancelResult,
 									},
