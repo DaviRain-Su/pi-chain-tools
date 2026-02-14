@@ -191,6 +191,29 @@ type NearIntentsStatusResponse = {
 	};
 };
 
+type NearIntentsAnyInputWithdrawalsResponse = {
+	asset?: string;
+	recipient?: string;
+	affiliateRecipient?: string;
+	withdrawals?: unknown;
+	page?: number;
+	limit?: number;
+	total?: number;
+};
+
+type NearIntentsAnyInputWithdrawal = {
+	status: string | null;
+	amountOut: string | null;
+	amountOutFormatted: string | null;
+	amountOutUsd: string | null;
+	withdrawFee: string | null;
+	withdrawFeeFormatted: string | null;
+	withdrawFeeUsd: string | null;
+	timestamp: string | null;
+	hash: string | null;
+	raw: Record<string, unknown>;
+};
+
 type NearIntentsBadRequest = {
 	message?: string;
 	statusCode?: number;
@@ -438,6 +461,32 @@ function parseIntentsListLimit(value: number | undefined): number {
 	return Math.min(200, parsePositiveInt(value, "limit"));
 }
 
+function parseIntentsWithdrawalsLimit(value: number | undefined): number {
+	if (value == null) return 50;
+	return Math.min(50, parsePositiveInt(value, "limit"));
+}
+
+function parseOptionalPositiveInt(
+	value: number | undefined,
+	fieldName: string,
+): number | undefined {
+	if (value == null) return undefined;
+	return parsePositiveInt(value, fieldName);
+}
+
+function parseOptionalIsoDatetime(
+	value: string | undefined,
+	fieldName: string,
+): string | undefined {
+	const normalized = value?.trim();
+	if (!normalized) return undefined;
+	const parsed = new Date(normalized);
+	if (Number.isNaN(parsed.getTime())) {
+		throw new Error(`${fieldName} must be a valid ISO datetime string`);
+	}
+	return parsed.toISOString();
+}
+
 function parseIntentsSlippageTolerance(value: number | undefined): number {
 	if (value == null) return 100;
 	if (!Number.isFinite(value) || value < 0 || value > 5_000) {
@@ -518,6 +567,71 @@ function resolveNearIntentsErrorMessage(
 		}
 	}
 	return fallback;
+}
+
+function pickOptionalText(
+	value: Record<string, unknown>,
+	key: string,
+): string | null {
+	const candidate = value[key];
+	return typeof candidate === "string" && candidate.trim() ? candidate : null;
+}
+
+function normalizeNearIntentsAnyInputWithdrawals(value: unknown): {
+	asset: string | null;
+	recipient: string | null;
+	affiliateRecipient: string | null;
+	withdrawals: NearIntentsAnyInputWithdrawal[];
+	page: number | null;
+	limit: number | null;
+	total: number | null;
+} {
+	const root =
+		value && typeof value === "object"
+			? (value as Record<string, unknown>)
+			: {};
+	const rawWithdrawalsSource = Array.isArray(root.withdrawals)
+		? root.withdrawals
+		: root.withdrawals && typeof root.withdrawals === "object"
+			? [root.withdrawals]
+			: Array.isArray(value)
+				? value
+				: [];
+	const withdrawals: NearIntentsAnyInputWithdrawal[] = rawWithdrawalsSource
+		.filter(
+			(entry): entry is Record<string, unknown> =>
+				Boolean(entry) && typeof entry === "object",
+		)
+		.map((entry) => ({
+			status: pickOptionalText(entry, "status"),
+			amountOut: pickOptionalText(entry, "amountOut"),
+			amountOutFormatted: pickOptionalText(entry, "amountOutFormatted"),
+			amountOutUsd: pickOptionalText(entry, "amountOutUsd"),
+			withdrawFee: pickOptionalText(entry, "withdrawFee"),
+			withdrawFeeFormatted: pickOptionalText(entry, "withdrawFeeFormatted"),
+			withdrawFeeUsd: pickOptionalText(entry, "withdrawFeeUsd"),
+			timestamp: pickOptionalText(entry, "timestamp"),
+			hash: pickOptionalText(entry, "hash"),
+			raw: entry,
+		}));
+	return {
+		asset: pickOptionalText(root, "asset"),
+		recipient: pickOptionalText(root, "recipient"),
+		affiliateRecipient: pickOptionalText(root, "affiliateRecipient"),
+		withdrawals,
+		page:
+			typeof root.page === "number" && Number.isFinite(root.page)
+				? Math.floor(root.page)
+				: null,
+		limit:
+			typeof root.limit === "number" && Number.isFinite(root.limit)
+				? Math.floor(root.limit)
+				: null,
+		total:
+			typeof root.total === "number" && Number.isFinite(root.total)
+				? Math.floor(root.total)
+				: null,
+	};
 }
 
 async function fetchNearIntentsJson<T>(params: {
@@ -2026,6 +2140,122 @@ export function createNearReadTools() {
 						depositAddress: params.depositAddress,
 						depositMemo: params.depositMemo ?? null,
 						status: payload,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}getIntentsAnyInputWithdrawals`,
+			label: "NEAR Intents ANY_INPUT Withdrawals",
+			description:
+				"Get ANY_INPUT withdrawals from NEAR Intents 1Click (/v0/any-input/withdrawals).",
+			parameters: Type.Object({
+				depositAddress: Type.String({
+					description: "ANY_INPUT deposit address.",
+				}),
+				depositMemo: Type.Optional(
+					Type.String({
+						description:
+							"Optional memo returned by quote when deposit mode is MEMO.",
+					}),
+				),
+				timestampFrom: Type.Optional(
+					Type.String({
+						description:
+							"Optional lower-bound timestamp filter (ISO datetime string).",
+					}),
+				),
+				page: Type.Optional(
+					Type.Number({
+						description: "Page number (default 1).",
+					}),
+				),
+				limit: Type.Optional(
+					Type.Number({
+						description: "Records per page (max 50, default 50).",
+					}),
+				),
+				sortOrder: Type.Optional(
+					Type.Union([Type.Literal("asc"), Type.Literal("desc")]),
+				),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				jwt: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const baseUrl = resolveNearIntentsApiBaseUrl(params.apiBaseUrl);
+				const authHeaders = resolveNearIntentsHeaders({
+					apiKey: params.apiKey,
+					jwt: params.jwt,
+				});
+				const page = parseOptionalPositiveInt(params.page, "page");
+				const limit = parseIntentsWithdrawalsLimit(params.limit);
+				const timestampFrom = parseOptionalIsoDatetime(
+					params.timestampFrom,
+					"timestampFrom",
+				);
+				const response =
+					await fetchNearIntentsJson<NearIntentsAnyInputWithdrawalsResponse>({
+						baseUrl,
+						path: "/v0/any-input/withdrawals",
+						method: "GET",
+						query: {
+							depositAddress: params.depositAddress,
+							depositMemo: params.depositMemo,
+							timestampFrom,
+							page: page != null ? String(page) : undefined,
+							limit: String(limit),
+							sortOrder: params.sortOrder,
+						},
+						headers: authHeaders,
+					});
+				const normalized = normalizeNearIntentsAnyInputWithdrawals(
+					response.payload,
+				);
+				const lines = [
+					`ANY_INPUT withdrawals: ${normalized.withdrawals.length} record(s)`,
+					`Deposit: ${params.depositAddress}${params.depositMemo ? ` (memo ${params.depositMemo})` : ""}`,
+				];
+				if (normalized.asset) lines.push(`Asset: ${normalized.asset}`);
+				if (normalized.recipient) {
+					lines.push(`Recipient: ${normalized.recipient}`);
+				}
+				if (normalized.affiliateRecipient) {
+					lines.push(`Affiliate: ${normalized.affiliateRecipient}`);
+				}
+				const shown = normalized.withdrawals.slice(0, 10);
+				for (const [index, withdrawal] of shown.entries()) {
+					lines.push(
+						`${index + 1}. ${withdrawal.status ?? "UNKNOWN"} amount=${withdrawal.amountOutFormatted ?? withdrawal.amountOut ?? "unknown"} fee=${withdrawal.withdrawFeeFormatted ?? withdrawal.withdrawFee ?? "unknown"} time=${withdrawal.timestamp ?? "unknown"} hash=${withdrawal.hash ?? "unknown"}`,
+					);
+				}
+				if (normalized.withdrawals.length > shown.length) {
+					lines.push(
+						`... ${normalized.withdrawals.length - shown.length} more record(s) not shown`,
+					);
+				}
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						apiBaseUrl: baseUrl,
+						endpoint: response.url,
+						httpStatus: response.status,
+						depositAddress: params.depositAddress,
+						depositMemo: params.depositMemo ?? null,
+						filters: {
+							timestampFrom: timestampFrom ?? null,
+							page: page ?? 1,
+							limit,
+							sortOrder: params.sortOrder ?? null,
+						},
+						asset: normalized.asset,
+						recipient: normalized.recipient,
+						affiliateRecipient: normalized.affiliateRecipient,
+						page: normalized.page,
+						limit: normalized.limit,
+						total: normalized.total,
+						withdrawals: normalized.withdrawals,
+						raw: response.payload,
 					},
 				};
 			},

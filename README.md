@@ -59,6 +59,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `near_getIntentsTokens` (NEAR Intents 1Click `/v0/tokens`, filterable supported-asset list)
 - `read`: `near_getIntentsQuote` (NEAR Intents 1Click `/v0/quote`, defaults to `dry=true` for safe preview)
 - `read`: `near_getIntentsStatus` (NEAR Intents 1Click `/v0/status` by `depositAddress`/`depositMemo`)
+- `read`: `near_getIntentsAnyInputWithdrawals` (NEAR Intents 1Click `/v0/any-input/withdrawals` for ANY_INPUT withdrawal records)
 - `compose`: `near_buildTransferNearTransaction` (unsigned native transfer payload, local signing)
 - `compose`: `near_buildTransferFtTransaction` (unsigned NEP-141 `ft_transfer` payload, local signing)
 - `compose`: `near_buildIntentsSwapDepositTransaction` (unsigned NEAR Intents deposit tx from `/v0/quote`, local signing)
@@ -130,6 +131,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `帮我用 NEAR Intents 预估把 wNEAR 换成 USDC，amount=10000000000000000000000（dry）`
 - Intents Status (read):
   - `帮我查一下 NEAR Intents 这个 depositAddress 的状态：0x...`
+- Intents ANY_INPUT Withdrawals (read):
+  - `帮我查一下 NEAR Intents 这个 depositAddress 的 ANY_INPUT 提现记录：0x...`
 - Intents Swap (workflow simulate):
   - `intentText: "通过 intents 把 NEAR 换成 USDC，amountRaw 10000000000000000000000，先模拟"`
 - Intents Swap (workflow execute submit):
@@ -369,6 +372,8 @@ Natural language confirmation example:
   - `继续执行刚才这笔 intents 兑换，txHash 0x...，确认主网执行`
 - Intents workflow execute (signed tx auto-broadcast):
   - `继续执行刚才这笔 intents 兑换，signedTxBase64 <BASE64_SIGNED_TX>，确认主网执行`
+- Intents ANY_INPUT withdrawals:
+  - `帮我查一下 NEAR Intents ANY_INPUT 提现记录，depositAddress 0x...`
 - Ref deposits:
   - `帮我查一下 NEAR 主网 Ref 存款（deposits）`
 - Ref LP positions:

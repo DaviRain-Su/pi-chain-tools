@@ -831,3 +831,102 @@ describe("near_getIntentsStatus", () => {
 		).rejects.toThrow("Deposit address test not found");
 	});
 });
+
+describe("near_getIntentsAnyInputWithdrawals", () => {
+	it("returns ANY_INPUT withdrawal list with readable summary", async () => {
+		mockFetchJsonOnce(200, {
+			asset: "nep141:usdc-near",
+			recipient: "alice.near",
+			affiliateRecipient: "partner.near",
+			withdrawals: [
+				{
+					status: "WITHDRAWN",
+					amountOut: "43210",
+					amountOutFormatted: "0.043210",
+					amountOutUsd: "0.0432",
+					withdrawFee: "10",
+					withdrawFeeFormatted: "0.000010",
+					withdrawFeeUsd: "0.00001",
+					timestamp: "2026-02-14T12:00:00.000Z",
+					hash: "0xhash1",
+				},
+			],
+			page: 1,
+			limit: 50,
+			total: 1,
+		});
+		const tool = getTool("near_getIntentsAnyInputWithdrawals");
+		const result = await tool.execute("near-read-intents-withdrawals-1", {
+			depositAddress: "0xdeposit",
+			depositMemo: "memo-1",
+			timestampFrom: "2026-02-14T00:00:00.000Z",
+			page: 1,
+			limit: 100,
+			sortOrder: "desc",
+		});
+
+		expect(restMocks.fetch).toHaveBeenCalledWith(
+			"https://1click.chaindefuser.com/v0/any-input/withdrawals?depositAddress=0xdeposit&depositMemo=memo-1&timestampFrom=2026-02-14T00%3A00%3A00.000Z&page=1&limit=50&sortOrder=desc",
+			expect.objectContaining({
+				method: "GET",
+			}),
+		);
+		expect(result.content[0]?.text).toContain(
+			"ANY_INPUT withdrawals: 1 record(s)",
+		);
+		expect(result.content[0]?.text).toContain("Asset: nep141:usdc-near");
+		expect(result.content[0]?.text).toContain("WITHDRAWN");
+		expect(result.details).toMatchObject({
+			depositAddress: "0xdeposit",
+			depositMemo: "memo-1",
+			filters: {
+				page: 1,
+				limit: 50,
+				sortOrder: "desc",
+			},
+			withdrawals: [
+				{
+					status: "WITHDRAWN",
+					hash: "0xhash1",
+				},
+			],
+			total: 1,
+		});
+	});
+
+	it("supports withdrawals payload as object and surfaces API errors", async () => {
+		mockFetchJsonOnce(200, {
+			asset: "nep141:usdc-near",
+			withdrawals: {
+				status: "PENDING_WITHDRAWAL",
+				amountOut: "100",
+				hash: "0xsingle",
+				timestamp: "2026-02-14T13:00:00.000Z",
+			},
+		});
+		const tool = getTool("near_getIntentsAnyInputWithdrawals");
+		const singleResult = await tool.execute("near-read-intents-withdrawals-2", {
+			depositAddress: "0xdeposit2",
+		});
+		expect(singleResult.content[0]?.text).toContain(
+			"ANY_INPUT withdrawals: 1 record(s)",
+		);
+		expect(singleResult.details).toMatchObject({
+			withdrawals: [
+				{
+					status: "PENDING_WITHDRAWAL",
+					hash: "0xsingle",
+				},
+			],
+		});
+
+		mockFetchJsonOnce(404, {
+			message: "ANY_INPUT withdrawals not found",
+		});
+		await expect(
+			tool.execute("near-read-intents-withdrawals-3", {
+				depositAddress: "0xmissing",
+			}),
+		).rejects.toThrow("ANY_INPUT withdrawals not found");
+	});
+});
