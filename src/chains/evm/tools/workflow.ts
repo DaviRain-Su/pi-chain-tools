@@ -30,6 +30,8 @@ type WorkflowTradeIntent = {
 	requoteStaleOrders: boolean;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
+	requoteMinIntervalSeconds?: number;
+	requoteMaxAttempts?: number;
 	useAiAssist: boolean;
 };
 
@@ -68,6 +70,8 @@ type WorkflowParams = {
 	requoteStaleOrders?: boolean;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
+	requoteMinIntervalSeconds?: number;
+	requoteMaxAttempts?: number;
 	useAiAssist?: boolean;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
@@ -85,6 +89,8 @@ type ParsedIntentHints = {
 	requoteStaleOrders?: boolean;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
+	requoteMinIntervalSeconds?: number;
+	requoteMaxAttempts?: number;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
 };
@@ -105,6 +111,16 @@ type ExecuteTool = {
 
 const WORKFLOW_SESSION_BY_RUN_ID = new Map<string, WorkflowSessionRecord>();
 let latestWorkflowSession: WorkflowSessionRecord | null = null;
+
+type WorkflowTradeRequoteRuntimeState = {
+	lastExecuteAtMs: number;
+	attempts: number;
+};
+
+const WORKFLOW_TRADE_REQUOTE_STATE_BY_RUN_ID = new Map<
+	string,
+	WorkflowTradeRequoteRuntimeState
+>();
 
 function parseRunMode(value?: string): WorkflowRunMode {
 	if (value === "simulate" || value === "execute") return value;
@@ -231,6 +247,22 @@ function parseIntentText(text?: string): ParsedIntentHints {
 			maxFillRatio = isPercent || parsed > 1 ? parsed / 100 : parsed;
 		}
 	}
+	const requoteMinIntervalSecondsRaw = hasRequotePhrase
+		? text.match(
+				/(?:每|间隔|冷却|cooldown|interval)\s*(\d+(?:\.\d+)?)\s*(?:秒|secs?|seconds?)/i,
+			)?.[1]
+		: undefined;
+	const requoteMaxAttemptsRaw = hasRequotePhrase
+		? text.match(
+				/(?:最多|至多|max)\s*(\d+)\s*(?:次|times?)\s*(?:重挂|re-?quote|repost|尝试)?/i,
+			)?.[1]
+		: undefined;
+	const requoteMinIntervalSeconds = requoteMinIntervalSecondsRaw
+		? Number.parseFloat(requoteMinIntervalSecondsRaw)
+		: undefined;
+	const requoteMaxAttempts = requoteMaxAttemptsRaw
+		? Number.parseInt(requoteMaxAttemptsRaw, 10)
+		: undefined;
 
 	return {
 		intentType: isCancelIntent ? "evm.polymarket.btc5m.cancel" : undefined,
@@ -244,6 +276,8 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		requoteStaleOrders: hasRequotePhrase ? true : undefined,
 		maxAgeMinutes,
 		maxFillRatio,
+		requoteMinIntervalSeconds,
+		requoteMaxAttempts,
 		confirmMainnet: hasConfirmMainnetPhrase(text) ? true : undefined,
 		confirmToken: extractConfirmTokenFromText(text),
 	};
@@ -266,6 +300,8 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			params.requoteStaleOrders === true ||
 			params.maxAgeMinutes != null ||
 			params.maxFillRatio != null ||
+			params.requoteMinIntervalSeconds != null ||
+			params.requoteMaxAttempts != null ||
 			parsed.intentType ||
 			parsed.marketSlug ||
 			parsed.tokenId ||
@@ -276,7 +312,9 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			parsed.cancelAll === true ||
 			parsed.requoteStaleOrders === true ||
 			parsed.maxAgeMinutes != null ||
-			parsed.maxFillRatio != null,
+			parsed.maxFillRatio != null ||
+			parsed.requoteMinIntervalSeconds != null ||
+			parsed.requoteMaxAttempts != null,
 	);
 }
 
@@ -360,6 +398,10 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 	}
 	const maxAgeMinutesRaw = params.maxAgeMinutes ?? parsed.maxAgeMinutes;
 	const maxFillRatioRaw = params.maxFillRatio ?? parsed.maxFillRatio;
+	const requoteMinIntervalSecondsRaw =
+		params.requoteMinIntervalSeconds ?? parsed.requoteMinIntervalSeconds;
+	const requoteMaxAttemptsRaw =
+		params.requoteMaxAttempts ?? parsed.requoteMaxAttempts;
 	const maxAgeMinutes =
 		maxAgeMinutesRaw != null
 			? parsePositiveNumber(maxAgeMinutesRaw, "maxAgeMinutes")
@@ -374,11 +416,31 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 		}
 		maxFillRatio = maxFillRatioRaw;
 	}
+	const requoteMinIntervalSeconds =
+		requoteMinIntervalSecondsRaw != null
+			? parsePositiveNumber(
+					requoteMinIntervalSecondsRaw,
+					"requoteMinIntervalSeconds",
+				)
+			: undefined;
+	let requoteMaxAttempts: number | undefined;
+	if (requoteMaxAttemptsRaw != null) {
+		if (
+			!Number.isFinite(requoteMaxAttemptsRaw) ||
+			!Number.isInteger(requoteMaxAttemptsRaw) ||
+			requoteMaxAttemptsRaw <= 0
+		) {
+			throw new Error("requoteMaxAttempts must be a positive integer");
+		}
+		requoteMaxAttempts = requoteMaxAttemptsRaw;
+	}
 	const requoteStaleOrders =
 		params.requoteStaleOrders === true ||
 		parsed.requoteStaleOrders === true ||
 		maxAgeMinutes != null ||
-		maxFillRatio != null;
+		maxFillRatio != null ||
+		requoteMinIntervalSeconds != null ||
+		requoteMaxAttempts != null;
 	if (requoteStaleOrders && maxAgeMinutes == null && maxFillRatio == null) {
 		throw new Error(
 			"requoteStaleOrders requires at least one stale filter: maxAgeMinutes or maxFillRatio.",
@@ -412,6 +474,8 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 		requoteStaleOrders,
 		maxAgeMinutes,
 		maxFillRatio,
+		requoteMinIntervalSeconds,
+		requoteMaxAttempts,
 		useAiAssist: params.useAiAssist !== false,
 	};
 }
@@ -460,6 +524,14 @@ function buildTradeSummaryLine(params: {
 	}
 	if (params.intent.maxFillRatio != null) {
 		parts.push(`maxFillRatio=${params.intent.maxFillRatio}`);
+	}
+	if (params.intent.requoteMinIntervalSeconds != null) {
+		parts.push(
+			`requoteMinIntervalSeconds=${params.intent.requoteMinIntervalSeconds}`,
+		);
+	}
+	if (params.intent.requoteMaxAttempts != null) {
+		parts.push(`requoteMaxAttempts=${params.intent.requoteMaxAttempts}`);
 	}
 	if (params.staleTargets != null) {
 		parts.push(`staleTargets=${params.staleTargets}`);
@@ -543,6 +615,45 @@ function classifyCancelPrecheckStatus(
 	return /private key|POLYMARKET_PRIVATE_KEY|funder/i.test(message)
 		? "needs_signer"
 		: "precheck_failed";
+}
+
+function readTradeRequoteRuntime(params: {
+	runId: string;
+	intent: WorkflowTradeIntent;
+	nowMs?: number;
+}) {
+	const nowMs = params.nowMs ?? Date.now();
+	const state =
+		WORKFLOW_TRADE_REQUOTE_STATE_BY_RUN_ID.get(params.runId) ?? null;
+	const attempts = state?.attempts ?? 0;
+	const maxAttempts = params.intent.requoteMaxAttempts ?? null;
+	const minIntervalSeconds = params.intent.requoteMinIntervalSeconds ?? null;
+	const minIntervalMs =
+		minIntervalSeconds == null ? 0 : Math.floor(minIntervalSeconds * 1000);
+	let remainingCooldownSeconds = 0;
+	if (state && minIntervalMs > 0) {
+		const elapsed = nowMs - state.lastExecuteAtMs;
+		if (elapsed < minIntervalMs) {
+			remainingCooldownSeconds = Math.ceil((minIntervalMs - elapsed) / 1000);
+		}
+	}
+	const blockedByAttempts = maxAttempts != null && attempts >= maxAttempts;
+	const blockedByCooldown = remainingCooldownSeconds > 0;
+	return {
+		attemptsUsed: attempts,
+		maxAttempts,
+		minIntervalSeconds,
+		remainingCooldownSeconds,
+		blockedByAttempts,
+		blockedByCooldown,
+	};
+}
+
+function writeTradeRequoteRuntime(
+	runId: string,
+	nextState: WorkflowTradeRequoteRuntimeState,
+): void {
+	WORKFLOW_TRADE_REQUOTE_STATE_BY_RUN_ID.set(runId, nextState);
 }
 
 function extractTargetOrderCount(details: unknown): number | null {
@@ -655,6 +766,10 @@ export function createEvmWorkflowTools() {
 				requoteStaleOrders: Type.Optional(Type.Boolean()),
 				maxAgeMinutes: Type.Optional(Type.Number({ minimum: 0.1 })),
 				maxFillRatio: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+				requoteMinIntervalSeconds: Type.Optional(Type.Number({ minimum: 0.1 })),
+				requoteMaxAttempts: Type.Optional(
+					Type.Number({ minimum: 1, maximum: 20 }),
+				),
 				useAiAssist: Type.Optional(Type.Boolean()),
 				confirmMainnet: Type.Optional(Type.Boolean()),
 				confirmToken: Type.Optional(Type.String()),
@@ -742,6 +857,12 @@ export function createEvmWorkflowTools() {
 					const simulateStatus = analysisStatus;
 
 					if (runMode === "analysis") {
+						const requoteRuntime = intent.requoteStaleOrders
+							? readTradeRequoteRuntime({
+									runId,
+									intent,
+								})
+							: null;
 						const summaryLine = buildTradeSummaryLine({
 							intent,
 							phase: "analysis",
@@ -775,9 +896,14 @@ export function createEvmWorkflowTools() {
 										staleRequote: intent.requoteStaleOrders
 											? {
 													enabled: true,
-													status: "planned",
+													status: requoteRuntime?.blockedByAttempts
+														? "max_attempts_reached"
+														: requoteRuntime?.blockedByCooldown
+															? "throttled"
+															: "planned",
 													maxAgeMinutes: intent.maxAgeMinutes ?? null,
 													maxFillRatio: intent.maxFillRatio ?? null,
+													runtime: requoteRuntime,
 												}
 											: {
 													enabled: false,
@@ -803,9 +929,17 @@ export function createEvmWorkflowTools() {
 							| "disabled"
 							| "ready"
 							| "needs_signer"
-							| "precheck_failed" = intent.requoteStaleOrders
+							| "precheck_failed"
+							| "throttled"
+							| "max_attempts_reached" = intent.requoteStaleOrders
 							? "ready"
 							: "disabled";
+						const requoteRuntime = intent.requoteStaleOrders
+							? readTradeRequoteRuntime({
+									runId,
+									intent,
+								})
+							: null;
 						if (intent.requoteStaleOrders) {
 							const cancelTool = resolveExecuteTool(
 								`${EVM_TOOL_PREFIX}polymarketCancelOrder`,
@@ -825,6 +959,18 @@ export function createEvmWorkflowTools() {
 								const message = stringifyUnknown(error);
 								staleRequoteStatus = classifyCancelPrecheckStatus(message);
 								staleRequotePreview = { error: message };
+							}
+							if (
+								staleRequoteStatus === "ready" &&
+								requoteRuntime?.blockedByAttempts
+							) {
+								staleRequoteStatus = "max_attempts_reached";
+							}
+							if (
+								staleRequoteStatus === "ready" &&
+								requoteRuntime?.blockedByCooldown
+							) {
+								staleRequoteStatus = "throttled";
 							}
 						}
 						const staleTargets = extractTargetOrderCount(staleRequotePreview);
@@ -866,6 +1012,7 @@ export function createEvmWorkflowTools() {
 											enabled: intent.requoteStaleOrders,
 											status: staleRequoteStatus,
 											targetOrders: staleTargets,
+											runtime: requoteRuntime,
 											result: staleRequotePreview,
 										},
 										status: simulateStatus,
@@ -897,6 +1044,22 @@ export function createEvmWorkflowTools() {
 					if (simulateStatus === "guard_blocked") {
 						throw new Error(
 							`Trade execute blocked by guard checks: ${guardEvaluation.issues.map((issue) => issue.message).join(" | ")}`,
+						);
+					}
+					const requoteRuntime = intent.requoteStaleOrders
+						? readTradeRequoteRuntime({
+								runId,
+								intent,
+							})
+						: null;
+					if (requoteRuntime?.blockedByAttempts) {
+						throw new Error(
+							`Trade execute blocked: requote max attempts reached (${requoteRuntime.attemptsUsed}/${requoteRuntime.maxAttempts}).`,
+						);
+					}
+					if (requoteRuntime?.blockedByCooldown) {
+						throw new Error(
+							`Trade execute throttled: wait ${requoteRuntime.remainingCooldownSeconds}s before next requote.`,
 						);
 					}
 					let staleCancelResult: unknown = null;
@@ -934,6 +1097,21 @@ export function createEvmWorkflowTools() {
 						dryRun: false,
 						useAiAssist: intent.useAiAssist,
 					});
+					let nextRequoteRuntime: ReturnType<
+						typeof readTradeRequoteRuntime
+					> | null = requoteRuntime;
+					if (intent.requoteStaleOrders) {
+						const nowMs = Date.now();
+						writeTradeRequoteRuntime(runId, {
+							attempts: (requoteRuntime?.attemptsUsed ?? 0) + 1,
+							lastExecuteAtMs: nowMs,
+						});
+						nextRequoteRuntime = readTradeRequoteRuntime({
+							runId,
+							intent,
+							nowMs,
+						});
+					}
 					const submittedOrderId = extractSubmittedOrderId(
 						executeResult.details,
 					);
@@ -989,6 +1167,7 @@ export function createEvmWorkflowTools() {
 									staleRequote: {
 										enabled: intent.requoteStaleOrders,
 										targetOrders: staleCancelTargetOrders,
+										runtime: nextRequoteRuntime,
 										result: staleCancelResult,
 									},
 									orderId: submittedOrderId,

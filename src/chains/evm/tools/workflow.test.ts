@@ -343,6 +343,68 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		});
 	});
 
+	it("blocks requote execute when max attempts reached", async () => {
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-requote-attempts-analysis", {
+			runId: "wf-evm-4-requote-attempts",
+			runMode: "analysis",
+			network: "polygon",
+			stakeUsd: 25,
+			side: "up",
+			requoteStaleOrders: true,
+			maxAgeMinutes: 30,
+			requoteMaxAttempts: 1,
+		});
+		const details = analyzed.details as { confirmToken: string };
+		await tool.execute("wf4-requote-attempts-exec-1", {
+			runId: "wf-evm-4-requote-attempts",
+			runMode: "execute",
+			network: "polygon",
+			confirmMainnet: true,
+			confirmToken: details.confirmToken,
+		});
+		await expect(
+			tool.execute("wf4-requote-attempts-exec-2", {
+				runId: "wf-evm-4-requote-attempts",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+			}),
+		).rejects.toThrow("max attempts reached");
+		expect(executeMocks.placeOrderExecute).toHaveBeenCalledTimes(1);
+	});
+
+	it("blocks requote execute when cooldown not elapsed", async () => {
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-requote-cooldown-analysis", {
+			runId: "wf-evm-4-requote-cooldown",
+			runMode: "analysis",
+			network: "polygon",
+			stakeUsd: 25,
+			side: "up",
+			requoteStaleOrders: true,
+			maxAgeMinutes: 30,
+			requoteMinIntervalSeconds: 3600,
+		});
+		const details = analyzed.details as { confirmToken: string };
+		await tool.execute("wf4-requote-cooldown-exec-1", {
+			runId: "wf-evm-4-requote-cooldown",
+			runMode: "execute",
+			network: "polygon",
+			confirmMainnet: true,
+			confirmToken: details.confirmToken,
+		});
+		await expect(
+			tool.execute("wf4-requote-cooldown-exec-2", {
+				runId: "wf-evm-4-requote-cooldown",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+			}),
+		).rejects.toThrow("throttled");
+		expect(executeMocks.placeOrderExecute).toHaveBeenCalledTimes(1);
+	});
+
 	it("blocks execute trade when guard checks fail", async () => {
 		const tool = getTool();
 		const simulated = await tool.execute("wf4-guard-sim", {
