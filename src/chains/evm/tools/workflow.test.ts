@@ -877,6 +877,22 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		});
 	});
 
+	it("supports English risk profile wording", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5-risk-profile-english", {
+			runId: "wf-evm-5-risk-profile-english",
+			runMode: "simulate",
+			network: "polygon",
+			intentText: "buy BTC 5m up 20 USDC, conservative mode, simulate",
+		});
+		expect(result.details).toMatchObject({
+			intentType: "evm.polymarket.btc5m.trade",
+			intent: {
+				riskProfile: "conservative",
+			},
+		});
+	});
+
 	it("keeps explicit guard values over risk profile defaults", async () => {
 		const tool = getTool();
 		const result = await tool.execute("wf5-risk-profile-override", {

@@ -472,18 +472,31 @@ function parseRequoteMaxAttemptsHint(text?: string): number | undefined {
 
 function parseRiskProfileHint(text?: string): PolymarketRiskProfile | undefined {
 	if (!text?.trim()) return undefined;
-	if (/(更|再|偏).{0,3}(保守|稳健|稳妥|低风险|谨慎点)/i.test(text))
+	if (
+		/(更|再|偏).{0,3}(保守|稳健|稳妥|低风险|谨慎点|safer|lower\s+risk|more\s+safe|more\s+conservative)|\b(conservative|defensive|safer)\b/i.test(
+			text,
+		)
+	) {
 		return "conservative";
-	if (/(更|再|偏).{0,3}(激进|冒进|进攻|高风险|冒险)/i.test(text))
+	}
+	if (
+		/(更|再|偏).{0,3}(激进|冒进|进攻|高风险|冒险|riskier|more\s+risky|more\s+aggressive)|\b(aggressive|risky|high\s+risk)\b/i.test(
+			text,
+		)
+	) {
 		return "aggressive";
-	if (/(更|再|偏).{0,3}(平衡|中性|普通|标准|常规|均衡)/i.test(text))
+	}
+	if (
+		/(更|再|偏).{0,3}(平衡|中性|普通|标准|常规|均衡|more\s+balanced)|\b(balanced|middle)\b/i.test(
+			text,
+		)
+	) {
 		return "balanced";
+	}
 	if (/(保守|稳健|稳妥|低风险|谨慎|谨慎点)/i.test(text))
 		return "conservative";
-	if (/(激进|冒进|进攻|高风险|快进)/i.test(text))
-		return "aggressive";
-	if (/(平衡|中性|普通|标准|常规|均衡)/i.test(text))
-		return "balanced";
+	if (/(激进|冒进|进攻|高风险|快进)/i.test(text)) return "aggressive";
+	if (/(平衡|中性|普通|标准|常规|均衡)/i.test(text)) return "balanced";
 	return undefined;
 }
 
