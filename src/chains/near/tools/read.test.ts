@@ -1189,6 +1189,12 @@ describe("near_getLendingPositionsBurrow", () => {
 
 		expect(result.content[0]?.text).toContain("Risk USD:");
 		expect(result.content[0]?.text).toContain("Borrow/Collateral:");
+		expect(result.content[0]?.text).toContain(
+			"Risk thresholds: warning >=60.00%, critical >=85.00%",
+		);
+		expect(result.content[0]?.text).toContain("Risk band: safe");
+		expect(result.content[0]?.text).toContain("Headroom to warning: 52.50%");
+		expect(result.content[0]?.text).toContain("Headroom to critical: 77.50%");
 		expect(restMocks.fetch).toHaveBeenCalledTimes(1);
 		expect(restMocks.fetch.mock.calls[0]?.[0]).toBe(
 			"https://1click.chaindefuser.com/v0/tokens",
@@ -1200,6 +1206,11 @@ describe("near_getLendingPositionsBurrow", () => {
 					collateralUsd?: number | null;
 					borrowedUsd?: number | null;
 					borrowToCollateralRatio?: number | null;
+					borrowToCollateralBand?: string;
+					warningRatio?: number;
+					criticalRatio?: number;
+					warningHeadroomRatio?: number | null;
+					criticalHeadroomRatio?: number | null;
 					valuationPricedRowCount?: number;
 					valuationUnpricedRowCount?: number;
 				};
@@ -1209,8 +1220,162 @@ describe("near_getLendingPositionsBurrow", () => {
 		expect(riskSummary?.collateralUsd).toBeCloseTo(1600, 6);
 		expect(riskSummary?.borrowedUsd).toBeCloseTo(120, 6);
 		expect(riskSummary?.borrowToCollateralRatio).toBeCloseTo(0.075, 6);
+		expect(riskSummary?.borrowToCollateralBand).toBe("safe");
+		expect(riskSummary?.warningRatio).toBeCloseTo(0.6, 6);
+		expect(riskSummary?.criticalRatio).toBeCloseTo(0.85, 6);
+		expect(riskSummary?.warningHeadroomRatio).toBeCloseTo(0.525, 6);
+		expect(riskSummary?.criticalHeadroomRatio).toBeCloseTo(0.775, 6);
 		expect(riskSummary?.valuationPricedRowCount).toBe(3);
 		expect(riskSummary?.valuationUnpricedRowCount).toBe(0);
+	});
+
+	it("applies custom warning/critical thresholds for risk band classification", async () => {
+		burrowMocks.fetchBurrowAssetsPagedDetailed.mockResolvedValue([
+			{
+				token_id: "wrap.near",
+				supplied: { shares: "0", balance: "0" },
+				borrowed: { shares: "0", balance: "0" },
+				config: { extra_decimals: 0 },
+			},
+			{
+				token_id: "usdc.tether-token.near",
+				supplied: { shares: "0", balance: "0" },
+				borrowed: { shares: "0", balance: "0" },
+				config: { extra_decimals: 0 },
+			},
+		]);
+		burrowMocks.fetchBurrowAccountAllPositions.mockResolvedValue({
+			account_id: "alice.near",
+			supplied: [
+				{
+					token_id: "wrap.near",
+					balance: "1000",
+					shares: "900",
+					apr: "0.01",
+				},
+			],
+			positions: {
+				REGULAR: {
+					collateral: [
+						{
+							token_id: "wrap.near",
+							balance: "800",
+							shares: "700",
+							apr: "0.01",
+						},
+					],
+					borrowed: [
+						{
+							token_id: "usdc.tether-token.near",
+							balance: "1400",
+							shares: "100",
+							apr: "0.05",
+						},
+					],
+				},
+			},
+			is_locked: false,
+		});
+		runtimeMocks.callNearRpc.mockImplementation(
+			(args: {
+				params: { method_name?: string; account_id?: string };
+			}) => {
+				if (args.params.method_name === "ft_metadata") {
+					if (args.params.account_id === "wrap.near") {
+						return Promise.resolve({
+							block_hash: "meta-1",
+							block_height: 1,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "WNEAR",
+								decimals: 0,
+							}),
+						});
+					}
+					if (args.params.account_id === "usdc.tether-token.near") {
+						return Promise.resolve({
+							block_hash: "meta-2",
+							block_height: 2,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "USDC",
+								decimals: 0,
+							}),
+						});
+					}
+				}
+				throw new Error("unexpected callNearRpc in custom threshold test");
+			},
+		);
+		burrowMocks.fromBurrowInnerAmount.mockImplementation(
+			(value: string) => value,
+		);
+		mockFetchJsonOnce(200, [
+			{
+				assetId: "nep141:wrap.near",
+				decimals: 24,
+				blockchain: "near",
+				symbol: "WNEAR",
+				price: 2,
+				priceUpdatedAt: "2026-02-14T00:00:00.000Z",
+				contractAddress: "wrap.near",
+			},
+			{
+				assetId: "nep141:usdc.tether-token.near",
+				decimals: 6,
+				blockchain: "near",
+				symbol: "USDC",
+				price: 1,
+				priceUpdatedAt: "2026-02-14T00:00:00.000Z",
+				contractAddress: "usdc.tether-token.near",
+			},
+		]);
+
+		const tool = getTool("near_getLendingPositionsBurrow");
+		const result = await tool.execute("near-read-burrow-positions-3", {
+			accountId: "alice.near",
+			network: "mainnet",
+			includeValuationUsd: true,
+			riskWarningRatio: 0.5,
+			riskCriticalRatio: 0.9,
+		});
+
+		expect(result.content[0]?.text).toContain(
+			"Risk thresholds: warning >=50.00%, critical >=90.00%",
+		);
+		expect(result.content[0]?.text).toContain("Risk band: warning");
+		expect(result.content[0]?.text).toContain("Above warning by: 37.50%");
+		expect(result.content[0]?.text).toContain("Headroom to critical: 2.50%");
+		const riskSummary = (
+			result.details as {
+				riskSummary?: {
+					level?: string;
+					borrowToCollateralBand?: string;
+					borrowToCollateralRatio?: number | null;
+					warningRatio?: number;
+					criticalRatio?: number;
+				};
+			}
+		).riskSummary;
+		expect(riskSummary?.level).toBe("medium");
+		expect(riskSummary?.borrowToCollateralBand).toBe("warning");
+		expect(riskSummary?.borrowToCollateralRatio).toBeCloseTo(0.875, 6);
+		expect(riskSummary?.warningRatio).toBeCloseTo(0.5, 6);
+		expect(riskSummary?.criticalRatio).toBeCloseTo(0.9, 6);
+	});
+
+	it("rejects invalid risk thresholds where warning is not below critical", async () => {
+		const tool = getTool("near_getLendingPositionsBurrow");
+		await expect(
+			tool.execute("near-read-burrow-positions-4", {
+				accountId: "alice.near",
+				network: "mainnet",
+				riskWarningRatio: 0.9,
+				riskCriticalRatio: 0.9,
+			}),
+		).rejects.toThrow(
+			"riskWarningRatio must be smaller than riskCriticalRatio",
+		);
 	});
 });
 

@@ -193,6 +193,8 @@ type NearBurrowPositionView = {
 	borrowed: NearBurrowPositionAssetRow[];
 };
 
+type NearBurrowRiskBand = "unknown" | "safe" | "warning" | "critical";
+
 type NearBurrowRiskSummary = {
 	level: "low" | "medium" | "high";
 	suppliedAssetCount: number;
@@ -209,6 +211,11 @@ type NearBurrowRiskSummary = {
 	valuationUnpricedRowCount: number;
 	valuationPriceUpdatedAtLatest: string | null;
 	valuationError: string | null;
+	warningRatio: number;
+	criticalRatio: number;
+	borrowToCollateralBand: NearBurrowRiskBand;
+	warningHeadroomRatio: number | null;
+	criticalHeadroomRatio: number | null;
 	notes: string[];
 };
 
@@ -408,6 +415,8 @@ const DEFAULT_NEAR_INTENTS_EXPLORER_API_BASE_URL =
 	"https://explorer.near-intents.org";
 const DEFAULT_NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS = 30_000;
 const MAX_NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS = 3_600_000;
+const DEFAULT_BURROW_RISK_WARNING_RATIO = 0.6;
+const DEFAULT_BURROW_RISK_CRITICAL_RATIO = 0.85;
 const NEAR_INTENTS_EXPLORER_STATUS_VALUES = [
 	"FAILED",
 	"INCOMPLETE_DEPOSIT",
@@ -1290,6 +1299,44 @@ function parseOptionalNonNegativeNumber(
 		throw new Error(`${fieldName} must be a number >= 0`);
 	}
 	return value;
+}
+
+function parseBurrowRiskRatio(
+	value: number | undefined,
+	fieldName: string,
+	fallback: number,
+): number {
+	if (value == null) return fallback;
+	if (!Number.isFinite(value) || value <= 0 || value >= 2) {
+		throw new Error(`${fieldName} must be > 0 and < 2`);
+	}
+	return value;
+}
+
+function parseBurrowRiskThresholds(params: {
+	warningRatio?: number;
+	criticalRatio?: number;
+}): {
+	warningRatio: number;
+	criticalRatio: number;
+} {
+	const warningRatio = parseBurrowRiskRatio(
+		params.warningRatio,
+		"riskWarningRatio",
+		DEFAULT_BURROW_RISK_WARNING_RATIO,
+	);
+	const criticalRatio = parseBurrowRiskRatio(
+		params.criticalRatio,
+		"riskCriticalRatio",
+		DEFAULT_BURROW_RISK_CRITICAL_RATIO,
+	);
+	if (warningRatio >= criticalRatio) {
+		throw new Error("riskWarningRatio must be smaller than riskCriticalRatio");
+	}
+	return {
+		warningRatio,
+		criticalRatio,
+	};
 }
 
 function parsePortfolioValuationCacheTtlMs(value: number | undefined): number {
@@ -2179,11 +2226,24 @@ function formatBurrowRatioPercent(value: number): string {
 	return `${(value * 100).toFixed(2)}%`;
 }
 
+function resolveBurrowRiskBand(params: {
+	ratio: number | null;
+	warningRatio: number;
+	criticalRatio: number;
+}): NearBurrowRiskBand {
+	if (params.ratio == null) return "unknown";
+	if (params.ratio >= params.criticalRatio) return "critical";
+	if (params.ratio >= params.warningRatio) return "warning";
+	return "safe";
+}
+
 function buildBurrowRiskSummary(params: {
 	suppliedRows: NearBurrowPositionAssetRow[];
 	collateralRows: NearBurrowPositionAssetRow[];
 	borrowedRows: NearBurrowPositionAssetRow[];
 	accountLocked: boolean;
+	warningRatio: number;
+	criticalRatio: number;
 	valuation?: {
 		suppliedUsd: number | null;
 		collateralUsd: number | null;
@@ -2222,6 +2282,19 @@ function buildBurrowRiskSummary(params: {
 			: null;
 	const hasBorrowedExposure = borrowedAssetCount > 0;
 	const hasCollateralExposure = collateralAssetCount > 0;
+	const borrowToCollateralBand = resolveBurrowRiskBand({
+		ratio: borrowToCollateralRatio,
+		warningRatio: params.warningRatio,
+		criticalRatio: params.criticalRatio,
+	});
+	const warningHeadroomRatio =
+		borrowToCollateralRatio == null
+			? null
+			: params.warningRatio - borrowToCollateralRatio;
+	const criticalHeadroomRatio =
+		borrowToCollateralRatio == null
+			? null
+			: params.criticalRatio - borrowToCollateralRatio;
 	const valuationError =
 		typeof params.valuation?.error === "string" &&
 		params.valuation.error.trim().length > 0
@@ -2243,16 +2316,20 @@ function buildBurrowRiskSummary(params: {
 			"Debt exposure detected. Run workflow simulate before execute for borrow/withdraw actions.",
 		);
 	}
-	if (borrowToCollateralRatio != null) {
-		if (borrowToCollateralRatio >= 0.85) {
-			notes.push(
-				`Borrow/collateral ratio is ${formatBurrowRatioPercent(borrowToCollateralRatio)} (high). Keep collateral buffer before withdrawing or borrowing more.`,
-			);
-		} else if (borrowToCollateralRatio >= 0.6) {
-			notes.push(
-				`Borrow/collateral ratio is ${formatBurrowRatioPercent(borrowToCollateralRatio)} (elevated).`,
-			);
-		}
+	if (
+		borrowToCollateralBand === "critical" &&
+		borrowToCollateralRatio != null
+	) {
+		notes.push(
+			`Borrow/collateral ratio is ${formatBurrowRatioPercent(borrowToCollateralRatio)} (critical). Keep collateral buffer before withdrawing or borrowing more.`,
+		);
+	} else if (
+		borrowToCollateralBand === "warning" &&
+		borrowToCollateralRatio != null
+	) {
+		notes.push(
+			`Borrow/collateral ratio is ${formatBurrowRatioPercent(borrowToCollateralRatio)} (warning).`,
+		);
 	}
 	if (valuationError) {
 		notes.push(`USD valuation unavailable (${valuationError}).`);
@@ -2263,8 +2340,10 @@ function buildBurrowRiskSummary(params: {
 			: hasBorrowedExposure || params.accountLocked
 				? "medium"
 				: "low";
-	if (borrowToCollateralRatio != null && borrowToCollateralRatio >= 0.85) {
+	if (borrowToCollateralBand === "critical") {
 		level = "high";
+	} else if (borrowToCollateralBand === "warning" && level === "low") {
+		level = "medium";
 	}
 	return {
 		level,
@@ -2283,6 +2362,11 @@ function buildBurrowRiskSummary(params: {
 		valuationPriceUpdatedAtLatest:
 			params.valuation?.priceUpdatedAtLatest ?? null,
 		valuationError,
+		warningRatio: params.warningRatio,
+		criticalRatio: params.criticalRatio,
+		borrowToCollateralBand,
+		warningHeadroomRatio,
+		criticalHeadroomRatio,
 		notes,
 	};
 }
@@ -3607,6 +3691,18 @@ export function createNearReadTools() {
 							"Cache TTL (ms) for valuation token feed reuse in process (default 30000).",
 					}),
 				),
+				riskWarningRatio: Type.Optional(
+					Type.Number({
+						description:
+							"Borrow/collateral warning threshold ratio (default 0.6).",
+					}),
+				),
+				riskCriticalRatio: Type.Optional(
+					Type.Number({
+						description:
+							"Borrow/collateral critical threshold ratio (default 0.85). Must be greater than riskWarningRatio.",
+					}),
+				),
 				network: nearNetworkSchema(),
 				rpcUrl: Type.Optional(
 					Type.String({ description: "Override NEAR JSON-RPC endpoint URL" }),
@@ -3625,6 +3721,10 @@ export function createNearReadTools() {
 				const valuationCacheTtlMs = parsePortfolioValuationCacheTtlMs(
 					params.valuationCacheTtlMs,
 				);
+				const riskThresholds = parseBurrowRiskThresholds({
+					warningRatio: params.riskWarningRatio,
+					criticalRatio: params.riskCriticalRatio,
+				});
 				const snapshotRaw = await fetchBurrowAccountAllPositions({
 					network,
 					rpcUrl: params.rpcUrl,
@@ -3824,6 +3924,8 @@ export function createNearReadTools() {
 					collateralRows: collateralRowsAll,
 					borrowedRows: borrowedRowsAll,
 					accountLocked: snapshot.is_locked === true,
+					warningRatio: riskThresholds.warningRatio,
+					criticalRatio: riskThresholds.criticalRatio,
 					valuation: includeValuationUsd
 						? {
 								suppliedUsd: valuation.suppliedUsd,
@@ -3843,6 +3945,9 @@ export function createNearReadTools() {
 					`Risk: ${riskSummary.level} (supplied=${riskSummary.suppliedAssetCount}, collateral=${riskSummary.collateralAssetCount}, borrowed=${riskSummary.borrowedAssetCount})`,
 				];
 				if (includeValuationUsd) {
+					lines.push(
+						`Risk thresholds: warning >=${formatBurrowRatioPercent(riskSummary.warningRatio)}, critical >=${formatBurrowRatioPercent(riskSummary.criticalRatio)}`,
+					);
 					if (
 						riskSummary.suppliedUsd != null ||
 						riskSummary.collateralUsd != null ||
@@ -3870,6 +3975,29 @@ export function createNearReadTools() {
 						lines.push(
 							`Borrow/Collateral: ${formatBurrowRatioPercent(riskSummary.borrowToCollateralRatio)}`,
 						);
+						lines.push(`Risk band: ${riskSummary.borrowToCollateralBand}`);
+						if (riskSummary.warningHeadroomRatio != null) {
+							if (riskSummary.warningHeadroomRatio >= 0) {
+								lines.push(
+									`Headroom to warning: ${formatBurrowRatioPercent(riskSummary.warningHeadroomRatio)}`,
+								);
+							} else {
+								lines.push(
+									`Above warning by: ${formatBurrowRatioPercent(Math.abs(riskSummary.warningHeadroomRatio))}`,
+								);
+							}
+						}
+						if (riskSummary.criticalHeadroomRatio != null) {
+							if (riskSummary.criticalHeadroomRatio >= 0) {
+								lines.push(
+									`Headroom to critical: ${formatBurrowRatioPercent(riskSummary.criticalHeadroomRatio)}`,
+								);
+							} else {
+								lines.push(
+									`Above critical by: ${formatBurrowRatioPercent(Math.abs(riskSummary.criticalHeadroomRatio))}`,
+								);
+							}
+						}
 					}
 					if (
 						riskSummary.valuationPricedRowCount > 0 ||
@@ -3939,6 +4067,7 @@ export function createNearReadTools() {
 						burrowContractId,
 						includeZeroBalances: includeZero,
 						includeValuationUsd,
+						riskThresholds,
 						registered: true,
 						positions,
 						supplied: suppliedAssets,
