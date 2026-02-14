@@ -57,6 +57,7 @@ type NearPortfolioAsset = {
 	rawAmount: string;
 	uiAmount: string | null;
 	decimals: number | null;
+	discoveredSources?: Array<"refDeposits" | "burrowPositions">;
 };
 
 type NearPortfolioFailure = {
@@ -1987,6 +1988,26 @@ export function createNearReadTools() {
 					...baseFtContractIds,
 					...discovered.tokenIds,
 				]);
+				const discoveredSourcesByToken = new Map<
+					string,
+					Array<"refDeposits" | "burrowPositions">
+				>();
+				const addDiscoveredSource = (
+					tokenId: string,
+					source: "refDeposits" | "burrowPositions",
+				) => {
+					const key = tokenId.trim().toLowerCase();
+					if (!key) return;
+					const current = discoveredSourcesByToken.get(key) ?? [];
+					if (!current.includes(source)) current.push(source);
+					discoveredSourcesByToken.set(key, current);
+				};
+				for (const tokenId of discovered.discoveredBySource.refDeposits) {
+					addDiscoveredSource(tokenId, "refDeposits");
+				}
+				for (const tokenId of discovered.discoveredBySource.burrowPositions) {
+					addDiscoveredSource(tokenId, "burrowPositions");
+				}
 
 				const account = await queryViewAccount({
 					accountId,
@@ -2024,7 +2045,13 @@ export function createNearReadTools() {
 							ftBalance.rawBalance,
 							"ft_balance_of",
 						);
-						if (!includeZero && rawBalance === 0n) {
+						const discoveredSources =
+							discoveredSourcesByToken.get(ftContractId.toLowerCase()) ?? [];
+						if (
+							!includeZero &&
+							rawBalance === 0n &&
+							discoveredSources.length === 0
+						) {
 							continue;
 						}
 
@@ -2050,6 +2077,8 @@ export function createNearReadTools() {
 							rawAmount: ftBalance.rawBalance,
 							uiAmount,
 							decimals,
+							discoveredSources:
+								discoveredSources.length > 0 ? discoveredSources : undefined,
 						});
 					} catch (error) {
 						failures.push({
@@ -2074,8 +2103,17 @@ export function createNearReadTools() {
 						asset.uiAmount == null
 							? `${asset.rawAmount} raw`
 							: `${asset.uiAmount} (raw ${asset.rawAmount})`;
+					const sourceText =
+						Array.isArray(asset.discoveredSources) &&
+						asset.discoveredSources.length > 0
+							? ` [discovered in ${asset.discoveredSources
+									.map((source) =>
+										source === "refDeposits" ? "Ref" : "Burrow",
+									)
+									.join("+")}]`
+							: "";
 					lines.push(
-						`${asset.symbol}: ${amountText} on ${asset.contractId ?? "unknown"}`,
+						`${asset.symbol}: ${amountText} on ${asset.contractId ?? "unknown"}${sourceText}`,
 					);
 				}
 				if (failures.length > 0) {
