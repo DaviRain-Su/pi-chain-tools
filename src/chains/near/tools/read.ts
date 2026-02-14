@@ -539,6 +539,14 @@ function dedupeStrings(values: string[]): string[] {
 	return [...new Set(values)];
 }
 
+function hasPositiveRawAmount(value: string): boolean {
+	try {
+		return parseUnsignedBigInt(value, "rawAmount") > 0n;
+	} catch {
+		return false;
+	}
+}
+
 function summarizeTokenIdsForReadableLine(
 	tokenIds: string[],
 	labelByTokenId: Map<string, string>,
@@ -553,6 +561,25 @@ function summarizeTokenIdsForReadableLine(
 	).filter(Boolean);
 	if (labels.length <= 4) return labels.join(", ");
 	return `${labels.slice(0, 4).join(", ")} (+${labels.length - 4} more)`;
+}
+
+function summarizePortfolioRoleTokens(
+	tokenIds: string[],
+	assetByTokenId: Map<string, NearPortfolioAsset>,
+): string {
+	const normalized = dedupeStrings(
+		tokenIds.map((entry) => entry.trim().toLowerCase()).filter(Boolean),
+	);
+	if (normalized.length === 0) return "none";
+	const rows = normalized.map((tokenId) => {
+		const asset = assetByTokenId.get(tokenId);
+		if (asset) {
+			return `${asset.symbol}=${asset.uiAmount ?? `${asset.rawAmount} raw`}`;
+		}
+		return shortAccountId(tokenId);
+	});
+	if (rows.length <= 4) return rows.join(", ");
+	return `${rows.slice(0, 4).join(", ")} (+${rows.length - 4} more)`;
 }
 
 function collectBurrowTokenIdsFromSnapshot(
@@ -2166,10 +2193,34 @@ export function createNearReadTools() {
 					`Portfolio: ${assets.length} assets (account ${accountId})`,
 					`NEAR: ${formatNearAmount(totalYoctoNear, 8)} (available ${formatNearAmount(availableYoctoNear, 8)}, locked ${formatNearAmount(lockedYoctoNear, 8)})`,
 				];
+				const ftAssets = assets.filter(
+					(asset): asset is NearPortfolioAsset =>
+						asset.kind === "ft" && typeof asset.contractId === "string",
+				);
 				const symbolByTokenId = new Map<string, string>();
-				for (const asset of assets) {
-					if (asset.kind !== "ft" || !asset.contractId) continue;
+				const assetByTokenId = new Map<string, NearPortfolioAsset>();
+				for (const asset of ftAssets) {
+					if (!asset.contractId) continue;
 					symbolByTokenId.set(asset.contractId.toLowerCase(), asset.symbol);
+					assetByTokenId.set(asset.contractId.toLowerCase(), asset);
+				}
+				const walletFtAssets = ftAssets
+					.filter((asset) => hasPositiveRawAmount(asset.rawAmount))
+					.sort((left, right) => left.symbol.localeCompare(right.symbol));
+				lines.push("Wallet assets (>0):");
+				lines.push(`- NEAR: ${formatNearAmount(totalYoctoNear, 8)}`);
+				if (walletFtAssets.length === 0) {
+					lines.push("- FT: none");
+				} else {
+					for (const asset of walletFtAssets) {
+						const amountText =
+							asset.uiAmount == null
+								? `${asset.rawAmount} raw`
+								: `${asset.uiAmount} (raw ${asset.rawAmount})`;
+						lines.push(
+							`- ${asset.symbol}: ${amountText} on ${asset.contractId ?? "unknown"}`,
+						);
+					}
 				}
 				if (autoDiscoverDefiTokens) {
 					lines.push(
@@ -2190,9 +2241,34 @@ export function createNearReadTools() {
 							symbolByTokenId,
 						)}).`,
 					);
+					lines.push("DeFi tracked tokens:");
+					lines.push(
+						`- Ref deposits: ${summarizePortfolioRoleTokens(
+							discovered.discoveredByRole.refDeposits,
+							assetByTokenId,
+						)}`,
+					);
+					lines.push(
+						`- Burrow supplied: ${summarizePortfolioRoleTokens(
+							discovered.discoveredByRole.burrowSupplied,
+							assetByTokenId,
+						)}`,
+					);
+					lines.push(
+						`- Burrow collateral: ${summarizePortfolioRoleTokens(
+							discovered.discoveredByRole.burrowCollateral,
+							assetByTokenId,
+						)}`,
+					);
+					lines.push(
+						`- Burrow borrowed: ${summarizePortfolioRoleTokens(
+							discovered.discoveredByRole.burrowBorrowed,
+							assetByTokenId,
+						)}`,
+					);
 				}
-				for (const asset of assets) {
-					if (asset.kind === "native") continue;
+				lines.push("Asset details:");
+				for (const asset of ftAssets) {
 					const amountText =
 						asset.uiAmount == null
 							? `${asset.rawAmount} raw`
@@ -2207,7 +2283,7 @@ export function createNearReadTools() {
 									.join("+")}]`
 							: "";
 					lines.push(
-						`${asset.symbol}: ${amountText} on ${asset.contractId ?? "unknown"}${sourceText}`,
+						`- ${asset.symbol}: ${amountText} on ${asset.contractId ?? "unknown"}${sourceText}`,
 					);
 				}
 				if (failures.length > 0) {

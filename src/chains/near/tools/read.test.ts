@@ -357,7 +357,9 @@ describe("near_getPortfolio", () => {
 		});
 
 		expect(result.content[0]?.text).toContain("Portfolio: 2 assets");
+		expect(result.content[0]?.text).toContain("Wallet assets (>0):");
 		expect(result.content[0]?.text).toContain("USDC: 1.2345");
+		expect(result.content[0]?.text).toContain("Asset details:");
 		expect(result.details).toMatchObject({
 			accountId: "alice.near",
 			network: "mainnet",
@@ -494,8 +496,10 @@ describe("near_getPortfolio", () => {
 
 		expect(result.content[0]?.text).toContain("Auto-discovered DeFi tokens");
 		expect(result.content[0]?.text).toContain("DeFi exposure:");
+		expect(result.content[0]?.text).toContain("DeFi tracked tokens:");
 		expect(result.content[0]?.text).toContain("Ref deposits 1");
 		expect(result.content[0]?.text).toContain("Burrow supplied 1");
+		expect(result.content[0]?.text).toContain("- Ref deposits:");
 		expect(result.details).toMatchObject({
 			accountId: "alice.near",
 			autoDiscoverDefiTokens: true,
@@ -630,6 +634,7 @@ describe("near_getPortfolio", () => {
 		expect(result.content[0]?.text).toContain("AURORA: 0");
 		expect(result.content[0]?.text).toContain("USDT: 0");
 		expect(result.content[0]?.text).toContain("DeFi exposure:");
+		expect(result.content[0]?.text).toContain("- Burrow supplied:");
 		expect(result.content[0]?.text).toContain("[discovered in Ref]");
 		expect(result.content[0]?.text).toContain("[discovered in Burrow]");
 		expect(result.details).toMatchObject({
