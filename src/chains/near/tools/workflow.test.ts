@@ -16,6 +16,7 @@ const executeMocks = vi.hoisted(() => ({
 	transferNearExecute: vi.fn(),
 	transferFtExecute: vi.fn(),
 	swapRefExecute: vi.fn(),
+	withdrawRefTokenExecute: vi.fn(),
 	submitIntentsDepositExecute: vi.fn(),
 	addLiquidityRefExecute: vi.fn(),
 	removeLiquidityRefExecute: vi.fn(),
@@ -67,6 +68,13 @@ vi.mock("./execute.js", () => ({
 			description: "ref swap",
 			parameters: {},
 			execute: executeMocks.swapRefExecute,
+		},
+		{
+			name: "near_withdrawRefToken",
+			label: "ref withdraw",
+			description: "ref withdraw",
+			parameters: {},
+			execute: executeMocks.withdrawRefTokenExecute,
 		},
 		{
 			name: "near_submitIntentsDeposit",
@@ -168,6 +176,12 @@ beforeEach(() => {
 		content: [{ type: "text", text: "ok" }],
 		details: {
 			txHash: "near-exec-swap-hash",
+		},
+	});
+	executeMocks.withdrawRefTokenExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			txHash: "near-exec-withdraw-hash",
 		},
 	});
 	executeMocks.submitIntentsDepositExecute.mockResolvedValue({
@@ -600,6 +614,109 @@ describe("w3rt_run_near_workflow_v0", () => {
 				originAsset: "NEAR",
 				destinationAsset: "USDC",
 				amount: "1000000",
+			},
+		});
+	});
+
+	it("parses natural-language ref withdraw intent", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-8d2", {
+			runId: "wf-near-8d2",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Ref 把 USDC 全部提回钱包，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.ref.withdraw",
+			intent: {
+				type: "near.ref.withdraw",
+				tokenId: "USDC",
+				withdrawAll: true,
+			},
+		});
+	});
+
+	it("simulates ref withdraw and returns deposit/storage artifacts", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "4446",
+				block_height: 323,
+				logs: [],
+				result: encodeJsonResult({
+					"usdc.tether-token.near": "1200000",
+					"wrap.near": "10000000000000000000000",
+				}),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "4447",
+				block_height: 324,
+				logs: [],
+				result: encodeJsonResult({ total: "1" }),
+			});
+		const tool = getTool();
+		const result = await tool.execute("near-wf-8d3", {
+			runId: "wf-near-8d3",
+			runMode: "simulate",
+			intentType: "near.ref.withdraw",
+			network: "mainnet",
+			tokenId: "USDC",
+			amountRaw: "1000000",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.ref.withdraw",
+			artifacts: {
+				simulate: {
+					status: "success",
+					tokenId: "usdc.tether-token.near",
+					depositBeforeRaw: "1200000",
+					requiredRaw: "1000000",
+					storageRegistration: {
+						status: "registered",
+					},
+				},
+			},
+		});
+	});
+
+	it("executes ref withdraw after confirm token validation", async () => {
+		const tool = getTool();
+		const analysis = await tool.execute("near-wf-8d4-analysis", {
+			runId: "wf-near-8d4",
+			runMode: "analysis",
+			intentType: "near.ref.withdraw",
+			network: "mainnet",
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "1000000",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		const result = await tool.execute("near-wf-8d4-execute", {
+			runId: "wf-near-8d4",
+			runMode: "execute",
+			intentType: "near.ref.withdraw",
+			network: "mainnet",
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "1000000",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.withdrawRefTokenExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				tokenId: "usdc.tether-token.near",
+				amountRaw: "1000000",
+				confirmMainnet: true,
+				network: "mainnet",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			intentType: "near.ref.withdraw",
+			artifacts: {
+				execute: {
+					txHash: "near-exec-withdraw-hash",
+				},
 			},
 		});
 	});

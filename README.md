@@ -66,7 +66,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `near_withdrawRefToken` (withdraw deposited token from Ref exchange back to wallet, optional full-balance withdraw)
 - `execute`: `near_addLiquidityRef` (Ref LP add-liquidity, includes optional auto register + token deposit to Ref exchange; supports auto pool selection by token pair when `poolId` is omitted)
 - `execute`: `near_removeLiquidityRef` (Ref LP remove-liquidity; supports auto pool selection by token pair when `poolId` is omitted, plus `autoWithdraw=true` to auto-withdraw pool tokens)
-- `workflow`: `w3rt_run_near_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken; supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks)
+- `workflow`: `w3rt_run_near_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken; supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks)
 - `intents execute tracking`: `near.swap.intents` execute now polls `/v0/status` by default after submit (until terminal status or timeout). Tunables: `waitForFinalStatus`, `statusPollIntervalMs`, `statusTimeoutMs`.
 - `LP auto-selection UX`: when pair-based selection has multiple candidate pools, simulate returns concise alternatives (`poolCandidates`) and text summary (`alternatives=...`)
 - `LP follow-up execute`: after simulate, execute can reuse the session and switch pool by natural language (`继续执行，用第2个池子`) or structured `poolCandidateIndex`
@@ -97,6 +97,10 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `intentText: "在 Ref 移除 LP，NEAR/USDC，全部撤出，先模拟"`
 - LP Remove + Auto Withdraw (execute intent):
   - `intentText: "在 Ref 移除 LP，NEAR/USDC，50%，提回钱包，确认主网执行"`
+- Ref Withdraw (simulate, exact amount):
+  - `intentText: "在 Ref 把 USDC 提回钱包，amountRaw 1000000，先模拟"`
+- Ref Withdraw (analysis, full balance):
+  - `intentText: "在 Ref 把 USDC 全部提回钱包，先分析"`
 - Ref Deposits (read):
   - `帮我查一下 NEAR 主网 Ref 里我存了哪些币`
 - Ref LP Positions (read):
