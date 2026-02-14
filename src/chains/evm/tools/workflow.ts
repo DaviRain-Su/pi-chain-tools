@@ -27,6 +27,9 @@ type WorkflowTradeIntent = {
 	minDepthUsd?: number;
 	maxStakeUsd?: number;
 	minConfidence?: number;
+	requoteStaleOrders: boolean;
+	maxAgeMinutes?: number;
+	maxFillRatio?: number;
 	useAiAssist: boolean;
 };
 
@@ -62,6 +65,7 @@ type WorkflowParams = {
 	orderId?: string;
 	orderIds?: string[];
 	cancelAll?: boolean;
+	requoteStaleOrders?: boolean;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
 	useAiAssist?: boolean;
@@ -78,6 +82,7 @@ type ParsedIntentHints = {
 	orderId?: string;
 	orderIds?: string[];
 	cancelAll?: boolean;
+	requoteStaleOrders?: boolean;
 	maxAgeMinutes?: number;
 	maxFillRatio?: number;
 	confirmMainnet?: boolean;
@@ -169,10 +174,18 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		text.match(/\b(btc-updown-5m-[a-z0-9-]+)\b/i)?.[1];
 	const tokenId =
 		text.match(/\btoken(?:Id)?\s*[:= ]\s*([0-9]{6,})\b/i)?.[1] ?? undefined;
-	const isCancelIntent =
+	const hasTradeSignal =
+		Boolean(stakeMatch) ||
+		Boolean(side) ||
+		/(买|卖|下单|开仓|做多|做空|trade|buy|sell)/i.test(text);
+	const hasRequotePhrase =
+		/(撤单重挂|重新挂单|重挂|re-?quote|repost|replace\s+stale)/i.test(text);
+	const hasCancelPhrase =
 		/(取消|撤销|撤单|清空挂单|cancel\s+order|cancel\s+orders?|cancel)/i.test(
 			text,
 		);
+	const isCancelIntent =
+		hasCancelPhrase && !(hasRequotePhrase && hasTradeSignal);
 	const cancelAll =
 		/(全部|所有|cancel\s+all|all\s+(?:open\s+)?orders?|清空)/i.test(text) ||
 		undefined;
@@ -200,9 +213,24 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		/(未成交|未成单|超时|过期挂单|stale|old\s+orders?)/i.test(text) ||
 		undefined;
 	const maxAgeMinutes =
-		staleMinutesMatch && (isCancelIntent || staleModeHint)
+		staleMinutesMatch && (isCancelIntent || staleModeHint || hasRequotePhrase)
 			? Number.parseFloat(staleMinutesMatch)
 			: undefined;
+	const maxFillRatioRaw =
+		text.match(
+			/(?:maxFillRatio|fill\s*ratio)\s*[:= ]\s*(\d+(?:\.\d+)?%?)/i,
+		)?.[1] ??
+		text.match(
+			/(?:成交率|fill\s*ratio)\s*(?:<=|<|不高于|低于|小于|at most|below)\s*(\d+(?:\.\d+)?%?)/i,
+		)?.[1];
+	let maxFillRatio: number | undefined;
+	if (maxFillRatioRaw) {
+		const isPercent = maxFillRatioRaw.includes("%");
+		const parsed = Number.parseFloat(maxFillRatioRaw.replace("%", ""));
+		if (Number.isFinite(parsed)) {
+			maxFillRatio = isPercent || parsed > 1 ? parsed / 100 : parsed;
+		}
+	}
 
 	return {
 		intentType: isCancelIntent ? "evm.polymarket.btc5m.cancel" : undefined,
@@ -213,7 +241,9 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		orderId: explicitOrderId,
 		orderIds,
 		cancelAll,
+		requoteStaleOrders: hasRequotePhrase ? true : undefined,
 		maxAgeMinutes,
+		maxFillRatio,
 		confirmMainnet: hasConfirmMainnetPhrase(text) ? true : undefined,
 		confirmToken: extractConfirmTokenFromText(text),
 	};
@@ -233,6 +263,7 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			params.orderId?.trim() ||
 			(params.orderIds && params.orderIds.length > 0) ||
 			params.cancelAll === true ||
+			params.requoteStaleOrders === true ||
 			params.maxAgeMinutes != null ||
 			params.maxFillRatio != null ||
 			parsed.intentType ||
@@ -243,6 +274,7 @@ function hasIntentInput(params: WorkflowParams): boolean {
 			parsed.orderId ||
 			(parsed.orderIds && parsed.orderIds.length > 0) ||
 			parsed.cancelAll === true ||
+			parsed.requoteStaleOrders === true ||
 			parsed.maxAgeMinutes != null ||
 			parsed.maxFillRatio != null,
 	);
@@ -326,6 +358,32 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 	if (stakeUsdRaw == null) {
 		throw new Error("stakeUsd is required for evm.polymarket.btc5m.trade");
 	}
+	const maxAgeMinutesRaw = params.maxAgeMinutes ?? parsed.maxAgeMinutes;
+	const maxFillRatioRaw = params.maxFillRatio ?? parsed.maxFillRatio;
+	const maxAgeMinutes =
+		maxAgeMinutesRaw != null
+			? parsePositiveNumber(maxAgeMinutesRaw, "maxAgeMinutes")
+			: undefined;
+	let maxFillRatio: number | undefined;
+	if (maxFillRatioRaw != null) {
+		if (!Number.isFinite(maxFillRatioRaw)) {
+			throw new Error("maxFillRatio must be a finite number");
+		}
+		if (maxFillRatioRaw < 0 || maxFillRatioRaw > 1) {
+			throw new Error("maxFillRatio must be between 0 and 1");
+		}
+		maxFillRatio = maxFillRatioRaw;
+	}
+	const requoteStaleOrders =
+		params.requoteStaleOrders === true ||
+		parsed.requoteStaleOrders === true ||
+		maxAgeMinutes != null ||
+		maxFillRatio != null;
+	if (requoteStaleOrders && maxAgeMinutes == null && maxFillRatio == null) {
+		throw new Error(
+			"requoteStaleOrders requires at least one stale filter: maxAgeMinutes or maxFillRatio.",
+		);
+	}
 	return {
 		type: "evm.polymarket.btc5m.trade",
 		marketSlug: params.marketSlug?.trim() || parsed.marketSlug,
@@ -351,6 +409,9 @@ function normalizeIntent(params: WorkflowParams): WorkflowIntent {
 			params.minConfidence != null
 				? parsePositiveNumber(params.minConfidence, "minConfidence")
 				: undefined,
+		requoteStaleOrders,
+		maxAgeMinutes,
+		maxFillRatio,
 		useAiAssist: params.useAiAssist !== false,
 	};
 }
@@ -384,6 +445,7 @@ function buildTradeSummaryLine(params: {
 	side?: "up" | "down";
 	entryPrice?: number | null;
 	shares?: number | null;
+	staleTargets?: number | null;
 	confirmToken?: string;
 }): string {
 	const parts = [`${params.intent.type}`, `${params.phase}=${params.status}`];
@@ -392,6 +454,16 @@ function buildTradeSummaryLine(params: {
 	if (params.entryPrice != null)
 		parts.push(`entry=${params.entryPrice.toFixed(4)}`);
 	if (params.shares != null) parts.push(`shares~=${params.shares.toFixed(4)}`);
+	if (params.intent.requoteStaleOrders) parts.push("requote=stale");
+	if (params.intent.maxAgeMinutes != null) {
+		parts.push(`maxAgeMinutes=${params.intent.maxAgeMinutes}`);
+	}
+	if (params.intent.maxFillRatio != null) {
+		parts.push(`maxFillRatio=${params.intent.maxFillRatio}`);
+	}
+	if (params.staleTargets != null) {
+		parts.push(`staleTargets=${params.staleTargets}`);
+	}
 	if (params.confirmToken) parts.push(`confirmToken=${params.confirmToken}`);
 	return parts.join(" ");
 }
@@ -448,6 +520,29 @@ function buildCancelExecuteParams(
 		useAiAssist: intent.useAiAssist,
 		dryRun,
 	};
+}
+
+function buildTradeStaleCancelParams(
+	network: string,
+	intent: WorkflowTradeIntent,
+	tokenId: string,
+	dryRun: boolean,
+): Record<string, unknown> {
+	return {
+		network,
+		tokenId,
+		maxAgeMinutes: intent.maxAgeMinutes,
+		maxFillRatio: intent.maxFillRatio,
+		dryRun,
+	};
+}
+
+function classifyCancelPrecheckStatus(
+	message: string,
+): "needs_signer" | "precheck_failed" {
+	return /private key|POLYMARKET_PRIVATE_KEY|funder/i.test(message)
+		? "needs_signer"
+		: "precheck_failed";
 }
 
 function extractTargetOrderCount(details: unknown): number | null {
@@ -557,6 +652,7 @@ export function createEvmWorkflowTools() {
 					}),
 				),
 				cancelAll: Type.Optional(Type.Boolean()),
+				requoteStaleOrders: Type.Optional(Type.Boolean()),
 				maxAgeMinutes: Type.Optional(Type.Number({ minimum: 0.1 })),
 				maxFillRatio: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 				useAiAssist: Type.Optional(Type.Boolean()),
@@ -676,6 +772,17 @@ export function createEvmWorkflowTools() {
 										entryPrice,
 										estimatedShares,
 										guardEvaluation,
+										staleRequote: intent.requoteStaleOrders
+											? {
+													enabled: true,
+													status: "planned",
+													maxAgeMinutes: intent.maxAgeMinutes ?? null,
+													maxFillRatio: intent.maxFillRatio ?? null,
+												}
+											: {
+													enabled: false,
+													status: "disabled",
+												},
 										summaryLine,
 										summary: {
 											schema: "w3rt.workflow.summary.v1",
@@ -691,6 +798,36 @@ export function createEvmWorkflowTools() {
 					}
 
 					if (runMode === "simulate") {
+						let staleRequotePreview: unknown = null;
+						let staleRequoteStatus:
+							| "disabled"
+							| "ready"
+							| "needs_signer"
+							| "precheck_failed" = intent.requoteStaleOrders
+							? "ready"
+							: "disabled";
+						if (intent.requoteStaleOrders) {
+							const cancelTool = resolveExecuteTool(
+								`${EVM_TOOL_PREFIX}polymarketCancelOrder`,
+							);
+							try {
+								const preview = await cancelTool.execute(
+									"wf-evm-trade-stale-simulate",
+									buildTradeStaleCancelParams(
+										network,
+										intent,
+										trade.tokenId,
+										true,
+									),
+								);
+								staleRequotePreview = preview.details ?? null;
+							} catch (error) {
+								const message = stringifyUnknown(error);
+								staleRequoteStatus = classifyCancelPrecheckStatus(message);
+								staleRequotePreview = { error: message };
+							}
+						}
+						const staleTargets = extractTargetOrderCount(staleRequotePreview);
 						const summaryLine = buildTradeSummaryLine({
 							intent,
 							phase: "simulate",
@@ -699,6 +836,7 @@ export function createEvmWorkflowTools() {
 							side: trade.side,
 							entryPrice,
 							shares: estimatedShares,
+							staleTargets,
 							confirmToken: mainnetGuardRequired ? confirmToken : undefined,
 						});
 						rememberSession({ runId, network, intent });
@@ -724,6 +862,12 @@ export function createEvmWorkflowTools() {
 										entryPrice,
 										estimatedShares,
 										guardEvaluation,
+										staleRequote: {
+											enabled: intent.requoteStaleOrders,
+											status: staleRequoteStatus,
+											targetOrders: staleTargets,
+											result: staleRequotePreview,
+										},
 										status: simulateStatus,
 										summaryLine,
 										summary: {
@@ -754,6 +898,25 @@ export function createEvmWorkflowTools() {
 						throw new Error(
 							`Trade execute blocked by guard checks: ${guardEvaluation.issues.map((issue) => issue.message).join(" | ")}`,
 						);
+					}
+					let staleCancelResult: unknown = null;
+					let staleCancelTargetOrders: number | null = null;
+					if (intent.requoteStaleOrders) {
+						const cancelTool = resolveExecuteTool(
+							`${EVM_TOOL_PREFIX}polymarketCancelOrder`,
+						);
+						const staleCancel = await cancelTool.execute(
+							"wf-evm-trade-stale-execute",
+							buildTradeStaleCancelParams(
+								network,
+								intent,
+								trade.tokenId,
+								false,
+							),
+						);
+						staleCancelResult = staleCancel.details ?? null;
+						staleCancelTargetOrders =
+							extractTargetOrderCount(staleCancelResult);
 					}
 					const executeTool = resolveExecuteTool(
 						`${EVM_TOOL_PREFIX}polymarketPlaceOrder`,
@@ -805,6 +968,7 @@ export function createEvmWorkflowTools() {
 						side: trade.side,
 						entryPrice,
 						shares: estimatedShares,
+						staleTargets: staleCancelTargetOrders,
 					});
 					rememberSession({ runId, network, intent });
 					return {
@@ -822,6 +986,11 @@ export function createEvmWorkflowTools() {
 							artifacts: {
 								execute: {
 									status: "submitted",
+									staleRequote: {
+										enabled: intent.requoteStaleOrders,
+										targetOrders: staleCancelTargetOrders,
+										result: staleCancelResult,
+									},
 									orderId: submittedOrderId,
 									orderStatus,
 									result: executeResult.details ?? null,
@@ -891,9 +1060,7 @@ export function createEvmWorkflowTools() {
 						previewResult = preview.details ?? null;
 					} catch (error) {
 						const message = stringifyUnknown(error);
-						status = /private key|POLYMARKET_PRIVATE_KEY|funder/i.test(message)
-							? "needs_signer"
-							: "precheck_failed";
+						status = classifyCancelPrecheckStatus(message);
 						previewResult = { error: message };
 					}
 					const targetOrders = extractTargetOrderCount(previewResult);

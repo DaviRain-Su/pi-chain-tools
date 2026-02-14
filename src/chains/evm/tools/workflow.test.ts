@@ -268,6 +268,81 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		});
 	});
 
+	it("simulates trade with stale requote preview", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf4-requote-sim", {
+			runId: "wf-evm-4-requote",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 25,
+			side: "up",
+			requoteStaleOrders: true,
+			maxAgeMinutes: 30,
+		});
+		expect(executeMocks.cancelOrderExecute).toHaveBeenCalledWith(
+			"wf-evm-trade-stale-simulate",
+			expect.objectContaining({
+				network: "polygon",
+				tokenId: "token-up-1",
+				maxAgeMinutes: 30,
+				dryRun: true,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			artifacts: {
+				simulate: {
+					staleRequote: {
+						enabled: true,
+						status: "ready",
+						targetOrders: 1,
+					},
+				},
+			},
+		});
+	});
+
+	it("executes trade with stale requote cancel-before-place", async () => {
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-requote-analysis", {
+			runId: "wf-evm-4-requote-exec",
+			runMode: "analysis",
+			network: "polygon",
+			stakeUsd: 25,
+			side: "up",
+			requoteStaleOrders: true,
+			maxAgeMinutes: 30,
+		});
+		const details = analyzed.details as { confirmToken: string };
+		const executed = await tool.execute("wf4-requote-exec", {
+			runId: "wf-evm-4-requote-exec",
+			runMode: "execute",
+			network: "polygon",
+			confirmMainnet: true,
+			confirmToken: details.confirmToken,
+		});
+
+		expect(executeMocks.cancelOrderExecute).toHaveBeenCalledWith(
+			"wf-evm-trade-stale-execute",
+			expect.objectContaining({
+				network: "polygon",
+				tokenId: "token-up-1",
+				maxAgeMinutes: 30,
+				dryRun: false,
+			}),
+		);
+		expect(executeMocks.placeOrderExecute).toHaveBeenCalled();
+		expect(executed.details).toMatchObject({
+			artifacts: {
+				execute: {
+					staleRequote: {
+						enabled: true,
+						targetOrders: 1,
+					},
+				},
+			},
+		});
+	});
+
 	it("blocks execute trade when guard checks fail", async () => {
 		const tool = getTool();
 		const simulated = await tool.execute("wf4-guard-sim", {
@@ -305,6 +380,35 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 			expect.objectContaining({
 				network: "polygon",
 				cancelAll: true,
+				dryRun: true,
+			}),
+		);
+	});
+
+	it("parses requote natural language as trade intent (not pure cancel)", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5-requote-text-sim", {
+			runId: "wf-evm-5-requote-text",
+			runMode: "simulate",
+			network: "polygon",
+			intentText:
+				"买 BTC 5分钟涨 20 USDC，如果超过 30 分钟未成交就撤单重挂，先模拟",
+		});
+		expect(result.details).toMatchObject({
+			intentType: "evm.polymarket.btc5m.trade",
+			artifacts: {
+				simulate: {
+					staleRequote: {
+						enabled: true,
+						status: "ready",
+					},
+				},
+			},
+		});
+		expect(executeMocks.cancelOrderExecute).toHaveBeenCalledWith(
+			"wf-evm-trade-stale-simulate",
+			expect.objectContaining({
+				maxAgeMinutes: 30,
 				dryRun: true,
 			}),
 		);
