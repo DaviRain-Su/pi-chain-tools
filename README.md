@@ -57,6 +57,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `compose`: `evm_polymarketBuildBtc5mOrder` (unsigned order intent builder)
 - `execute`: `evm_polymarketPlaceOrder` (CLOB order submit, default `dryRun=true`)
 - `execute`: `evm_polymarketGetOpenOrders` (authenticated open-order list)
+- `execute`: `evm_polymarketGetOrderStatus` (authenticated order status/fill snapshot by `orderId`, optional associated trade details)
 - `execute`: `evm_polymarketCancelOrder` (cancel by orderId(s)/token scope/cancel-all, default `dryRun=true`)
 - `execute`: `evm_transferNative` (native token transfer, default `dryRun=true`, execute requires `confirmMainnet=true`)
 - `execute`: `evm_transferErc20` (ERC20 transfer by `tokenAddress + amountRaw`, default `dryRun=true`, execute requires `confirmMainnet=true`)
@@ -65,6 +66,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `workflow cancel intent`: supports `evm.polymarket.btc5m.cancel` (analysis/simulate/execute + deterministic mainnet confirmToken)
 - `mainnet guard`: workflow execute on polygon requires `confirmMainnet=true` + correct `confirmToken`
 - `trade safety rails`: Polymarket trade compose/execute/workflow support optional guard params `maxSpreadBps` / `minDepthUsd` / `maxStakeUsd` / `minConfidence`; simulate can return `status=guard_blocked`, and execute is blocked when guards fail
+- `trade status loop`: workflow execute now attempts to attach order-status snapshot (state/fill/trade summary) when submit response contains `orderId/orderID`
 - `transfer symbol map`: workflow can resolve `USDC/USDT/DAI/WETH/WBTC` addresses on `ethereum/polygon/arbitrum/optimism` and `USDC/DAI/WETH` on `base` (otherwise provide `tokenAddress`)
 - `transfer symbol map override`: configurable via `EVM_TRANSFER_TOKEN_MAP` (global JSON by symbol->network->address) and `EVM_TRANSFER_TOKEN_MAP_<NETWORK>` (per-network JSON by symbol->address, e.g. `EVM_TRANSFER_TOKEN_MAP_BASE`)
 - `transfer symbol decimals override`: configurable via `EVM_TRANSFER_TOKEN_DECIMALS` (JSON by symbol->decimals, used when converting `amountToken` to `amountRaw`)

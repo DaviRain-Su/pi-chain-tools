@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const executeMocks = vi.hoisted(() => ({
 	placeOrderExecute: vi.fn(),
+	getOrderStatusExecute: vi.fn(),
 	cancelOrderExecute: vi.fn(),
 }));
 
@@ -57,6 +58,13 @@ vi.mock("./execute.js", () => ({
 			description: "place order",
 			parameters: {},
 			execute: executeMocks.placeOrderExecute,
+		},
+		{
+			name: "evm_polymarketGetOrderStatus",
+			label: "get order status",
+			description: "get order status",
+			parameters: {},
+			execute: executeMocks.getOrderStatusExecute,
 		},
 		{
 			name: "evm_polymarketCancelOrder",
@@ -116,6 +124,15 @@ beforeEach(() => {
 	executeMocks.placeOrderExecute.mockResolvedValue({
 		content: [{ type: "text", text: "submitted" }],
 		details: { orderId: "order-1" },
+	});
+	executeMocks.getOrderStatusExecute.mockResolvedValue({
+		content: [{ type: "text", text: "order status" }],
+		details: {
+			orderId: "order-1",
+			orderState: "partially_filled",
+			fillRatio: 0.25,
+			tradeSummary: { tradeCount: 1 },
+		},
 	});
 	executeMocks.cancelOrderExecute.mockResolvedValue({
 		content: [{ type: "text", text: "cancel submitted" }],
@@ -230,10 +247,22 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 				dryRun: false,
 			}),
 		);
+		expect(executeMocks.getOrderStatusExecute).toHaveBeenCalledWith(
+			"wf-evm-order-status",
+			expect.objectContaining({
+				network: "polygon",
+				orderId: "order-1",
+				includeTrades: true,
+			}),
+		);
 		expect(executed.details).toMatchObject({
 			artifacts: {
 				execute: {
 					status: "submitted",
+					orderId: "order-1",
+					orderStatus: {
+						orderState: "partially_filled",
+					},
 				},
 			},
 		});

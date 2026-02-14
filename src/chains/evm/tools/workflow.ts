@@ -422,6 +422,42 @@ function extractTargetOrderCount(details: unknown): number | null {
 	return null;
 }
 
+function extractSubmittedOrderId(details: unknown): string | null {
+	if (!details || typeof details !== "object") return null;
+	const payload = details as {
+		orderId?: unknown;
+		orderID?: unknown;
+		response?: unknown;
+		result?: unknown;
+	};
+	const directOrderId =
+		typeof payload.orderId === "string" && payload.orderId.trim()
+			? payload.orderId.trim()
+			: typeof payload.orderID === "string" && payload.orderID.trim()
+				? payload.orderID.trim()
+				: null;
+	if (directOrderId) return directOrderId;
+	if (payload.response && typeof payload.response === "object") {
+		const nested = payload.response as { orderId?: unknown; orderID?: unknown };
+		if (typeof nested.orderId === "string" && nested.orderId.trim()) {
+			return nested.orderId.trim();
+		}
+		if (typeof nested.orderID === "string" && nested.orderID.trim()) {
+			return nested.orderID.trim();
+		}
+	}
+	if (payload.result && typeof payload.result === "object") {
+		const nested = payload.result as { orderId?: unknown; orderID?: unknown };
+		if (typeof nested.orderId === "string" && nested.orderId.trim()) {
+			return nested.orderId.trim();
+		}
+		if (typeof nested.orderID === "string" && nested.orderID.trim()) {
+			return nested.orderID.trim();
+		}
+	}
+	return null;
+}
+
 export function createEvmWorkflowTools() {
 	return [
 		defineTool({
@@ -681,6 +717,32 @@ export function createEvmWorkflowTools() {
 						dryRun: false,
 						useAiAssist: intent.useAiAssist,
 					});
+					const submittedOrderId = extractSubmittedOrderId(
+						executeResult.details,
+					);
+					let orderStatus: unknown = null;
+					if (submittedOrderId) {
+						try {
+							const statusTool = resolveExecuteTool(
+								`${EVM_TOOL_PREFIX}polymarketGetOrderStatus`,
+							);
+							const statusResult = await statusTool.execute(
+								"wf-evm-order-status",
+								{
+									network,
+									orderId: submittedOrderId,
+									includeTrades: true,
+									maxTrades: 10,
+								},
+							);
+							orderStatus = statusResult.details ?? null;
+						} catch (error) {
+							orderStatus = {
+								orderId: submittedOrderId,
+								error: stringifyUnknown(error),
+							};
+						}
+					}
 					const summaryLine = buildTradeSummaryLine({
 						intent,
 						phase: "execute",
@@ -706,6 +768,8 @@ export function createEvmWorkflowTools() {
 							artifacts: {
 								execute: {
 									status: "submitted",
+									orderId: submittedOrderId,
+									orderStatus,
 									result: executeResult.details ?? null,
 									guardEvaluation,
 									summaryLine,

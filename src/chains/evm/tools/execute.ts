@@ -44,12 +44,33 @@ type ClobOpenOrder = {
 	outcome: string;
 	created_at: number;
 	order_type: string;
+	associate_trades?: string[];
 };
 
 type ClobOrderFilter = {
 	id?: string;
 	market?: string;
 	asset_id?: string;
+};
+
+type ClobTradeFilter = {
+	id?: string;
+	market?: string;
+	asset_id?: string;
+	maker_address?: string;
+};
+
+type ClobTrade = {
+	id: string;
+	taker_order_id: string;
+	market: string;
+	asset_id: string;
+	side: string;
+	size: string;
+	price: string;
+	status: string;
+	match_time: string;
+	transaction_hash: string;
 };
 
 type ClobClientLike = {
@@ -69,6 +90,12 @@ type ClobClientLike = {
 		onlyFirstPage?: boolean,
 		nextCursor?: string,
 	) => Promise<ClobOpenOrder[]>;
+	getOrder?: (orderID: string) => Promise<ClobOpenOrder>;
+	getTrades?: (
+		params?: ClobTradeFilter,
+		onlyFirstPage?: boolean,
+		nextCursor?: string,
+	) => Promise<ClobTrade[]>;
 	cancelOrder?: (payload: { orderID: string }) => Promise<unknown>;
 	cancelOrders?: (orderIds: string[]) => Promise<unknown>;
 	cancelAll?: () => Promise<unknown>;
@@ -230,6 +257,81 @@ function calculateRemainingSize(order: ClobOpenOrder): number | null {
 	const matched = parseNumberText(order.size_matched);
 	if (original == null || matched == null) return null;
 	return Math.max(0, original - matched);
+}
+
+function calculateOrderFillRatio(order: ClobOpenOrder): number | null {
+	const original = parseNumberText(order.original_size);
+	const matched = parseNumberText(order.size_matched);
+	if (original == null || matched == null || original <= 0) return null;
+	return Math.max(0, Math.min(1, matched / original));
+}
+
+function deriveOrderState(order: ClobOpenOrder): string {
+	const normalizedStatus = order.status.trim().toLowerCase();
+	const fillRatio = calculateOrderFillRatio(order);
+	if (fillRatio != null && fillRatio >= 1) return "filled";
+	if (
+		normalizedStatus.includes("cancel") ||
+		normalizedStatus.includes("canceled") ||
+		normalizedStatus.includes("cancelled")
+	) {
+		return fillRatio != null && fillRatio > 0
+			? "partially_filled_canceled"
+			: "canceled";
+	}
+	if (
+		normalizedStatus.includes("expired") ||
+		normalizedStatus.includes("expire")
+	) {
+		return fillRatio != null && fillRatio > 0
+			? "partially_filled_expired"
+			: "expired";
+	}
+	if (fillRatio != null && fillRatio > 0) return "partially_filled";
+	return "open";
+}
+
+function summarizeOrderTrades(trades: ClobTrade[]): {
+	tradeCount: number;
+	filledSize: number;
+	averageFillPrice: number | null;
+	lastMatchTime: string | null;
+} {
+	if (trades.length === 0) {
+		return {
+			tradeCount: 0,
+			filledSize: 0,
+			averageFillPrice: null,
+			lastMatchTime: null,
+		};
+	}
+	let filledSize = 0;
+	let weightedNotional = 0;
+	let lastMatchTime: string | null = null;
+	for (const trade of trades) {
+		const size = parseNumberText(trade.size);
+		const price = parseNumberText(trade.price);
+		if (size != null && size > 0) {
+			filledSize += size;
+			if (price != null && price > 0) {
+				weightedNotional += size * price;
+			}
+		}
+		if (trade.match_time) {
+			if (!lastMatchTime || trade.match_time > lastMatchTime) {
+				lastMatchTime = trade.match_time;
+			}
+		}
+	}
+	return {
+		tradeCount: trades.length,
+		filledSize,
+		averageFillPrice:
+			filledSize > 0 && weightedNotional > 0
+				? weightedNotional / filledSize
+				: null,
+		lastMatchTime,
+	};
 }
 
 type JsonRpcResponse<T> = {
@@ -699,6 +801,107 @@ export function createEvmExecuteTools() {
 						tokenId: tokenId ?? null,
 						orderCount: orders.length,
 						orders: preview,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${EVM_TOOL_PREFIX}polymarketGetOrderStatus`,
+			label: "EVM Polymarket Order Status",
+			description:
+				"Get latest order state/fill progress by orderId, with optional associated trade snapshots.",
+			parameters: Type.Object({
+				network: evmNetworkSchema(),
+				orderId: Type.String(),
+				includeTrades: Type.Optional(Type.Boolean()),
+				maxTrades: Type.Optional(
+					Type.Number({ minimum: 1, maximum: 50, default: 20 }),
+				),
+				fromPrivateKey: Type.Optional(Type.String()),
+				funder: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				apiSecret: Type.Optional(Type.String()),
+				apiPassphrase: Type.Optional(Type.String()),
+				signatureType: Type.Optional(Type.Number({ minimum: 0, maximum: 2 })),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseEvmNetwork(params.network);
+				const orderId = normalizeOrderId(params.orderId);
+				const includeTrades = params.includeTrades !== false;
+				const maxTrades = params.maxTrades ?? 20;
+				const { client } = await createAuthedClobClient({
+					fromPrivateKey: params.fromPrivateKey,
+					funder: params.funder,
+					apiKey: params.apiKey,
+					apiSecret: params.apiSecret,
+					apiPassphrase: params.apiPassphrase,
+					signatureType: params.signatureType,
+				});
+				if (!client.getOrder) {
+					throw new Error("getOrder is not supported by current CLOB client.");
+				}
+				const order = await client.getOrder(orderId);
+				const trades: ClobTrade[] = [];
+				if (includeTrades && client.getTrades) {
+					const associatedTradeIds = Array.isArray(order.associate_trades)
+						? order.associate_trades
+								.filter((entry): entry is string => typeof entry === "string")
+								.slice(0, maxTrades)
+						: [];
+					if (associatedTradeIds.length > 0) {
+						for (const tradeId of associatedTradeIds) {
+							const rows =
+								(await client.getTrades({ id: tradeId }, true)) ?? [];
+							for (const row of rows) {
+								if (typeof row.id === "string" && row.id.trim()) {
+									trades.push(row);
+								}
+							}
+						}
+					}
+				}
+				const tradeById = new Map<string, ClobTrade>();
+				for (const trade of trades) {
+					tradeById.set(trade.id, trade);
+				}
+				const uniqueTrades = [...tradeById.values()]
+					.sort((a, b) => b.match_time.localeCompare(a.match_time))
+					.slice(0, maxTrades);
+				const tradeSummary = summarizeOrderTrades(uniqueTrades);
+				const remainingSize = calculateRemainingSize(order);
+				const fillRatio = calculateOrderFillRatio(order);
+				const orderState = deriveOrderState(order);
+				const filledSizeFromOrder = parseNumberText(order.size_matched);
+				const filledSize =
+					tradeSummary.filledSize > 0
+						? tradeSummary.filledSize
+						: (filledSizeFromOrder ?? 0);
+				const lines = [
+					`Polymarket order status (${network}): order=${shortId(order.id)} state=${orderState}`,
+					`statusRaw=${order.status} filled=${filledSize.toFixed(4)} / ${order.original_size} remaining=${remainingSize == null ? "n/a" : remainingSize.toFixed(4)} fillRatio=${fillRatio == null ? "n/a" : `${(fillRatio * 100).toFixed(2)}%`}`,
+				];
+				if (uniqueTrades.length > 0) {
+					lines.push(
+						`trades=${uniqueTrades.length} avgFillPrice=${tradeSummary.averageFillPrice == null ? "n/a" : tradeSummary.averageFillPrice.toFixed(4)} lastMatch=${tradeSummary.lastMatchTime ?? "n/a"}`,
+					);
+					for (const [index, trade] of uniqueTrades.slice(0, 5).entries()) {
+						lines.push(
+							`${index + 1}. trade=${shortId(trade.id)} size=${trade.size} price=${trade.price} match=${trade.match_time}`,
+						);
+					}
+				}
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						network,
+						orderState,
+						orderId: order.id,
+						fillRatio,
+						remainingSize,
+						filledSize,
+						tradeSummary,
+						order,
+						trades: uniqueTrades,
 					},
 				};
 			},

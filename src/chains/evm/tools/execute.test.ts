@@ -4,6 +4,8 @@ import { setEvmTransferPolicy } from "../policy.js";
 const clobMocks = vi.hoisted(() => ({
 	createOrDeriveApiKey: vi.fn(),
 	getOpenOrders: vi.fn(),
+	getOrder: vi.fn(),
+	getTrades: vi.fn(),
 	cancelOrder: vi.fn(),
 	cancelOrders: vi.fn(),
 	cancelAll: vi.fn(),
@@ -66,6 +68,14 @@ vi.mock("@polymarket/clob-client", () => {
 
 		async getOpenOrders(params?: unknown, onlyFirstPage?: boolean) {
 			return clobMocks.getOpenOrders(params, onlyFirstPage);
+		}
+
+		async getOrder(orderId: string) {
+			return clobMocks.getOrder(orderId);
+		}
+
+		async getTrades(params?: unknown, onlyFirstPage?: boolean) {
+			return clobMocks.getTrades(params, onlyFirstPage);
 		}
 
 		async cancelOrder(payload: unknown) {
@@ -172,6 +182,34 @@ beforeEach(() => {
 		passphrase: "p",
 	});
 	clobMocks.getOpenOrders.mockResolvedValue([]);
+	clobMocks.getOrder.mockResolvedValue({
+		id: "order-1",
+		status: "LIVE",
+		market: "m1",
+		asset_id: "100001",
+		side: "BUY",
+		original_size: "20",
+		size_matched: "5",
+		price: "0.51",
+		outcome: "Up",
+		created_at: 200,
+		order_type: "GTC",
+		associate_trades: ["trade-1"],
+	});
+	clobMocks.getTrades.mockResolvedValue([
+		{
+			id: "trade-1",
+			taker_order_id: "order-1",
+			market: "m1",
+			asset_id: "100001",
+			side: "BUY",
+			size: "5",
+			price: "0.51",
+			status: "MATCHED",
+			match_time: "2026-02-14T00:00:00Z",
+			transaction_hash: "0xtrade",
+		},
+	]);
 	clobMocks.cancelOrder.mockResolvedValue({ ok: true });
 	clobMocks.cancelOrders.mockResolvedValue({ ok: true });
 	clobMocks.cancelAll.mockResolvedValue({ ok: true });
@@ -244,6 +282,23 @@ describe("evm execute tools", () => {
 			}),
 		).rejects.toThrow("Polymarket guard check failed");
 		expect(clobMocks.createOrDeriveApiKey).not.toHaveBeenCalled();
+	});
+
+	it("reads polymarket order status with fill summary", async () => {
+		const tool = getTool("evm_polymarketGetOrderStatus");
+		const result = await tool.execute("order-status", {
+			network: "polygon",
+			orderId: "order-1",
+		});
+		expect(clobMocks.getOrder).toHaveBeenCalledWith("order-1");
+		expect(result.content[0]?.text).toContain("state=partially_filled");
+		expect(result.details).toMatchObject({
+			orderState: "partially_filled",
+			orderId: "order-1",
+			tradeSummary: {
+				tradeCount: 1,
+			},
+		});
 	});
 
 	it("lists open orders in token scope", async () => {
