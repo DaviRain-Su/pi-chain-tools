@@ -937,6 +937,61 @@ describe("w3rt_run_near_workflow_v0", () => {
 		);
 	});
 
+	it("infers execute runMode from natural language follow-up when runMode is omitted", async () => {
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-5e-sim", {
+			runId: "wf-near-05e",
+			runMode: "simulate",
+			intentType: "near.transfer.near",
+			network: "mainnet",
+			toAccountId: "bob.near",
+			amountYoctoNear: "1000",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+
+		await tool.execute("near-wf-5e-exec", {
+			runId: "wf-near-05e",
+			intentText: "继续执行刚才这笔，确认主网执行",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.transferNearExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				toAccountId: "bob.near",
+				amountYoctoNear: "1000",
+				confirmMainnet: true,
+			}),
+		);
+	});
+
+	it("infers simulate runMode from natural language when runMode is omitted", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-5f-sim", {
+			runId: "wf-near-05f",
+			intentType: "near.transfer.near",
+			intentText: "先模拟给 bob.near 转 0.000001 NEAR",
+			network: "mainnet",
+			toAccountId: "bob.near",
+			amountYoctoNear: "1000",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.transfer.near",
+			artifacts: {
+				simulate: {
+					status: "success",
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "simulate",
+						intentType: "near.transfer.near",
+					},
+				},
+			},
+		});
+	});
+
 	it("parses confirm-mainnet phrase from intentText for follow-up execute", async () => {
 		const tool = getTool();
 		const simulated = await tool.execute("near-wf-5c-sim", {

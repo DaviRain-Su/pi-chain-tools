@@ -526,6 +526,40 @@ function parseRunMode(value?: string): WorkflowRunMode {
 	return "analysis";
 }
 
+function parseRunModeHint(text?: string): WorkflowRunMode | undefined {
+	if (!text?.trim()) return undefined;
+	const hasExecute =
+		/(确认主网执行|确认执行|继续执行|直接执行|立即执行|现在执行|马上执行|execute|submit|real\s+order|live\s+order|\bnow\b.*\bexecute\b)/i.test(
+			text,
+		);
+	const hasSimulate =
+		/(先模拟|模拟一下|先仿真|先dry\s*run|dry\s*run|simulate|先试跑|先试一下|先预演|先演练)/i.test(
+			text,
+		);
+	const hasAnalysis =
+		/(先分析|分析一下|先看分析|analysis|analyze|先看一下|先检查)/i.test(text);
+
+	if (hasSimulate && !hasExecute) return "simulate";
+	if (hasAnalysis && !hasExecute && !hasSimulate) return "analysis";
+	if (hasExecute && !hasSimulate && !hasAnalysis) return "execute";
+	if (hasSimulate && hasExecute) {
+		if (
+			/(先模拟|先仿真|先dry\s*run|先试跑|先试一下|先预演|先演练)/i.test(text)
+		) {
+			return "simulate";
+		}
+		return "execute";
+	}
+	if (hasAnalysis && hasExecute) {
+		if (/(先分析|先看一下|先检查)/i.test(text)) return "analysis";
+		return "execute";
+	}
+	if (hasExecute) return "execute";
+	if (hasSimulate) return "simulate";
+	if (hasAnalysis) return "analysis";
+	return undefined;
+}
+
 function parsePositiveBigInt(value: string, fieldName: string): bigint {
 	const normalized = value.trim();
 	if (!/^\d+$/.test(normalized)) {
@@ -6037,7 +6071,9 @@ export function createNearWorkflowTools() {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as WorkflowParams;
-				const runMode = parseRunMode(params.runMode);
+				const runMode = parseRunMode(
+					params.runMode ?? parseRunModeHint(params.intentText),
+				);
 				const session =
 					runMode === "execute" ? readWorkflowSession(params.runId) : null;
 				const hints = parseIntentHints(params.intentText);
