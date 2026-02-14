@@ -2681,7 +2681,6 @@ function resolveDefiWorkflowRoute(
 	const runMode = parseRunMode(params.runMode ?? parseRunModeHint(params.intentText));
 	const hasRoutingHints = Boolean(
 		intentType ||
-		params.intentText?.trim() ||
 		params.stableCoinType?.trim() ||
 		params.amountUsdcRaw?.trim() ||
 		params.amountStableRaw?.trim() ||
@@ -2689,8 +2688,23 @@ function resolveDefiWorkflowRoute(
 		params.clmmPoolId?.trim() ||
 		params.positionNftId?.trim(),
 	);
-	if (runMode === "execute" && !hasRoutingHints && latestWorkflowSession) {
-		return latestWorkflowSession.route;
+	if (runMode === "execute" && !hasRoutingHints) {
+		const explicitRunId = params.runId?.trim();
+		if (explicitRunId) {
+			const routedByRunId =
+				readWorkflowSession("w3rt_run_sui_workflow_v0", explicitRunId) ??
+				readWorkflowSession("w3rt_run_sui_stablelayer_workflow_v0", explicitRunId) ??
+				readWorkflowSession("w3rt_run_sui_cetus_farms_workflow_v0", explicitRunId);
+			if (routedByRunId?.route) {
+				return routedByRunId.route;
+			}
+			if (latestWorkflowSession?.runId === explicitRunId) {
+				return latestWorkflowSession.route;
+			}
+		}
+		if (latestWorkflowSession) {
+			return latestWorkflowSession.route;
+		}
 	}
 
 	return "w3rt_run_sui_workflow_v0";

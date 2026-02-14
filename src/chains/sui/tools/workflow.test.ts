@@ -1377,6 +1377,36 @@ describe("w3rt_run_sui_cetus_farms_workflow_v0", () => {
 });
 
 describe("w3rt_run_sui_defi_workflow_v0", () => {
+	it("supports natural-language execute follow-up by reusing latest routed session", async () => {
+		const tool = getTool("w3rt_run_sui_defi_workflow_v0");
+		const analysis = await tool.execute("sui-defi-wf-4", {
+			runId: "wf-sui-defi-04",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"mint stable coin 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::btc_usdc::BtcUSDC 1000000",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+
+		const result = await tool.execute("sui-defi-wf-4-exec", {
+			runId: "wf-sui-defi-04",
+			network: "mainnet",
+			intentType: "sui.stablelayer.mint",
+			stableCoinType:
+				"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::btc_usdc::BtcUSDC",
+			amountUsdcRaw: "1000000",
+			intentText: "继续执行刚才这笔，确认主网执行",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(result.details).toMatchObject({
+			routedWorkflow: "w3rt_run_sui_stablelayer_workflow_v0",
+			intentType: "sui.stablelayer.mint",
+		});
+		expect(executeMocks.stableLayerMintExecute).toHaveBeenCalledTimes(1);
+	});
+
 	it("routes stablelayer intent to stablelayer workflow", async () => {
 		const tool = getTool("w3rt_run_sui_defi_workflow_v0");
 		const result = await tool.execute("sui-defi-wf-1", {
