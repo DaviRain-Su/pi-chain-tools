@@ -10,9 +10,17 @@ import {
 } from "../polymarket.js";
 import {
 	EVM_TOOL_PREFIX,
+	type EvmNetwork,
 	evmNetworkSchema,
 	parseEvmNetwork,
 } from "../runtime.js";
+import {
+	EVM_TRANSFER_TOKEN_DECIMALS_ENV,
+	EVM_TRANSFER_TOKEN_MAP_ENV,
+	EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK,
+	type TokenSymbolMetadata,
+	resolveTokenMetadataBySymbol,
+} from "./transfer-workflow.js";
 
 function shortId(value: string): string {
 	if (value.length <= 16) return value;
@@ -43,8 +51,143 @@ function summarizeBtc5mMarketsText(
 	return lines.join("\n");
 }
 
+function normalizeTokenSymbolFilter(value?: string): string | undefined {
+	if (!value?.trim()) return undefined;
+	const normalized = value
+		.trim()
+		.toUpperCase()
+		.replace(/[^A-Z0-9]/g, "");
+	if (normalized === "USDCE") return "USDC";
+	return normalized;
+}
+
+function summarizeTransferTokenMapText(params: {
+	network?: EvmNetwork;
+	symbolFilter?: string;
+	entries: Array<{
+		symbol: string;
+		decimals: number;
+		addresses: Partial<Record<EvmNetwork, string>>;
+	}>;
+	includeAddresses: boolean;
+}): string {
+	const scope = params.network ? `network=${params.network}` : "all networks";
+	const symbolText = params.symbolFilter
+		? ` symbol=${params.symbolFilter}`
+		: "";
+	const lines = [
+		`EVM transfer token map (${scope}${symbolText}): ${params.entries.length} symbol(s)`,
+	];
+	if (params.entries.length === 0) {
+		lines.push("No symbol mapping matched current filters.");
+		return lines.join("\n");
+	}
+	for (const [index, entry] of params.entries.entries()) {
+		const networks = Object.keys(entry.addresses);
+		lines.push(
+			`${index + 1}. ${entry.symbol} decimals=${entry.decimals} networks=${networks.length ? networks.join(",") : "(none)"}`,
+		);
+		if (params.includeAddresses) {
+			for (const network of networks) {
+				lines.push(
+					`   ${network}: ${entry.addresses[network as EvmNetwork] ?? "(none)"}`,
+				);
+			}
+		}
+	}
+	return lines.join("\n");
+}
+
+function filterTokenMapEntries(params: {
+	metadataBySymbol: Record<string, TokenSymbolMetadata>;
+	network?: EvmNetwork;
+	symbolFilter?: string;
+}): Array<{
+	symbol: string;
+	decimals: number;
+	addresses: Partial<Record<EvmNetwork, string>>;
+}> {
+	const symbols = Object.keys(params.metadataBySymbol)
+		.filter((symbol) =>
+			params.symbolFilter ? symbol === params.symbolFilter : true,
+		)
+		.sort();
+	const entries: Array<{
+		symbol: string;
+		decimals: number;
+		addresses: Partial<Record<EvmNetwork, string>>;
+	}> = [];
+	for (const symbol of symbols) {
+		const metadata = params.metadataBySymbol[symbol];
+		if (!metadata) continue;
+		if (!params.network) {
+			entries.push({
+				symbol,
+				decimals: metadata.decimals,
+				addresses: { ...metadata.addresses },
+			});
+			continue;
+		}
+		const address = metadata.addresses[params.network];
+		if (!address) continue;
+		entries.push({
+			symbol,
+			decimals: metadata.decimals,
+			addresses: { [params.network]: address },
+		});
+	}
+	return entries;
+}
+
 export function createEvmReadTools() {
 	return [
+		defineTool({
+			name: `${EVM_TOOL_PREFIX}getTransferTokenMap`,
+			label: "EVM Get Transfer Token Map",
+			description:
+				"Read effective symbol->address/decimals mapping used by EVM transfer workflow (includes env overrides).",
+			parameters: Type.Object({
+				network: evmNetworkSchema(),
+				symbol: Type.Optional(Type.String()),
+				includeAddresses: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, params) {
+				const network = params.network
+					? parseEvmNetwork(params.network)
+					: undefined;
+				const symbolFilter = normalizeTokenSymbolFilter(params.symbol);
+				const metadataBySymbol = resolveTokenMetadataBySymbol();
+				const entries = filterTokenMapEntries({
+					metadataBySymbol,
+					network,
+					symbolFilter,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeTransferTokenMapText({
+								network,
+								symbolFilter,
+								entries,
+								includeAddresses: params.includeAddresses !== false,
+							}),
+						},
+					],
+					details: {
+						schema: "evm.transfer.token-map.v1",
+						network: network ?? null,
+						symbol: symbolFilter ?? null,
+						env: {
+							globalMapKey: EVM_TRANSFER_TOKEN_MAP_ENV,
+							decimalsKey: EVM_TRANSFER_TOKEN_DECIMALS_ENV,
+							networkMapKeys: EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK,
+						},
+						symbols: entries,
+					},
+				};
+			},
+		}),
 		defineTool({
 			name: `${EVM_TOOL_PREFIX}polymarketSearchMarkets`,
 			label: "EVM Polymarket Search Markets",

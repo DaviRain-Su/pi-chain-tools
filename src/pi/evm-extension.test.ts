@@ -13,6 +13,7 @@ describe("evmExtension", () => {
 		evmExtension(registrar);
 		evmExtension(registrar);
 
+		expect(names).toContain("evm_getTransferTokenMap");
 		expect(names).toContain("evm_polymarketGetBtc5mMarkets");
 		expect(names).toContain("evm_polymarketGetBtc5mAdvice");
 		expect(names).toContain("evm_polymarketBuildBtc5mOrder");

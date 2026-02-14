@@ -13,8 +13,8 @@ import {
 import { createEvmExecuteTools } from "./execute.js";
 
 type WorkflowRunMode = "analysis" | "simulate" | "execute";
-type KnownTokenSymbol = "USDC" | "USDT" | "DAI" | "WETH" | "WBTC";
-type TokenSymbolMetadata = {
+export type KnownTokenSymbol = "USDC" | "USDT" | "DAI" | "WETH" | "WBTC";
+export type TokenSymbolMetadata = {
 	decimals: number;
 	addresses: Partial<Record<EvmNetwork, string>>;
 };
@@ -28,17 +28,18 @@ const EVM_NETWORKS: EvmNetwork[] = [
 	"optimism",
 ];
 
-const EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK: Record<EvmNetwork, string> = {
-	ethereum: "EVM_TRANSFER_TOKEN_MAP_ETHEREUM",
-	sepolia: "EVM_TRANSFER_TOKEN_MAP_SEPOLIA",
-	polygon: "EVM_TRANSFER_TOKEN_MAP_POLYGON",
-	base: "EVM_TRANSFER_TOKEN_MAP_BASE",
-	arbitrum: "EVM_TRANSFER_TOKEN_MAP_ARBITRUM",
-	optimism: "EVM_TRANSFER_TOKEN_MAP_OPTIMISM",
-};
+export const EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK: Record<EvmNetwork, string> =
+	{
+		ethereum: "EVM_TRANSFER_TOKEN_MAP_ETHEREUM",
+		sepolia: "EVM_TRANSFER_TOKEN_MAP_SEPOLIA",
+		polygon: "EVM_TRANSFER_TOKEN_MAP_POLYGON",
+		base: "EVM_TRANSFER_TOKEN_MAP_BASE",
+		arbitrum: "EVM_TRANSFER_TOKEN_MAP_ARBITRUM",
+		optimism: "EVM_TRANSFER_TOKEN_MAP_OPTIMISM",
+	};
 
-const EVM_TRANSFER_TOKEN_MAP_ENV = "EVM_TRANSFER_TOKEN_MAP";
-const EVM_TRANSFER_TOKEN_DECIMALS_ENV = "EVM_TRANSFER_TOKEN_DECIMALS";
+export const EVM_TRANSFER_TOKEN_MAP_ENV = "EVM_TRANSFER_TOKEN_MAP";
+export const EVM_TRANSFER_TOKEN_DECIMALS_ENV = "EVM_TRANSFER_TOKEN_DECIMALS";
 
 const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 	{
@@ -327,7 +328,7 @@ function copyDefaultTokenMetadata(): Record<
 	};
 }
 
-function resolveTokenMetadataBySymbol(): Record<
+export function resolveTokenMetadataBySymbol(): Record<
 	KnownTokenSymbol,
 	TokenSymbolMetadata
 > {

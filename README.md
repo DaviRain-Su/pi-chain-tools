@@ -53,6 +53,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `evm_polymarketGetOrderbook` (CLOB orderbook snapshot by tokenId)
 - `read`: `evm_polymarketGetBtc5mAdvice` (AI-style explainable side recommendation)
 - `read`: `evm_polymarketGetGeoblock` (geoblock status check)
+- `read`: `evm_getTransferTokenMap` (inspect effective transfer token symbol mapping/decimals including env overrides)
 - `compose`: `evm_polymarketBuildBtc5mOrder` (unsigned order intent builder)
 - `execute`: `evm_polymarketPlaceOrder` (CLOB order submit, default `dryRun=true`)
 - `execute`: `evm_polymarketGetOpenOrders` (authenticated open-order list)
@@ -81,6 +82,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `给 0x... 转 0.001 MATIC，先预览`
 - `把 1000000 raw USDC（Polygon）转到 0x...，确认主网执行`
 - `在 base 把 2.5 USDC 转给 0x...，先模拟`
+- `帮我查一下 EVM 转账 token symbol 映射（base）`
 - `给 0x... 转 0.001 MATIC，先分析`
 - `继续执行刚才这笔转账，确认主网执行，confirmToken EVM-XXXX`
 

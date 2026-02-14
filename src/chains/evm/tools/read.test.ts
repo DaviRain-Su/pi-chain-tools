@@ -1,4 +1,19 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const TRANSFER_MAP_ENV_KEYS = [
+	"EVM_TRANSFER_TOKEN_MAP",
+	"EVM_TRANSFER_TOKEN_DECIMALS",
+	"EVM_TRANSFER_TOKEN_MAP_ETHEREUM",
+	"EVM_TRANSFER_TOKEN_MAP_SEPOLIA",
+	"EVM_TRANSFER_TOKEN_MAP_POLYGON",
+	"EVM_TRANSFER_TOKEN_MAP_BASE",
+	"EVM_TRANSFER_TOKEN_MAP_ARBITRUM",
+	"EVM_TRANSFER_TOKEN_MAP_OPTIMISM",
+] as const;
+
+const TRANSFER_MAP_ENV_SNAPSHOT = Object.fromEntries(
+	TRANSFER_MAP_ENV_KEYS.map((key) => [key, process.env[key]]),
+) as Record<(typeof TRANSFER_MAP_ENV_KEYS)[number], string | undefined>;
 
 const polymarketMocks = vi.hoisted(() => ({
 	searchPolymarketEvents: vi.fn(),
@@ -34,6 +49,9 @@ function getTool(name: string): ReadTool {
 }
 
 beforeEach(() => {
+	for (const key of TRANSFER_MAP_ENV_KEYS) {
+		Reflect.deleteProperty(process.env, key);
+	}
 	vi.clearAllMocks();
 	polymarketMocks.searchPolymarketEvents.mockResolvedValue([]);
 	polymarketMocks.getPolymarketMarketBySlug.mockResolvedValue({
@@ -73,7 +91,59 @@ beforeEach(() => {
 	});
 });
 
+afterEach(() => {
+	for (const key of TRANSFER_MAP_ENV_KEYS) {
+		const value = TRANSFER_MAP_ENV_SNAPSHOT[key];
+		if (value == null) {
+			Reflect.deleteProperty(process.env, key);
+		} else {
+			process.env[key] = value;
+		}
+	}
+});
+
 describe("evm read tools", () => {
+	it("returns effective transfer token map", async () => {
+		const tool = getTool("evm_getTransferTokenMap");
+		const result = await tool.execute("t0", {
+			network: "base",
+		});
+		expect(result.content[0]?.text).toContain("EVM transfer token map");
+		expect(result.content[0]?.text).toContain("USDC");
+		expect(result.details).toMatchObject({
+			schema: "evm.transfer.token-map.v1",
+			network: "base",
+			env: {
+				globalMapKey: "EVM_TRANSFER_TOKEN_MAP",
+				decimalsKey: "EVM_TRANSFER_TOKEN_DECIMALS",
+			},
+		});
+	});
+
+	it("applies env override in transfer token map view", async () => {
+		process.env.EVM_TRANSFER_TOKEN_MAP_BASE = JSON.stringify({
+			USDT: "0x1111111111111111111111111111111111111111",
+		});
+		const tool = getTool("evm_getTransferTokenMap");
+		const result = await tool.execute("t0-1", {
+			network: "base",
+			symbol: "usdt",
+		});
+		expect(result.details).toMatchObject({
+			schema: "evm.transfer.token-map.v1",
+			network: "base",
+			symbol: "USDT",
+			symbols: [
+				{
+					symbol: "USDT",
+					addresses: {
+						base: "0x1111111111111111111111111111111111111111",
+					},
+				},
+			],
+		});
+	});
+
 	it("returns BTC 5m markets", async () => {
 		polymarketMocks.getPolymarketBtc5mMarkets.mockResolvedValue([
 			{

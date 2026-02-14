@@ -65,6 +65,10 @@ export EVM_TRANSFER_TOKEN_MAP_BASE='{"USDT":"0x111111111111111111111111111111111
 export EVM_TRANSFER_TOKEN_DECIMALS='{"USDT":6}'
 ```
 
+Inspect effective mapping in agent:
+
+- tool: `evm_getTransferTokenMap` (example params: `{"network":"base"}`)
+
 ## 4) First workflows
 
 ### Polymarket BTC 5m

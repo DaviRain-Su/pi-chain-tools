@@ -24,6 +24,7 @@ describe("defaultExtension", () => {
 		expect(names).toContain("w3rt_run_sui_defi_workflow_v0");
 		expect(names).toContain("near_getBalance");
 		expect(names).toContain("w3rt_run_near_workflow_v0");
+		expect(names).toContain("evm_getTransferTokenMap");
 		expect(names).toContain("evm_polymarketGetBtc5mMarkets");
 		expect(names).toContain("w3rt_run_evm_polymarket_workflow_v0");
 		expect(names).toContain("w3rt_run_evm_transfer_workflow_v0");
