@@ -2,6 +2,10 @@ import { createHash } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
+	parseRunMode,
+	parseRunModeHint,
+} from "../../shared/workflow-runtime.js";
+import {
 	type Btc5mTradeGuardEvaluation,
 	evaluateBtc5mTradeGuards,
 	getPolymarketOrderBook,
@@ -145,11 +149,6 @@ const WORKFLOW_TRADE_REQUOTE_STATE_BY_RUN_ID = new Map<
 	WorkflowTradeRequoteRuntimeState
 >();
 
-function parseRunMode(value?: string): WorkflowRunMode {
-	if (value === "simulate" || value === "execute") return value;
-	return "analysis";
-}
-
 function createRunId(input?: string): string {
 	if (input?.trim()) return input.trim();
 	const nonce = Math.random().toString(36).slice(2, 8);
@@ -198,37 +197,6 @@ function parseSideHint(text: string): "up" | "down" | undefined {
 	if (/\bdown\b|\bshort\b|下跌|看跌|买跌|做空|跌\b/i.test(text)) {
 		return "down";
 	}
-	return undefined;
-}
-
-function parseRunModeHint(text?: string): WorkflowRunMode | undefined {
-	if (!text?.trim()) return undefined;
-	const hasExecute =
-		/(确认主网执行|确认执行|继续执行|直接执行|立即执行|现在执行|马上执行|execute|submit|live\s+order|real\s+order)/i.test(
-			text,
-		);
-	const hasSimulate =
-		/(先模拟|模拟一下|先仿真|先dry\s*run|dry\s*run|simulate|先试跑|先试一下)/i.test(
-			text,
-		);
-	const hasAnalysis =
-		/(先分析|分析一下|先评估|先看分析|analysis|analyze|先看一下)/i.test(text);
-	if (hasSimulate && !hasExecute) return "simulate";
-	if (hasAnalysis && !hasExecute && !hasSimulate) return "analysis";
-	if (hasExecute && !hasSimulate && !hasAnalysis) return "execute";
-	if (hasSimulate && hasExecute) {
-		if (/(先模拟|先dry\s*run|先试跑|先试一下)/i.test(text)) {
-			return "simulate";
-		}
-		return "execute";
-	}
-	if (hasAnalysis && hasExecute) {
-		if (/(先分析|先评估|先看一下)/i.test(text)) return "analysis";
-		return "execute";
-	}
-	if (hasExecute) return "execute";
-	if (hasSimulate) return "simulate";
-	if (hasAnalysis) return "analysis";
 	return undefined;
 }
 
@@ -690,7 +658,7 @@ function resolveRequoteLimitPrice(params: {
 
 function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
-	const runMode = parseRunModeHint(text);
+	const runMode = parseRunModeHint(text) as WorkflowRunMode | undefined;
 	const side = parseSideHint(text);
 	const riskProfile = parseRiskProfileHint(text);
 	const maxEntryPrice = parseMaxEntryPriceHint(text);

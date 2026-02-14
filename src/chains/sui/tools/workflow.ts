@@ -4,6 +4,10 @@ import { Transaction } from "@mysten/sui/transactions";
 import { Type } from "@sinclair/typebox";
 import { type RegisteredTool, defineTool } from "../../../core/types.js";
 import {
+	parseRunMode,
+	parseRunModeHint,
+} from "../../shared/workflow-runtime.js";
+import {
 	buildCetusFarmsHarvestTransaction,
 	buildCetusFarmsStakeTransaction,
 	buildCetusFarmsUnstakeTransaction,
@@ -400,47 +404,6 @@ function workflowRunModeSchema() {
 			Type.Literal("execute"),
 		]),
 	);
-}
-
-function parseRunMode(value?: string): WorkflowRunMode {
-	if (value === "simulate" || value === "execute") return value;
-	return "analysis";
-}
-
-function parseRunModeHint(text?: string): WorkflowRunMode | undefined {
-	if (!text?.trim()) return undefined;
-	const hasExecute =
-		/(确认主网执行|确认执行|继续执行|直接执行|立即执行|现在执行|马上执行|execute|submit|live\s+order|real\s+order|\bnow\b.*\bexecute\b)/i.test(
-			text,
-		);
-	const hasSimulate =
-		/(先模拟|模拟一下|先仿真|先dry\s*run|dry\s*run|simulate|先试跑|先试一下|先预演|先演练)/i.test(
-			text,
-		);
-	const hasAnalysis =
-		/(先分析|分析一下|先评估|先看分析|analysis|analyze|先看一下|先检查)/i.test(
-			text,
-		);
-
-	if (hasSimulate && !hasExecute) return "simulate";
-	if (hasAnalysis && !hasExecute && !hasSimulate) return "analysis";
-	if (hasExecute && !hasSimulate && !hasAnalysis) return "execute";
-	if (hasSimulate && hasExecute) {
-		if (
-			/(先模拟|先仿真|先dry\s*run|先试跑|先试一下|先预演|先演练)/i.test(text)
-		) {
-			return "simulate";
-		}
-		return "execute";
-	}
-	if (hasAnalysis && hasExecute) {
-		if (/(先分析|先评估|先看一下|先检查)/i.test(text)) return "analysis";
-		return "execute";
-	}
-	if (hasExecute) return "execute";
-	if (hasSimulate) return "simulate";
-	if (hasAnalysis) return "analysis";
-	return undefined;
 }
 
 function createRunId(input?: string): string {
@@ -2682,7 +2645,8 @@ function resolveDefiWorkflowRoute(
 	}
 
 	const runMode = parseRunMode(
-		params.runMode ?? parseRunModeHint(params.intentText),
+		params.runMode ??
+			(parseRunModeHint(params.intentText) as WorkflowRunMode | undefined),
 	);
 	const hasRoutingHints = Boolean(
 		intentType ||
@@ -2790,7 +2754,10 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as WorkflowParams;
 				const runMode = parseRunMode(
-					params.runMode ?? parseRunModeHint(params.intentText),
+					params.runMode ??
+						(parseRunModeHint(params.intentText) as
+							| WorkflowRunMode
+							| undefined),
 				);
 				const intentHints = parseIntentText(params.intentText);
 				const priorSession =
@@ -3085,7 +3052,10 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as StableLayerWorkflowParams;
 				const runMode = parseRunMode(
-					params.runMode ?? parseRunModeHint(params.intentText),
+					params.runMode ??
+						(parseRunModeHint(params.intentText) as
+							| WorkflowRunMode
+							| undefined),
 				);
 				const priorSession =
 					runMode === "execute"
@@ -3357,7 +3327,10 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as CetusFarmsWorkflowParams;
 				const runMode = parseRunMode(
-					params.runMode ?? parseRunModeHint(params.intentText),
+					params.runMode ??
+						(parseRunModeHint(params.intentText) as
+							| WorkflowRunMode
+							| undefined),
 				);
 				const priorSession =
 					runMode === "execute"

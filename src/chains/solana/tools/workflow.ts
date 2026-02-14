@@ -21,6 +21,10 @@ import {
 } from "@solana/web3.js";
 import { defineTool } from "../../../core/types.js";
 import {
+	parseRunMode,
+	parseRunModeHint,
+} from "../../shared/workflow-runtime.js";
+import {
 	KAMINO_MAINNET_MARKET_ADDRESS,
 	TOKEN_2022_PROGRAM_ID,
 	TOKEN_PROGRAM_ID,
@@ -776,49 +780,6 @@ function getIntentTypeForProtocolKeyword(
 	if (lower === "jupiter") {
 		return "solana.swap.jupiter";
 	}
-	return undefined;
-}
-
-function parseRunMode(value?: string): WorkflowRunMode {
-	if (value === "analysis" || value === "simulate" || value === "execute") {
-		return value;
-	}
-	return "analysis";
-}
-
-function parseRunModeHint(text?: string): WorkflowRunMode | undefined {
-	if (!text?.trim()) return undefined;
-	const hasExecute =
-		/(确认主网执行|确认执行|继续执行|直接执行|立即执行|现在执行|马上执行|execute|submit|real\s+order|live\s+order|\bnow\b.*\bexecute\b)/i.test(
-			text,
-		);
-	const hasSimulate =
-		/(先模拟|模拟一下|先仿真|先dry\s*run|dry\s*run|simulate|先试跑|先试一下|先预演|先演练)/i.test(
-			text,
-		);
-	const hasAnalysis =
-		/(先分析|分析一下|先评估|先看分析|analysis|analyze|先看一下|先检查)/i.test(
-			text,
-		);
-
-	if (hasSimulate && !hasExecute) return "simulate";
-	if (hasAnalysis && !hasExecute && !hasSimulate) return "analysis";
-	if (hasExecute && !hasSimulate && !hasAnalysis) return "execute";
-	if (hasSimulate && hasExecute) {
-		if (
-			/(先模拟|先仿真|先dry\s*run|先试跑|先试一下|先预演|先演练)/i.test(text)
-		) {
-			return "simulate";
-		}
-		return "execute";
-	}
-	if (hasAnalysis && hasExecute) {
-		if (/(先分析|先看一下|先检查)/i.test(text)) return "analysis";
-		return "execute";
-	}
-	if (hasExecute) return "execute";
-	if (hasSimulate) return "simulate";
-	if (hasAnalysis) return "analysis";
 	return undefined;
 }
 
@@ -9758,7 +9719,10 @@ export function createSolanaWorkflowTools() {
 			}),
 			async execute(_toolCallId, params) {
 				const runMode = parseRunMode(
-					params.runMode ?? parseRunModeHint(params.intentText),
+					params.runMode ??
+						(parseRunModeHint(params.intentText) as
+							| WorkflowRunMode
+							| undefined),
 				);
 				const requestParams = params as Record<string, unknown>;
 				const hasCoreIntentInputs = hasIntentInputs(requestParams);
