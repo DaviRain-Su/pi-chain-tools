@@ -223,6 +223,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `sui_transferSui` (amount in `amountMist` or `amountSui`, with mainnet safety gate `confirmMainnet=true`)
 - `execute`: `sui_transferCoin` (non-SUI transfer, auto-merge coin objects, with mainnet safety gate)
 - `workflow`: `w3rt_run_sui_workflow_v0` (analysis/simulate/execute with deterministic mainnet confirmToken)
+- `workflow LP usability`: for `sui.lp.cetus.add/remove`, if `poolId` is omitted but `positionId` is provided, workflow now attempts to auto-resolve `poolId` from the on-chain position object
 - `workflow`: `w3rt_run_sui_stablelayer_workflow_v0` (analysis/simulate/execute for stable-layer mint/burn/claim with deterministic mainnet confirmToken)
 - `workflow`: `w3rt_run_sui_cetus_farms_workflow_v0` (analysis/simulate/execute for Cetus v2 farms stake/unstake/harvest with deterministic mainnet confirmToken)
 - `workflow`: `w3rt_run_sui_defi_workflow_v0` (unified DeFi router workflow; auto-routes to core/stablelayer/cetus-farms flows)
@@ -240,6 +241,8 @@ Use unified router tool `w3rt_run_sui_defi_workflow_v0`:
   - `intentText: "swap 1000000 from 0x2::sui::SUI to 0x...::usdc::USDC"`
 - LP Add (analysis, less structured):
   - `intentText: "provide liquidity pool: 0xabc position: 0xdef 0x2::sui::SUI 0x2::usdc::USDC tick: -5 to 5 a: 10 b: 20"`
+- LP Add (analysis, auto-resolve poolId from position):
+  - `intentText: "给 position 0xdef 添加 SUI/USDC 流动性，tick -5 到 5，amountA 10 amountB 20，先分析"`
 - Cetus Farms Harvest (analysis):
   - `intentText: "claim farm rewards pool: 0xabc nft: 0xdef"`
 - StableLayer Mint (analysis):

@@ -573,6 +573,78 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("auto-resolves LP add poolId from position object when omitted", async () => {
+		const tool = getTool();
+		const positionId =
+			"0x1111111111111111111111111111111111111111111111111111111111111111";
+		const resolvedPoolId =
+			"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+		const getObject = vi.fn().mockResolvedValue({
+			data: {
+				content: {
+					fields: {
+						pool: {
+							id: resolvedPoolId,
+						},
+					},
+				},
+			},
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({
+			getObject,
+		});
+		const result = await tool.execute("wf5c-autopool", {
+			runId: "wf-sui-05c-autopool",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: `添加流动性 position: ${positionId} SUI/USDC tick: -5 to 5 amountA: 10 amountB: 20`,
+		});
+
+		expect(getObject).toHaveBeenCalledWith({
+			id: positionId,
+			options: {
+				showContent: true,
+			},
+		});
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				poolId: resolvedPoolId,
+				positionId,
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+			},
+		});
+	});
+
+	it("throws readable error when LP poolId is omitted and position lookup fails", async () => {
+		const tool = getTool();
+		const positionId =
+			"0x1111111111111111111111111111111111111111111111111111111111111111";
+		const getObject = vi.fn().mockResolvedValue({
+			data: {
+				content: {
+					fields: {
+						not_pool: "0xdeadbeef",
+					},
+				},
+			},
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({
+			getObject,
+		});
+
+		await expect(
+			tool.execute("wf5c-autopool-fail", {
+				runId: "wf-sui-05c-autopool-fail",
+				runMode: "analysis",
+				network: "mainnet",
+				intentText: `add liquidity position: ${positionId} SUI/USDC tick: -5 to 5 amountA: 10 amountB: 20`,
+			}),
+		).rejects.toThrow("could not be auto-resolved from positionId");
+	});
+
 	it("resolves symbol input/output coin types from structured params", async () => {
 		const tool = getTool();
 		const result = await tool.execute("wf5d", {

@@ -325,6 +325,7 @@ type SuiWorkflowRiskCheck = {
 
 const DEFAULT_SUI_SWAP_RISK_WARNING_SLIPPAGE_BPS = 300;
 const DEFAULT_SUI_SWAP_RISK_CRITICAL_SLIPPAGE_BPS = 1000;
+const SUI_OBJECT_ID_PATTERN = /^0x[a-fA-F0-9]{1,64}$/;
 
 type CetusClmmSdkLike = {
 	Position: {
@@ -643,6 +644,122 @@ function parseNonNegativeBigInt(value: string): bigint | null {
 	return BigInt(normalized);
 }
 
+function asObjectRecord(value: unknown): Record<string, unknown> | null {
+	if (!value || typeof value !== "object") return null;
+	return value as Record<string, unknown>;
+}
+
+function extractObjectIdFromUnknown(
+	value: unknown,
+	maxDepth = 4,
+): string | undefined {
+	if (maxDepth < 0) return undefined;
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		if (SUI_OBJECT_ID_PATTERN.test(trimmed)) return trimmed;
+		return undefined;
+	}
+	const record = asObjectRecord(value);
+	if (!record) return undefined;
+
+	const directKeys = ["id", "objectId", "object_id"];
+	for (const key of directKeys) {
+		const candidate = record[key];
+		if (
+			typeof candidate === "string" &&
+			SUI_OBJECT_ID_PATTERN.test(candidate)
+		) {
+			return candidate;
+		}
+	}
+	for (const key of directKeys) {
+		const nested = extractObjectIdFromUnknown(record[key], maxDepth - 1);
+		if (nested) return nested;
+	}
+	const fieldsNested = extractObjectIdFromUnknown(record.fields, maxDepth - 1);
+	if (fieldsNested) return fieldsNested;
+	return undefined;
+}
+
+function extractPoolIdFromSuiObjectResponse(
+	response: unknown,
+): string | undefined {
+	const root = asObjectRecord(response);
+	if (!root) return undefined;
+	const data = asObjectRecord(root.data);
+	const content = asObjectRecord(data?.content);
+	const fields = asObjectRecord(content?.fields);
+	if (!fields) return undefined;
+
+	const candidateKeys = [
+		"pool",
+		"pool_id",
+		"poolId",
+		"clmm_pool_id",
+		"clmmPoolId",
+		"clmm_pool",
+		"clmmPool",
+	];
+	for (const key of candidateKeys) {
+		const candidate = extractObjectIdFromUnknown(fields[key], 5);
+		if (candidate) return candidate;
+	}
+	return undefined;
+}
+
+async function resolvePoolIdByPositionId(
+	network: SuiNetwork,
+	positionId: string,
+): Promise<string | undefined> {
+	const client = getSuiClient(network) as {
+		getObject?: (params: {
+			id: string;
+			options?: { showContent?: boolean };
+		}) => Promise<unknown>;
+	};
+	if (typeof client.getObject !== "function") return undefined;
+
+	try {
+		const objectData = await client.getObject({
+			id: positionId,
+			options: { showContent: true },
+		});
+		return extractPoolIdFromSuiObjectResponse(objectData);
+	} catch {
+		return undefined;
+	}
+}
+
+function derivePoolAndPositionIds(params: {
+	objectIdMatches: string[];
+	poolLabelMatch: RegExpMatchArray | null;
+	positionLabelMatch: RegExpMatchArray | null;
+}): {
+	poolId: string | undefined;
+	positionId: string | undefined;
+} {
+	const explicitPoolId = params.poolLabelMatch?.[1];
+	const explicitPositionId = params.positionLabelMatch?.[1];
+	let poolId = explicitPoolId;
+	let positionId = explicitPositionId;
+
+	for (const candidate of params.objectIdMatches) {
+		if (!poolId && candidate !== positionId) {
+			poolId = candidate;
+			continue;
+		}
+		if (!positionId && candidate !== poolId) {
+			positionId = candidate;
+		}
+	}
+
+	if (!explicitPoolId && poolId && positionId && poolId === positionId) {
+		poolId = undefined;
+	}
+
+	return { poolId, positionId };
+}
+
 function buildSuiRiskReadableHint(risk: SuiWorkflowRiskCheck): string | null {
 	if (risk.riskBand === "safe") return null;
 	const label =
@@ -744,6 +861,11 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		text.match(
 			/(?:position|positionId|pos|仓位|头寸)\s*[:= ]\s*(0x[a-fA-F0-9]{1,64})/i,
 		) ?? null;
+	const poolAndPositionIds = derivePoolAndPositionIds({
+		objectIdMatches,
+		poolLabelMatch,
+		positionLabelMatch,
+	});
 	const tickRangeMatch =
 		text.match(
 			/(?:tick|ticks|范围)\s*[:= ]?\s*(-?\d+)\s*(?:to|~|-)\s*(-?\d+)/i,
@@ -785,8 +907,8 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		return {
 			...controlHints,
 			intentType: "sui.lp.cetus.add",
-			poolId: poolLabelMatch?.[1] || objectIdMatches[0],
-			positionId: positionLabelMatch?.[1] || objectIdMatches[1],
+			poolId: poolAndPositionIds.poolId,
+			positionId: poolAndPositionIds.positionId,
 			coinTypeA: coinTypeCandidates[0],
 			coinTypeB: coinTypeCandidates[1],
 			tickLower: parseInteger(tickRangeMatch?.[1]),
@@ -804,8 +926,8 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		return {
 			...controlHints,
 			intentType: "sui.lp.cetus.remove",
-			poolId: poolLabelMatch?.[1] || objectIdMatches[0],
-			positionId: positionLabelMatch?.[1] || objectIdMatches[1],
+			poolId: poolAndPositionIds.poolId,
+			positionId: poolAndPositionIds.positionId,
 			coinTypeA: coinTypeCandidates[0],
 			coinTypeB: coinTypeCandidates[1],
 			deltaLiquidity: deltaLiquidityMatch?.[1] || integerMatch?.[0],
@@ -1142,7 +1264,10 @@ function inferIntentType(params: WorkflowParams, parsed: ParsedIntentHints) {
 	);
 }
 
-function normalizeIntent(params: WorkflowParams): SuiWorkflowIntent {
+async function normalizeIntent(
+	params: WorkflowParams,
+	network: SuiNetwork,
+): Promise<SuiWorkflowIntent> {
 	const parsed = parseIntentText(params.intentText);
 	const intentType = inferIntentType(params, parsed);
 
@@ -1184,7 +1309,7 @@ function normalizeIntent(params: WorkflowParams): SuiWorkflowIntent {
 	}
 
 	if (intentType === "sui.lp.cetus.add") {
-		const poolId = params.poolId?.trim() || parsed.poolId;
+		let poolId = params.poolId?.trim() || parsed.poolId;
 		const positionId = params.positionId?.trim() || parsed.positionId;
 		const coinTypeA =
 			normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) || parsed.coinTypeA;
@@ -1194,9 +1319,14 @@ function normalizeIntent(params: WorkflowParams): SuiWorkflowIntent {
 		const tickUpper = params.tickUpper ?? parsed.tickUpper;
 		const amountA = params.amountA?.trim() || parsed.amountA;
 		const amountB = params.amountB?.trim() || parsed.amountB;
+		if (!poolId && positionId) {
+			poolId = await resolvePoolIdByPositionId(network, positionId);
+		}
 		if (!poolId) {
 			throw new Error(
-				"poolId is required for sui.lp.cetus.add. Tip: first query Cetus pools and choose a poolId.",
+				positionId
+					? "poolId is required for sui.lp.cetus.add and could not be auto-resolved from positionId. Tip: provide poolId explicitly or verify positionId belongs to a Cetus position object."
+					: "poolId is required for sui.lp.cetus.add. Tip: first query Cetus pools and choose a poolId.",
 			);
 		}
 		if (!positionId)
@@ -1233,7 +1363,7 @@ function normalizeIntent(params: WorkflowParams): SuiWorkflowIntent {
 	}
 
 	if (intentType === "sui.lp.cetus.remove") {
-		const poolId = params.poolId?.trim() || parsed.poolId;
+		let poolId = params.poolId?.trim() || parsed.poolId;
 		const positionId = params.positionId?.trim() || parsed.positionId;
 		const coinTypeA =
 			normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) || parsed.coinTypeA;
@@ -1243,9 +1373,14 @@ function normalizeIntent(params: WorkflowParams): SuiWorkflowIntent {
 			params.deltaLiquidity?.trim() || parsed.deltaLiquidity;
 		const minAmountA = params.minAmountA?.trim() || parsed.minAmountA || "0";
 		const minAmountB = params.minAmountB?.trim() || parsed.minAmountB || "0";
+		if (!poolId && positionId) {
+			poolId = await resolvePoolIdByPositionId(network, positionId);
+		}
 		if (!poolId) {
 			throw new Error(
-				"poolId is required for sui.lp.cetus.remove. Tip: first query Cetus pools and choose a poolId.",
+				positionId
+					? "poolId is required for sui.lp.cetus.remove and could not be auto-resolved from positionId. Tip: provide poolId explicitly or verify positionId belongs to a Cetus position object."
+					: "poolId is required for sui.lp.cetus.remove. Tip: first query Cetus pools and choose a poolId.",
 			);
 		}
 		if (!positionId)
@@ -2428,7 +2563,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					!hasCoreIntentInput(params) &&
 					priorSession?.intent
 						? (priorSession.intent as SuiWorkflowIntent)
-						: normalizeIntent(params);
+						: await normalizeIntent(params, network);
 				const effectiveConfirmMainnet =
 					params.confirmMainnet === true || intentHints.confirmMainnet === true;
 				const providedConfirmTokenRaw =
