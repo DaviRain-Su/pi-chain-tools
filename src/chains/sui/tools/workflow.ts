@@ -423,6 +423,8 @@ type WorkflowSessionRecord = {
 	runId: string;
 	network: SuiNetwork;
 	intent: unknown;
+	simulatedTransaction?: Transaction;
+	simulatedSignerAddress?: string;
 };
 
 const WORKFLOW_SESSION_BY_RUN_ID = new Map<string, WorkflowSessionRecord>();
@@ -1566,6 +1568,11 @@ type SignedSubmission = {
 	signedSignatures: string[];
 };
 
+function normalizeSuiAddressForCompare(value: string): string {
+	const trimmed = value.trim().toLowerCase();
+	return trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
+}
+
 function resolveSignedSubmission(params: {
 	signedTransactionBytesBase64?: string;
 	signedSignatures?: string[];
@@ -1662,6 +1669,60 @@ async function executeSignedTransactionBlock(params: {
 	};
 }
 
+async function executeSimulatedTransactionBlock(params: {
+	network: SuiNetwork;
+	rpcUrl?: string;
+	transaction: Transaction;
+	expectedSignerAddress?: string;
+	waitForLocalExecution?: boolean;
+}): Promise<Record<string, unknown>> {
+	const signer = resolveSuiKeypair();
+	const signerAddress = signer.toSuiAddress();
+	if (params.expectedSignerAddress?.trim()) {
+		const normalizedExpected = normalizeSuiAddressForCompare(
+			params.expectedSignerAddress,
+		);
+		const normalizedSigner = normalizeSuiAddressForCompare(signerAddress);
+		if (normalizedExpected !== normalizedSigner) {
+			throw new Error(
+				`Local signer address mismatch for simulated tx execute. expected=${params.expectedSignerAddress} actual=${signerAddress}`,
+			);
+		}
+	}
+	const requestType = resolveRequestType(params.waitForLocalExecution);
+	const client = getSuiClient(params.network, params.rpcUrl);
+	const response = await client.signAndExecuteTransaction({
+		signer,
+		transaction: params.transaction,
+		options: {
+			showEffects: true,
+			showEvents: true,
+			showObjectChanges: true,
+			showBalanceChanges: true,
+		},
+		requestType,
+	});
+	const status = response.effects?.status?.status ?? "unknown";
+	const error = response.effects?.status?.error ?? response.errors?.[0] ?? null;
+	if (status === "failure") {
+		throw new Error(
+			`Sui simulated tx execute failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+		);
+	}
+	return {
+		digest: response.digest,
+		status,
+		error,
+		confirmedLocalExecution: response.confirmedLocalExecution ?? null,
+		network: params.network,
+		rpcUrl: getSuiRpcEndpoint(params.network, params.rpcUrl),
+		requestType,
+		executeVia: "simulated_tx_local_signer",
+		signerAddress,
+		explorer: getSuiExplorerTransactionUrl(response.digest, params.network),
+	};
+}
+
 function parseSlippageDecimal(slippageBps?: number): number {
 	const bps = slippageBps ?? 100;
 	if (!Number.isFinite(bps) || bps <= 0 || bps > 10_000) {
@@ -1751,11 +1812,18 @@ function buildSuiExecuteSummaryLine(
 		typeof details.digest === "string" && details.digest.trim()
 			? details.digest.trim()
 			: null;
+	const executeVia =
+		typeof details.executeVia === "string" && details.executeVia.trim()
+			? details.executeVia.trim()
+			: null;
 	if (status) {
 		parts.push(`status=${status}`);
 	}
 	if (digest) {
 		parts.push(`digest=${shortenSummaryValue(digest)}`);
+	}
+	if (executeVia) {
+		parts.push(`via=${executeVia}`);
 	}
 	if (typeof details.confirmedLocalExecution === "boolean") {
 		parts.push(
@@ -2773,6 +2841,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						runId,
 						network,
 						intent,
+						simulatedTransaction: tx,
+						simulatedSignerAddress: sender,
 					});
 					const simulateSummaryLine = buildSuiSimulationSummaryLine({
 						intentType: intent.type,
@@ -2859,17 +2929,30 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					signedSignatures: params.signedSignatures,
 					signedSignature: params.signedSignature,
 				});
+				const canReuseSimulatedTransaction =
+					runMode === "execute" &&
+					!hasCoreIntentInput(params) &&
+					!!priorSession?.simulatedTransaction &&
+					priorSession.network === network &&
+					intentsMatch(priorSession.intent, intent);
 				const executeDetailsBase = signedSubmission
 					? await executeSignedTransactionBlock({
 							network,
 							signed: signedSubmission,
 							waitForLocalExecution: params.waitForLocalExecution,
 						})
-					: await executeIntent(intent, params, network).then((result) =>
-							isRecordObject(result.details)
-								? result.details
-								: { details: result.details ?? null },
-						);
+					: canReuseSimulatedTransaction
+						? await executeSimulatedTransactionBlock({
+								network,
+								transaction: priorSession.simulatedTransaction as Transaction,
+								expectedSignerAddress: priorSession?.simulatedSignerAddress,
+								waitForLocalExecution: params.waitForLocalExecution,
+							})
+						: await executeIntent(intent, params, network).then((result) =>
+								isRecordObject(result.details)
+									? result.details
+									: { details: result.details ?? null },
+							);
 				const executeDetails = {
 					...executeDetailsBase,
 					riskCheck: executeRiskCheck,
@@ -3045,6 +3128,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						runId,
 						network,
 						intent,
+						simulatedTransaction: tx,
+						simulatedSignerAddress: sender,
 					});
 					const simulateSummaryLine = buildSuiSimulationSummaryLine({
 						intentType: intent.type,
@@ -3115,6 +3200,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					signedSignatures: params.signedSignatures,
 					signedSignature: params.signedSignature,
 				});
+				const canReuseSimulatedTransaction =
+					runMode === "execute" &&
+					!hasStableLayerIntentInput(params) &&
+					!!priorSession?.simulatedTransaction &&
+					priorSession.network === network &&
+					intentsMatch(priorSession.intent, intent);
 				const executeResult = signedSubmission
 					? {
 							details: await executeSignedTransactionBlock({
@@ -3123,7 +3214,16 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								waitForLocalExecution: params.waitForLocalExecution,
 							}),
 						}
-					: await executeStableLayerIntent(intent, params, network);
+					: canReuseSimulatedTransaction
+						? {
+								details: await executeSimulatedTransactionBlock({
+									network,
+									transaction: priorSession.simulatedTransaction as Transaction,
+									expectedSignerAddress: priorSession?.simulatedSignerAddress,
+									waitForLocalExecution: params.waitForLocalExecution,
+								}),
+							}
+						: await executeStableLayerIntent(intent, params, network);
 				const executeArtifact = attachExecuteSummary(
 					intent.type,
 					executeResult.details ?? null,
@@ -3299,6 +3399,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						runId,
 						network,
 						intent,
+						simulatedTransaction: tx,
+						simulatedSignerAddress: sender,
 					});
 					const simulateSummaryLine = buildSuiSimulationSummaryLine({
 						intentType: intent.type,
@@ -3369,6 +3471,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					signedSignatures: params.signedSignatures,
 					signedSignature: params.signedSignature,
 				});
+				const canReuseSimulatedTransaction =
+					runMode === "execute" &&
+					!hasCetusFarmsIntentInput(params) &&
+					!!priorSession?.simulatedTransaction &&
+					priorSession.network === network &&
+					intentsMatch(priorSession.intent, intent);
 				const executeResult = signedSubmission
 					? {
 							details: await executeSignedTransactionBlock({
@@ -3378,7 +3486,17 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								waitForLocalExecution: params.waitForLocalExecution,
 							}),
 						}
-					: await executeCetusFarmsIntent(intent, params, network);
+					: canReuseSimulatedTransaction
+						? {
+								details: await executeSimulatedTransactionBlock({
+									network,
+									rpcUrl: params.rpcUrl,
+									transaction: priorSession.simulatedTransaction as Transaction,
+									expectedSignerAddress: priorSession?.simulatedSignerAddress,
+									waitForLocalExecution: params.waitForLocalExecution,
+								}),
+							}
+						: await executeCetusFarmsIntent(intent, params, network);
 				const executeArtifact = attachExecuteSummary(
 					intent.type,
 					executeResult.details ?? null,

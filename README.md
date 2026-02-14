@@ -265,6 +265,7 @@ export EVM_TRANSFER_TOKEN_DECIMALS='{"USDC":6,"USDT":6}'
 - `execute`: `sui_transferSui` (amount in `amountMist` or `amountSui`, with mainnet safety gate `confirmMainnet=true`)
 - `execute`: `sui_transferCoin` (non-SUI transfer, auto-merge coin objects, with mainnet safety gate)
 - `workflow`: `w3rt_run_sui_workflow_v0` (analysis/simulate/execute with deterministic mainnet confirmToken; execute supports either local signer or signed payload submit via `signedTransactionBytesBase64 + signedSignatures`)
+- `workflow follow-up execute`: after `simulate`, a natural follow-up `execute` (same run/session) can reuse the simulated transaction and sign directly with local Sui keystore signer, so no extra signing params are required
 - `workflow LP usability`: for `sui.lp.cetus.add/remove`, if `poolId` is omitted but `positionId` is provided, workflow now attempts to auto-resolve `poolId` from the on-chain position object
 - `workflow`: `w3rt_run_sui_stablelayer_workflow_v0` (analysis/simulate/execute for stable-layer mint/burn/claim with deterministic mainnet confirmToken; supports signed payload submit on execute)
 - `workflow`: `w3rt_run_sui_cetus_farms_workflow_v0` (analysis/simulate/execute for Cetus v2 farms stake/unstake/harvest with deterministic mainnet confirmToken; supports signed payload submit on execute)

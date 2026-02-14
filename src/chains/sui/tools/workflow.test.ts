@@ -16,18 +16,25 @@ const cetusMocks = vi.hoisted(() => {
 	};
 });
 
-const runtimeMocks = vi.hoisted(() => ({
-	getSuiClient: vi.fn(),
-	getSuiRpcEndpoint: vi.fn(() => "https://fullnode.mainnet.sui.io:443"),
-	parsePositiveBigInt: vi.fn((value: string) => BigInt(value)),
-	parseSuiNetwork: vi.fn(() => "mainnet"),
-	resolveSuiKeypair: vi.fn(() => ({
-		toSuiAddress: () =>
-			"0x1111111111111111111111111111111111111111111111111111111111111111",
-	})),
-	suiNetworkSchema: vi.fn(),
-	toMist: vi.fn((value: number) => BigInt(Math.round(value * 1_000_000_000))),
-}));
+const runtimeMocks = vi.hoisted(() => {
+	const signTransaction = vi
+		.fn()
+		.mockResolvedValue({ bytes: "AQID", signature: "AQID-local-signature" });
+	return {
+		getSuiClient: vi.fn(),
+		getSuiRpcEndpoint: vi.fn(() => "https://fullnode.mainnet.sui.io:443"),
+		parsePositiveBigInt: vi.fn((value: string) => BigInt(value)),
+		parseSuiNetwork: vi.fn(() => "mainnet"),
+		signTransaction,
+		resolveSuiKeypair: vi.fn(() => ({
+			toSuiAddress: () =>
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			signTransaction,
+		})),
+		suiNetworkSchema: vi.fn(),
+		toMist: vi.fn((value: number) => BigInt(Math.round(value * 1_000_000_000))),
+	};
+});
 
 const executeMocks = vi.hoisted(() => {
 	const transferSuiExecute = vi.fn();
@@ -241,6 +248,20 @@ beforeEach(() => {
 			},
 			errors: [],
 		}),
+		signAndExecuteTransaction: vi.fn().mockResolvedValue({
+			digest: "0xsimexec",
+			confirmedLocalExecution: true,
+			effects: {
+				status: {
+					status: "success",
+				},
+			},
+			errors: [],
+		}),
+	});
+	runtimeMocks.signTransaction.mockResolvedValue({
+		bytes: "AQID",
+		signature: "AQID-local-signature",
 	});
 	executeMocks.transferSuiExecute.mockResolvedValue({
 		content: [{ type: "text", text: "ok" }],
@@ -562,6 +583,36 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		const tool = getTool();
 		const destination =
 			"0x2222222222222222222222222222222222222222222222222222222222222222";
+		const localClient = {
+			devInspectTransactionBlock: vi.fn().mockResolvedValue({
+				effects: {
+					status: {
+						status: "success",
+					},
+				},
+			}),
+			signAndExecuteTransaction: vi.fn().mockResolvedValue({
+				digest: "0xsim-followup",
+				confirmedLocalExecution: true,
+				effects: {
+					status: {
+						status: "success",
+					},
+				},
+				errors: [],
+			}),
+			executeTransactionBlock: vi.fn().mockResolvedValue({
+				digest: "0xunused",
+				confirmedLocalExecution: true,
+				effects: {
+					status: {
+						status: "success",
+					},
+				},
+				errors: [],
+			}),
+		};
+		runtimeMocks.getSuiClient.mockReturnValue(localClient);
 		const simulated = await tool.execute("wf-followup-sim", {
 			runMode: "simulate",
 			network: "mainnet",
@@ -576,12 +627,14 @@ describe("w3rt_run_sui_workflow_v0", () => {
 			confirmMainnet: true,
 		});
 
-		expect(executeMocks.transferSuiExecute).toHaveBeenCalledTimes(1);
+		expect(localClient.signAndExecuteTransaction).toHaveBeenCalledTimes(1);
+		expect(executeMocks.transferSuiExecute).not.toHaveBeenCalled();
 		expect(executed.details).toMatchObject({
 			intentType: "sui.transfer.sui",
 			artifacts: {
 				execute: {
-					digest: "0xexec",
+					digest: "0xsim-followup",
+					executeVia: "simulated_tx_local_signer",
 				},
 			},
 		});
