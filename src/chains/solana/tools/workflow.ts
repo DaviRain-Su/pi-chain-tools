@@ -940,6 +940,33 @@ function createWorkflowPlan(intentType: WorkflowIntentType): string[] {
 	];
 }
 
+function shortenSummaryValue(value: string): string {
+	const normalized = value.trim();
+	if (normalized.length <= 18) return normalized;
+	return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
+}
+
+function buildExecuteSummaryLine(params: {
+	intentType: WorkflowIntentType;
+	signature: string;
+	signatures: string[] | null;
+	confirmed: boolean;
+	approvalRequired: boolean;
+}): string {
+	const parts = [
+		params.intentType,
+		params.confirmed ? "confirmed" : "submitted",
+	];
+	parts.push(`sig=${shortenSummaryValue(params.signature)}`);
+	if (params.signatures && params.signatures.length > 1) {
+		parts.push(`sigs=${params.signatures.length}`);
+	}
+	if (params.approvalRequired) {
+		parts.push("mainnetGuard=on");
+	}
+	return parts.join(" ");
+}
+
 function parsePositiveNumber(value: string): number | null {
 	const parsed = Number.parseFloat(value);
 	if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -9814,7 +9841,7 @@ export function createSolanaWorkflowTools() {
 					prepared,
 					params as Record<string, unknown>,
 				);
-				const executeArtifact = {
+				const executeArtifactBase = {
 					stage: "execute",
 					signature: execution.signature,
 					signatures: execution.signatures,
@@ -9827,6 +9854,16 @@ export function createSolanaWorkflowTools() {
 							!approvalRequired || params.confirmToken === confirmToken,
 						simulationOk: prepared.simulation.ok,
 					},
+				};
+				const executeArtifact = {
+					...executeArtifactBase,
+					summaryLine: buildExecuteSummaryLine({
+						intentType: intent.type,
+						signature: execution.signature,
+						signatures: execution.signatures,
+						confirmed: execution.confirmed,
+						approvalRequired,
+					}),
 				};
 				const monitorArtifact = {
 					stage: "monitor",

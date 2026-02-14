@@ -35,6 +35,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - Meteora DLMM LP lifecycle compose/execute/workflow support (add/remove)
 - Meteora add-liquidity supports UI amount inputs (`totalXAmountUi`/`totalYAmountUi`) and natural-language x/y token amounts
 - Workflow can auto-resolve Orca/Meteora position ids for LP intents when the owner has a single matching position (fewer structured params needed)
+- workflow execute summary: Solana execute artifacts now include `summaryLine` for one-line replay (`intent + signature + confirmation/guard`)
 - Native stake operation tools: create+delegate/delegate/authorize/deactivate/withdraw
 - Workflow/read support for `solana.read.defiPositions` + `solana_getDefiPositions`
 - Workflow/read support for `solana.read.lendingMarkets` / `solana.read.lendingPositions`
@@ -176,6 +177,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `workflow`: `w3rt_run_sui_stablelayer_workflow_v0` (analysis/simulate/execute for stable-layer mint/burn/claim with deterministic mainnet confirmToken)
 - `workflow`: `w3rt_run_sui_cetus_farms_workflow_v0` (analysis/simulate/execute for Cetus v2 farms stake/unstake/harvest with deterministic mainnet confirmToken)
 - `workflow`: `w3rt_run_sui_defi_workflow_v0` (unified DeFi router workflow; auto-routes to core/stablelayer/cetus-farms flows)
+- `workflow execute summary`: Sui execute artifacts now include `summaryLine` (concise `intent + digest/status` output for PI/OpenClaw narration)
 - `rpc`: `sui_rpc` (generic Sui JSON-RPC passthrough with dangerous method safety guard)
 
 ### Sui DeFi NL Examples (Pi)

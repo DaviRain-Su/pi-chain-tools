@@ -1151,6 +1151,7 @@ describe("w3rt_run_workflow_v0", () => {
 			artifacts: {
 				execute: {
 					signature: "kamino-deposit-sig",
+					summaryLine: expect.stringContaining("solana.lend.kamino.deposit"),
 					guardChecks: {
 						approvalRequired: true,
 						confirmMainnetProvided: true,

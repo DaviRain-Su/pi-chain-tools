@@ -1221,6 +1221,64 @@ function stringifyError(error: unknown): string {
 	return String(error);
 }
 
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function shortenSummaryValue(value: string): string {
+	const normalized = value.trim();
+	if (normalized.length <= 18) return normalized;
+	return `${normalized.slice(0, 8)}...${normalized.slice(-6)}`;
+}
+
+function buildSuiExecuteSummaryLine(
+	intentType: string,
+	executeDetails: unknown,
+): string {
+	const details = isRecordObject(executeDetails) ? executeDetails : null;
+	const parts: string[] = [intentType, "executed"];
+	if (!details) {
+		return parts.join(" ");
+	}
+	const status =
+		typeof details.status === "string" && details.status.trim()
+			? details.status.trim()
+			: null;
+	const digest =
+		typeof details.digest === "string" && details.digest.trim()
+			? details.digest.trim()
+			: null;
+	if (status) {
+		parts.push(`status=${status}`);
+	}
+	if (digest) {
+		parts.push(`digest=${shortenSummaryValue(digest)}`);
+	}
+	if (typeof details.confirmedLocalExecution === "boolean") {
+		parts.push(
+			`localExecution=${details.confirmedLocalExecution ? "confirmed" : "pending"}`,
+		);
+	}
+	return parts.join(" ");
+}
+
+function attachExecuteSummary(
+	intentType: string,
+	executeDetails: unknown,
+): Record<string, unknown> {
+	const summaryLine = buildSuiExecuteSummaryLine(intentType, executeDetails);
+	if (isRecordObject(executeDetails)) {
+		return {
+			...executeDetails,
+			summaryLine,
+		};
+	}
+	return {
+		details: executeDetails ?? null,
+		summaryLine,
+	};
+}
+
 async function exportUnsignedPayload(
 	tx: Transaction,
 	client: ReturnType<typeof getSuiClient>,
@@ -2141,7 +2199,10 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						confirmToken,
 						requestType: resolveRequestType(params.waitForLocalExecution),
 						artifacts: {
-							execute: executeResult.details ?? null,
+							execute: attachExecuteSummary(
+								intent.type,
+								executeResult.details ?? null,
+							),
 						},
 					},
 				};
@@ -2348,7 +2409,10 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						confirmToken,
 						requestType: resolveRequestType(params.waitForLocalExecution),
 						artifacts: {
-							execute: executeResult.details ?? null,
+							execute: attachExecuteSummary(
+								intent.type,
+								executeResult.details ?? null,
+							),
 						},
 					},
 				};
@@ -2558,7 +2622,10 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						confirmToken,
 						requestType: resolveRequestType(params.waitForLocalExecution),
 						artifacts: {
-							execute: executeResult.details ?? null,
+							execute: attachExecuteSummary(
+								intent.type,
+								executeResult.details ?? null,
+							),
 						},
 					},
 				};

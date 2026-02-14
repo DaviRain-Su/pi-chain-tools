@@ -429,6 +429,7 @@ describe("w3rt_run_sui_workflow_v0", () => {
 			artifacts: {
 				execute: {
 					digest: "0xexec",
+					summaryLine: expect.stringContaining("sui.transfer.sui executed"),
 				},
 			},
 		});
@@ -732,6 +733,7 @@ describe("w3rt_run_sui_stablelayer_workflow_v0", () => {
 			artifacts: {
 				execute: {
 					digest: "0xexec-stable-burn",
+					summaryLine: expect.stringContaining("sui.stablelayer.burn executed"),
 				},
 			},
 		});
@@ -868,6 +870,9 @@ describe("w3rt_run_sui_cetus_farms_workflow_v0", () => {
 			artifacts: {
 				execute: {
 					digest: "0xexec-cetus-farms-harvest",
+					summaryLine: expect.stringContaining(
+						"sui.cetus.farms.harvest executed",
+					),
 				},
 			},
 		});
