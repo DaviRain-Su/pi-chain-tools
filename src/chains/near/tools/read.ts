@@ -198,9 +198,17 @@ type NearBurrowRiskSummary = {
 	suppliedAssetCount: number;
 	collateralAssetCount: number;
 	borrowedAssetCount: number;
+	suppliedUsd: number | null;
+	collateralUsd: number | null;
+	borrowedUsd: number | null;
+	borrowToCollateralRatio: number | null;
 	hasBorrowedExposure: boolean;
 	hasCollateralExposure: boolean;
 	accountLocked: boolean;
+	valuationPricedRowCount: number;
+	valuationUnpricedRowCount: number;
+	valuationPriceUpdatedAtLatest: string | null;
+	valuationError: string | null;
 	notes: string[];
 };
 
@@ -2077,17 +2085,148 @@ function countPositiveBurrowRows(rows: NearBurrowPositionAssetRow[]): number {
 	return count;
 }
 
+type NearBurrowRowValuationSummary = {
+	totalUsd: number | null;
+	positiveRowCount: number;
+	pricedRowCount: number;
+	unpricedRowCount: number;
+	priceUpdatedAtLatest: string | null;
+	priceUpdatedAtOldest: string | null;
+};
+
+function summarizeBurrowRowsValuationUsd(params: {
+	rows: NearBurrowPositionAssetRow[];
+	priceIndex: {
+		byTokenId: Map<string, NearIntentsToken>;
+		bySymbol: Map<string, NearIntentsToken[]>;
+	};
+}): NearBurrowRowValuationSummary {
+	let totalUsd = 0;
+	let hasValuation = false;
+	let positiveRowCount = 0;
+	let pricedRowCount = 0;
+	let unpricedRowCount = 0;
+	let latestPriceUpdateMs: number | null = null;
+	let oldestPriceUpdateMs: number | null = null;
+
+	for (const row of params.rows) {
+		if (!hasPositiveBurrowRowBalance(row)) continue;
+		positiveRowCount += 1;
+		const valuationAsset: NearPortfolioAsset = {
+			kind: row.tokenId.trim().toLowerCase() === "wrap.near" ? "native" : "ft",
+			symbol: row.symbol,
+			contractId: row.tokenId,
+			rawAmount: row.balanceRaw,
+			uiAmount: row.balanceUi,
+			decimals: row.rawDecimals,
+		};
+		const resolvedPrice = resolvePortfolioAssetPrice({
+			asset: valuationAsset,
+			priceIndex: params.priceIndex,
+		});
+		if (!resolvedPrice) {
+			unpricedRowCount += 1;
+			continue;
+		}
+		valuationAsset.priceUsd = resolvedPrice.priceUsd;
+		const estimatedUsd = computePortfolioAssetEstimatedUsd(valuationAsset);
+		if (
+			estimatedUsd == null ||
+			!Number.isFinite(estimatedUsd) ||
+			estimatedUsd < 0
+		) {
+			unpricedRowCount += 1;
+			continue;
+		}
+
+		totalUsd += estimatedUsd;
+		hasValuation = true;
+		pricedRowCount += 1;
+		const parsedPriceUpdatedAt = Date.parse(resolvedPrice.priceUpdatedAt);
+		if (!Number.isNaN(parsedPriceUpdatedAt)) {
+			if (
+				latestPriceUpdateMs == null ||
+				parsedPriceUpdatedAt > latestPriceUpdateMs
+			) {
+				latestPriceUpdateMs = parsedPriceUpdatedAt;
+			}
+			if (
+				oldestPriceUpdateMs == null ||
+				parsedPriceUpdatedAt < oldestPriceUpdateMs
+			) {
+				oldestPriceUpdateMs = parsedPriceUpdatedAt;
+			}
+		}
+	}
+
+	return {
+		totalUsd: positiveRowCount === 0 ? 0 : hasValuation ? totalUsd : null,
+		positiveRowCount,
+		pricedRowCount,
+		unpricedRowCount,
+		priceUpdatedAtLatest:
+			latestPriceUpdateMs == null
+				? null
+				: new Date(latestPriceUpdateMs).toISOString(),
+		priceUpdatedAtOldest:
+			oldestPriceUpdateMs == null
+				? null
+				: new Date(oldestPriceUpdateMs).toISOString(),
+	};
+}
+
+function formatBurrowRatioPercent(value: number): string {
+	return `${(value * 100).toFixed(2)}%`;
+}
+
 function buildBurrowRiskSummary(params: {
 	suppliedRows: NearBurrowPositionAssetRow[];
 	collateralRows: NearBurrowPositionAssetRow[];
 	borrowedRows: NearBurrowPositionAssetRow[];
 	accountLocked: boolean;
+	valuation?: {
+		suppliedUsd: number | null;
+		collateralUsd: number | null;
+		borrowedUsd: number | null;
+		pricedRowCount: number;
+		unpricedRowCount: number;
+		priceUpdatedAtLatest: string | null;
+		error: string | null;
+	};
 }): NearBurrowRiskSummary {
 	const suppliedAssetCount = countPositiveBurrowRows(params.suppliedRows);
 	const collateralAssetCount = countPositiveBurrowRows(params.collateralRows);
 	const borrowedAssetCount = countPositiveBurrowRows(params.borrowedRows);
+	const suppliedUsd =
+		typeof params.valuation?.suppliedUsd === "number" &&
+		Number.isFinite(params.valuation.suppliedUsd)
+			? params.valuation.suppliedUsd
+			: null;
+	const collateralUsd =
+		typeof params.valuation?.collateralUsd === "number" &&
+		Number.isFinite(params.valuation.collateralUsd)
+			? params.valuation.collateralUsd
+			: null;
+	const borrowedUsd =
+		typeof params.valuation?.borrowedUsd === "number" &&
+		Number.isFinite(params.valuation.borrowedUsd)
+			? params.valuation.borrowedUsd
+			: null;
+	const borrowToCollateralRatio =
+		borrowedUsd != null &&
+		collateralUsd != null &&
+		Number.isFinite(borrowedUsd) &&
+		Number.isFinite(collateralUsd) &&
+		collateralUsd > 0
+			? borrowedUsd / collateralUsd
+			: null;
 	const hasBorrowedExposure = borrowedAssetCount > 0;
 	const hasCollateralExposure = collateralAssetCount > 0;
+	const valuationError =
+		typeof params.valuation?.error === "string" &&
+		params.valuation.error.trim().length > 0
+			? params.valuation.error.trim()
+			: null;
 	const notes: string[] = [];
 	if (hasBorrowedExposure && !hasCollateralExposure) {
 		notes.push(
@@ -2104,20 +2243,46 @@ function buildBurrowRiskSummary(params: {
 			"Debt exposure detected. Run workflow simulate before execute for borrow/withdraw actions.",
 		);
 	}
-	const level: "low" | "medium" | "high" =
+	if (borrowToCollateralRatio != null) {
+		if (borrowToCollateralRatio >= 0.85) {
+			notes.push(
+				`Borrow/collateral ratio is ${formatBurrowRatioPercent(borrowToCollateralRatio)} (high). Keep collateral buffer before withdrawing or borrowing more.`,
+			);
+		} else if (borrowToCollateralRatio >= 0.6) {
+			notes.push(
+				`Borrow/collateral ratio is ${formatBurrowRatioPercent(borrowToCollateralRatio)} (elevated).`,
+			);
+		}
+	}
+	if (valuationError) {
+		notes.push(`USD valuation unavailable (${valuationError}).`);
+	}
+	let level: "low" | "medium" | "high" =
 		hasBorrowedExposure && !hasCollateralExposure
 			? "high"
 			: hasBorrowedExposure || params.accountLocked
 				? "medium"
 				: "low";
+	if (borrowToCollateralRatio != null && borrowToCollateralRatio >= 0.85) {
+		level = "high";
+	}
 	return {
 		level,
 		suppliedAssetCount,
 		collateralAssetCount,
 		borrowedAssetCount,
+		suppliedUsd,
+		collateralUsd,
+		borrowedUsd,
+		borrowToCollateralRatio,
 		hasBorrowedExposure,
 		hasCollateralExposure,
 		accountLocked: params.accountLocked,
+		valuationPricedRowCount: params.valuation?.pricedRowCount ?? 0,
+		valuationUnpricedRowCount: params.valuation?.unpricedRowCount ?? 0,
+		valuationPriceUpdatedAtLatest:
+			params.valuation?.priceUpdatedAtLatest ?? null,
+		valuationError,
 		notes,
 	};
 }
@@ -3412,6 +3577,36 @@ export function createNearReadTools() {
 							"Include zero-balance assets in sections (default false).",
 					}),
 				),
+				includeValuationUsd: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include USD valuation via NEAR Intents /v0/tokens feed (default true).",
+					}),
+				),
+				valuationApiBaseUrl: Type.Optional(
+					Type.String({
+						description:
+							"NEAR Intents API base URL override for valuation price feed (default https://1click.chaindefuser.com).",
+					}),
+				),
+				valuationApiKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional API key for valuation price feed (fallback env NEAR_INTENTS_API_KEY).",
+					}),
+				),
+				valuationJwt: Type.Optional(
+					Type.String({
+						description:
+							"Optional JWT for valuation price feed (fallback env NEAR_INTENTS_JWT).",
+					}),
+				),
+				valuationCacheTtlMs: Type.Optional(
+					Type.Number({
+						description:
+							"Cache TTL (ms) for valuation token feed reuse in process (default 30000).",
+					}),
+				),
 				network: nearNetworkSchema(),
 				rpcUrl: Type.Optional(
 					Type.String({ description: "Override NEAR JSON-RPC endpoint URL" }),
@@ -3426,6 +3621,10 @@ export function createNearReadTools() {
 					params.burrowContractId,
 				);
 				const includeZero = params.includeZeroBalances === true;
+				const includeValuationUsd = params.includeValuationUsd !== false;
+				const valuationCacheTtlMs = parsePortfolioValuationCacheTtlMs(
+					params.valuationCacheTtlMs,
+				);
 				const snapshotRaw = await fetchBurrowAccountAllPositions({
 					network,
 					rpcUrl: params.rpcUrl,
@@ -3530,11 +3729,112 @@ export function createNearReadTools() {
 				positions.sort((left, right) =>
 					left.positionId.localeCompare(right.positionId),
 				);
+				const valuation = {
+					enabled: includeValuationUsd,
+					endpoint: null as string | null,
+					httpStatus: null as number | null,
+					tokenCount: null as number | null,
+					cache: {
+						hit: null as boolean | null,
+						ageMs: null as number | null,
+						ttlMs: valuationCacheTtlMs,
+					},
+					suppliedUsd: null as number | null,
+					collateralUsd: null as number | null,
+					borrowedUsd: null as number | null,
+					pricedRowCount: 0,
+					unpricedRowCount: 0,
+					priceUpdatedAtLatest: null as string | null,
+					priceUpdatedAtOldest: null as string | null,
+					error: null as string | null,
+				};
+				if (includeValuationUsd) {
+					try {
+						const valuationApiBaseUrl = resolveNearIntentsApiBaseUrl(
+							params.valuationApiBaseUrl,
+						);
+						const tokenResponse = await queryNearPortfolioValuationTokens({
+							baseUrl: valuationApiBaseUrl,
+							headers: resolveNearIntentsHeaders({
+								apiKey: params.valuationApiKey,
+								jwt: params.valuationJwt,
+							}),
+							cacheTtlMs: valuationCacheTtlMs,
+						});
+						valuation.endpoint = tokenResponse.endpoint;
+						valuation.httpStatus = tokenResponse.httpStatus;
+						valuation.tokenCount = tokenResponse.tokens.length;
+						valuation.cache.hit = tokenResponse.cacheHit;
+						valuation.cache.ageMs = tokenResponse.cacheAgeMs;
+
+						const priceIndex = buildNearPortfolioPriceIndex(
+							tokenResponse.tokens,
+						);
+						const suppliedValuation = summarizeBurrowRowsValuationUsd({
+							rows: suppliedAssetsAll,
+							priceIndex,
+						});
+						const collateralValuation = summarizeBurrowRowsValuationUsd({
+							rows: collateralRowsAll,
+							priceIndex,
+						});
+						const borrowedValuation = summarizeBurrowRowsValuationUsd({
+							rows: borrowedRowsAll,
+							priceIndex,
+						});
+						valuation.suppliedUsd = suppliedValuation.totalUsd;
+						valuation.collateralUsd = collateralValuation.totalUsd;
+						valuation.borrowedUsd = borrowedValuation.totalUsd;
+						valuation.pricedRowCount =
+							suppliedValuation.pricedRowCount +
+							collateralValuation.pricedRowCount +
+							borrowedValuation.pricedRowCount;
+						valuation.unpricedRowCount =
+							suppliedValuation.unpricedRowCount +
+							collateralValuation.unpricedRowCount +
+							borrowedValuation.unpricedRowCount;
+
+						const valuationUpdatedTimes = [
+							suppliedValuation.priceUpdatedAtLatest,
+							suppliedValuation.priceUpdatedAtOldest,
+							collateralValuation.priceUpdatedAtLatest,
+							collateralValuation.priceUpdatedAtOldest,
+							borrowedValuation.priceUpdatedAtLatest,
+							borrowedValuation.priceUpdatedAtOldest,
+						]
+							.filter(
+								(value): value is string =>
+									typeof value === "string" && value.length > 0,
+							)
+							.map((value) => Date.parse(value))
+							.filter((value) => !Number.isNaN(value));
+						if (valuationUpdatedTimes.length > 0) {
+							const latest = Math.max(...valuationUpdatedTimes);
+							const oldest = Math.min(...valuationUpdatedTimes);
+							valuation.priceUpdatedAtLatest = new Date(latest).toISOString();
+							valuation.priceUpdatedAtOldest = new Date(oldest).toISOString();
+						}
+					} catch (error) {
+						valuation.error =
+							error instanceof Error ? error.message : String(error);
+					}
+				}
 				const riskSummary = buildBurrowRiskSummary({
 					suppliedRows: suppliedAssetsAll,
 					collateralRows: collateralRowsAll,
 					borrowedRows: borrowedRowsAll,
 					accountLocked: snapshot.is_locked === true,
+					valuation: includeValuationUsd
+						? {
+								suppliedUsd: valuation.suppliedUsd,
+								collateralUsd: valuation.collateralUsd,
+								borrowedUsd: valuation.borrowedUsd,
+								pricedRowCount: valuation.pricedRowCount,
+								unpricedRowCount: valuation.unpricedRowCount,
+								priceUpdatedAtLatest: valuation.priceUpdatedAtLatest,
+								error: valuation.error,
+							}
+						: undefined,
 				});
 
 				const lines = [
@@ -3542,6 +3842,49 @@ export function createNearReadTools() {
 					`Supplied assets: ${suppliedAssets.length}`,
 					`Risk: ${riskSummary.level} (supplied=${riskSummary.suppliedAssetCount}, collateral=${riskSummary.collateralAssetCount}, borrowed=${riskSummary.borrowedAssetCount})`,
 				];
+				if (includeValuationUsd) {
+					if (
+						riskSummary.suppliedUsd != null ||
+						riskSummary.collateralUsd != null ||
+						riskSummary.borrowedUsd != null
+					) {
+						const suppliedUsdText =
+							riskSummary.suppliedUsd == null
+								? "n/a"
+								: formatUsdOrFallback(riskSummary.suppliedUsd);
+						const collateralUsdText =
+							riskSummary.collateralUsd == null
+								? "n/a"
+								: formatUsdOrFallback(riskSummary.collateralUsd);
+						const borrowedUsdText =
+							riskSummary.borrowedUsd == null
+								? "n/a"
+								: formatUsdOrFallback(riskSummary.borrowedUsd);
+						lines.push(
+							`Risk USD: supplied=${suppliedUsdText}, collateral=${collateralUsdText}, borrowed=${borrowedUsdText}`,
+						);
+					} else if (riskSummary.valuationError) {
+						lines.push(`Risk USD: unavailable (${riskSummary.valuationError})`);
+					}
+					if (riskSummary.borrowToCollateralRatio != null) {
+						lines.push(
+							`Borrow/Collateral: ${formatBurrowRatioPercent(riskSummary.borrowToCollateralRatio)}`,
+						);
+					}
+					if (
+						riskSummary.valuationPricedRowCount > 0 ||
+						riskSummary.valuationUnpricedRowCount > 0
+					) {
+						lines.push(
+							`Valuation coverage: priced ${riskSummary.valuationPricedRowCount} rows, unpriced ${riskSummary.valuationUnpricedRowCount} rows`,
+						);
+					}
+					if (riskSummary.valuationPriceUpdatedAtLatest) {
+						lines.push(
+							`Valuation prices as of: ${riskSummary.valuationPriceUpdatedAtLatest}`,
+						);
+					}
+				}
 				for (const asset of suppliedAssets) {
 					const amountText =
 						asset.balanceUi == null
@@ -3595,11 +3938,13 @@ export function createNearReadTools() {
 						rpcEndpoint: endpoint,
 						burrowContractId,
 						includeZeroBalances: includeZero,
+						includeValuationUsd,
 						registered: true,
 						positions,
 						supplied: suppliedAssets,
 						isLocked: snapshot.is_locked === true,
 						riskSummary,
+						valuation,
 						raw: snapshot,
 					},
 				};

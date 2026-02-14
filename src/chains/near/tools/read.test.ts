@@ -1048,6 +1048,7 @@ describe("near_getLendingPositionsBurrow", () => {
 		const result = await tool.execute("near-read-burrow-positions-1", {
 			accountId: "alice.near",
 			network: "mainnet",
+			includeValuationUsd: false,
 		});
 
 		expect(burrowMocks.fetchBurrowAccountAllPositions).toHaveBeenCalledWith({
@@ -1074,6 +1075,142 @@ describe("near_getLendingPositionsBurrow", () => {
 				hasCollateralExposure: true,
 			},
 		});
+	});
+
+	it("adds USD valuation and borrow/collateral ratio when token prices are available", async () => {
+		burrowMocks.fetchBurrowAssetsPagedDetailed.mockResolvedValue([
+			{
+				token_id: "wrap.near",
+				supplied: { shares: "0", balance: "0" },
+				borrowed: { shares: "0", balance: "0" },
+				config: { extra_decimals: 0 },
+			},
+			{
+				token_id: "usdc.tether-token.near",
+				supplied: { shares: "0", balance: "0" },
+				borrowed: { shares: "0", balance: "0" },
+				config: { extra_decimals: 0 },
+			},
+		]);
+		burrowMocks.fetchBurrowAccountAllPositions.mockResolvedValue({
+			account_id: "alice.near",
+			supplied: [
+				{
+					token_id: "wrap.near",
+					balance: "1000",
+					shares: "900",
+					apr: "0.01",
+				},
+			],
+			positions: {
+				REGULAR: {
+					collateral: [
+						{
+							token_id: "wrap.near",
+							balance: "800",
+							shares: "700",
+							apr: "0.01",
+						},
+					],
+					borrowed: [
+						{
+							token_id: "usdc.tether-token.near",
+							balance: "120",
+							shares: "100",
+							apr: "0.05",
+						},
+					],
+				},
+			},
+			is_locked: false,
+		});
+		runtimeMocks.callNearRpc.mockImplementation(
+			(args: {
+				params: { method_name?: string; account_id?: string };
+			}) => {
+				if (args.params.method_name === "ft_metadata") {
+					if (args.params.account_id === "wrap.near") {
+						return Promise.resolve({
+							block_hash: "meta-1",
+							block_height: 1,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "WNEAR",
+								decimals: 0,
+							}),
+						});
+					}
+					if (args.params.account_id === "usdc.tether-token.near") {
+						return Promise.resolve({
+							block_hash: "meta-2",
+							block_height: 2,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "USDC",
+								decimals: 0,
+							}),
+						});
+					}
+				}
+				throw new Error("unexpected callNearRpc in valuation positions test");
+			},
+		);
+		burrowMocks.fromBurrowInnerAmount.mockImplementation(
+			(value: string) => value,
+		);
+		mockFetchJsonOnce(200, [
+			{
+				assetId: "nep141:wrap.near",
+				decimals: 24,
+				blockchain: "near",
+				symbol: "WNEAR",
+				price: 2,
+				priceUpdatedAt: "2026-02-14T00:00:00.000Z",
+				contractAddress: "wrap.near",
+			},
+			{
+				assetId: "nep141:usdc.tether-token.near",
+				decimals: 6,
+				blockchain: "near",
+				symbol: "USDC",
+				price: 1,
+				priceUpdatedAt: "2026-02-14T00:00:00.000Z",
+				contractAddress: "usdc.tether-token.near",
+			},
+		]);
+
+		const tool = getTool("near_getLendingPositionsBurrow");
+		const result = await tool.execute("near-read-burrow-positions-2", {
+			accountId: "alice.near",
+			network: "mainnet",
+			includeValuationUsd: true,
+			valuationCacheTtlMs: 60000,
+		});
+
+		expect(result.content[0]?.text).toContain("Risk USD:");
+		expect(result.content[0]?.text).toContain("Borrow/Collateral:");
+		expect(restMocks.fetch).toHaveBeenCalledTimes(1);
+		expect(restMocks.fetch.mock.calls[0]?.[0]).toBe(
+			"https://1click.chaindefuser.com/v0/tokens",
+		);
+		const riskSummary = (
+			result.details as {
+				riskSummary?: {
+					suppliedUsd?: number | null;
+					collateralUsd?: number | null;
+					borrowedUsd?: number | null;
+					borrowToCollateralRatio?: number | null;
+					valuationPricedRowCount?: number;
+					valuationUnpricedRowCount?: number;
+				};
+			}
+		).riskSummary;
+		expect(riskSummary?.suppliedUsd).toBeCloseTo(2000, 6);
+		expect(riskSummary?.collateralUsd).toBeCloseTo(1600, 6);
+		expect(riskSummary?.borrowedUsd).toBeCloseTo(120, 6);
+		expect(riskSummary?.borrowToCollateralRatio).toBeCloseTo(0.075, 6);
+		expect(riskSummary?.valuationPricedRowCount).toBe(3);
+		expect(riskSummary?.valuationUnpricedRowCount).toBe(0);
 	});
 });
 

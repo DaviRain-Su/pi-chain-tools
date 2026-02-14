@@ -66,7 +66,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `portfolio valuation freshness`: output includes latest valuation price timestamp and structured `priceUpdatedAtLatest/Oldest`
 - `portfolio defi panel`: `near_getPortfolio` now includes Ref/Burrow quantity rows and USD totals (`wallet/ref/burrowSupplied/burrowBorrowed/net`) in both readable text and structured `details.defiBreakdown`
 - `read`: `near_getLendingMarketsBurrow` (Burrow lending market list with capability flags + supply/borrow APR + readable amounts)
-- `read`: `near_getLendingPositionsBurrow` (Burrow account supplied/collateral/borrowed snapshot with readable token rows + risk summary)
+- `read`: `near_getLendingPositionsBurrow` (Burrow account supplied/collateral/borrowed snapshot with readable token rows + risk summary + USD valuation/borrow-collateral ratio)
 - `read`: `near_getRefDeposits` (Ref exchange deposited balances, readable token symbols + raw/ui amounts)
 - `read`: `near_getRefLpPositions` (Ref LP share positions, pool pair labels + remove hints)
 - `read`: `near_getSwapQuoteRef` (Ref/Rhea quote: explicit pool/direct/two-hop route; supports token symbols like `NEAR`/`USDC`)
@@ -442,6 +442,8 @@ Natural language confirmation example:
   - `帮我查一下 NEAR 主网 Ref 存款（deposits）`
 - Ref LP positions:
   - `帮我查一下 NEAR 主网 Ref LP 持仓`
+- Burrow lending risk:
+  - `帮我查一下 NEAR 主网 Burrow 借贷仓位，并给我美元风险摘要`
 
 ### 9) Quick self-check
 
