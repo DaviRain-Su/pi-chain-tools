@@ -47,6 +47,24 @@ const refMocks = vi.hoisted(() => ({
 	resolveRefTokenIds: vi.fn(),
 }));
 
+const burrowMocks = vi.hoisted(() => ({
+	fetchBurrowAsset: vi.fn(),
+	fetchBurrowAssetsIndex: vi.fn(),
+	getBurrowContractId: vi.fn(() => "contract.main.burrow.near"),
+	parseBurrowActionAmountRaw: vi.fn((value: string) => value.trim()),
+	parseBurrowExtraDecimals: vi.fn((value: unknown) =>
+		Number.isInteger(value) ? (value as number) : 0,
+	),
+	resolveBurrowTokenId: vi.fn(
+		({
+			tokenInput,
+		}: {
+			tokenInput: string;
+		}) => tokenInput.toLowerCase(),
+	),
+	toBurrowInnerAmount: vi.fn((value: string) => value.trim()),
+}));
+
 const fetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../runtime.js", async () => {
@@ -78,6 +96,21 @@ vi.mock("../ref.js", () => ({
 	getRefTokenDecimalsHint: refMocks.getRefTokenDecimalsHint,
 	resolveRefTokenIds: refMocks.resolveRefTokenIds,
 }));
+
+vi.mock("../burrow.js", async () => {
+	const actual =
+		await vi.importActual<typeof import("../burrow.js")>("../burrow.js");
+	return {
+		...actual,
+		fetchBurrowAsset: burrowMocks.fetchBurrowAsset,
+		fetchBurrowAssetsIndex: burrowMocks.fetchBurrowAssetsIndex,
+		getBurrowContractId: burrowMocks.getBurrowContractId,
+		parseBurrowActionAmountRaw: burrowMocks.parseBurrowActionAmountRaw,
+		parseBurrowExtraDecimals: burrowMocks.parseBurrowExtraDecimals,
+		resolveBurrowTokenId: burrowMocks.resolveBurrowTokenId,
+		toBurrowInnerAmount: burrowMocks.toBurrowInnerAmount,
+	};
+});
 
 import { createNearExecuteTools } from "./execute.js";
 
@@ -221,6 +254,48 @@ beforeEach(() => {
 			}
 			return candidates.filter((tokenId) => tokenId === normalized);
 		},
+	);
+	burrowMocks.getBurrowContractId.mockReturnValue("contract.main.burrow.near");
+	burrowMocks.fetchBurrowAssetsIndex.mockResolvedValue([
+		{
+			token_id: "wrap.near",
+			supplied: { shares: "0", balance: "0" },
+			borrowed: { shares: "0", balance: "0" },
+			config: { extra_decimals: 0 },
+		},
+		{
+			token_id: "usdc.tether-token.near",
+			supplied: { shares: "0", balance: "0" },
+			borrowed: { shares: "0", balance: "0" },
+			config: { extra_decimals: 0 },
+		},
+	]);
+	burrowMocks.fetchBurrowAsset.mockResolvedValue({
+		token_id: "wrap.near",
+		supplied: { shares: "0", balance: "0" },
+		borrowed: { shares: "0", balance: "0" },
+		config: { extra_decimals: 0 },
+	});
+	burrowMocks.resolveBurrowTokenId.mockImplementation(
+		({
+			tokenInput,
+		}: {
+			tokenInput: string;
+		}) => {
+			const normalized = tokenInput.toLowerCase();
+			if (normalized === "near" || normalized === "wnear") return "wrap.near";
+			if (normalized === "usdc") return "usdc.tether-token.near";
+			return normalized;
+		},
+	);
+	burrowMocks.parseBurrowActionAmountRaw.mockImplementation((value: string) =>
+		value.trim(),
+	);
+	burrowMocks.toBurrowInnerAmount.mockImplementation((value: string) =>
+		value.trim(),
+	);
+	burrowMocks.parseBurrowExtraDecimals.mockImplementation((value: unknown) =>
+		Number.isInteger(value) ? (value as number) : 0,
 	);
 });
 
@@ -555,6 +630,172 @@ describe("near_swapRef", () => {
 			tokenOutId: "usdc.tether-token.near",
 			poolId: 11,
 			source: "bestTwoHopPoolRoute",
+		});
+	});
+});
+
+describe("near Burrow execute tools", () => {
+	it("supplies token to Burrow as collateral", async () => {
+		nearApiMocks.callFunction.mockResolvedValueOnce({
+			transaction_outcome: { id: "near-burrow-supply-hash" },
+		});
+		const tool = getTool("near_supplyBurrow");
+		const result = await tool.execute("near-exec-burrow-1", {
+			tokenId: "NEAR",
+			amountRaw: "1000",
+			confirmMainnet: true,
+		});
+
+		expect(nearApiMocks.callFunction).toHaveBeenCalledWith({
+			contractId: "wrap.near",
+			methodName: "ft_transfer_call",
+			args: {
+				receiver_id: "contract.main.burrow.near",
+				amount: "1000",
+				msg: JSON.stringify({
+					Execute: {
+						actions: [
+							{
+								IncreaseCollateral: {
+									token_id: "wrap.near",
+									amount: null,
+									max_amount: null,
+								},
+							},
+						],
+					},
+				}),
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			tokenId: "wrap.near",
+			amountRaw: "1000",
+			asCollateral: true,
+			txHash: "near-burrow-supply-hash",
+		});
+	});
+
+	it("borrows and withdraws token from Burrow", async () => {
+		burrowMocks.fetchBurrowAssetsIndex.mockResolvedValueOnce([
+			{
+				token_id: "usdc.tether-token.near",
+				supplied: { shares: "0", balance: "0" },
+				borrowed: { shares: "0", balance: "0" },
+				config: { extra_decimals: 12 },
+			},
+		]);
+		burrowMocks.toBurrowInnerAmount.mockReturnValueOnce("1000000000000");
+		nearApiMocks.callFunction.mockResolvedValueOnce({
+			transaction_outcome: { id: "near-burrow-borrow-hash" },
+		});
+		const tool = getTool("near_borrowBurrow");
+		const result = await tool.execute("near-exec-burrow-2", {
+			tokenId: "USDC",
+			amountRaw: "1000000",
+			confirmMainnet: true,
+		});
+
+		expect(nearApiMocks.callFunction).toHaveBeenCalledWith({
+			contractId: "contract.main.burrow.near",
+			methodName: "execute",
+			args: {
+				actions: [
+					{
+						Borrow: {
+							token_id: "usdc.tether-token.near",
+							amount: "1000000000000",
+							max_amount: null,
+						},
+					},
+					{
+						Withdraw: {
+							token_id: "usdc.tether-token.near",
+							amount: "1000000000000",
+							max_amount: null,
+						},
+					},
+				],
+			},
+			deposit: 1n,
+			gas: 250_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "1000000",
+			amountInner: "1000000000000",
+			txHash: "near-burrow-borrow-hash",
+		});
+	});
+
+	it("repays Burrow debt via OnlyRepay transfer_call", async () => {
+		nearApiMocks.callFunction.mockResolvedValueOnce({
+			transaction_outcome: { id: "near-burrow-repay-hash" },
+		});
+		const tool = getTool("near_repayBurrow");
+		const result = await tool.execute("near-exec-burrow-3", {
+			tokenId: "USDC",
+			amountRaw: "500000",
+			confirmMainnet: true,
+		});
+
+		expect(nearApiMocks.callFunction).toHaveBeenCalledWith({
+			contractId: "usdc.tether-token.near",
+			methodName: "ft_transfer_call",
+			args: {
+				receiver_id: "contract.main.burrow.near",
+				amount: "500000",
+				msg: JSON.stringify("OnlyRepay"),
+			},
+			deposit: 1n,
+			gas: 180_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "500000",
+			txHash: "near-burrow-repay-hash",
+		});
+	});
+
+	it("withdraws from Burrow using simple_withdraw", async () => {
+		burrowMocks.fetchBurrowAssetsIndex.mockResolvedValueOnce([
+			{
+				token_id: "usdc.tether-token.near",
+				supplied: { shares: "0", balance: "0" },
+				borrowed: { shares: "0", balance: "0" },
+				config: { extra_decimals: 12 },
+			},
+		]);
+		burrowMocks.toBurrowInnerAmount.mockReturnValueOnce("750000000000");
+		nearApiMocks.callFunction.mockResolvedValueOnce({
+			transaction_outcome: { id: "near-burrow-withdraw-hash" },
+		});
+		const tool = getTool("near_withdrawBurrow");
+		const result = await tool.execute("near-exec-burrow-4", {
+			tokenId: "USDC",
+			amountRaw: "750000",
+			recipientId: "bob.near",
+			confirmMainnet: true,
+		});
+
+		expect(nearApiMocks.callFunction).toHaveBeenCalledWith({
+			contractId: "contract.main.burrow.near",
+			methodName: "simple_withdraw",
+			args: {
+				token_id: "usdc.tether-token.near",
+				amount_with_inner_decimal: "750000000000",
+				recipient_id: "bob.near",
+			},
+			deposit: 1n,
+			gas: 250_000_000_000_000n,
+		});
+		expect(result.details).toMatchObject({
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "750000",
+			amountInner: "750000000000",
+			recipientId: "bob.near",
+			txHash: "near-burrow-withdraw-hash",
 		});
 	});
 });

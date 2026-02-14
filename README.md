@@ -57,6 +57,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `near_getAccount` (view account state)
 - `read`: `near_getFtBalance` (NEP-141 FT balance by contract id, with metadata fallback)
 - `read`: `near_getPortfolio` (native + common FT portfolio snapshot, readable output)
+- `read`: `near_getLendingMarketsBurrow` (Burrow lending market list with capability flags + supply/borrow APR + readable amounts)
+- `read`: `near_getLendingPositionsBurrow` (Burrow account supplied/collateral/borrowed snapshot with readable token rows)
 - `read`: `near_getRefDeposits` (Ref exchange deposited balances, readable token symbols + raw/ui amounts)
 - `read`: `near_getRefLpPositions` (Ref LP share positions, pool pair labels + remove hints)
 - `read`: `near_getSwapQuoteRef` (Ref/Rhea quote: explicit pool/direct/two-hop route; supports token symbols like `NEAR`/`USDC`)
@@ -72,15 +74,23 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `compose`: `near_buildAddLiquidityRefTransaction` (unsigned Ref add-liquidity tx set, optional pre-registration/deposit steps)
 - `compose`: `near_buildRemoveLiquidityRefTransaction` (unsigned Ref remove-liquidity tx, supports shares/shareBps; when `autoWithdraw=true` returns post-remove withdraw compose templates)
 - `compose`: `near_buildRefWithdrawTransaction` (unsigned Ref withdraw payload(s), can include `storage_deposit` pre-tx when needed)
+- `compose`: `near_buildSupplyBurrowTransaction` (unsigned Burrow supply `ft_transfer_call`, supports `asCollateral`)
+- `compose`: `near_buildBorrowBurrowTransaction` (unsigned Burrow borrow `execute`, supports `withdrawToWallet`)
+- `compose`: `near_buildRepayBurrowTransaction` (unsigned Burrow repay `ft_transfer_call` with `OnlyRepay`)
+- `compose`: `near_buildWithdrawBurrowTransaction` (unsigned Burrow `simple_withdraw`, supports recipient + raw->inner conversion)
 - `execute`: `near_transferNear` (local credentials/env signer, mainnet safety gate)
 - `execute`: `near_transferFt` (NEP-141 `ft_transfer`, supports custom gas/deposit, mainnet safety gate)
 - `execute`: `near_swapRef` (Ref/Rhea swap via `ft_transfer_call`, supports multi-hop actions, mainnet safety gate, auto output-token `storage_deposit`)
+- `execute`: `near_supplyBurrow` (Burrow supply via `ft_transfer_call`, supports `asCollateral=true` one-step collateralization)
+- `execute`: `near_borrowBurrow` (Burrow `execute` borrow path, optional auto-withdraw borrowed amount to wallet)
+- `execute`: `near_repayBurrow` (Burrow repay via token `ft_transfer_call` + `OnlyRepay`)
+- `execute`: `near_withdrawBurrow` (Burrow `simple_withdraw`, supports recipient and raw->inner amount conversion by market `extra_decimals`)
 - `execute`: `near_submitIntentsDeposit` (NEAR Intents `/v0/deposit/submit`, submit deposit `txHash` + `depositAddress`/`depositMemo`, mainnet safety gate)
 - `execute`: `near_broadcastSignedTransaction` (broadcast base64 signed NEAR tx via `broadcast_tx_commit`, returns `txHash`)
 - `execute`: `near_withdrawRefToken` (withdraw deposited token from Ref exchange back to wallet, optional full-balance withdraw)
 - `execute`: `near_addLiquidityRef` (Ref LP add-liquidity, includes optional auto register + token deposit to Ref exchange; supports auto pool selection by token pair when `poolId` is omitted)
 - `execute`: `near_removeLiquidityRef` (Ref LP remove-liquidity; supports auto pool selection by token pair when `poolId` is omitted, plus `autoWithdraw=true` to auto-withdraw pool tokens)
-- `workflow`: `w3rt_run_near_workflow_v0` (analysis/compose/simulate/execute + deterministic mainnet confirmToken; compose currently supports `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove` / `near.ref.withdraw`; full workflow intents include `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove`; simulate includes balance + storage-registration prechecks; intents execute accepts either `txHash` or `signedTxBase64` and can auto-broadcast first; `swapType=ANY_INPUT` execute also attempts `/v0/any-input/withdrawals` and returns readable withdrawal artifacts)
+- `workflow`: `w3rt_run_near_workflow_v0` (analysis/compose/simulate/execute + deterministic mainnet confirmToken; compose/workflow intents include `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove` / `near.lend.burrow.supply` / `near.lend.burrow.borrow` / `near.lend.burrow.repay` / `near.lend.burrow.withdraw`; simulate includes balance + storage-registration prechecks plus Burrow market/position prechecks; intents execute accepts either `txHash` or `signedTxBase64` and can auto-broadcast first; `swapType=ANY_INPUT` execute also attempts `/v0/any-input/withdrawals` and returns readable withdrawal artifacts)
 - `workflow phase summary`: NEAR workflow analysis/simulate/execute artifacts include `summaryLine` for concise one-line replay in PI/OpenClaw
 - `workflow execute summary`: NEAR workflow execute artifacts include `summaryLine` for concise one-line replay in PI/OpenClaw (all intents)
 - `intents execute summary`: `near.swap.intents` execute artifact now includes `summaryLine` for one-line natural-language replay in PI/OpenClaw
@@ -118,6 +128,18 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `intentText: "在 Ref 把 USDC 提回钱包，amountRaw 1000000，先模拟"`
 - Ref Withdraw (analysis, full balance):
   - `intentText: "在 Ref 把 USDC 全部提回钱包，先分析"`
+- Burrow Markets (read):
+  - `帮我查一下 NEAR 主网 Burrow 借贷市场`
+- Burrow Positions (read):
+  - `帮我查一下 NEAR 主网 Burrow 我的借贷仓位`
+- Burrow Supply (execute):
+  - `在 Burrow 存入 1 USDC，作为抵押，确认主网执行`
+- Burrow Borrow (execute):
+  - `在 Burrow 借 0.01 USDC 并提到钱包，确认主网执行`
+- Burrow Repay (execute):
+  - `在 Burrow 还款 0.005 USDC，确认主网执行`
+- Burrow Withdraw (execute):
+  - `在 Burrow 提取 0.005 USDC 到钱包，确认主网执行`
 - Compose unsigned transfer (tool):
   - `near_buildTransferNearTransaction` with `fromAccountId`, `toAccountId`, `amountNear`
 - Compose unsigned Ref swap (tool):
@@ -129,6 +151,11 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
   - `near_buildRemoveLiquidityRefTransaction` with `poolId`, `shares` (or `shareBps`); set `autoWithdraw=true` to get post-remove withdraw templates
 - Compose unsigned Ref withdraw (tool):
   - `near_buildRefWithdrawTransaction` with `fromAccountId`, `tokenId`, `amountRaw` (or `withdrawAll=true`)
+- Compose unsigned Burrow lend (tools):
+  - `near_buildSupplyBurrowTransaction` with `tokenId`, `amountRaw`, optional `asCollateral`
+  - `near_buildBorrowBurrowTransaction` with `tokenId`, `amountRaw`, optional `withdrawToWallet`
+  - `near_buildRepayBurrowTransaction` with `tokenId`, `amountRaw`
+  - `near_buildWithdrawBurrowTransaction` with `tokenId`, `amountRaw`, optional `recipientId`
 - Ref Deposits (read):
   - `帮我查一下 NEAR 主网 Ref 里我存了哪些币`
 - Ref LP Positions (read):

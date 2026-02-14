@@ -17,6 +17,10 @@ const executeMocks = vi.hoisted(() => ({
 	transferFtExecute: vi.fn(),
 	swapRefExecute: vi.fn(),
 	withdrawRefTokenExecute: vi.fn(),
+	supplyBurrowExecute: vi.fn(),
+	borrowBurrowExecute: vi.fn(),
+	repayBurrowExecute: vi.fn(),
+	withdrawBurrowExecute: vi.fn(),
 	submitIntentsDepositExecute: vi.fn(),
 	broadcastSignedTxExecute: vi.fn(),
 	addLiquidityRefExecute: vi.fn(),
@@ -31,6 +35,10 @@ const composeMocks = vi.hoisted(() => ({
 	buildRemoveLiquidityRefCompose: vi.fn(),
 	buildSwapRefCompose: vi.fn(),
 	buildRefWithdrawCompose: vi.fn(),
+	buildSupplyBurrowCompose: vi.fn(),
+	buildBorrowBurrowCompose: vi.fn(),
+	buildRepayBurrowCompose: vi.fn(),
+	buildWithdrawBurrowCompose: vi.fn(),
 }));
 
 const fetchMock = vi.hoisted(() => vi.fn());
@@ -86,6 +94,34 @@ vi.mock("./execute.js", () => ({
 			description: "ref withdraw",
 			parameters: {},
 			execute: executeMocks.withdrawRefTokenExecute,
+		},
+		{
+			name: "near_supplyBurrow",
+			label: "burrow supply",
+			description: "burrow supply",
+			parameters: {},
+			execute: executeMocks.supplyBurrowExecute,
+		},
+		{
+			name: "near_borrowBurrow",
+			label: "burrow borrow",
+			description: "burrow borrow",
+			parameters: {},
+			execute: executeMocks.borrowBurrowExecute,
+		},
+		{
+			name: "near_repayBurrow",
+			label: "burrow repay",
+			description: "burrow repay",
+			parameters: {},
+			execute: executeMocks.repayBurrowExecute,
+		},
+		{
+			name: "near_withdrawBurrow",
+			label: "burrow withdraw",
+			description: "burrow withdraw",
+			parameters: {},
+			execute: executeMocks.withdrawBurrowExecute,
 		},
 		{
 			name: "near_submitIntentsDeposit",
@@ -168,6 +204,34 @@ vi.mock("./compose.js", () => ({
 			description: "compose ref withdraw",
 			parameters: {},
 			execute: composeMocks.buildRefWithdrawCompose,
+		},
+		{
+			name: "near_buildSupplyBurrowTransaction",
+			label: "compose burrow supply",
+			description: "compose burrow supply",
+			parameters: {},
+			execute: composeMocks.buildSupplyBurrowCompose,
+		},
+		{
+			name: "near_buildBorrowBurrowTransaction",
+			label: "compose burrow borrow",
+			description: "compose burrow borrow",
+			parameters: {},
+			execute: composeMocks.buildBorrowBurrowCompose,
+		},
+		{
+			name: "near_buildRepayBurrowTransaction",
+			label: "compose burrow repay",
+			description: "compose burrow repay",
+			parameters: {},
+			execute: composeMocks.buildRepayBurrowCompose,
+		},
+		{
+			name: "near_buildWithdrawBurrowTransaction",
+			label: "compose burrow withdraw",
+			description: "compose burrow withdraw",
+			parameters: {},
+			execute: composeMocks.buildWithdrawBurrowCompose,
 		},
 	],
 }));
@@ -256,6 +320,30 @@ beforeEach(() => {
 			txHash: "near-exec-withdraw-hash",
 		},
 	});
+	executeMocks.supplyBurrowExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			txHash: "near-exec-burrow-supply-hash",
+		},
+	});
+	executeMocks.borrowBurrowExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			txHash: "near-exec-burrow-borrow-hash",
+		},
+	});
+	executeMocks.repayBurrowExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			txHash: "near-exec-burrow-repay-hash",
+		},
+	});
+	executeMocks.withdrawBurrowExecute.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			txHash: "near-exec-burrow-withdraw-hash",
+		},
+	});
 	executeMocks.submitIntentsDepositExecute.mockResolvedValue({
 		content: [{ type: "text", text: "ok" }],
 		details: {
@@ -322,6 +410,30 @@ beforeEach(() => {
 		content: [{ type: "text", text: "ok" }],
 		details: {
 			unsignedPayload: "near-compose-ref-withdraw",
+		},
+	});
+	composeMocks.buildSupplyBurrowCompose.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			unsignedPayload: "near-compose-burrow-supply",
+		},
+	});
+	composeMocks.buildBorrowBurrowCompose.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			unsignedPayload: "near-compose-burrow-borrow",
+		},
+	});
+	composeMocks.buildRepayBurrowCompose.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			unsignedPayload: "near-compose-burrow-repay",
+		},
+	});
+	composeMocks.buildWithdrawBurrowCompose.mockResolvedValue({
+		content: [{ type: "text", text: "ok" }],
+		details: {
+			unsignedPayload: "near-compose-burrow-withdraw",
 		},
 	});
 	refMocks.getRefContractId.mockReturnValue("v2.ref-finance.near");
@@ -631,6 +743,38 @@ describe("w3rt_run_near_workflow_v0", () => {
 				autoWithdraw: true,
 			}),
 		);
+	});
+
+	it("composes burrow supply and returns unsigned payload artifact", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-1-compose-burrow-supply", {
+			runId: "wf-near-01-compose-burrow-supply",
+			runMode: "compose",
+			network: "mainnet",
+			intentType: "near.lend.burrow.supply",
+			tokenId: "USDC",
+			amountRaw: "1000000",
+			asCollateral: true,
+		});
+
+		expect(composeMocks.buildSupplyBurrowCompose).toHaveBeenCalledWith(
+			"near-wf-compose",
+			expect.objectContaining({
+				tokenId: "USDC",
+				amountRaw: "1000000",
+				asCollateral: true,
+				network: "mainnet",
+			}),
+		);
+		expect(result.details).toMatchObject({
+			runMode: "compose",
+			intentType: "near.lend.burrow.supply",
+			artifacts: {
+				compose: {
+					unsignedPayload: "near-compose-burrow-supply",
+				},
+			},
+		});
 	});
 
 	it("simulates native transfer and returns artifacts", async () => {
@@ -2756,6 +2900,227 @@ describe("w3rt_run_near_workflow_v0", () => {
 			expect.objectContaining({
 				autoWithdraw: true,
 				autoRegisterReceiver: true,
+			}),
+		);
+	});
+
+	it("parses natural-language burrow supply intent", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-burrow-1", {
+			runId: "wf-near-burrow-01",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Burrow 把 0.01 NEAR 存入并作为抵押，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lend.burrow.supply",
+			intent: {
+				type: "near.lend.burrow.supply",
+				tokenId: "NEAR",
+				amountRaw: "1000",
+				asCollateral: true,
+			},
+		});
+	});
+
+	it("simulates burrow supply and returns market/balance artifacts", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "801",
+				block_height: 801,
+				logs: [],
+				result: encodeJsonResult([
+					{
+						token_id: "wrap.near",
+						supplied: { shares: "0", balance: "0" },
+						borrowed: { shares: "0", balance: "0" },
+						config: {
+							extra_decimals: 0,
+							can_deposit: true,
+							can_use_as_collateral: true,
+							can_borrow: true,
+							can_withdraw: true,
+						},
+					},
+				]),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "802",
+				block_height: 802,
+				logs: [],
+				result: encodeJsonResult("2000"),
+			});
+		const tool = getTool();
+		const result = await tool.execute("near-wf-burrow-2", {
+			runId: "wf-near-burrow-02",
+			runMode: "simulate",
+			intentType: "near.lend.burrow.supply",
+			network: "mainnet",
+			tokenId: "NEAR",
+			amountRaw: "1000",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lend.burrow.supply",
+			artifacts: {
+				simulate: {
+					status: "success",
+					tokenId: "wrap.near",
+					requiredRaw: "1000",
+					availableRaw: "2000",
+					canDeposit: true,
+				},
+			},
+		});
+	});
+
+	it("executes burrow supply after confirm token validation", async () => {
+		const tool = getTool();
+		const analysis = await tool.execute("near-wf-burrow-3-analysis", {
+			runId: "wf-near-burrow-03",
+			runMode: "analysis",
+			intentType: "near.lend.burrow.supply",
+			network: "mainnet",
+			tokenId: "NEAR",
+			amountRaw: "1000",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		const result = await tool.execute("near-wf-burrow-3-execute", {
+			runId: "wf-near-burrow-03",
+			runMode: "execute",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.supplyBurrowExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				tokenId: "NEAR",
+				amountRaw: "1000",
+				asCollateral: true,
+				confirmMainnet: true,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			intentType: "near.lend.burrow.supply",
+			artifacts: {
+				execute: {
+					txHash: "near-exec-burrow-supply-hash",
+				},
+			},
+		});
+	});
+
+	it("parses natural-language burrow borrow intent", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-burrow-4", {
+			runId: "wf-near-burrow-04",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Burrow 借 token NEAR，amountRaw 1000，并提到钱包，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lend.burrow.borrow",
+			intent: {
+				type: "near.lend.burrow.borrow",
+				tokenId: "NEAR",
+				amountRaw: "1000",
+				withdrawToWallet: true,
+			},
+		});
+	});
+
+	it("simulates burrow repay and reports no-debt status", async () => {
+		runtimeMocks.callNearRpc
+			.mockResolvedValueOnce({
+				block_hash: "811",
+				block_height: 811,
+				logs: [],
+				result: encodeJsonResult([
+					{
+						token_id: "wrap.near",
+						supplied: { shares: "0", balance: "0" },
+						borrowed: { shares: "0", balance: "0" },
+						config: {
+							extra_decimals: 0,
+							can_deposit: true,
+							can_use_as_collateral: true,
+							can_borrow: true,
+							can_withdraw: true,
+						},
+					},
+				]),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "812",
+				block_height: 812,
+				logs: [],
+				result: encodeJsonResult("5000"),
+			})
+			.mockResolvedValueOnce({
+				block_hash: "813",
+				block_height: 813,
+				logs: [],
+				result: encodeJsonResult({
+					account_id: "alice.near",
+					supplied: [],
+					positions: {},
+				}),
+			});
+		const tool = getTool();
+		const result = await tool.execute("near-wf-burrow-5", {
+			runId: "wf-near-burrow-05",
+			runMode: "simulate",
+			intentType: "near.lend.burrow.repay",
+			network: "mainnet",
+			tokenId: "NEAR",
+			amountRaw: "1000",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lend.burrow.repay",
+			artifacts: {
+				simulate: {
+					status: "no_debt",
+					tokenId: "wrap.near",
+					borrowedRaw: "0",
+				},
+			},
+		});
+	});
+
+	it("executes burrow withdraw after confirm token validation", async () => {
+		const tool = getTool();
+		const analysis = await tool.execute("near-wf-burrow-6-analysis", {
+			runId: "wf-near-burrow-06",
+			runMode: "analysis",
+			intentType: "near.lend.burrow.withdraw",
+			network: "mainnet",
+			tokenId: "NEAR",
+			amountRaw: "1000",
+			recipientId: "bob.near",
+		});
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		await tool.execute("near-wf-burrow-6-execute", {
+			runId: "wf-near-burrow-06",
+			runMode: "execute",
+			network: "mainnet",
+			tokenId: "NEAR",
+			amountRaw: "1000",
+			recipientId: "bob.near",
+			confirmMainnet: true,
+			confirmToken: token,
+		});
+
+		expect(executeMocks.withdrawBurrowExecute).toHaveBeenCalledWith(
+			"near-wf-exec",
+			expect.objectContaining({
+				tokenId: "NEAR",
+				amountRaw: "1000",
+				recipientId: "bob.near",
+				confirmMainnet: true,
 			}),
 		);
 	});

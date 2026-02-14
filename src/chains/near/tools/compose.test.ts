@@ -20,6 +20,13 @@ const refMocks = vi.hoisted(() => ({
 	resolveRefTokenIds: vi.fn(),
 }));
 
+const burrowMocks = vi.hoisted(() => ({
+	fetchBurrowAsset: vi.fn(),
+	fetchBurrowAssetsIndex: vi.fn(),
+	getBurrowContractId: vi.fn(() => "contract.main.burrow.near"),
+	resolveBurrowTokenId: vi.fn(),
+}));
+
 const fetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../runtime.js", async () => {
@@ -46,6 +53,18 @@ vi.mock("../ref.js", async () => {
 		getRefTokenDecimalsHint: refMocks.getRefTokenDecimalsHint,
 		getRefSwapQuote: refMocks.getRefSwapQuote,
 		resolveRefTokenIds: refMocks.resolveRefTokenIds,
+	};
+});
+
+vi.mock("../burrow.js", async () => {
+	const actual =
+		await vi.importActual<typeof import("../burrow.js")>("../burrow.js");
+	return {
+		...actual,
+		fetchBurrowAsset: burrowMocks.fetchBurrowAsset,
+		fetchBurrowAssetsIndex: burrowMocks.fetchBurrowAssetsIndex,
+		getBurrowContractId: burrowMocks.getBurrowContractId,
+		resolveBurrowTokenId: burrowMocks.resolveBurrowTokenId,
 	};
 });
 
@@ -196,6 +215,37 @@ beforeEach(() => {
 			pool_kind: "SIMPLE_POOL",
 		},
 	});
+	burrowMocks.getBurrowContractId.mockImplementation(
+		(_network?: string, override?: string) =>
+			override ?? "contract.main.burrow.near",
+	);
+	burrowMocks.fetchBurrowAssetsIndex.mockResolvedValue([
+		{
+			token_id: "usdc.tether-token.near",
+			config: {
+				extra_decimals: 6,
+			},
+		},
+		{
+			token_id: "wrap.near",
+			config: {
+				extra_decimals: 0,
+			},
+		},
+	]);
+	burrowMocks.fetchBurrowAsset.mockResolvedValue(null);
+	burrowMocks.resolveBurrowTokenId.mockImplementation(
+		({
+			tokenInput,
+		}: {
+			tokenInput: string;
+		}) => {
+			const normalized = tokenInput.toLowerCase();
+			if (normalized === "usdc") return "usdc.tether-token.near";
+			if (normalized === "near") return "wrap.near";
+			return normalized;
+		},
+	);
 });
 
 afterEach(() => {
@@ -770,6 +820,206 @@ describe("near compose tools", () => {
 					nonce: "7",
 				},
 			],
+		});
+	});
+
+	it("builds unsigned burrow supply transaction", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			keys: [
+				{
+					public_key: TEST_PUBLIC_KEY,
+					access_key: {
+						nonce: 51,
+						permission: "FullAccess",
+					},
+				},
+			],
+			block_hash: TEST_BLOCK_HASH,
+			block_height: 401,
+		});
+		const tool = getTool("near_buildSupplyBurrowTransaction");
+		const result = await tool.execute("near-compose-burrow-supply-1", {
+			network: "mainnet",
+			fromAccountId: "alice.near",
+			tokenId: "USDC",
+			amountRaw: "1000000",
+		});
+
+		expect(result.details).toMatchObject({
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "1000000",
+			asCollateral: true,
+			burrowContractId: "contract.main.burrow.near",
+			transaction: {
+				label: "burrow_supply",
+				receiverId: "usdc.tether-token.near",
+				nonce: "52",
+				actionSummaries: [
+					{
+						type: "FunctionCall",
+						methodName: "ft_transfer_call",
+						args: {
+							receiver_id: "contract.main.burrow.near",
+							amount: "1000000",
+						},
+					},
+				],
+			},
+		});
+		const supplyArgs = (
+			result.details as {
+				transaction: {
+					actionSummaries: [{ args: { msg: string } }];
+				};
+			}
+		).transaction.actionSummaries[0].args;
+		expect(supplyArgs.msg).toContain("IncreaseCollateral");
+	});
+
+	it("builds unsigned burrow borrow transaction", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			keys: [
+				{
+					public_key: TEST_PUBLIC_KEY,
+					access_key: {
+						nonce: 61,
+						permission: "FullAccess",
+					},
+				},
+			],
+			block_hash: TEST_BLOCK_HASH,
+			block_height: 402,
+		});
+		const tool = getTool("near_buildBorrowBurrowTransaction");
+		const result = await tool.execute("near-compose-burrow-borrow-1", {
+			network: "mainnet",
+			fromAccountId: "alice.near",
+			tokenId: "USDC",
+			amountRaw: "2500000",
+			withdrawToWallet: false,
+		});
+
+		expect(result.details).toMatchObject({
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "2500000",
+			amountInner: "2500000000000",
+			extraDecimals: 6,
+			withdrawToWallet: false,
+			burrowContractId: "contract.main.burrow.near",
+			actions: [
+				{
+					Borrow: {
+						token_id: "usdc.tether-token.near",
+						amount: "2500000000000",
+					},
+				},
+			],
+			transaction: {
+				label: "burrow_borrow",
+				receiverId: "contract.main.burrow.near",
+				nonce: "62",
+			},
+		});
+	});
+
+	it("builds unsigned burrow repay transaction", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			keys: [
+				{
+					public_key: TEST_PUBLIC_KEY,
+					access_key: {
+						nonce: 71,
+						permission: "FullAccess",
+					},
+				},
+			],
+			block_hash: TEST_BLOCK_HASH,
+			block_height: 403,
+		});
+		const tool = getTool("near_buildRepayBurrowTransaction");
+		const result = await tool.execute("near-compose-burrow-repay-1", {
+			network: "mainnet",
+			fromAccountId: "alice.near",
+			tokenId: "USDC",
+			amountRaw: "12345",
+		});
+
+		expect(result.details).toMatchObject({
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "12345",
+			burrowContractId: "contract.main.burrow.near",
+			transaction: {
+				label: "burrow_repay",
+				receiverId: "usdc.tether-token.near",
+				nonce: "72",
+				actionSummaries: [
+					{
+						type: "FunctionCall",
+						methodName: "ft_transfer_call",
+						args: {
+							receiver_id: "contract.main.burrow.near",
+							amount: "12345",
+						},
+					},
+				],
+			},
+		});
+		const repayArgs = (
+			result.details as {
+				transaction: {
+					actionSummaries: [{ args: { msg: string } }];
+				};
+			}
+		).transaction.actionSummaries[0].args;
+		expect(repayArgs.msg).toContain("OnlyRepay");
+	});
+
+	it("builds unsigned burrow withdraw transaction", async () => {
+		runtimeMocks.callNearRpc.mockResolvedValueOnce({
+			keys: [
+				{
+					public_key: TEST_PUBLIC_KEY,
+					access_key: {
+						nonce: 81,
+						permission: "FullAccess",
+					},
+				},
+			],
+			block_hash: TEST_BLOCK_HASH,
+			block_height: 404,
+		});
+		const tool = getTool("near_buildWithdrawBurrowTransaction");
+		const result = await tool.execute("near-compose-burrow-withdraw-1", {
+			network: "mainnet",
+			fromAccountId: "alice.near",
+			tokenId: "USDC",
+			amountRaw: "1000",
+			recipientId: "bob.near",
+		});
+
+		expect(result.details).toMatchObject({
+			tokenId: "usdc.tether-token.near",
+			amountRaw: "1000",
+			amountInner: "1000000000",
+			extraDecimals: 6,
+			recipientId: "bob.near",
+			burrowContractId: "contract.main.burrow.near",
+			transaction: {
+				label: "burrow_withdraw",
+				receiverId: "contract.main.burrow.near",
+				nonce: "82",
+				actionSummaries: [
+					{
+						type: "FunctionCall",
+						methodName: "simple_withdraw",
+						args: {
+							token_id: "usdc.tether-token.near",
+							amount_with_inner_decimal: "1000000000",
+							recipient_id: "bob.near",
+						},
+					},
+				],
+			},
 		});
 	});
 });

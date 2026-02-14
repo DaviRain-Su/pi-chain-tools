@@ -1,5 +1,16 @@
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
+import {
+	type BurrowAccountAllPositionsView,
+	type BurrowAccountAssetView,
+	type BurrowAccountPositionView,
+	type BurrowAssetDetailedView,
+	fetchBurrowAccountAllPositions,
+	fetchBurrowAssetsPagedDetailed,
+	fromBurrowInnerAmount,
+	getBurrowContractId,
+	parseBurrowExtraDecimals,
+} from "../burrow.js";
 import { fetchRefPoolById, getRefContractId, getRefSwapQuote } from "../ref.js";
 import {
 	NEAR_TOOL_PREFIX,
@@ -86,6 +97,43 @@ type NearRefLpPosition = {
 type NearRefLpFailure = {
 	poolId: number;
 	error: string;
+};
+
+type NearBurrowMarketRow = {
+	tokenId: string;
+	symbol: string;
+	rawDecimals: number | null;
+	extraDecimals: number;
+	canDeposit: boolean;
+	canWithdraw: boolean;
+	canBorrow: boolean;
+	canUseAsCollateral: boolean;
+	suppliedInner: string;
+	borrowedInner: string;
+	suppliedRaw: string;
+	borrowedRaw: string;
+	suppliedUi: string | null;
+	borrowedUi: string | null;
+	supplyApr: string | null;
+	borrowApr: string | null;
+};
+
+type NearBurrowPositionAssetRow = {
+	tokenId: string;
+	symbol: string;
+	rawDecimals: number | null;
+	extraDecimals: number;
+	balanceInner: string;
+	shares: string;
+	balanceRaw: string;
+	balanceUi: string | null;
+	apr: string | null;
+};
+
+type NearBurrowPositionView = {
+	positionId: string;
+	collateral: NearBurrowPositionAssetRow[];
+	borrowed: NearBurrowPositionAssetRow[];
 };
 
 type NearIntentsBlockchain =
@@ -1282,6 +1330,222 @@ async function resolveTokenMetadataCached(
 	return await metadataPromise;
 }
 
+function normalizeBurrowApr(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const normalized = value.trim();
+	if (!normalized) return null;
+	return normalized;
+}
+
+function formatBurrowAmountUi(params: {
+	rawAmount: string;
+	rawDecimals: number | null;
+}): string | null {
+	if (params.rawDecimals == null) return null;
+	try {
+		return formatTokenAmount(params.rawAmount, params.rawDecimals, 8);
+	} catch {
+		return null;
+	}
+}
+
+function normalizeBurrowMarketAsset(
+	value: unknown,
+): BurrowAssetDetailedView | null {
+	if (!value || typeof value !== "object") return null;
+	const candidate = value as BurrowAssetDetailedView;
+	if (typeof candidate.token_id !== "string") return null;
+	if (
+		!candidate.supplied ||
+		typeof candidate.supplied.balance !== "string" ||
+		typeof candidate.supplied.shares !== "string"
+	) {
+		return null;
+	}
+	if (
+		!candidate.borrowed ||
+		typeof candidate.borrowed.balance !== "string" ||
+		typeof candidate.borrowed.shares !== "string"
+	) {
+		return null;
+	}
+	if (!candidate.config || typeof candidate.config !== "object") {
+		return null;
+	}
+	return candidate;
+}
+
+function normalizeBurrowAccountPositions(
+	value: unknown,
+): BurrowAccountAllPositionsView | null {
+	if (!value || typeof value !== "object") return null;
+	const candidate = value as BurrowAccountAllPositionsView;
+	if (typeof candidate.account_id !== "string") return null;
+	return candidate;
+}
+
+function normalizeBurrowAccountAssetView(
+	value: unknown,
+): BurrowAccountAssetView | null {
+	if (!value || typeof value !== "object") return null;
+	const candidate = value as BurrowAccountAssetView;
+	if (
+		typeof candidate.token_id !== "string" ||
+		typeof candidate.balance !== "string" ||
+		typeof candidate.shares !== "string"
+	) {
+		return null;
+	}
+	return candidate;
+}
+
+function normalizeBurrowPositionNode(
+	value: unknown,
+): BurrowAccountPositionView | null {
+	if (!value || typeof value !== "object") return null;
+	const candidate = value as {
+		collateral?: unknown;
+		borrowed?: unknown;
+	};
+	const collateral = Array.isArray(candidate.collateral)
+		? candidate.collateral
+				.map(normalizeBurrowAccountAssetView)
+				.filter((entry): entry is BurrowAccountAssetView => entry != null)
+		: [];
+	const borrowed = Array.isArray(candidate.borrowed)
+		? candidate.borrowed
+				.map(normalizeBurrowAccountAssetView)
+				.filter((entry): entry is BurrowAccountAssetView => entry != null)
+		: [];
+	return {
+		collateral,
+		borrowed,
+	};
+}
+
+async function resolveBurrowMarketRows(params: {
+	network: string;
+	rpcUrl?: string;
+	markets: BurrowAssetDetailedView[];
+}): Promise<NearBurrowMarketRow[]> {
+	const metadataCache = new Map<string, Promise<NearFtMetadata | null>>();
+	const rows = await mapConcurrently(
+		params.markets,
+		8,
+		async (market): Promise<NearBurrowMarketRow> => {
+			const tokenId = market.token_id.toLowerCase();
+			const metadata = await resolveTokenMetadataCached(
+				tokenId,
+				metadataCache,
+				{
+					network: params.network,
+					rpcUrl: params.rpcUrl,
+				},
+			);
+			const rawDecimals =
+				typeof metadata?.decimals === "number" ? metadata.decimals : null;
+			const symbol =
+				typeof metadata?.symbol === "string" && metadata.symbol.trim()
+					? metadata.symbol.trim()
+					: shortAccountId(tokenId);
+			const extraDecimals = parseBurrowExtraDecimals(
+				market.config?.extra_decimals,
+			);
+			const suppliedInner = parseUnsignedBigInt(
+				market.supplied.balance,
+				`${tokenId}.supplied.balance`,
+			).toString();
+			const borrowedInner = parseUnsignedBigInt(
+				market.borrowed.balance,
+				`${tokenId}.borrowed.balance`,
+			).toString();
+			const suppliedRaw = fromBurrowInnerAmount(suppliedInner, extraDecimals);
+			const borrowedRaw = fromBurrowInnerAmount(borrowedInner, extraDecimals);
+			return {
+				tokenId,
+				symbol,
+				rawDecimals,
+				extraDecimals,
+				canDeposit: market.config?.can_deposit === true,
+				canWithdraw: market.config?.can_withdraw === true,
+				canBorrow: market.config?.can_borrow === true,
+				canUseAsCollateral: market.config?.can_use_as_collateral === true,
+				suppliedInner,
+				borrowedInner,
+				suppliedRaw,
+				borrowedRaw,
+				suppliedUi: formatBurrowAmountUi({
+					rawAmount: suppliedRaw,
+					rawDecimals,
+				}),
+				borrowedUi: formatBurrowAmountUi({
+					rawAmount: borrowedRaw,
+					rawDecimals,
+				}),
+				supplyApr: normalizeBurrowApr(market.supply_apr),
+				borrowApr: normalizeBurrowApr(market.borrow_apr),
+			};
+		},
+	);
+	rows.sort((left, right) => left.symbol.localeCompare(right.symbol));
+	return rows;
+}
+
+async function resolveBurrowPositionAssetRows(params: {
+	network: string;
+	rpcUrl?: string;
+	assets: BurrowAccountAssetView[];
+	extraDecimalsByToken: Map<string, number>;
+}): Promise<NearBurrowPositionAssetRow[]> {
+	const metadataCache = new Map<string, Promise<NearFtMetadata | null>>();
+	return await mapConcurrently(
+		params.assets,
+		8,
+		async (asset): Promise<NearBurrowPositionAssetRow> => {
+			const tokenId = asset.token_id.toLowerCase();
+			const metadata = await resolveTokenMetadataCached(
+				tokenId,
+				metadataCache,
+				{
+					network: params.network,
+					rpcUrl: params.rpcUrl,
+				},
+			);
+			const rawDecimals =
+				typeof metadata?.decimals === "number" ? metadata.decimals : null;
+			const symbol =
+				typeof metadata?.symbol === "string" && metadata.symbol.trim()
+					? metadata.symbol.trim()
+					: shortAccountId(tokenId);
+			const extraDecimals =
+				params.extraDecimalsByToken.get(tokenId) ?? parseBurrowExtraDecimals(0);
+			const balanceInner = parseUnsignedBigInt(
+				asset.balance,
+				`${tokenId}.balance`,
+			).toString();
+			const shares = parseUnsignedBigInt(
+				asset.shares,
+				`${tokenId}.shares`,
+			).toString();
+			const balanceRaw = fromBurrowInnerAmount(balanceInner, extraDecimals);
+			return {
+				tokenId,
+				symbol,
+				rawDecimals,
+				extraDecimals,
+				balanceInner,
+				shares,
+				balanceRaw,
+				balanceUi: formatBurrowAmountUi({
+					rawAmount: balanceRaw,
+					rawDecimals,
+				}),
+				apr: normalizeBurrowApr(asset.apr),
+			};
+		},
+	);
+}
+
 export function createNearReadTools() {
 	return [
 		defineTool({
@@ -1614,6 +1878,322 @@ export function createNearReadTools() {
 						totalYoctoNear: totalYoctoNear.toString(),
 						availableYoctoNear: availableYoctoNear.toString(),
 						lockedYoctoNear: lockedYoctoNear.toString(),
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}getLendingMarketsBurrow`,
+			label: "NEAR Burrow Lending Markets",
+			description:
+				"List Burrow lending markets with deposit/borrow capability and utilization snapshots.",
+			parameters: Type.Object({
+				burrowContractId: Type.Optional(
+					Type.String({
+						description:
+							"Burrow contract id override (default contract.main.burrow.near).",
+					}),
+				),
+				fromIndex: Type.Optional(
+					Type.Number({
+						description: "Paging from_index for Burrow assets (default 0).",
+					}),
+				),
+				limit: Type.Optional(
+					Type.Number({
+						description: "Paging limit (default 30, max 200).",
+					}),
+				),
+				includeDisabled: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include markets where all deposit/withdraw/borrow capabilities are disabled.",
+					}),
+				),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({ description: "Override NEAR JSON-RPC endpoint URL" }),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNearNetwork(params.network);
+				const endpoint = getNearRpcEndpoint(network, params.rpcUrl);
+				const burrowContractId = getBurrowContractId(
+					network,
+					params.burrowContractId,
+				);
+				const fromIndex =
+					typeof params.fromIndex === "number" &&
+					Number.isFinite(params.fromIndex) &&
+					params.fromIndex >= 0
+						? Math.floor(params.fromIndex)
+						: 0;
+				const limit =
+					typeof params.limit === "number" &&
+					Number.isFinite(params.limit) &&
+					params.limit > 0
+						? Math.min(200, Math.floor(params.limit))
+						: 30;
+				const includeDisabled = params.includeDisabled === true;
+				const assetsRaw = await fetchBurrowAssetsPagedDetailed({
+					network,
+					rpcUrl: params.rpcUrl,
+					burrowContractId,
+					fromIndex,
+					limit,
+				});
+				const normalizedAssets = assetsRaw
+					.map(normalizeBurrowMarketAsset)
+					.filter((entry): entry is BurrowAssetDetailedView => entry != null);
+				const rowsAll = await resolveBurrowMarketRows({
+					network,
+					rpcUrl: params.rpcUrl,
+					markets: normalizedAssets,
+				});
+				const rows = includeDisabled
+					? rowsAll
+					: rowsAll.filter(
+							(entry) =>
+								entry.canDeposit || entry.canWithdraw || entry.canBorrow,
+						);
+
+				const lines = [
+					`Burrow lending markets: ${rows.length} shown / ${rowsAll.length} fetched (contract ${burrowContractId})`,
+				];
+				if (rows.length === 0) {
+					lines.push("No market matched current filters.");
+				}
+				for (const [index, row] of rows.entries()) {
+					const suppliedText =
+						row.suppliedUi == null
+							? `${row.suppliedRaw} raw`
+							: `${row.suppliedUi} (raw ${row.suppliedRaw})`;
+					const borrowedText =
+						row.borrowedUi == null
+							? `${row.borrowedRaw} raw`
+							: `${row.borrowedUi} (raw ${row.borrowedRaw})`;
+					const capability = [
+						row.canDeposit ? "deposit" : null,
+						row.canWithdraw ? "withdraw" : null,
+						row.canBorrow ? "borrow" : null,
+						row.canUseAsCollateral ? "collateral" : null,
+					]
+						.filter((item): item is string => item != null)
+						.join("/");
+					lines.push(
+						`${index + 1}. ${row.symbol} [${capability || "no-capability"}] supplyAPR=${row.supplyApr ?? "n/a"} borrowAPR=${row.borrowApr ?? "n/a"}`,
+					);
+					lines.push(`   supplied: ${suppliedText}; borrowed: ${borrowedText}`);
+					lines.push(`   tokenId: ${row.tokenId}`);
+				}
+
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						network,
+						rpcEndpoint: endpoint,
+						burrowContractId,
+						fromIndex,
+						limit,
+						includeDisabled,
+						markets: rows,
+						fetchedCount: rowsAll.length,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}getLendingPositionsBurrow`,
+			label: "NEAR Burrow Lending Positions",
+			description:
+				"Get Burrow lending position snapshot (supplied/collateral/borrowed) for one account.",
+			parameters: Type.Object({
+				accountId: Type.Optional(
+					Type.String({
+						description:
+							"NEAR account id. If omitted, resolve from env/credentials.",
+					}),
+				),
+				burrowContractId: Type.Optional(
+					Type.String({
+						description:
+							"Burrow contract id override (default contract.main.burrow.near).",
+					}),
+				),
+				includeZeroBalances: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include zero-balance assets in sections (default false).",
+					}),
+				),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({ description: "Override NEAR JSON-RPC endpoint URL" }),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNearNetwork(params.network);
+				const accountId = resolveNearAccountId(params.accountId, network);
+				const endpoint = getNearRpcEndpoint(network, params.rpcUrl);
+				const burrowContractId = getBurrowContractId(
+					network,
+					params.burrowContractId,
+				);
+				const includeZero = params.includeZeroBalances === true;
+				const snapshotRaw = await fetchBurrowAccountAllPositions({
+					network,
+					rpcUrl: params.rpcUrl,
+					burrowContractId,
+					accountId,
+				});
+				const snapshot = normalizeBurrowAccountPositions(snapshotRaw);
+				if (!snapshot) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Burrow positions: account ${accountId} is not registered on ${burrowContractId}.`,
+							},
+						],
+						details: {
+							accountId,
+							network,
+							rpcEndpoint: endpoint,
+							burrowContractId,
+							registered: false,
+						},
+					};
+				}
+
+				const markets = await fetchBurrowAssetsPagedDetailed({
+					network,
+					rpcUrl: params.rpcUrl,
+					burrowContractId,
+					fromIndex: 0,
+					limit: 256,
+				});
+				const extraDecimalsByToken = new Map<string, number>();
+				for (const market of markets) {
+					const normalized = normalizeBurrowMarketAsset(market);
+					if (!normalized) continue;
+					extraDecimalsByToken.set(
+						normalized.token_id.toLowerCase(),
+						parseBurrowExtraDecimals(normalized.config?.extra_decimals),
+					);
+				}
+
+				const suppliedAssetsInput = Array.isArray(snapshot.supplied)
+					? snapshot.supplied
+							.map(normalizeBurrowAccountAssetView)
+							.filter((entry): entry is BurrowAccountAssetView => entry != null)
+					: [];
+				const suppliedAssetsAll = await resolveBurrowPositionAssetRows({
+					network,
+					rpcUrl: params.rpcUrl,
+					assets: suppliedAssetsInput,
+					extraDecimalsByToken,
+				});
+				const suppliedAssets = includeZero
+					? suppliedAssetsAll
+					: suppliedAssetsAll.filter(
+							(asset) =>
+								parseUnsignedBigInt(asset.balanceRaw, "balanceRaw") > 0n,
+						);
+
+				const positions: NearBurrowPositionView[] = [];
+				const positionEntries = snapshot.positions ?? {};
+				for (const [positionId, positionNode] of Object.entries(
+					positionEntries,
+				)) {
+					const normalizedPosition = normalizeBurrowPositionNode(positionNode);
+					if (!normalizedPosition) continue;
+					const collateralAll = await resolveBurrowPositionAssetRows({
+						network,
+						rpcUrl: params.rpcUrl,
+						assets: normalizedPosition.collateral ?? [],
+						extraDecimalsByToken,
+					});
+					const borrowedAll = await resolveBurrowPositionAssetRows({
+						network,
+						rpcUrl: params.rpcUrl,
+						assets: normalizedPosition.borrowed ?? [],
+						extraDecimalsByToken,
+					});
+					const collateral = includeZero
+						? collateralAll
+						: collateralAll.filter(
+								(asset) =>
+									parseUnsignedBigInt(asset.balanceRaw, "balanceRaw") > 0n,
+							);
+					const borrowed = includeZero
+						? borrowedAll
+						: borrowedAll.filter(
+								(asset) =>
+									parseUnsignedBigInt(asset.balanceRaw, "balanceRaw") > 0n,
+							);
+					positions.push({
+						positionId,
+						collateral,
+						borrowed,
+					});
+				}
+				positions.sort((left, right) =>
+					left.positionId.localeCompare(right.positionId),
+				);
+
+				const lines = [
+					`Burrow positions: account ${accountId} on ${burrowContractId}`,
+					`Supplied assets: ${suppliedAssets.length}`,
+				];
+				for (const asset of suppliedAssets) {
+					const amountText =
+						asset.balanceUi == null
+							? `${asset.balanceRaw} raw`
+							: `${asset.balanceUi} (raw ${asset.balanceRaw})`;
+					lines.push(
+						`- Supply ${asset.symbol}: ${amountText} shares=${asset.shares}`,
+					);
+				}
+				for (const position of positions) {
+					lines.push(
+						`Position ${position.positionId}: collateral ${position.collateral.length}, borrowed ${position.borrowed.length}`,
+					);
+					for (const collateral of position.collateral) {
+						const amountText =
+							collateral.balanceUi == null
+								? `${collateral.balanceRaw} raw`
+								: `${collateral.balanceUi} (raw ${collateral.balanceRaw})`;
+						lines.push(
+							`  collateral ${collateral.symbol}: ${amountText} shares=${collateral.shares}`,
+						);
+					}
+					for (const borrowed of position.borrowed) {
+						const amountText =
+							borrowed.balanceUi == null
+								? `${borrowed.balanceRaw} raw`
+								: `${borrowed.balanceUi} (raw ${borrowed.balanceRaw})`;
+						lines.push(
+							`  borrowed ${borrowed.symbol}: ${amountText} shares=${borrowed.shares}`,
+						);
+					}
+				}
+				if (lines.length <= 2) {
+					lines.push("No non-zero supplied/collateral/borrowed assets found.");
+				}
+
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						accountId,
+						network,
+						rpcEndpoint: endpoint,
+						burrowContractId,
+						includeZeroBalances: includeZero,
+						registered: true,
+						positions,
+						supplied: suppliedAssets,
+						isLocked: snapshot.is_locked === true,
+						raw: snapshot,
 					},
 				};
 			},

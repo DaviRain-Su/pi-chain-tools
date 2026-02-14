@@ -10,6 +10,15 @@ import {
 import { defineTool } from "../../../core/types.js";
 import type { RegisteredTool } from "../../../core/types.js";
 import {
+	fetchBurrowAsset,
+	fetchBurrowAssetsIndex,
+	getBurrowContractId,
+	parseBurrowActionAmountRaw,
+	parseBurrowExtraDecimals,
+	resolveBurrowTokenId,
+	toBurrowInnerAmount,
+} from "../burrow.js";
+import {
 	type RefPoolPairCandidate,
 	fetchRefPoolById,
 	findRefPoolForPair,
@@ -141,6 +150,57 @@ type NearBuildRefWithdrawTransactionParams = {
 	withdrawAll?: boolean;
 	refContractId?: string;
 	autoRegisterReceiver?: boolean;
+	fromAccountId?: string;
+	publicKey?: string;
+	network?: string;
+	rpcUrl?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearBuildSupplyBurrowTransactionParams = {
+	tokenId: string;
+	amountRaw: string;
+	asCollateral?: boolean;
+	burrowContractId?: string;
+	fromAccountId?: string;
+	publicKey?: string;
+	network?: string;
+	rpcUrl?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearBuildBorrowBurrowTransactionParams = {
+	tokenId: string;
+	amountRaw: string;
+	withdrawToWallet?: boolean;
+	burrowContractId?: string;
+	fromAccountId?: string;
+	publicKey?: string;
+	network?: string;
+	rpcUrl?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearBuildRepayBurrowTransactionParams = {
+	tokenId: string;
+	amountRaw: string;
+	burrowContractId?: string;
+	fromAccountId?: string;
+	publicKey?: string;
+	network?: string;
+	rpcUrl?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearBuildWithdrawBurrowTransactionParams = {
+	tokenId: string;
+	amountRaw: string;
+	recipientId?: string;
+	burrowContractId?: string;
 	fromAccountId?: string;
 	publicKey?: string;
 	network?: string;
@@ -327,6 +387,8 @@ type StorageRegistrationStatus =
 const DEFAULT_FUNCTION_CALL_GAS = 30_000_000_000_000n;
 const DEFAULT_REF_SWAP_GAS = 180_000_000_000_000n;
 const DEFAULT_REF_WITHDRAW_GAS = 180_000_000_000_000n;
+const DEFAULT_BURROW_CALL_GAS = 180_000_000_000_000n;
+const DEFAULT_BURROW_EXECUTE_GAS = 250_000_000_000_000n;
 const DEFAULT_ATTACHED_DEPOSIT = 1n;
 const DEFAULT_FT_STORAGE_DEPOSIT_YOCTO_NEAR = 1_250_000_000_000_000_000_000n;
 const DEFAULT_STORAGE_DEPOSIT_GAS = 30_000_000_000_000n;
@@ -442,6 +504,45 @@ function resolveRefWithdrawGas(value?: string): string {
 		return DEFAULT_REF_WITHDRAW_GAS.toString();
 	}
 	return parsePositiveBigInt(value, "gas").toString();
+}
+
+function resolveBurrowCallGas(value?: string): string {
+	if (typeof value !== "string" || !value.trim()) {
+		return DEFAULT_BURROW_CALL_GAS.toString();
+	}
+	return parsePositiveBigInt(value, "gas").toString();
+}
+
+function resolveBurrowExecuteGas(value?: string): string {
+	if (typeof value !== "string" || !value.trim()) {
+		return DEFAULT_BURROW_EXECUTE_GAS.toString();
+	}
+	return parsePositiveBigInt(value, "gas").toString();
+}
+
+function buildBurrowAssetAmountAction(params: {
+	action: "IncreaseCollateral" | "Borrow" | "Withdraw";
+	tokenId: string;
+	amountInner?: string;
+}): Record<string, unknown> {
+	return {
+		[params.action]: {
+			token_id: params.tokenId,
+			amount:
+				typeof params.amountInner === "string" && params.amountInner.trim()
+					? params.amountInner.trim()
+					: null,
+			max_amount: null,
+		},
+	};
+}
+
+function buildBurrowExecuteMessage(actions: Record<string, unknown>[]): string {
+	return JSON.stringify({
+		Execute: {
+			actions,
+		},
+	});
 }
 
 function parseOptionalPoolId(value?: number | string): number | undefined {
@@ -1365,6 +1466,57 @@ async function queryStorageRegistrationStatus(params: {
 	}
 }
 
+async function resolveBurrowTokenAndAsset(params: {
+	network: string;
+	rpcUrl?: string;
+	burrowContractId?: string;
+	tokenInput: string;
+}): Promise<{
+	burrowContractId: string;
+	tokenId: string;
+	extraDecimals: number;
+}> {
+	const burrowContractId = getBurrowContractId(
+		params.network,
+		params.burrowContractId,
+	);
+	const markets = await fetchBurrowAssetsIndex({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		burrowContractId,
+		maxAssets: 256,
+		pageSize: 64,
+	});
+	const marketIds = markets.map((entry) => entry.token_id.toLowerCase());
+	const tokenId = resolveBurrowTokenId({
+		network: params.network,
+		tokenInput: params.tokenInput,
+		availableTokenIds: marketIds,
+	});
+	const market = markets.find(
+		(entry) => entry.token_id.toLowerCase() === tokenId,
+	);
+	const resolvedAsset =
+		market ??
+		(await fetchBurrowAsset({
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			burrowContractId,
+			tokenId,
+		}));
+	if (!resolvedAsset) {
+		throw new Error(`Burrow market not found for token: ${tokenId}`);
+	}
+	const extraDecimals = parseBurrowExtraDecimals(
+		resolvedAsset.config?.extra_decimals,
+	);
+	return {
+		burrowContractId,
+		tokenId,
+		extraDecimals,
+	};
+}
+
 export function createNearComposeTools(): RegisteredTool[] {
 	return [
 		defineTool({
@@ -1573,6 +1725,583 @@ export function createNearComposeTools(): RegisteredTool[] {
 						accessKeySource: keyState.source,
 						accessKeyPermission: keyState.permission,
 						blockHeight: keyState.blockHeight,
+						transactionCount: 1,
+						requiresLocalSignature: true,
+						expirationNote:
+							"Unsigned payload includes nonce+blockHash and expires quickly. Sign and broadcast promptly.",
+						transaction: artifact,
+						transactions: [artifact],
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}buildSupplyBurrowTransaction`,
+			label: "NEAR Build Burrow Supply Transaction",
+			description:
+				"Build an unsigned Burrow supply transaction (ft_transfer_call) for local signing.",
+			parameters: Type.Object({
+				tokenId: Type.String({
+					description: "Token contract id or common symbol (e.g. NEAR/USDC).",
+				}),
+				amountRaw: Type.String({
+					description: "Token amount in raw integer units.",
+				}),
+				asCollateral: Type.Optional(
+					Type.Boolean({
+						description:
+							"Mark supplied amount as collateral in the same transaction (default true).",
+					}),
+				),
+				burrowContractId: Type.Optional(
+					Type.String({
+						description:
+							"Burrow contract id override (default contract.main.burrow.near).",
+					}),
+				),
+				fromAccountId: Type.Optional(
+					Type.String({
+						description:
+							"Signer account id. If omitted, resolve from env/credentials.",
+					}),
+				),
+				publicKey: Type.Optional(
+					Type.String({
+						description:
+							"Public key used for nonce/access-key lookup, e.g. ed25519:.... If omitted, auto-select from account access keys.",
+					}),
+				),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				gas: Type.Optional(
+					Type.String({
+						description:
+							"Gas for ft_transfer_call in yoctoGas (default 180000000000000 / 180 Tgas).",
+					}),
+				),
+				attachedDepositYoctoNear: Type.Optional(
+					Type.String({
+						description:
+							"Attached deposit for ft_transfer_call in yoctoNEAR (default 1).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as NearBuildSupplyBurrowTransactionParams;
+				const network = parseNearNetwork(params.network);
+				const signerAccountId = resolveNearAccountId(
+					params.fromAccountId,
+					network,
+				);
+				const amountRaw = parseBurrowActionAmountRaw(
+					params.amountRaw,
+					"amountRaw",
+				);
+				const asCollateral = params.asCollateral !== false;
+				const gas = resolveBurrowCallGas(params.gas);
+				const deposit = resolveAttachedDeposit(params.attachedDepositYoctoNear);
+				const { burrowContractId, tokenId } = await resolveBurrowTokenAndAsset({
+					network,
+					rpcUrl: params.rpcUrl,
+					burrowContractId: params.burrowContractId,
+					tokenInput: params.tokenId,
+				});
+				const msg = asCollateral
+					? buildBurrowExecuteMessage([
+							buildBurrowAssetAmountAction({
+								action: "IncreaseCollateral",
+								tokenId,
+							}),
+						])
+					: "";
+				const keyState = await resolveComposeAccessKeyState({
+					accountId: signerAccountId,
+					publicKey: params.publicKey,
+					network,
+					rpcUrl: params.rpcUrl,
+				});
+				const artifact = createUnsignedTransactionArtifact({
+					label: "burrow_supply",
+					signerAccountId,
+					signerPublicKey: keyState.signerPublicKey,
+					receiverId: tokenId,
+					nonce: keyState.nextNonce,
+					blockHash: keyState.blockHash,
+					actions: [
+						actions.functionCall(
+							"ft_transfer_call",
+							{
+								receiver_id: burrowContractId,
+								amount: amountRaw,
+								msg,
+							},
+							BigInt(gas),
+							BigInt(deposit),
+						),
+					],
+					actionSummaries: [
+						{
+							type: "FunctionCall",
+							methodName: "ft_transfer_call",
+							args: {
+								receiver_id: burrowContractId,
+								amount: amountRaw,
+								msg,
+							},
+							gas,
+							depositYoctoNear: deposit,
+						},
+					],
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Unsigned Burrow supply built: ${amountRaw} raw ${tokenId}${asCollateral ? " (as collateral)" : ""}.`,
+						},
+					],
+					details: {
+						network,
+						rpcEndpoint: getNearRpcEndpoint(network, params.rpcUrl),
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						accessKeySource: keyState.source,
+						accessKeyPermission: keyState.permission,
+						blockHeight: keyState.blockHeight,
+						tokenId,
+						amountRaw,
+						asCollateral,
+						burrowContractId,
+						transactionCount: 1,
+						requiresLocalSignature: true,
+						expirationNote:
+							"Unsigned payload includes nonce+blockHash and expires quickly. Sign and broadcast promptly.",
+						transaction: artifact,
+						transactions: [artifact],
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}buildBorrowBurrowTransaction`,
+			label: "NEAR Build Burrow Borrow Transaction",
+			description:
+				"Build an unsigned Burrow borrow transaction (execute) for local signing.",
+			parameters: Type.Object({
+				tokenId: Type.String({
+					description: "Borrow token contract id or common symbol.",
+				}),
+				amountRaw: Type.String({
+					description: "Borrow amount in token raw units.",
+				}),
+				withdrawToWallet: Type.Optional(
+					Type.Boolean({
+						description:
+							"Auto-withdraw borrowed amount in same execute call (default true).",
+					}),
+				),
+				burrowContractId: Type.Optional(
+					Type.String({
+						description:
+							"Burrow contract id override (default contract.main.burrow.near).",
+					}),
+				),
+				fromAccountId: Type.Optional(
+					Type.String({
+						description:
+							"Signer account id. If omitted, resolve from env/credentials.",
+					}),
+				),
+				publicKey: Type.Optional(
+					Type.String({
+						description:
+							"Public key used for nonce/access-key lookup, e.g. ed25519:.... If omitted, auto-select from account access keys.",
+					}),
+				),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				gas: Type.Optional(
+					Type.String({
+						description:
+							"Gas for execute in yoctoGas (default 250000000000000 / 250 Tgas).",
+					}),
+				),
+				attachedDepositYoctoNear: Type.Optional(
+					Type.String({
+						description:
+							"Attached deposit for execute in yoctoNEAR (default 1).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as NearBuildBorrowBurrowTransactionParams;
+				const network = parseNearNetwork(params.network);
+				const signerAccountId = resolveNearAccountId(
+					params.fromAccountId,
+					network,
+				);
+				const amountRaw = parseBurrowActionAmountRaw(
+					params.amountRaw,
+					"amountRaw",
+				);
+				const withdrawToWallet = params.withdrawToWallet !== false;
+				const gas = resolveBurrowExecuteGas(params.gas);
+				const deposit = resolveAttachedDeposit(params.attachedDepositYoctoNear);
+				const { burrowContractId, tokenId, extraDecimals } =
+					await resolveBurrowTokenAndAsset({
+						network,
+						rpcUrl: params.rpcUrl,
+						burrowContractId: params.burrowContractId,
+						tokenInput: params.tokenId,
+					});
+				const amountInner = toBurrowInnerAmount(amountRaw, extraDecimals);
+				const actionsPayload = [
+					buildBurrowAssetAmountAction({
+						action: "Borrow",
+						tokenId,
+						amountInner,
+					}),
+					...(withdrawToWallet
+						? [
+								buildBurrowAssetAmountAction({
+									action: "Withdraw",
+									tokenId,
+									amountInner,
+								}),
+							]
+						: []),
+				];
+				const keyState = await resolveComposeAccessKeyState({
+					accountId: signerAccountId,
+					publicKey: params.publicKey,
+					network,
+					rpcUrl: params.rpcUrl,
+				});
+				const artifact = createUnsignedTransactionArtifact({
+					label: "burrow_borrow",
+					signerAccountId,
+					signerPublicKey: keyState.signerPublicKey,
+					receiverId: burrowContractId,
+					nonce: keyState.nextNonce,
+					blockHash: keyState.blockHash,
+					actions: [
+						actions.functionCall(
+							"execute",
+							{
+								actions: actionsPayload,
+							},
+							BigInt(gas),
+							BigInt(deposit),
+						),
+					],
+					actionSummaries: [
+						{
+							type: "FunctionCall",
+							methodName: "execute",
+							args: {
+								actions: actionsPayload,
+							},
+							gas,
+							depositYoctoNear: deposit,
+						},
+					],
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Unsigned Burrow borrow built: ${amountRaw} raw ${tokenId}${withdrawToWallet ? " (borrow+withdraw)" : ""}.`,
+						},
+					],
+					details: {
+						network,
+						rpcEndpoint: getNearRpcEndpoint(network, params.rpcUrl),
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						accessKeySource: keyState.source,
+						accessKeyPermission: keyState.permission,
+						blockHeight: keyState.blockHeight,
+						tokenId,
+						amountRaw,
+						amountInner,
+						extraDecimals,
+						withdrawToWallet,
+						burrowContractId,
+						actions: actionsPayload,
+						transactionCount: 1,
+						requiresLocalSignature: true,
+						expirationNote:
+							"Unsigned payload includes nonce+blockHash and expires quickly. Sign and broadcast promptly.",
+						transaction: artifact,
+						transactions: [artifact],
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}buildRepayBurrowTransaction`,
+			label: "NEAR Build Burrow Repay Transaction",
+			description:
+				"Build an unsigned Burrow repay transaction (ft_transfer_call) for local signing.",
+			parameters: Type.Object({
+				tokenId: Type.String({
+					description: "Repay token contract id or common symbol.",
+				}),
+				amountRaw: Type.String({
+					description: "Repay amount in token raw units.",
+				}),
+				burrowContractId: Type.Optional(
+					Type.String({
+						description:
+							"Burrow contract id override (default contract.main.burrow.near).",
+					}),
+				),
+				fromAccountId: Type.Optional(
+					Type.String({
+						description:
+							"Signer account id. If omitted, resolve from env/credentials.",
+					}),
+				),
+				publicKey: Type.Optional(
+					Type.String({
+						description:
+							"Public key used for nonce/access-key lookup, e.g. ed25519:.... If omitted, auto-select from account access keys.",
+					}),
+				),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				gas: Type.Optional(
+					Type.String({
+						description:
+							"Gas for ft_transfer_call in yoctoGas (default 180000000000000 / 180 Tgas).",
+					}),
+				),
+				attachedDepositYoctoNear: Type.Optional(
+					Type.String({
+						description:
+							"Attached deposit for ft_transfer_call in yoctoNEAR (default 1).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as NearBuildRepayBurrowTransactionParams;
+				const network = parseNearNetwork(params.network);
+				const signerAccountId = resolveNearAccountId(
+					params.fromAccountId,
+					network,
+				);
+				const amountRaw = parseBurrowActionAmountRaw(
+					params.amountRaw,
+					"amountRaw",
+				);
+				const gas = resolveBurrowCallGas(params.gas);
+				const deposit = resolveAttachedDeposit(params.attachedDepositYoctoNear);
+				const { burrowContractId, tokenId } = await resolveBurrowTokenAndAsset({
+					network,
+					rpcUrl: params.rpcUrl,
+					burrowContractId: params.burrowContractId,
+					tokenInput: params.tokenId,
+				});
+				const repayMsg = JSON.stringify("OnlyRepay");
+				const keyState = await resolveComposeAccessKeyState({
+					accountId: signerAccountId,
+					publicKey: params.publicKey,
+					network,
+					rpcUrl: params.rpcUrl,
+				});
+				const artifact = createUnsignedTransactionArtifact({
+					label: "burrow_repay",
+					signerAccountId,
+					signerPublicKey: keyState.signerPublicKey,
+					receiverId: tokenId,
+					nonce: keyState.nextNonce,
+					blockHash: keyState.blockHash,
+					actions: [
+						actions.functionCall(
+							"ft_transfer_call",
+							{
+								receiver_id: burrowContractId,
+								amount: amountRaw,
+								msg: repayMsg,
+							},
+							BigInt(gas),
+							BigInt(deposit),
+						),
+					],
+					actionSummaries: [
+						{
+							type: "FunctionCall",
+							methodName: "ft_transfer_call",
+							args: {
+								receiver_id: burrowContractId,
+								amount: amountRaw,
+								msg: repayMsg,
+							},
+							gas,
+							depositYoctoNear: deposit,
+						},
+					],
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Unsigned Burrow repay built: ${amountRaw} raw ${tokenId}.`,
+						},
+					],
+					details: {
+						network,
+						rpcEndpoint: getNearRpcEndpoint(network, params.rpcUrl),
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						accessKeySource: keyState.source,
+						accessKeyPermission: keyState.permission,
+						blockHeight: keyState.blockHeight,
+						tokenId,
+						amountRaw,
+						burrowContractId,
+						transactionCount: 1,
+						requiresLocalSignature: true,
+						expirationNote:
+							"Unsigned payload includes nonce+blockHash and expires quickly. Sign and broadcast promptly.",
+						transaction: artifact,
+						transactions: [artifact],
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}buildWithdrawBurrowTransaction`,
+			label: "NEAR Build Burrow Withdraw Transaction",
+			description:
+				"Build an unsigned Burrow withdraw transaction (simple_withdraw) for local signing.",
+			parameters: Type.Object({
+				tokenId: Type.String({
+					description: "Withdraw token contract id or common symbol.",
+				}),
+				amountRaw: Type.String({
+					description: "Withdraw amount in token raw units.",
+				}),
+				recipientId: Type.Optional(
+					Type.String({
+						description: "Optional recipient account id (default signer).",
+					}),
+				),
+				burrowContractId: Type.Optional(
+					Type.String({
+						description:
+							"Burrow contract id override (default contract.main.burrow.near).",
+					}),
+				),
+				fromAccountId: Type.Optional(
+					Type.String({
+						description:
+							"Signer account id. If omitted, resolve from env/credentials.",
+					}),
+				),
+				publicKey: Type.Optional(
+					Type.String({
+						description:
+							"Public key used for nonce/access-key lookup, e.g. ed25519:.... If omitted, auto-select from account access keys.",
+					}),
+				),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(Type.String()),
+				gas: Type.Optional(
+					Type.String({
+						description:
+							"Gas for simple_withdraw in yoctoGas (default 250000000000000 / 250 Tgas).",
+					}),
+				),
+				attachedDepositYoctoNear: Type.Optional(
+					Type.String({
+						description:
+							"Attached deposit for simple_withdraw in yoctoNEAR (default 1).",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as NearBuildWithdrawBurrowTransactionParams;
+				const network = parseNearNetwork(params.network);
+				const signerAccountId = resolveNearAccountId(
+					params.fromAccountId,
+					network,
+				);
+				const amountRaw = parseBurrowActionAmountRaw(
+					params.amountRaw,
+					"amountRaw",
+				);
+				const gas = resolveBurrowExecuteGas(params.gas);
+				const deposit = resolveAttachedDeposit(params.attachedDepositYoctoNear);
+				const { burrowContractId, tokenId, extraDecimals } =
+					await resolveBurrowTokenAndAsset({
+						network,
+						rpcUrl: params.rpcUrl,
+						burrowContractId: params.burrowContractId,
+						tokenInput: params.tokenId,
+					});
+				const recipientId =
+					typeof params.recipientId === "string" && params.recipientId.trim()
+						? normalizeAccountId(params.recipientId, "recipientId")
+						: undefined;
+				const amountInner = toBurrowInnerAmount(amountRaw, extraDecimals);
+				const withdrawArgs = {
+					token_id: tokenId,
+					amount_with_inner_decimal: amountInner,
+					...(recipientId ? { recipient_id: recipientId } : {}),
+				};
+				const keyState = await resolveComposeAccessKeyState({
+					accountId: signerAccountId,
+					publicKey: params.publicKey,
+					network,
+					rpcUrl: params.rpcUrl,
+				});
+				const artifact = createUnsignedTransactionArtifact({
+					label: "burrow_withdraw",
+					signerAccountId,
+					signerPublicKey: keyState.signerPublicKey,
+					receiverId: burrowContractId,
+					nonce: keyState.nextNonce,
+					blockHash: keyState.blockHash,
+					actions: [
+						actions.functionCall(
+							"simple_withdraw",
+							withdrawArgs,
+							BigInt(gas),
+							BigInt(deposit),
+						),
+					],
+					actionSummaries: [
+						{
+							type: "FunctionCall",
+							methodName: "simple_withdraw",
+							args: withdrawArgs,
+							gas,
+							depositYoctoNear: deposit,
+						},
+					],
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Unsigned Burrow withdraw built: ${amountRaw} raw ${tokenId}${recipientId ? ` -> ${recipientId}` : ""}.`,
+						},
+					],
+					details: {
+						network,
+						rpcEndpoint: getNearRpcEndpoint(network, params.rpcUrl),
+						signerAccountId,
+						signerPublicKey: keyState.signerPublicKey,
+						accessKeySource: keyState.source,
+						accessKeyPermission: keyState.permission,
+						blockHeight: keyState.blockHeight,
+						tokenId,
+						amountRaw,
+						amountInner,
+						extraDecimals,
+						recipientId: recipientId ?? signerAccountId,
+						burrowContractId,
 						transactionCount: 1,
 						requiresLocalSignature: true,
 						expirationNote:

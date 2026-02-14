@@ -2,6 +2,19 @@ import { createHash, randomUUID } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
+	type BurrowAccountAllPositionsView,
+	type BurrowAccountAssetView,
+	type BurrowAssetDetailedView,
+	fetchBurrowAccountAllPositions,
+	fetchBurrowAsset,
+	fetchBurrowAssetsIndex,
+	getBurrowContractId,
+	parseBurrowActionAmountRaw,
+	parseBurrowExtraDecimals,
+	resolveBurrowTokenId,
+	toBurrowInnerAmount,
+} from "../burrow.js";
+import {
 	type RefPoolPairCandidate,
 	fetchRefPoolById,
 	findRefPoolForPair,
@@ -132,6 +145,49 @@ type NearRefWithdrawIntent = {
 	attachedDepositYoctoNear?: string;
 };
 
+type NearBurrowSupplyIntent = {
+	type: "near.lend.burrow.supply";
+	tokenId: string;
+	amountRaw: string;
+	asCollateral: boolean;
+	burrowContractId?: string;
+	fromAccountId?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearBurrowBorrowIntent = {
+	type: "near.lend.burrow.borrow";
+	tokenId: string;
+	amountRaw: string;
+	withdrawToWallet: boolean;
+	burrowContractId?: string;
+	fromAccountId?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearBurrowRepayIntent = {
+	type: "near.lend.burrow.repay";
+	tokenId: string;
+	amountRaw: string;
+	burrowContractId?: string;
+	fromAccountId?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
+type NearBurrowWithdrawIntent = {
+	type: "near.lend.burrow.withdraw";
+	tokenId: string;
+	amountRaw: string;
+	recipientId?: string;
+	burrowContractId?: string;
+	fromAccountId?: string;
+	gas?: string;
+	attachedDepositYoctoNear?: string;
+};
+
 type NearWorkflowIntent =
 	| NearTransferIntent
 	| NearFtTransferIntent
@@ -139,7 +195,11 @@ type NearWorkflowIntent =
 	| NearIntentsSwapIntent
 	| NearRefAddLiquidityIntent
 	| NearRefRemoveLiquidityIntent
-	| NearRefWithdrawIntent;
+	| NearRefWithdrawIntent
+	| NearBurrowSupplyIntent
+	| NearBurrowBorrowIntent
+	| NearBurrowRepayIntent
+	| NearBurrowWithdrawIntent;
 
 type WorkflowParams = {
 	runId?: string;
@@ -163,6 +223,7 @@ type WorkflowParams = {
 	tokenAId?: string;
 	tokenBId?: string;
 	tokenId?: string;
+	burrowContractId?: string;
 	poolId?: number | string;
 	poolCandidateIndex?: number | string;
 	slippageBps?: number;
@@ -179,7 +240,10 @@ type WorkflowParams = {
 	minAmountARaw?: string;
 	minAmountBRaw?: string;
 	withdrawAll?: boolean;
+	recipientId?: string;
 	recipient?: string;
+	asCollateral?: boolean;
+	withdrawToWallet?: boolean;
 	refundTo?: string;
 	swapType?: NearIntentsSwapType;
 	slippageTolerance?: number;
@@ -228,6 +292,7 @@ type ParsedIntentHints = {
 	tokenAId?: string;
 	tokenBId?: string;
 	tokenId?: string;
+	burrowContractId?: string;
 	amountAUi?: string;
 	amountBUi?: string;
 	amountARaw?: string;
@@ -252,6 +317,9 @@ type ParsedIntentHints = {
 	confirmToken?: string;
 	withdrawAll?: boolean;
 	autoWithdraw?: boolean;
+	asCollateral?: boolean;
+	withdrawToWallet?: boolean;
+	recipientId?: string;
 };
 
 type NearAccountQueryResult = {
@@ -996,6 +1064,36 @@ function parseRefLpAmountRaw(params: {
 	return parsePositiveBigInt(rawAmount, params.fieldUi).toString();
 }
 
+function isNearLikeTokenInput(tokenInput: string): boolean {
+	const normalized = tokenInput.trim().toLowerCase();
+	return (
+		normalized === "near" ||
+		normalized === "wnear" ||
+		normalized.includes("wrap.near") ||
+		normalized.includes("wrap.testnet")
+	);
+}
+
+function resolveBurrowActionAmountRaw(params: {
+	intentType: NearWorkflowIntent["type"];
+	tokenInput: string;
+	valueRaw?: string;
+	valueNear?: string | number;
+}): string {
+	if (typeof params.valueRaw === "string" && params.valueRaw.trim()) {
+		return parseBurrowActionAmountRaw(params.valueRaw, "amountRaw");
+	}
+	if (params.valueNear != null && isNearLikeTokenInput(params.tokenInput)) {
+		return parseBurrowActionAmountRaw(
+			toYoctoNear(params.valueNear).toString(),
+			"amountNear",
+		);
+	}
+	throw new Error(
+		`${params.intentType} requires amountRaw (or provide amountNear for NEAR/wNEAR).`,
+	);
+}
+
 const LP_TOKEN_AMOUNT_STOP_WORDS = new Set([
 	"pool",
 	"lp",
@@ -1012,6 +1110,13 @@ const LP_TOKEN_AMOUNT_STOP_WORDS = new Set([
 	"minb",
 	"tokena",
 	"tokenb",
+	"burrow",
+	"supply",
+	"borrow",
+	"repay",
+	"withdraw",
+	"lending",
+	"collateral",
 ]);
 
 type ParsedTokenAmountPair = {
@@ -1155,6 +1260,9 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	const refContractMatch = text.match(
 		/(?:ref\s*contract|ref合约|交易所合约)\s*[:：]?\s*([a-z0-9][a-z0-9._-]*(?:\.near)?)/i,
 	);
+	const burrowContractMatch = text.match(
+		/(?:burrow\s*contract|burrow合约|借贷合约)\s*[:：]?\s*([a-z0-9][a-z0-9._-]*(?:\.near)?)/i,
+	);
 	const recipientMatch = text.match(
 		/(?:recipient|收款地址|收款人)\s*[:：]?\s*([a-z0-9._:-]{6,})/i,
 	);
@@ -1285,6 +1393,38 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 			lower.includes("撤出") ||
 			lower.includes("移除") ||
 			lower.includes("减少"));
+	const hasBurrowKeyword =
+		lower.includes("burrow") ||
+		lower.includes("借贷") ||
+		lower.includes("lending");
+	const likelyBurrowSupply =
+		hasBurrowKeyword &&
+		(lower.includes("supply") ||
+			lower.includes("deposit") ||
+			lower.includes("lend") ||
+			lower.includes("存入") ||
+			lower.includes("供应") ||
+			lower.includes("供给"));
+	const likelyBurrowBorrow =
+		hasBurrowKeyword &&
+		(lower.includes("borrow") ||
+			lower.includes("借款") ||
+			lower.includes("借出") ||
+			lower.includes("借入") ||
+			lower.includes("借"));
+	const likelyBurrowRepay =
+		hasBurrowKeyword &&
+		(lower.includes("repay") ||
+			lower.includes("还款") ||
+			lower.includes("归还") ||
+			lower.includes("偿还"));
+	const likelyBurrowWithdraw =
+		hasBurrowKeyword &&
+		(lower.includes("withdraw") ||
+			lower.includes("提取") ||
+			lower.includes("取出") ||
+			lower.includes("提回") ||
+			lower.includes("提现"));
 	const hasNearAmount = nearAmountMatch != null;
 
 	const hints: ParsedIntentHints = {};
@@ -1313,11 +1453,29 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	if (tokenAMatch?.[1]) hints.tokenAId = tokenAMatch[1];
 	if (tokenBMatch?.[1]) hints.tokenBId = tokenBMatch[1];
 	if (tokenIdMatch?.[1]) hints.tokenId = tokenIdMatch[1];
+	if (burrowContractMatch?.[1]) hints.burrowContractId = burrowContractMatch[1];
 	if (!hints.tokenId && refWithdrawTokenBeforeActionMatch?.[1]) {
 		hints.tokenId = refWithdrawTokenBeforeActionMatch[1];
 	}
 	if (!hints.tokenId && refWithdrawTokenAfterActionMatch?.[1]) {
 		hints.tokenId = refWithdrawTokenAfterActionMatch[1];
+	}
+	if (hasBurrowKeyword && !hints.tokenId && tokenAmountPairs[0]) {
+		hints.tokenId = tokenAmountPairs[0].token;
+	}
+	if (hasBurrowKeyword && !hints.amountRaw && !hints.amountNear) {
+		const amountTokenPair = tokenAmountPairs.find((pair) => {
+			if (!hints.tokenId) return true;
+			return pair.token.toLowerCase() === hints.tokenId.toLowerCase();
+		});
+		if (amountTokenPair) {
+			if (/^\d+$/.test(amountTokenPair.amount)) {
+				hints.amountRaw = amountTokenPair.amount;
+				hints.amountInRaw = amountTokenPair.amount;
+			} else if (isNearLikeTokenInput(amountTokenPair.token)) {
+				hints.amountNear = amountTokenPair.amount;
+			}
+		}
 	}
 	if (amountARawMatch?.[1]) hints.amountARaw = amountARawMatch[1];
 	if (amountBRawMatch?.[1]) hints.amountBRaw = amountBRawMatch[1];
@@ -1389,6 +1547,9 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		hints.refContractId = refContractMatch[1];
 	}
 	if (recipientMatch?.[1]) hints.recipient = recipientMatch[1];
+	if (hasBurrowKeyword && recipientMatch?.[1]) {
+		hints.recipientId = recipientMatch[1];
+	}
 	if (refundToMatch?.[1]) hints.refundTo = refundToMatch[1];
 	if (depositAddressMatch?.[1]) hints.depositAddress = depositAddressMatch[1];
 	if (depositMemoMatch?.[1]) hints.depositMemo = depositMemoMatch[1];
@@ -1433,6 +1594,37 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	) {
 		hints.autoWithdraw = true;
 	}
+	if (hasBurrowKeyword) {
+		if (
+			lower.includes("不作为抵押") ||
+			lower.includes("不要抵押") ||
+			lower.includes("without collateral") ||
+			lower.includes("no collateral")
+		) {
+			hints.asCollateral = false;
+		} else if (
+			lower.includes("作为抵押") ||
+			lower.includes("设为抵押") ||
+			lower.includes("as collateral")
+		) {
+			hints.asCollateral = true;
+		}
+		if (
+			lower.includes("不提到钱包") ||
+			lower.includes("不提现到钱包") ||
+			lower.includes("without withdraw") ||
+			lower.includes("no withdraw to wallet")
+		) {
+			hints.withdrawToWallet = false;
+		} else if (
+			lower.includes("提到钱包") ||
+			lower.includes("提回钱包") ||
+			lower.includes("withdraw to wallet") ||
+			lower.includes("borrow+withdraw")
+		) {
+			hints.withdrawToWallet = true;
+		}
+	}
 
 	if (
 		likelyLpRemove &&
@@ -1466,6 +1658,24 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	}
 
 	if (
+		hasBurrowKeyword &&
+		(hints.tokenId ||
+			hints.ftContractId ||
+			hints.amountRaw ||
+			hints.amountNear ||
+			hints.burrowContractId)
+	) {
+		hints.intentType = likelyBurrowRepay
+			? "near.lend.burrow.repay"
+			: likelyBurrowBorrow
+				? "near.lend.burrow.borrow"
+				: likelyBurrowWithdraw
+					? "near.lend.burrow.withdraw"
+					: "near.lend.burrow.supply";
+		return hints;
+	}
+
+	if (
 		hints.tokenInId &&
 		hints.tokenOutId &&
 		(likelySwap || hints.amountInRaw || hints.amountInUi)
@@ -1492,6 +1702,11 @@ function inferIntentType(
 	params: WorkflowParams,
 	hints: ParsedIntentHints,
 ): NearWorkflowIntent["type"] {
+	if (params.intentType === "near.lend.burrow.supply") return params.intentType;
+	if (params.intentType === "near.lend.burrow.borrow") return params.intentType;
+	if (params.intentType === "near.lend.burrow.repay") return params.intentType;
+	if (params.intentType === "near.lend.burrow.withdraw")
+		return params.intentType;
 	if (params.intentType === "near.lp.ref.add") return params.intentType;
 	if (params.intentType === "near.lp.ref.remove") return params.intentType;
 	if (params.intentType === "near.ref.withdraw") return params.intentType;
@@ -1500,6 +1715,32 @@ function inferIntentType(
 	if (params.intentType === "near.transfer.near") return params.intentType;
 	if (params.intentType === "near.transfer.ft") return params.intentType;
 	if (hints.intentType) return hints.intentType;
+	if (
+		params.burrowContractId ||
+		params.asCollateral != null ||
+		params.withdrawToWallet != null ||
+		params.recipientId
+	) {
+		if (params.recipientId) return "near.lend.burrow.withdraw";
+		if (params.withdrawToWallet != null) return "near.lend.burrow.borrow";
+		if (params.asCollateral != null) return "near.lend.burrow.supply";
+		if (params.intentText && /repay|还款|归还|偿还/i.test(params.intentText)) {
+			return "near.lend.burrow.repay";
+		}
+		if (
+			params.intentText &&
+			/borrow|借款|借出|借入|借/i.test(params.intentText)
+		) {
+			return "near.lend.burrow.borrow";
+		}
+		if (
+			params.intentText &&
+			/withdraw|提取|取出|提回|提现/i.test(params.intentText)
+		) {
+			return "near.lend.burrow.withdraw";
+		}
+		return "near.lend.burrow.supply";
+	}
 	if (params.poolId != null && params.shares) {
 		return "near.lp.ref.remove";
 	}
@@ -1595,6 +1836,210 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 			toAccountId,
 			amountYoctoNear: amountYoctoNear.toString(),
 			fromAccountId,
+		};
+	}
+
+	if (intentType === "near.lend.burrow.supply") {
+		const tokenInput = normalizeTokenInput(
+			params.tokenId ??
+				hints.tokenId ??
+				params.ftContractId ??
+				hints.ftContractId ??
+				"",
+			"tokenId",
+		);
+		const amountRaw = resolveBurrowActionAmountRaw({
+			intentType,
+			tokenInput,
+			valueRaw:
+				params.amountRaw ??
+				params.amountInRaw ??
+				hints.amountRaw ??
+				hints.amountInRaw,
+			valueNear:
+				params.amountNear ??
+				params.amountIn ??
+				hints.amountNear ??
+				hints.amountInUi,
+		});
+		return {
+			type: "near.lend.burrow.supply",
+			tokenId: tokenInput,
+			amountRaw,
+			asCollateral: params.asCollateral ?? hints.asCollateral ?? true,
+			burrowContractId:
+				typeof params.burrowContractId === "string" &&
+				params.burrowContractId.trim()
+					? normalizeAccountId(params.burrowContractId, "burrowContractId")
+					: typeof hints.burrowContractId === "string" &&
+							hints.burrowContractId.trim()
+						? normalizeAccountId(hints.burrowContractId, "burrowContractId")
+						: undefined,
+			fromAccountId,
+			gas:
+				typeof params.gas === "string" && params.gas.trim()
+					? params.gas.trim()
+					: undefined,
+			attachedDepositYoctoNear:
+				typeof params.attachedDepositYoctoNear === "string" &&
+				params.attachedDepositYoctoNear.trim()
+					? params.attachedDepositYoctoNear.trim()
+					: undefined,
+		};
+	}
+
+	if (intentType === "near.lend.burrow.borrow") {
+		const tokenInput = normalizeTokenInput(
+			params.tokenId ??
+				hints.tokenId ??
+				params.ftContractId ??
+				hints.ftContractId ??
+				"",
+			"tokenId",
+		);
+		const amountRaw = resolveBurrowActionAmountRaw({
+			intentType,
+			tokenInput,
+			valueRaw:
+				params.amountRaw ??
+				params.amountInRaw ??
+				hints.amountRaw ??
+				hints.amountInRaw,
+			valueNear:
+				params.amountNear ??
+				params.amountIn ??
+				hints.amountNear ??
+				hints.amountInUi,
+		});
+		return {
+			type: "near.lend.burrow.borrow",
+			tokenId: tokenInput,
+			amountRaw,
+			withdrawToWallet:
+				params.withdrawToWallet ?? hints.withdrawToWallet ?? true,
+			burrowContractId:
+				typeof params.burrowContractId === "string" &&
+				params.burrowContractId.trim()
+					? normalizeAccountId(params.burrowContractId, "burrowContractId")
+					: typeof hints.burrowContractId === "string" &&
+							hints.burrowContractId.trim()
+						? normalizeAccountId(hints.burrowContractId, "burrowContractId")
+						: undefined,
+			fromAccountId,
+			gas:
+				typeof params.gas === "string" && params.gas.trim()
+					? params.gas.trim()
+					: undefined,
+			attachedDepositYoctoNear:
+				typeof params.attachedDepositYoctoNear === "string" &&
+				params.attachedDepositYoctoNear.trim()
+					? params.attachedDepositYoctoNear.trim()
+					: undefined,
+		};
+	}
+
+	if (intentType === "near.lend.burrow.repay") {
+		const tokenInput = normalizeTokenInput(
+			params.tokenId ??
+				hints.tokenId ??
+				params.ftContractId ??
+				hints.ftContractId ??
+				"",
+			"tokenId",
+		);
+		const amountRaw = resolveBurrowActionAmountRaw({
+			intentType,
+			tokenInput,
+			valueRaw:
+				params.amountRaw ??
+				params.amountInRaw ??
+				hints.amountRaw ??
+				hints.amountInRaw,
+			valueNear:
+				params.amountNear ??
+				params.amountIn ??
+				hints.amountNear ??
+				hints.amountInUi,
+		});
+		return {
+			type: "near.lend.burrow.repay",
+			tokenId: tokenInput,
+			amountRaw,
+			burrowContractId:
+				typeof params.burrowContractId === "string" &&
+				params.burrowContractId.trim()
+					? normalizeAccountId(params.burrowContractId, "burrowContractId")
+					: typeof hints.burrowContractId === "string" &&
+							hints.burrowContractId.trim()
+						? normalizeAccountId(hints.burrowContractId, "burrowContractId")
+						: undefined,
+			fromAccountId,
+			gas:
+				typeof params.gas === "string" && params.gas.trim()
+					? params.gas.trim()
+					: undefined,
+			attachedDepositYoctoNear:
+				typeof params.attachedDepositYoctoNear === "string" &&
+				params.attachedDepositYoctoNear.trim()
+					? params.attachedDepositYoctoNear.trim()
+					: undefined,
+		};
+	}
+
+	if (intentType === "near.lend.burrow.withdraw") {
+		const tokenInput = normalizeTokenInput(
+			params.tokenId ??
+				hints.tokenId ??
+				params.ftContractId ??
+				hints.ftContractId ??
+				"",
+			"tokenId",
+		);
+		const amountRaw = resolveBurrowActionAmountRaw({
+			intentType,
+			tokenInput,
+			valueRaw:
+				params.amountRaw ??
+				params.amountInRaw ??
+				hints.amountRaw ??
+				hints.amountInRaw,
+			valueNear:
+				params.amountNear ??
+				params.amountIn ??
+				hints.amountNear ??
+				hints.amountInUi,
+		});
+		const recipientInput =
+			params.recipientId ??
+			hints.recipientId ??
+			params.recipient ??
+			hints.recipient;
+		return {
+			type: "near.lend.burrow.withdraw",
+			tokenId: tokenInput,
+			amountRaw,
+			recipientId:
+				typeof recipientInput === "string" && recipientInput.trim()
+					? normalizeAccountId(recipientInput, "recipientId")
+					: undefined,
+			burrowContractId:
+				typeof params.burrowContractId === "string" &&
+				params.burrowContractId.trim()
+					? normalizeAccountId(params.burrowContractId, "burrowContractId")
+					: typeof hints.burrowContractId === "string" &&
+							hints.burrowContractId.trim()
+						? normalizeAccountId(hints.burrowContractId, "burrowContractId")
+						: undefined,
+			fromAccountId,
+			gas:
+				typeof params.gas === "string" && params.gas.trim()
+					? params.gas.trim()
+					: undefined,
+			attachedDepositYoctoNear:
+				typeof params.attachedDepositYoctoNear === "string" &&
+				params.attachedDepositYoctoNear.trim()
+					? params.attachedDepositYoctoNear.trim()
+					: undefined,
 		};
 	}
 
@@ -2068,6 +2513,7 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 		params.tokenAId ||
 		params.tokenBId ||
 		params.tokenId ||
+		params.burrowContractId ||
 		params.amountInRaw ||
 		params.amountARaw ||
 		params.amountBRaw ||
@@ -2078,6 +2524,9 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 		params.sharePercent != null ||
 		params.amountIn != null ||
 		params.withdrawAll != null ||
+		params.asCollateral != null ||
+		params.withdrawToWallet != null ||
+		params.recipientId ||
 		params.swapType ||
 		params.depositType ||
 		params.refundType ||
@@ -2102,7 +2551,8 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 		params.minAmountBRaw ||
 		params.autoWithdraw != null ||
 		params.autoRegisterReceiver != null ||
-		params.autoRegisterOutput != null
+		params.autoRegisterOutput != null ||
+		params.burrowContractId
 	) {
 		return true;
 	}
@@ -2122,6 +2572,7 @@ function hasCoreIntentInputs(params: WorkflowParams): boolean {
 		params.tokenAId ||
 		params.tokenBId ||
 		params.tokenId ||
+		params.burrowContractId ||
 		params.amountInRaw ||
 		params.amountARaw ||
 		params.amountBRaw ||
@@ -2132,6 +2583,9 @@ function hasCoreIntentInputs(params: WorkflowParams): boolean {
 		params.sharePercent != null ||
 		params.amountIn != null ||
 		params.withdrawAll != null ||
+		params.asCollateral != null ||
+		params.withdrawToWallet != null ||
+		params.recipientId ||
 		params.swapType ||
 		params.depositType ||
 		params.refundType ||
@@ -2155,7 +2609,8 @@ function hasCoreIntentInputs(params: WorkflowParams): boolean {
 		params.minAmountBRaw ||
 		params.autoWithdraw != null ||
 		params.autoRegisterReceiver != null ||
-		params.autoRegisterOutput != null
+		params.autoRegisterOutput != null ||
+		params.burrowContractId
 	) {
 		return true;
 	}
@@ -2178,6 +2633,7 @@ function hintsContainActionableIntentFields(hints: ParsedIntentHints): boolean {
 			hints.tokenAId ||
 			hints.tokenBId ||
 			hints.tokenId ||
+			hints.burrowContractId ||
 			hints.amountAUi ||
 			hints.amountBUi ||
 			hints.amountARaw ||
@@ -2192,7 +2648,10 @@ function hintsContainActionableIntentFields(hints: ParsedIntentHints): boolean {
 			hints.recipient ||
 			hints.refundTo ||
 			hints.withdrawAll != null ||
-			hints.autoWithdraw != null,
+			hints.autoWithdraw != null ||
+			hints.asCollateral != null ||
+			hints.withdrawToWallet != null ||
+			hints.recipientId,
 	);
 }
 
@@ -2433,6 +2892,98 @@ async function queryStorageRegistrationStatus(params: {
 			estimatedDepositYoctoNear: "1250000000000000000000",
 		};
 	}
+}
+
+async function resolveBurrowTokenAndAssetForWorkflow(params: {
+	network: string;
+	rpcUrl?: string;
+	burrowContractId?: string;
+	tokenInput: string;
+}): Promise<{
+	burrowContractId: string;
+	tokenId: string;
+	extraDecimals: number;
+	asset: BurrowAssetDetailedView;
+}> {
+	const burrowContractId = getBurrowContractId(
+		params.network,
+		params.burrowContractId,
+	);
+	const markets = await fetchBurrowAssetsIndex({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		burrowContractId,
+		maxAssets: 256,
+		pageSize: 64,
+	});
+	const tokenId = resolveBurrowTokenId({
+		network: params.network,
+		tokenInput: params.tokenInput,
+		availableTokenIds: markets.map((entry) => entry.token_id.toLowerCase()),
+	});
+	const asset =
+		markets.find((entry) => entry.token_id.toLowerCase() === tokenId) ??
+		(await fetchBurrowAsset({
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			burrowContractId,
+			tokenId,
+		}));
+	if (!asset) {
+		throw new Error(`Burrow market not found for token: ${tokenId}`);
+	}
+	return {
+		burrowContractId,
+		tokenId,
+		extraDecimals: parseBurrowExtraDecimals(asset.config?.extra_decimals),
+		asset,
+	};
+}
+
+function sumBurrowAccountAssetInnerByToken(params: {
+	assets?: BurrowAccountAssetView[];
+	tokenId: string;
+}): bigint {
+	if (!Array.isArray(params.assets) || params.assets.length === 0) {
+		return 0n;
+	}
+	return params.assets.reduce((accumulator, asset) => {
+		if (!asset || asset.token_id.toLowerCase() !== params.tokenId) {
+			return accumulator;
+		}
+		return (
+			accumulator +
+			parseNonNegativeBigInt(asset.balance, "burrow.asset.balance")
+		);
+	}, 0n);
+}
+
+function sumBurrowPositionAssetInnerByToken(params: {
+	positions?: BurrowAccountAllPositionsView["positions"];
+	tokenId: string;
+	side: "collateral" | "borrowed";
+}): bigint {
+	if (!params.positions) return 0n;
+	let total = 0n;
+	for (const position of Object.values(params.positions)) {
+		if (!position || typeof position !== "object") continue;
+		const assets = position[params.side];
+		if (!Array.isArray(assets)) continue;
+		total += sumBurrowAccountAssetInnerByToken({
+			assets,
+			tokenId: params.tokenId,
+		});
+	}
+	return total;
+}
+
+function burrowInnerToRawString(
+	innerAmount: bigint,
+	extraDecimals: number,
+): string {
+	const extra = parseBurrowExtraDecimals(extraDecimals);
+	if (extra <= 0) return innerAmount.toString();
+	return (innerAmount / 10n ** BigInt(extra)).toString();
 }
 
 async function simulateNearTransfer(params: {
@@ -3538,12 +4089,281 @@ async function simulateRefRemoveLiquidity(params: {
 	};
 }
 
+async function simulateBurrowSupply(params: {
+	intent: NearBurrowSupplyIntent;
+	network: string;
+	rpcUrl?: string;
+	fromAccountId?: string;
+}): Promise<{
+	status: "success" | "insufficient_balance" | "market_unavailable";
+	fromAccountId: string;
+	burrowContractId: string;
+	tokenId: string;
+	amountRaw: string;
+	availableRaw: string;
+	requiredRaw: string;
+	asCollateral: boolean;
+	canDeposit: boolean;
+	canUseAsCollateral: boolean;
+}> {
+	const fromAccountId = resolveNearAccountId(
+		params.intent.fromAccountId ?? params.fromAccountId,
+		params.network,
+	);
+	const { burrowContractId, tokenId, asset } =
+		await resolveBurrowTokenAndAssetForWorkflow({
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			burrowContractId: params.intent.burrowContractId,
+			tokenInput: params.intent.tokenId,
+		});
+	const query = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		params: {
+			account_id: tokenId,
+			args_base64: encodeCallFunctionArgs({ account_id: fromAccountId }),
+			finality: "final",
+			method_name: "ft_balance_of",
+			request_type: "call_function",
+		},
+	});
+	const availableRaw = parseNonNegativeBigInt(
+		decodeCallFunctionResult(query),
+		"ft_balance_of",
+	);
+	const requiredRaw = parsePositiveBigInt(params.intent.amountRaw, "amountRaw");
+	const canDeposit = asset.config?.can_deposit !== false;
+	const canUseAsCollateral = asset.config?.can_use_as_collateral !== false;
+	return {
+		status: !canDeposit
+			? "market_unavailable"
+			: availableRaw >= requiredRaw
+				? "success"
+				: "insufficient_balance",
+		fromAccountId,
+		burrowContractId,
+		tokenId,
+		amountRaw: requiredRaw.toString(),
+		availableRaw: availableRaw.toString(),
+		requiredRaw: requiredRaw.toString(),
+		asCollateral: params.intent.asCollateral,
+		canDeposit,
+		canUseAsCollateral,
+	};
+}
+
+async function simulateBurrowBorrow(params: {
+	intent: NearBurrowBorrowIntent;
+	network: string;
+	rpcUrl?: string;
+	fromAccountId?: string;
+}): Promise<{
+	status: "success" | "market_unavailable";
+	fromAccountId: string;
+	burrowContractId: string;
+	tokenId: string;
+	amountRaw: string;
+	amountInner: string;
+	extraDecimals: number;
+	withdrawToWallet: boolean;
+	canBorrow: boolean;
+}> {
+	const fromAccountId = resolveNearAccountId(
+		params.intent.fromAccountId ?? params.fromAccountId,
+		params.network,
+	);
+	const { burrowContractId, tokenId, extraDecimals, asset } =
+		await resolveBurrowTokenAndAssetForWorkflow({
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			burrowContractId: params.intent.burrowContractId,
+			tokenInput: params.intent.tokenId,
+		});
+	const amountRaw = parsePositiveBigInt(params.intent.amountRaw, "amountRaw");
+	const amountInner = toBurrowInnerAmount(amountRaw.toString(), extraDecimals);
+	const canBorrow = asset.config?.can_borrow !== false;
+	return {
+		status: canBorrow ? "success" : "market_unavailable",
+		fromAccountId,
+		burrowContractId,
+		tokenId,
+		amountRaw: amountRaw.toString(),
+		amountInner,
+		extraDecimals,
+		withdrawToWallet: params.intent.withdrawToWallet,
+		canBorrow,
+	};
+}
+
+async function simulateBurrowRepay(params: {
+	intent: NearBurrowRepayIntent;
+	network: string;
+	rpcUrl?: string;
+	fromAccountId?: string;
+}): Promise<{
+	status: "success" | "insufficient_balance" | "no_debt";
+	fromAccountId: string;
+	burrowContractId: string;
+	tokenId: string;
+	amountRaw: string;
+	availableRaw: string;
+	requiredRaw: string;
+	borrowedRaw: string;
+}> {
+	const fromAccountId = resolveNearAccountId(
+		params.intent.fromAccountId ?? params.fromAccountId,
+		params.network,
+	);
+	const { burrowContractId, tokenId, extraDecimals } =
+		await resolveBurrowTokenAndAssetForWorkflow({
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			burrowContractId: params.intent.burrowContractId,
+			tokenInput: params.intent.tokenId,
+		});
+	const balanceQuery = await callNearRpc<NearCallFunctionResult>({
+		method: "query",
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		params: {
+			account_id: tokenId,
+			args_base64: encodeCallFunctionArgs({ account_id: fromAccountId }),
+			finality: "final",
+			method_name: "ft_balance_of",
+			request_type: "call_function",
+		},
+	});
+	const availableRaw = parseNonNegativeBigInt(
+		decodeCallFunctionResult(balanceQuery),
+		"ft_balance_of",
+	);
+	const requiredRaw = parsePositiveBigInt(params.intent.amountRaw, "amountRaw");
+	const snapshot = await fetchBurrowAccountAllPositions({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		burrowContractId,
+		accountId: fromAccountId,
+	});
+	const borrowedInner = snapshot
+		? sumBurrowPositionAssetInnerByToken({
+				positions: snapshot.positions,
+				tokenId,
+				side: "borrowed",
+			})
+		: 0n;
+	const borrowedRaw = parseNonNegativeBigInt(
+		burrowInnerToRawString(borrowedInner, extraDecimals),
+		"borrowedRaw",
+	);
+	return {
+		status:
+			borrowedRaw <= 0n
+				? "no_debt"
+				: availableRaw >= requiredRaw
+					? "success"
+					: "insufficient_balance",
+		fromAccountId,
+		burrowContractId,
+		tokenId,
+		amountRaw: requiredRaw.toString(),
+		availableRaw: availableRaw.toString(),
+		requiredRaw: requiredRaw.toString(),
+		borrowedRaw: borrowedRaw.toString(),
+	};
+}
+
+async function simulateBurrowWithdraw(params: {
+	intent: NearBurrowWithdrawIntent;
+	network: string;
+	rpcUrl?: string;
+	fromAccountId?: string;
+}): Promise<{
+	status:
+		| "success"
+		| "insufficient_balance"
+		| "no_supply"
+		| "market_unavailable";
+	fromAccountId: string;
+	burrowContractId: string;
+	tokenId: string;
+	amountRaw: string;
+	amountInner: string;
+	availableRaw: string;
+	availableInner: string;
+	requiredRaw: string;
+	requiredInner: string;
+	recipientId: string | null;
+	canWithdraw: boolean;
+}> {
+	const fromAccountId = resolveNearAccountId(
+		params.intent.fromAccountId ?? params.fromAccountId,
+		params.network,
+	);
+	const { burrowContractId, tokenId, extraDecimals, asset } =
+		await resolveBurrowTokenAndAssetForWorkflow({
+			network: params.network,
+			rpcUrl: params.rpcUrl,
+			burrowContractId: params.intent.burrowContractId,
+			tokenInput: params.intent.tokenId,
+		});
+	const amountRaw = parsePositiveBigInt(params.intent.amountRaw, "amountRaw");
+	const amountInner = toBurrowInnerAmount(amountRaw.toString(), extraDecimals);
+	const requiredInner = parsePositiveBigInt(amountInner, "amountInner");
+	const snapshot = await fetchBurrowAccountAllPositions({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		burrowContractId,
+		accountId: fromAccountId,
+	});
+	const suppliedInner = sumBurrowAccountAssetInnerByToken({
+		assets: snapshot?.supplied,
+		tokenId,
+	});
+	const collateralInner = sumBurrowPositionAssetInnerByToken({
+		positions: snapshot?.positions,
+		tokenId,
+		side: "collateral",
+	});
+	const availableInner = suppliedInner + collateralInner;
+	const availableRaw = parseNonNegativeBigInt(
+		burrowInnerToRawString(availableInner, extraDecimals),
+		"availableRaw",
+	);
+	const canWithdraw = asset.config?.can_withdraw !== false;
+	return {
+		status: !canWithdraw
+			? "market_unavailable"
+			: availableInner <= 0n
+				? "no_supply"
+				: availableInner >= requiredInner
+					? "success"
+					: "insufficient_balance",
+		fromAccountId,
+		burrowContractId,
+		tokenId,
+		amountRaw: amountRaw.toString(),
+		amountInner,
+		availableRaw: availableRaw.toString(),
+		availableInner: availableInner.toString(),
+		requiredRaw: amountRaw.toString(),
+		requiredInner: requiredInner.toString(),
+		recipientId: params.intent.recipientId ?? null,
+		canWithdraw,
+	};
+}
+
 function resolveExecuteTool(
 	name:
 		| "near_transferNear"
 		| "near_transferFt"
 		| "near_swapRef"
 		| "near_withdrawRefToken"
+		| "near_supplyBurrow"
+		| "near_borrowBurrow"
+		| "near_repayBurrow"
+		| "near_withdrawBurrow"
 		| "near_submitIntentsDeposit"
 		| "near_broadcastSignedTransaction"
 		| "near_addLiquidityRef"
@@ -3564,7 +4384,11 @@ function resolveComposeTool(
 		| "near_buildAddLiquidityRefTransaction"
 		| "near_buildRemoveLiquidityRefTransaction"
 		| "near_buildSwapRefTransaction"
-		| "near_buildRefWithdrawTransaction",
+		| "near_buildRefWithdrawTransaction"
+		| "near_buildSupplyBurrowTransaction"
+		| "near_buildBorrowBurrowTransaction"
+		| "near_buildRepayBurrowTransaction"
+		| "near_buildWithdrawBurrowTransaction",
 ): WorkflowComposeTool {
 	const tool = createNearComposeTools().find((entry) => entry.name === name);
 	if (!tool) {
@@ -4077,7 +4901,7 @@ export function createNearWorkflowTools() {
 			name: "w3rt_run_near_workflow_v0",
 			label: "W3RT NEAR Workflow",
 			description:
-				"Run NEAR workflow in phases: analysis -> compose/simulate -> execute for native transfer, FT transfer, Ref swap, Ref withdraw, NEAR Intents swap, and Ref LP add/remove.",
+				"Run NEAR workflow in phases: analysis -> compose/simulate -> execute for native transfer, FT transfer, Ref swap/withdraw/LP, Burrow lend (supply/borrow/repay/withdraw), and NEAR Intents swap.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -4090,6 +4914,10 @@ export function createNearWorkflowTools() {
 						Type.Literal("near.swap.intents"),
 						Type.Literal("near.lp.ref.add"),
 						Type.Literal("near.lp.ref.remove"),
+						Type.Literal("near.lend.burrow.supply"),
+						Type.Literal("near.lend.burrow.borrow"),
+						Type.Literal("near.lend.burrow.repay"),
+						Type.Literal("near.lend.burrow.withdraw"),
 					]),
 				),
 				intentText: Type.Optional(Type.String()),
@@ -4110,6 +4938,7 @@ export function createNearWorkflowTools() {
 				tokenAId: Type.Optional(Type.String()),
 				tokenBId: Type.Optional(Type.String()),
 				tokenId: Type.Optional(Type.String()),
+				burrowContractId: Type.Optional(Type.String()),
 				poolId: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				poolCandidateIndex: Type.Optional(
 					Type.Union([Type.String(), Type.Number()]),
@@ -4167,6 +4996,9 @@ export function createNearWorkflowTools() {
 				minAmountARaw: Type.Optional(Type.String()),
 				minAmountBRaw: Type.Optional(Type.String()),
 				withdrawAll: Type.Optional(Type.Boolean()),
+				recipientId: Type.Optional(Type.String()),
+				asCollateral: Type.Optional(Type.Boolean()),
+				withdrawToWallet: Type.Optional(Type.Boolean()),
 				autoRegisterOutput: Type.Optional(Type.Boolean()),
 				autoRegisterExchange: Type.Optional(Type.Boolean()),
 				autoRegisterTokens: Type.Optional(Type.Boolean()),
@@ -4378,9 +5210,72 @@ export function createNearWorkflowTools() {
 							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
 							publicKey: params.publicKey,
 						});
+					} else if (intent.type === "near.lend.burrow.supply") {
+						const composeTool = resolveComposeTool(
+							"near_buildSupplyBurrowTransaction",
+						);
+						composeResult = await composeTool.execute("near-wf-compose", {
+							tokenId: intent.tokenId,
+							amountRaw: intent.amountRaw,
+							asCollateral: intent.asCollateral,
+							burrowContractId: intent.burrowContractId,
+							gas: intent.gas,
+							attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+							network,
+							rpcUrl: params.rpcUrl,
+							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+							publicKey: params.publicKey,
+						});
+					} else if (intent.type === "near.lend.burrow.borrow") {
+						const composeTool = resolveComposeTool(
+							"near_buildBorrowBurrowTransaction",
+						);
+						composeResult = await composeTool.execute("near-wf-compose", {
+							tokenId: intent.tokenId,
+							amountRaw: intent.amountRaw,
+							withdrawToWallet: intent.withdrawToWallet,
+							burrowContractId: intent.burrowContractId,
+							gas: intent.gas,
+							attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+							network,
+							rpcUrl: params.rpcUrl,
+							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+							publicKey: params.publicKey,
+						});
+					} else if (intent.type === "near.lend.burrow.repay") {
+						const composeTool = resolveComposeTool(
+							"near_buildRepayBurrowTransaction",
+						);
+						composeResult = await composeTool.execute("near-wf-compose", {
+							tokenId: intent.tokenId,
+							amountRaw: intent.amountRaw,
+							burrowContractId: intent.burrowContractId,
+							gas: intent.gas,
+							attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+							network,
+							rpcUrl: params.rpcUrl,
+							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+							publicKey: params.publicKey,
+						});
+					} else if (intent.type === "near.lend.burrow.withdraw") {
+						const composeTool = resolveComposeTool(
+							"near_buildWithdrawBurrowTransaction",
+						);
+						composeResult = await composeTool.execute("near-wf-compose", {
+							tokenId: intent.tokenId,
+							amountRaw: intent.amountRaw,
+							recipientId: intent.recipientId,
+							burrowContractId: intent.burrowContractId,
+							gas: intent.gas,
+							attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
+							network,
+							rpcUrl: params.rpcUrl,
+							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
+							publicKey: params.publicKey,
+						});
 					} else {
 						throw new Error(
-							"compose currently supports near.transfer.near / near.transfer.ft / near.swap.ref / near.swap.intents / near.lp.ref.add / near.lp.ref.remove / near.ref.withdraw.",
+							"compose supports near.transfer.near / near.transfer.ft / near.swap.ref / near.swap.intents / near.lp.ref.add / near.lp.ref.remove / near.ref.withdraw / near.lend.burrow.supply / near.lend.burrow.borrow / near.lend.burrow.repay / near.lend.burrow.withdraw.",
 						);
 					}
 
@@ -4488,26 +5383,54 @@ export function createNearWorkflowTools() {
 												apiKey: params.apiKey,
 												jwt: params.jwt,
 											})
-										: intent.type === "near.lp.ref.add"
-											? await simulateRefAddLiquidity({
+										: intent.type === "near.lend.burrow.supply"
+											? await simulateBurrowSupply({
 													intent,
 													network,
 													rpcUrl: params.rpcUrl,
 													fromAccountId: params.fromAccountId,
 												})
-											: intent.type === "near.ref.withdraw"
-												? await simulateRefWithdraw({
+											: intent.type === "near.lend.burrow.borrow"
+												? await simulateBurrowBorrow({
 														intent,
 														network,
 														rpcUrl: params.rpcUrl,
 														fromAccountId: params.fromAccountId,
 													})
-												: await simulateRefRemoveLiquidity({
-														intent,
-														network,
-														rpcUrl: params.rpcUrl,
-														fromAccountId: params.fromAccountId,
-													});
+												: intent.type === "near.lend.burrow.repay"
+													? await simulateBurrowRepay({
+															intent,
+															network,
+															rpcUrl: params.rpcUrl,
+															fromAccountId: params.fromAccountId,
+														})
+													: intent.type === "near.lend.burrow.withdraw"
+														? await simulateBurrowWithdraw({
+																intent,
+																network,
+																rpcUrl: params.rpcUrl,
+																fromAccountId: params.fromAccountId,
+															})
+														: intent.type === "near.lp.ref.add"
+															? await simulateRefAddLiquidity({
+																	intent,
+																	network,
+																	rpcUrl: params.rpcUrl,
+																	fromAccountId: params.fromAccountId,
+																})
+															: intent.type === "near.ref.withdraw"
+																? await simulateRefWithdraw({
+																		intent,
+																		network,
+																		rpcUrl: params.rpcUrl,
+																		fromAccountId: params.fromAccountId,
+																	})
+																: await simulateRefRemoveLiquidity({
+																		intent,
+																		network,
+																		rpcUrl: params.rpcUrl,
+																		fromAccountId: params.fromAccountId,
+																	});
 					const sessionIntent: NearWorkflowIntent =
 						(intent.type === "near.lp.ref.add" ||
 							intent.type === "near.lp.ref.remove") &&
@@ -4752,11 +5675,19 @@ export function createNearWorkflowTools() {
 								? resolveExecuteTool("near_swapRef")
 								: intent.type === "near.ref.withdraw"
 									? resolveExecuteTool("near_withdrawRefToken")
-									: intent.type === "near.swap.intents"
-										? resolveExecuteTool("near_submitIntentsDeposit")
-										: intent.type === "near.lp.ref.add"
-											? resolveExecuteTool("near_addLiquidityRef")
-											: resolveExecuteTool("near_removeLiquidityRef");
+									: intent.type === "near.lend.burrow.supply"
+										? resolveExecuteTool("near_supplyBurrow")
+										: intent.type === "near.lend.burrow.borrow"
+											? resolveExecuteTool("near_borrowBurrow")
+											: intent.type === "near.lend.burrow.repay"
+												? resolveExecuteTool("near_repayBurrow")
+												: intent.type === "near.lend.burrow.withdraw"
+													? resolveExecuteTool("near_withdrawBurrow")
+													: intent.type === "near.swap.intents"
+														? resolveExecuteTool("near_submitIntentsDeposit")
+														: intent.type === "near.lp.ref.add"
+															? resolveExecuteTool("near_addLiquidityRef")
+															: resolveExecuteTool("near_removeLiquidityRef");
 				const executeResult = await executeTool.execute("near-wf-exec", {
 					...(intent.type === "near.transfer.near"
 						? {
@@ -4794,47 +5725,89 @@ export function createNearWorkflowTools() {
 											gas: intent.gas,
 											attachedDepositYoctoNear: intent.attachedDepositYoctoNear,
 										}
-									: intent.type === "near.swap.intents"
+									: intent.type === "near.lend.burrow.supply"
 										? {
-												txHash: submitTxHash as string,
-												depositAddress: effectiveIntentsDepositAddress,
-												depositMemo: effectiveIntentsDepositMemo,
-												nearSenderAccount:
-													intent.accountId ?? params.fromAccountId,
-												apiBaseUrl: params.apiBaseUrl ?? intent.apiBaseUrl,
-												apiKey: params.apiKey,
-												jwt: params.jwt,
+												tokenId: intent.tokenId,
+												amountRaw: intent.amountRaw,
+												asCollateral: intent.asCollateral,
+												burrowContractId: intent.burrowContractId,
+												gas: intent.gas,
+												attachedDepositYoctoNear:
+													intent.attachedDepositYoctoNear,
 											}
-										: intent.type === "near.lp.ref.add"
+										: intent.type === "near.lend.burrow.borrow"
 											? {
-													poolId: intent.poolId,
-													amountARaw: intent.amountARaw,
-													amountBRaw: intent.amountBRaw,
-													tokenAId: intent.tokenAId,
-													tokenBId: intent.tokenBId,
-													refContractId: intent.refContractId,
-													autoRegisterExchange: intent.autoRegisterExchange,
-													autoRegisterTokens: intent.autoRegisterTokens,
+													tokenId: intent.tokenId,
+													amountRaw: intent.amountRaw,
+													withdrawToWallet: intent.withdrawToWallet,
+													burrowContractId: intent.burrowContractId,
 													gas: intent.gas,
 													attachedDepositYoctoNear:
 														intent.attachedDepositYoctoNear,
 												}
-											: {
-													poolId: intent.poolId,
-													shares: intent.shares,
-													shareBps: intent.shareBps,
-													minAmountsRaw: intent.minAmountsRaw,
-													minAmountARaw: intent.minAmountARaw,
-													minAmountBRaw: intent.minAmountBRaw,
-													tokenAId: intent.tokenAId,
-													tokenBId: intent.tokenBId,
-													refContractId: intent.refContractId,
-													autoWithdraw: intent.autoWithdraw,
-													autoRegisterReceiver: intent.autoRegisterReceiver,
-													gas: intent.gas,
-													attachedDepositYoctoNear:
-														intent.attachedDepositYoctoNear,
-												}),
+											: intent.type === "near.lend.burrow.repay"
+												? {
+														tokenId: intent.tokenId,
+														amountRaw: intent.amountRaw,
+														burrowContractId: intent.burrowContractId,
+														gas: intent.gas,
+														attachedDepositYoctoNear:
+															intent.attachedDepositYoctoNear,
+													}
+												: intent.type === "near.lend.burrow.withdraw"
+													? {
+															tokenId: intent.tokenId,
+															amountRaw: intent.amountRaw,
+															recipientId: intent.recipientId,
+															burrowContractId: intent.burrowContractId,
+															gas: intent.gas,
+															attachedDepositYoctoNear:
+																intent.attachedDepositYoctoNear,
+														}
+													: intent.type === "near.swap.intents"
+														? {
+																txHash: submitTxHash as string,
+																depositAddress: effectiveIntentsDepositAddress,
+																depositMemo: effectiveIntentsDepositMemo,
+																nearSenderAccount:
+																	intent.accountId ?? params.fromAccountId,
+																apiBaseUrl:
+																	params.apiBaseUrl ?? intent.apiBaseUrl,
+																apiKey: params.apiKey,
+																jwt: params.jwt,
+															}
+														: intent.type === "near.lp.ref.add"
+															? {
+																	poolId: intent.poolId,
+																	amountARaw: intent.amountARaw,
+																	amountBRaw: intent.amountBRaw,
+																	tokenAId: intent.tokenAId,
+																	tokenBId: intent.tokenBId,
+																	refContractId: intent.refContractId,
+																	autoRegisterExchange:
+																		intent.autoRegisterExchange,
+																	autoRegisterTokens: intent.autoRegisterTokens,
+																	gas: intent.gas,
+																	attachedDepositYoctoNear:
+																		intent.attachedDepositYoctoNear,
+																}
+															: {
+																	poolId: intent.poolId,
+																	shares: intent.shares,
+																	shareBps: intent.shareBps,
+																	minAmountsRaw: intent.minAmountsRaw,
+																	minAmountARaw: intent.minAmountARaw,
+																	minAmountBRaw: intent.minAmountBRaw,
+																	tokenAId: intent.tokenAId,
+																	tokenBId: intent.tokenBId,
+																	refContractId: intent.refContractId,
+																	autoWithdraw: intent.autoWithdraw,
+																	autoRegisterReceiver:
+																		intent.autoRegisterReceiver,
+																	gas: intent.gas,
+																	attachedDepositYoctoNear:
+																		intent.attachedDepositYoctoNear,
+																}),
 					network,
 					rpcUrl: params.rpcUrl,
 					fromAccountId: intent.fromAccountId ?? params.fromAccountId,

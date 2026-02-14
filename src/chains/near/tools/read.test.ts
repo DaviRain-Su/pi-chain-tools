@@ -20,6 +20,16 @@ const refMocks = vi.hoisted(() => ({
 	getRefSwapQuote: vi.fn(),
 }));
 
+const burrowMocks = vi.hoisted(() => ({
+	fetchBurrowAccountAllPositions: vi.fn(),
+	fetchBurrowAssetsPagedDetailed: vi.fn(),
+	fromBurrowInnerAmount: vi.fn((value: string) => value),
+	getBurrowContractId: vi.fn(() => "contract.main.burrow.near"),
+	parseBurrowExtraDecimals: vi.fn((value: unknown) =>
+		Number.isInteger(value) ? (value as number) : 0,
+	),
+}));
+
 const restMocks = vi.hoisted(() => ({
 	fetch: vi.fn(),
 }));
@@ -49,6 +59,19 @@ vi.mock("../ref.js", async () => {
 	};
 });
 
+vi.mock("../burrow.js", async () => {
+	const actual =
+		await vi.importActual<typeof import("../burrow.js")>("../burrow.js");
+	return {
+		...actual,
+		fetchBurrowAccountAllPositions: burrowMocks.fetchBurrowAccountAllPositions,
+		fetchBurrowAssetsPagedDetailed: burrowMocks.fetchBurrowAssetsPagedDetailed,
+		fromBurrowInnerAmount: burrowMocks.fromBurrowInnerAmount,
+		getBurrowContractId: burrowMocks.getBurrowContractId,
+		parseBurrowExtraDecimals: burrowMocks.parseBurrowExtraDecimals,
+	};
+});
+
 import { createNearReadTools } from "./read.js";
 
 type ReadTool = {
@@ -68,6 +91,10 @@ function decodeArgsBase64(argsBase64: string): Record<string, unknown> {
 	return JSON.parse(
 		Buffer.from(argsBase64, "base64").toString("utf8"),
 	) as Record<string, unknown>;
+}
+
+function encodeJsonResult(value: unknown): number[] {
+	return [...Buffer.from(JSON.stringify(value), "utf8")];
 }
 
 function mockFetchJsonOnce(status: number, payload: unknown): void {
@@ -119,6 +146,15 @@ beforeEach(() => {
 		total_fee: 30,
 		pool_kind: "SIMPLE_POOL",
 	});
+	burrowMocks.getBurrowContractId.mockReturnValue("contract.main.burrow.near");
+	burrowMocks.fetchBurrowAssetsPagedDetailed.mockResolvedValue([]);
+	burrowMocks.fetchBurrowAccountAllPositions.mockResolvedValue(null);
+	burrowMocks.fromBurrowInnerAmount.mockImplementation(
+		(value: string) => value,
+	);
+	burrowMocks.parseBurrowExtraDecimals.mockImplementation((value: unknown) =>
+		Number.isInteger(value) ? (value as number) : 0,
+	);
 });
 
 describe("near_getBalance", () => {
@@ -339,6 +375,205 @@ describe("near_getPortfolio", () => {
 					uiAmount: "1.2345",
 				},
 			],
+		});
+	});
+});
+
+describe("near_getLendingMarketsBurrow", () => {
+	it("returns readable Burrow lending markets", async () => {
+		burrowMocks.fetchBurrowAssetsPagedDetailed.mockResolvedValue([
+			{
+				token_id: "wrap.near",
+				supplied: { shares: "1000", balance: "1000" },
+				borrowed: { shares: "200", balance: "200" },
+				config: {
+					extra_decimals: 0,
+					can_deposit: true,
+					can_withdraw: true,
+					can_borrow: true,
+					can_use_as_collateral: true,
+				},
+				supply_apr: "0.0123",
+				borrow_apr: "0.0456",
+			},
+			{
+				token_id: "usdc.tether-token.near",
+				supplied: { shares: "5000", balance: "5000" },
+				borrowed: { shares: "0", balance: "0" },
+				config: {
+					extra_decimals: 0,
+					can_deposit: true,
+					can_withdraw: true,
+					can_borrow: false,
+					can_use_as_collateral: true,
+				},
+				supply_apr: "0.0042",
+				borrow_apr: "0.0",
+			},
+		]);
+		runtimeMocks.callNearRpc.mockImplementation(
+			(args: {
+				params: { method_name?: string; account_id?: string };
+			}) => {
+				if (args.params.method_name === "ft_metadata") {
+					if (args.params.account_id === "wrap.near") {
+						return Promise.resolve({
+							block_hash: "meta-1",
+							block_height: 1,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "WNEAR",
+								decimals: 24,
+							}),
+						});
+					}
+					if (args.params.account_id === "usdc.tether-token.near") {
+						return Promise.resolve({
+							block_hash: "meta-2",
+							block_height: 2,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "USDC",
+								decimals: 6,
+							}),
+						});
+					}
+				}
+				throw new Error("unexpected callNearRpc in market test");
+			},
+		);
+		burrowMocks.fromBurrowInnerAmount.mockImplementation(
+			(value: string) => value,
+		);
+
+		const tool = getTool("near_getLendingMarketsBurrow");
+		const result = await tool.execute("near-read-burrow-markets-1", {
+			network: "mainnet",
+		});
+
+		expect(burrowMocks.fetchBurrowAssetsPagedDetailed).toHaveBeenCalledWith({
+			network: "mainnet",
+			rpcUrl: undefined,
+			burrowContractId: "contract.main.burrow.near",
+			fromIndex: 0,
+			limit: 30,
+		});
+		expect(result.content[0]?.text).toContain(
+			"Burrow lending markets: 2 shown",
+		);
+		expect(result.content[0]?.text).toContain("WNEAR");
+		expect(result.content[0]?.text).toContain("USDC");
+		expect(result.details).toMatchObject({
+			network: "mainnet",
+			burrowContractId: "contract.main.burrow.near",
+			fetchedCount: 2,
+		});
+	});
+});
+
+describe("near_getLendingPositionsBurrow", () => {
+	it("returns Burrow supplied/collateral/borrowed snapshot", async () => {
+		burrowMocks.fetchBurrowAssetsPagedDetailed.mockResolvedValue([
+			{
+				token_id: "wrap.near",
+				supplied: { shares: "0", balance: "0" },
+				borrowed: { shares: "0", balance: "0" },
+				config: { extra_decimals: 0 },
+			},
+			{
+				token_id: "usdc.tether-token.near",
+				supplied: { shares: "0", balance: "0" },
+				borrowed: { shares: "0", balance: "0" },
+				config: { extra_decimals: 0 },
+			},
+		]);
+		burrowMocks.fetchBurrowAccountAllPositions.mockResolvedValue({
+			account_id: "alice.near",
+			supplied: [
+				{
+					token_id: "wrap.near",
+					balance: "1000",
+					shares: "900",
+					apr: "0.01",
+				},
+			],
+			positions: {
+				REGULAR: {
+					collateral: [
+						{
+							token_id: "wrap.near",
+							balance: "800",
+							shares: "700",
+							apr: "0.01",
+						},
+					],
+					borrowed: [
+						{
+							token_id: "usdc.tether-token.near",
+							balance: "120",
+							shares: "100",
+							apr: "0.05",
+						},
+					],
+				},
+			},
+			is_locked: false,
+		});
+		runtimeMocks.callNearRpc.mockImplementation(
+			(args: {
+				params: { method_name?: string; account_id?: string };
+			}) => {
+				if (args.params.method_name === "ft_metadata") {
+					if (args.params.account_id === "wrap.near") {
+						return Promise.resolve({
+							block_hash: "meta-1",
+							block_height: 1,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "WNEAR",
+								decimals: 24,
+							}),
+						});
+					}
+					if (args.params.account_id === "usdc.tether-token.near") {
+						return Promise.resolve({
+							block_hash: "meta-2",
+							block_height: 2,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "USDC",
+								decimals: 6,
+							}),
+						});
+					}
+				}
+				throw new Error("unexpected callNearRpc in positions test");
+			},
+		);
+		burrowMocks.fromBurrowInnerAmount.mockImplementation(
+			(value: string) => value,
+		);
+
+		const tool = getTool("near_getLendingPositionsBurrow");
+		const result = await tool.execute("near-read-burrow-positions-1", {
+			accountId: "alice.near",
+			network: "mainnet",
+		});
+
+		expect(burrowMocks.fetchBurrowAccountAllPositions).toHaveBeenCalledWith({
+			accountId: "alice.near",
+			burrowContractId: "contract.main.burrow.near",
+			network: "mainnet",
+			rpcUrl: undefined,
+		});
+		expect(result.content[0]?.text).toContain(
+			"Burrow positions: account alice.near",
+		);
+		expect(result.content[0]?.text).toContain("Position REGULAR");
+		expect(result.content[0]?.text).toContain("borrowed USDC");
+		expect(result.details).toMatchObject({
+			accountId: "alice.near",
+			registered: true,
 		});
 	});
 });
