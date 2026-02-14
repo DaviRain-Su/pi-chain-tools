@@ -27,6 +27,7 @@ describe("nearExtension", () => {
 			"near_getBalance",
 			"near_getFtBalance",
 			"near_getIntentsAnyInputWithdrawals",
+			"near_getIntentsExplorerTransactions",
 			"near_getIntentsQuote",
 			"near_getIntentsStatus",
 			"near_getIntentsTokens",
