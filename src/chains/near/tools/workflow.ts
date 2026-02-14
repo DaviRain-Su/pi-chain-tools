@@ -3812,6 +3812,39 @@ function buildIntentsExecuteOneLineSummary(executeArtifact: unknown): string {
 	return parts.join(" ");
 }
 
+function buildWorkflowExecuteOneLineSummary(
+	intentType: NearWorkflowIntent["type"],
+	executeArtifact: unknown,
+): string {
+	if (intentType === "near.swap.intents") {
+		return buildIntentsExecuteOneLineSummary(executeArtifact);
+	}
+	return `${intentType} ${buildExecuteResultSummary(executeArtifact)}`.trim();
+}
+
+function attachExecuteSummaryLine(
+	intentType: NearWorkflowIntent["type"],
+	executeArtifact: unknown,
+): unknown {
+	if (!isObjectRecord(executeArtifact)) {
+		return executeArtifact;
+	}
+	const existingSummary =
+		typeof executeArtifact.summaryLine === "string"
+			? executeArtifact.summaryLine.trim()
+			: "";
+	if (existingSummary.length > 0) {
+		return executeArtifact;
+	}
+	return {
+		...executeArtifact,
+		summaryLine: buildWorkflowExecuteOneLineSummary(
+			intentType,
+			executeArtifact,
+		),
+	};
+}
+
 function buildSimulateResultSummary(
 	intentType: NearWorkflowIntent["type"],
 	simulateResult: unknown,
@@ -4796,10 +4829,14 @@ export function createNearWorkflowTools() {
 								};
 							})()
 						: (executeDetails ?? null);
+				const executeArtifactWithSummary = attachExecuteSummaryLine(
+					intent.type,
+					executeArtifact,
+				);
 				const executeSummaryText =
 					intent.type === "near.swap.intents"
-						? buildIntentsExecuteReadableText(executeArtifact)
-						: `Workflow executed: ${intent.type} ${buildExecuteResultSummary(executeArtifact)}`;
+						? buildIntentsExecuteReadableText(executeArtifactWithSummary)
+						: `Workflow executed: ${intent.type} ${buildExecuteResultSummary(executeArtifactWithSummary)}`;
 				return {
 					content: [
 						{
@@ -4819,7 +4856,7 @@ export function createNearWorkflowTools() {
 							!approvalRequired ||
 							providedConfirmToken === expectedConfirmToken,
 						artifacts: {
-							execute: executeArtifact,
+							execute: executeArtifactWithSummary,
 						},
 					},
 				};

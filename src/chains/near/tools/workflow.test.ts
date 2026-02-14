@@ -709,6 +709,7 @@ describe("w3rt_run_near_workflow_v0", () => {
 			artifacts: {
 				execute: {
 					txHash: "near-exec-hash",
+					summaryLine: expect.stringContaining("near.transfer.near"),
 				},
 			},
 		});
