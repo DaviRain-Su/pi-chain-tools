@@ -1279,6 +1279,18 @@ function attachExecuteSummary(
 	};
 }
 
+function formatExecuteSummaryText(
+	intentType: string,
+	executeArtifact: Record<string, unknown>,
+): string {
+	const summaryLine =
+		typeof executeArtifact.summaryLine === "string" &&
+		executeArtifact.summaryLine.trim()
+			? executeArtifact.summaryLine.trim()
+			: `${intentType} executed`;
+	return `Workflow executed: ${summaryLine}`;
+}
+
 async function exportUnsignedPayload(
 	tx: Transaction,
 	client: ReturnType<typeof getSuiClient>,
@@ -2176,6 +2188,10 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				}
 
 				const executeResult = await executeIntent(intent, params, network);
+				const executeArtifact = attachExecuteSummary(
+					intent.type,
+					executeResult.details ?? null,
+				);
 				rememberWorkflowSession({
 					route: "w3rt_run_sui_workflow_v0",
 					runId,
@@ -2186,7 +2202,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					content: [
 						{
 							type: "text",
-							text: `Workflow executed: ${intent.type}`,
+							text: formatExecuteSummaryText(intent.type, executeArtifact),
 						},
 					],
 					details: {
@@ -2199,10 +2215,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						confirmToken,
 						requestType: resolveRequestType(params.waitForLocalExecution),
 						artifacts: {
-							execute: attachExecuteSummary(
-								intent.type,
-								executeResult.details ?? null,
-							),
+							execute: executeArtifact,
 						},
 					},
 				};
@@ -2385,6 +2398,10 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					params,
 					network,
 				);
+				const executeArtifact = attachExecuteSummary(
+					intent.type,
+					executeResult.details ?? null,
+				);
 				rememberWorkflowSession({
 					route: "w3rt_run_sui_stablelayer_workflow_v0",
 					runId,
@@ -2395,7 +2412,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					content: [
 						{
 							type: "text",
-							text: `Workflow executed: ${intent.type}`,
+							text: formatExecuteSummaryText(intent.type, executeArtifact),
 						},
 					],
 					details: {
@@ -2409,10 +2426,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						confirmToken,
 						requestType: resolveRequestType(params.waitForLocalExecution),
 						artifacts: {
-							execute: attachExecuteSummary(
-								intent.type,
-								executeResult.details ?? null,
-							),
+							execute: executeArtifact,
 						},
 					},
 				};
@@ -2598,6 +2612,10 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					params,
 					network,
 				);
+				const executeArtifact = attachExecuteSummary(
+					intent.type,
+					executeResult.details ?? null,
+				);
 				rememberWorkflowSession({
 					route: "w3rt_run_sui_cetus_farms_workflow_v0",
 					runId,
@@ -2608,7 +2626,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					content: [
 						{
 							type: "text",
-							text: `Workflow executed: ${intent.type}`,
+							text: formatExecuteSummaryText(intent.type, executeArtifact),
 						},
 					],
 					details: {
@@ -2622,10 +2640,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						confirmToken,
 						requestType: resolveRequestType(params.waitForLocalExecution),
 						artifacts: {
-							execute: attachExecuteSummary(
-								intent.type,
-								executeResult.details ?? null,
-							),
+							execute: executeArtifact,
 						},
 					},
 				};

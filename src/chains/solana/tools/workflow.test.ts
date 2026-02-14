@@ -1145,6 +1145,7 @@ describe("w3rt_run_workflow_v0", () => {
 		});
 
 		expect(connection.sendRawTransaction).toHaveBeenCalledTimes(1);
+		expect(executed.content[0]?.text).toContain("solana.lend.kamino.deposit");
 		expect(executed.details).toMatchObject({
 			runId: "run-kamino",
 			status: "executed",

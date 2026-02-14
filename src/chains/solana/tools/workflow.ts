@@ -9876,7 +9876,7 @@ export function createSolanaWorkflowTools() {
 					content: [
 						{
 							type: "text",
-							text: `Workflow executed: ${execution.signature}`,
+							text: `Workflow executed: ${executeArtifact.summaryLine}`,
 						},
 						{
 							type: "text",

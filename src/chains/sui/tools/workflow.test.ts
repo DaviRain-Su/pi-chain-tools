@@ -423,7 +423,7 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 
 		expect(executeMocks.transferSuiExecute).toHaveBeenCalledTimes(1);
-		expect(execute.content[0]?.text).toContain("Workflow executed");
+		expect(execute.content[0]?.text).toContain("sui.transfer.sui executed");
 		expect(execute.details).toMatchObject({
 			intentType: "sui.transfer.sui",
 			artifacts: {
