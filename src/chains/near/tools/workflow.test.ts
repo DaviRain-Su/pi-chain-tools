@@ -1246,6 +1246,12 @@ describe("w3rt_run_near_workflow_v0", () => {
 				network: "mainnet",
 			}),
 		);
+		expect(fetchMock).toHaveBeenLastCalledWith(
+			"https://1click.chaindefuser.com/v0/status?depositAddress=0xnear-deposit-2&depositMemo=memo-2&correlationId=corr-exec-1",
+			expect.objectContaining({
+				method: "GET",
+			}),
+		);
 		expect(result.details).toMatchObject({
 			intentType: "near.swap.intents",
 			artifacts: {
@@ -1632,6 +1638,150 @@ describe("w3rt_run_near_workflow_v0", () => {
 						error: expect.stringContaining(
 							"ANY_INPUT withdrawals not found yet",
 						),
+					},
+				},
+			},
+		});
+	});
+
+	it("polls ANY_INPUT withdrawals when waitForFinalStatus is enabled", async () => {
+		mockFetchJsonOnce({
+			status: 200,
+			body: [
+				{
+					assetId: "near:wrap.near",
+					decimals: 24,
+					blockchain: "near",
+					symbol: "NEAR",
+					price: 4.2,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+				{
+					assetId: "near:usdc.tether-token.near",
+					decimals: 6,
+					blockchain: "near",
+					symbol: "USDC",
+					price: 1,
+					priceUpdatedAt: "2026-02-13T00:00:00Z",
+				},
+			],
+		});
+		mockFetchJsonOnce({
+			status: 201,
+			body: {
+				correlationId: "corr-sim-any-3",
+				timestamp: "2026-02-13T00:00:00Z",
+				signature: "sig-any-3",
+				quoteRequest: { dry: true },
+				quote: {
+					depositAddress: "0xnear-deposit-any-3",
+					depositMemo: "memo-any-3",
+					amountIn: "10000000000000000000000",
+					amountInFormatted: "0.01",
+					amountInUsd: "0.042",
+					minAmountIn: "10000000000000000000000",
+					amountOut: "41871",
+					amountOutFormatted: "0.041871",
+					amountOutUsd: "0.041871",
+					minAmountOut: "40000",
+					timeEstimate: 22,
+				},
+			},
+		});
+		const tool = getTool();
+		const simulated = await tool.execute("near-wf-8j-sim", {
+			runId: "wf-near-08j",
+			runMode: "simulate",
+			intentType: "near.swap.intents",
+			swapType: "ANY_INPUT",
+			network: "mainnet",
+			originAsset: "NEAR",
+			destinationAsset: "USDC",
+			amountRaw: "10000000000000000000000",
+		});
+		const token = (simulated.details as { confirmToken: string }).confirmToken;
+		mockFetchJsonOnce({
+			status: 200,
+			body: {
+				correlationId: "corr-sim-any-3",
+				status: "SUCCESS",
+				updatedAt: "2026-02-13T00:00:12Z",
+				quoteResponse: {
+					correlationId: "corr-sim-any-3",
+					timestamp: "2026-02-13T00:00:00Z",
+					signature: "sig-any-3",
+					quoteRequest: { dry: true },
+					quote: {
+						depositAddress: "0xnear-deposit-any-3",
+						depositMemo: "memo-any-3",
+						amountIn: "10000000000000000000000",
+						amountInFormatted: "0.01",
+						amountInUsd: "0.042",
+						minAmountIn: "10000000000000000000000",
+						amountOut: "41871",
+						amountOutFormatted: "0.041871",
+						amountOutUsd: "0.041871",
+						minAmountOut: "40000",
+						timeEstimate: 22,
+					},
+				},
+				swapDetails: {},
+			},
+		});
+		mockFetchJsonOnce({
+			status: 200,
+			body: {
+				asset: "near:usdc.tether-token.near",
+				recipient: "alice.near",
+				withdrawals: [
+					{
+						status: "WITHDRAWN",
+						amountOut: "41871",
+						amountOutFormatted: "0.041871",
+						withdrawFee: "10",
+						withdrawFeeFormatted: "0.000010",
+						timestamp: "2026-02-13T00:00:12Z",
+						hash: "0xwithdraw-any-3",
+					},
+				],
+				page: 1,
+				limit: 50,
+				total: 1,
+			},
+		});
+		const result = await tool.execute("near-wf-8j-exec", {
+			runId: "wf-near-08j",
+			runMode: "execute",
+			confirmMainnet: true,
+			confirmToken: token,
+			txHash: "0xfeedbeef-any-3",
+			statusPollIntervalMs: 500,
+			statusTimeoutMs: 3000,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.swap.intents",
+			artifacts: {
+				execute: {
+					correlationId: "corr-exec-1",
+					statusTracking: {
+						timedOut: false,
+						latestStatus: {
+							status: "SUCCESS",
+						},
+					},
+					anyInputWithdrawals: {
+						status: "success",
+						withdrawals: [
+							{
+								status: "WITHDRAWN",
+								hash: "0xwithdraw-any-3",
+							},
+						],
+						polling: {
+							timedOut: false,
+							attempts: 1,
+						},
 					},
 				},
 			},

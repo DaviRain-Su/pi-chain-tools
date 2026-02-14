@@ -819,6 +819,76 @@ describe("near_getIntentsStatus", () => {
 		});
 	});
 
+	it("supports querying status by correlationId", async () => {
+		mockFetchJsonOnce(200, {
+			correlationId: "corr-status-2",
+			status: "PROCESSING",
+			updatedAt: "2026-02-13T18:30:00.000Z",
+			quoteResponse: {
+				correlationId: "corr-status-2",
+				timestamp: "2026-02-13T18:10:42.627Z",
+				signature: "ed25519:yyy",
+				quoteRequest: {
+					dry: false,
+					swapType: "EXACT_INPUT",
+					slippageTolerance: 100,
+					originAsset: "nep141:wrap.near",
+					depositType: "ORIGIN_CHAIN",
+					destinationAsset: "nep141:usdc-near",
+					amount: "10000000000000000000000",
+					refundTo: "alice.near",
+					refundType: "ORIGIN_CHAIN",
+					recipient: "alice.near",
+					recipientType: "DESTINATION_CHAIN",
+					deadline: "2026-02-14T18:30:00.000Z",
+				},
+				quote: {
+					amountIn: "10000000000000000000000",
+					amountInFormatted: "0.01",
+					amountInUsd: "0.0101",
+					minAmountIn: "10000000000000000000000",
+					amountOut: "8833",
+					amountOutFormatted: "0.008833",
+					amountOutUsd: "0.0088",
+					minAmountOut: "8744",
+					timeEstimate: 20,
+				},
+			},
+			swapDetails: {},
+		});
+		const tool = getTool("near_getIntentsStatus");
+		const result = await tool.execute("near-read-intents-status-corr-1", {
+			correlationId: "corr-status-2",
+		});
+
+		expect(restMocks.fetch).toHaveBeenCalledWith(
+			"https://1click.chaindefuser.com/v0/status?correlationId=corr-status-2",
+			expect.objectContaining({
+				method: "GET",
+			}),
+		);
+		expect(result.content[0]?.text).toContain(
+			"Correlation query: corr-status-2",
+		);
+		expect(result.details).toMatchObject({
+			query: {
+				depositAddress: null,
+				depositMemo: null,
+				correlationId: "corr-status-2",
+			},
+			status: {
+				status: "PROCESSING",
+			},
+		});
+	});
+
+	it("requires depositAddress or correlationId", async () => {
+		const tool = getTool("near_getIntentsStatus");
+		await expect(
+			tool.execute("near-read-intents-status-missing", {}),
+		).rejects.toThrow("requires depositAddress or correlationId");
+	});
+
 	it("returns readable API error for missing deposit address", async () => {
 		mockFetchJsonOnce(404, {
 			message: "Deposit address test not found",

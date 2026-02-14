@@ -2067,15 +2067,23 @@ export function createNearReadTools() {
 			name: `${NEAR_TOOL_PREFIX}getIntentsStatus`,
 			label: "NEAR Intents Status",
 			description:
-				"Check NEAR Intents execution status by depositAddress (/v0/status).",
+				"Check NEAR Intents execution status by depositAddress or correlationId (/v0/status).",
 			parameters: Type.Object({
-				depositAddress: Type.String({
-					description: "Deposit address returned by 1Click quote response.",
-				}),
+				depositAddress: Type.Optional(
+					Type.String({
+						description: "Deposit address returned by 1Click quote response.",
+					}),
+				),
 				depositMemo: Type.Optional(
 					Type.String({
 						description:
 							"Optional deposit memo, required when quote returned memo mode.",
+					}),
+				),
+				correlationId: Type.Optional(
+					Type.String({
+						description:
+							"Optional correlationId returned by quote/submit response.",
 					}),
 				),
 				apiBaseUrl: Type.Optional(Type.String()),
@@ -2083,6 +2091,17 @@ export function createNearReadTools() {
 				jwt: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, params) {
+				const depositAddress = params.depositAddress?.trim() || undefined;
+				const correlationId = params.correlationId?.trim() || undefined;
+				const depositMemo =
+					depositAddress && params.depositMemo?.trim()
+						? params.depositMemo.trim()
+						: undefined;
+				if (!depositAddress && !correlationId) {
+					throw new Error(
+						"near_getIntentsStatus requires depositAddress or correlationId",
+					);
+				}
 				const baseUrl = resolveNearIntentsApiBaseUrl(params.apiBaseUrl);
 				const authHeaders = resolveNearIntentsHeaders({
 					apiKey: params.apiKey,
@@ -2094,8 +2113,9 @@ export function createNearReadTools() {
 						path: "/v0/status",
 						method: "GET",
 						query: {
-							depositAddress: params.depositAddress,
-							depositMemo: params.depositMemo,
+							depositAddress,
+							depositMemo,
+							correlationId,
 						},
 						headers: authHeaders,
 					});
@@ -2104,7 +2124,9 @@ export function createNearReadTools() {
 				const swapSummary = payload.swapDetails;
 				const lines = [
 					`Intents status: ${payload.status}`,
-					`Deposit: ${params.depositAddress}${params.depositMemo ? ` (memo ${params.depositMemo})` : ""}`,
+					depositAddress
+						? `Deposit: ${depositAddress}${depositMemo ? ` (memo ${depositMemo})` : ""}`
+						: `Correlation query: ${correlationId}`,
 					`Updated: ${payload.updatedAt}`,
 					`CorrelationId: ${payload.correlationId}`,
 				];
@@ -2137,8 +2159,14 @@ export function createNearReadTools() {
 						apiBaseUrl: baseUrl,
 						endpoint: statusResponse.url,
 						httpStatus: statusResponse.status,
-						depositAddress: params.depositAddress,
-						depositMemo: params.depositMemo ?? null,
+						query: {
+							depositAddress: depositAddress ?? null,
+							depositMemo: depositMemo ?? null,
+							correlationId: correlationId ?? null,
+						},
+						depositAddress: depositAddress ?? null,
+						depositMemo: depositMemo ?? null,
+						correlationId: correlationId ?? null,
 						status: payload,
 					},
 				};

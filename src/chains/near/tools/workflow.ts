@@ -2790,6 +2790,15 @@ function extractErrorText(error: unknown): string {
 	return String(error);
 }
 
+function isNearIntentsNotFoundError(message: string): boolean {
+	return (
+		message.includes("(404)") ||
+		/deposit .*not found/i.test(message) ||
+		/correlation.*not found/i.test(message) ||
+		/not found/i.test(message)
+	);
+}
+
 function isNearIntentsTerminalStatus(
 	status: NearIntentsStatusResponse["status"],
 ): boolean {
@@ -2810,8 +2819,9 @@ function sleepMs(delayMs: number): Promise<void> {
 async function pollNearIntentsStatusUntilFinal(params: {
 	baseUrl: string;
 	headers: Record<string, string>;
-	depositAddress: string;
+	depositAddress?: string;
 	depositMemo?: string;
+	correlationId?: string;
 	timeoutMs: number;
 	intervalMs: number;
 }): Promise<{
@@ -2826,6 +2836,11 @@ async function pollNearIntentsStatusUntilFinal(params: {
 		message?: string;
 	}>;
 }> {
+	if (!params.depositAddress && !params.correlationId) {
+		throw new Error(
+			"pollNearIntentsStatusUntilFinal requires depositAddress or correlationId",
+		);
+	}
 	const deadlineAt = Date.now() + params.timeoutMs;
 	let attempts = 0;
 	let latestStatus: NearIntentsStatusResponse | null = null;
@@ -2846,7 +2861,8 @@ async function pollNearIntentsStatusUntilFinal(params: {
 				method: "GET",
 				query: {
 					depositAddress: params.depositAddress,
-					depositMemo: params.depositMemo,
+					depositMemo: params.depositAddress ? params.depositMemo : undefined,
+					correlationId: params.correlationId,
 				},
 				headers: params.headers,
 			});
@@ -2868,10 +2884,7 @@ async function pollNearIntentsStatusUntilFinal(params: {
 		} catch (error) {
 			const message = extractErrorText(error);
 			lastError = message;
-			const isNotIndexedYet =
-				message.includes("(404)") ||
-				/deposit .*not found/i.test(message) ||
-				/not found/i.test(message);
+			const isNotIndexedYet = isNearIntentsNotFoundError(message);
 			history.push({
 				attempt: attempts,
 				status: isNotIndexedYet ? "NOT_FOUND" : "ERROR",
@@ -2893,6 +2906,100 @@ async function pollNearIntentsStatusUntilFinal(params: {
 		timedOut: true,
 		attempts,
 		latestStatus,
+		lastError,
+		history,
+	};
+}
+
+async function pollNearIntentsAnyInputWithdrawalsUntilFound(params: {
+	baseUrl: string;
+	headers: Record<string, string>;
+	depositAddress: string;
+	depositMemo?: string;
+	timeoutMs: number;
+	intervalMs: number;
+}): Promise<{
+	timedOut: boolean;
+	attempts: number;
+	latest: Awaited<
+		ReturnType<typeof queryNearIntentsAnyInputWithdrawals>
+	> | null;
+	lastError: string | null;
+	history: Array<{
+		attempt: number;
+		status: "FOUND" | "EMPTY" | "NOT_FOUND" | "ERROR";
+		count?: number;
+		message?: string;
+	}>;
+}> {
+	const deadlineAt = Date.now() + params.timeoutMs;
+	let attempts = 0;
+	let latest: Awaited<
+		ReturnType<typeof queryNearIntentsAnyInputWithdrawals>
+	> | null = null;
+	let lastError: string | null = null;
+	const history: Array<{
+		attempt: number;
+		status: "FOUND" | "EMPTY" | "NOT_FOUND" | "ERROR";
+		count?: number;
+		message?: string;
+	}> = [];
+
+	while (Date.now() <= deadlineAt) {
+		attempts += 1;
+		try {
+			const response = await queryNearIntentsAnyInputWithdrawals({
+				baseUrl: params.baseUrl,
+				headers: params.headers,
+				depositAddress: params.depositAddress,
+				depositMemo: params.depositMemo,
+			});
+			latest = response;
+			const count = response.withdrawals.length;
+			history.push({
+				attempt: attempts,
+				status: count > 0 ? "FOUND" : "EMPTY",
+				count,
+			});
+			if (count > 0) {
+				return {
+					timedOut: false,
+					attempts,
+					latest,
+					lastError,
+					history,
+				};
+			}
+		} catch (error) {
+			const message = extractErrorText(error);
+			lastError = message;
+			const notReady = isNearIntentsNotFoundError(message);
+			history.push({
+				attempt: attempts,
+				status: notReady ? "NOT_FOUND" : "ERROR",
+				message,
+			});
+			if (!notReady) {
+				return {
+					timedOut: true,
+					attempts,
+					latest,
+					lastError,
+					history,
+				};
+			}
+		}
+
+		if (Date.now() + params.intervalMs > deadlineAt) {
+			break;
+		}
+		await sleepMs(params.intervalMs);
+	}
+
+	return {
+		timedOut: true,
+		attempts,
+		latest,
 		lastError,
 		history,
 	};
@@ -4251,8 +4358,15 @@ export function createNearWorkflowTools() {
 				const executeDetails = executeResult.details as
 					| {
 							txHash?: string;
+							correlationId?: string;
 					  }
 					| undefined;
+				const intentsExecuteCorrelationId =
+					intent.type === "near.swap.intents" &&
+					typeof executeDetails?.correlationId === "string" &&
+					executeDetails.correlationId.trim()
+						? executeDetails.correlationId.trim()
+						: undefined;
 				const shouldTrackIntentsStatus =
 					intent.type === "near.swap.intents"
 						? shouldWaitForIntentsFinalStatus(params.waitForFinalStatus, hints)
@@ -4260,7 +4374,7 @@ export function createNearWorkflowTools() {
 				const statusTracking =
 					intent.type === "near.swap.intents" &&
 					shouldTrackIntentsStatus &&
-					effectiveIntentsDepositAddress
+					(effectiveIntentsDepositAddress || intentsExecuteCorrelationId)
 						? await pollNearIntentsStatusUntilFinal({
 								baseUrl: resolveNearIntentsApiBaseUrl(
 									params.apiBaseUrl ?? intent.apiBaseUrl,
@@ -4271,6 +4385,7 @@ export function createNearWorkflowTools() {
 								}),
 								depositAddress: effectiveIntentsDepositAddress,
 								depositMemo: effectiveIntentsDepositMemo,
+								correlationId: intentsExecuteCorrelationId,
 								intervalMs: parseIntentsStatusPollIntervalMs(
 									params.statusPollIntervalMs,
 								),
@@ -4290,17 +4405,68 @@ export function createNearWorkflowTools() {
 									jwt: params.jwt,
 								});
 								try {
-									const queryResult = await queryNearIntentsAnyInputWithdrawals(
-										{
+									if (!shouldTrackIntentsStatus) {
+										const queryResult =
+											await queryNearIntentsAnyInputWithdrawals({
+												baseUrl,
+												headers,
+												depositAddress: effectiveIntentsDepositAddress,
+												depositMemo: effectiveIntentsDepositMemo,
+											});
+										return {
+											status: "success",
+											...queryResult,
+										};
+									}
+									const pollingResult =
+										await pollNearIntentsAnyInputWithdrawalsUntilFound({
 											baseUrl,
 											headers,
 											depositAddress: effectiveIntentsDepositAddress,
 											depositMemo: effectiveIntentsDepositMemo,
-										},
-									);
+											intervalMs: parseIntentsStatusPollIntervalMs(
+												params.statusPollIntervalMs,
+											),
+											timeoutMs: parseIntentsStatusTimeoutMs(
+												params.statusTimeoutMs,
+											),
+										});
+									if (pollingResult.latest) {
+										return {
+											status:
+												pollingResult.latest.withdrawals.length > 0
+													? "success"
+													: "pending",
+											...pollingResult.latest,
+											polling: {
+												timedOut: pollingResult.timedOut,
+												attempts: pollingResult.attempts,
+												lastError: pollingResult.lastError,
+												history: pollingResult.history,
+											},
+										};
+									}
+									if (pollingResult.lastError) {
+										return {
+											status: "error",
+											error: pollingResult.lastError,
+											polling: {
+												timedOut: pollingResult.timedOut,
+												attempts: pollingResult.attempts,
+												lastError: pollingResult.lastError,
+												history: pollingResult.history,
+											},
+										};
+									}
 									return {
-										status: "success",
-										...queryResult,
+										status: "pending",
+										withdrawals: [],
+										polling: {
+											timedOut: pollingResult.timedOut,
+											attempts: pollingResult.attempts,
+											lastError: pollingResult.lastError,
+											history: pollingResult.history,
+										},
 									};
 								} catch (error) {
 									return {
@@ -4331,7 +4497,7 @@ export function createNearWorkflowTools() {
 													attempts: 0,
 													latestStatus: null,
 													lastError:
-														"status tracking was requested but depositAddress is missing",
+														"status tracking was requested but both depositAddress and correlationId are missing",
 													history: [],
 												}
 											: null,
