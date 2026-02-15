@@ -26,7 +26,7 @@ const runtimeMocks = vi.hoisted(() => {
 	return {
 		getSuiClient: vi.fn(),
 		getSuiRpcEndpoint: vi.fn(() => "https://fullnode.mainnet.sui.io:443"),
-		listSuiKeystoreAddresses: vi.fn(() => []),
+		listSuiKeystoreAddresses: vi.fn((): string[] => []),
 		parsePositiveBigInt: vi.fn((value: string) => BigInt(value)),
 		parseSuiNetwork: vi.fn(() => "mainnet"),
 		resolveSuiOwnerAddress: vi.fn(
@@ -87,7 +87,22 @@ const cetusV2Mocks = vi.hoisted(() => ({
 	buildCetusFarmsUnstakeTransaction: vi.fn(),
 	buildCetusFarmsHarvestTransaction: vi.fn(),
 	findCetusFarmsPoolsByTokenPair: vi.fn(),
-	formatCetusFarmsPairError: vi.fn(() => "formatCetusFarmsPairError"),
+	formatCetusFarmsPoolPairError: vi.fn(
+		(params: {
+			coinTypeA: string;
+			coinTypeB: string;
+			pools: {
+				poolId: string;
+				clmmPoolId: string;
+				coinTypeA: string;
+				coinTypeB: string;
+				pairSymbol: string;
+				symbolA: string;
+				symbolB: string;
+			}[];
+		}) =>
+			`${params.coinTypeA}/${params.coinTypeB} maps to multiple pools, Please provide poolId.`,
+	),
 }));
 
 vi.mock("../runtime.js", async () => {
@@ -225,7 +240,7 @@ vi.mock("../cetus-v2.js", () => ({
 	buildCetusFarmsHarvestTransaction:
 		cetusV2Mocks.buildCetusFarmsHarvestTransaction,
 	findCetusFarmsPoolsByTokenPair: cetusV2Mocks.findCetusFarmsPoolsByTokenPair,
-	formatCetusFarmsPairError: cetusV2Mocks.formatCetusFarmsPairError,
+	formatCetusFarmsPoolPairError: cetusV2Mocks.formatCetusFarmsPoolPairError,
 }));
 
 import { createSuiWorkflowTools } from "./workflow.js";
@@ -248,8 +263,8 @@ beforeEach(() => {
 	runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
 	runtimeMocks.listSuiKeystoreAddresses.mockReturnValue([]);
 	cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockResolvedValue([]);
-	cetusV2Mocks.formatCetusFarmsPairError.mockImplementation(
-		({ coinTypeA, coinTypeB }) =>
+	cetusV2Mocks.formatCetusFarmsPoolPairError.mockImplementation(
+		({ coinTypeA, coinTypeB }: { coinTypeA: string; coinTypeB: string }) =>
 			`${coinTypeA}/${coinTypeB} maps to multiple pools, Please provide poolId.`,
 	);
 	runtimeMocks.getSuiClient.mockReturnValue({

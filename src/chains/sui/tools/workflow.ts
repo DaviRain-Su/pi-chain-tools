@@ -9,7 +9,7 @@ import {
 	buildCetusFarmsStakeTransaction,
 	buildCetusFarmsUnstakeTransaction,
 	findCetusFarmsPoolsByTokenPair,
-	formatCetusFarmsPairError,
+	formatCetusFarmsPoolPairError,
 	resolveCetusTokenTypesBySymbol,
 	resolveCetusV2Network,
 } from "../cetus-v2.js";
@@ -20,9 +20,9 @@ import {
 	getSuiExplorerTransactionUrl,
 	getSuiRpcEndpoint,
 	getSuiSignerLookupPaths,
+	listSuiKeystoreAddresses,
 	parsePositiveBigInt,
 	parseSuiNetwork,
-	listSuiKeystoreAddresses,
 	resolveSuiKeypair,
 	resolveSuiOwnerAddress,
 	suiNetworkSchema,
@@ -1424,15 +1424,11 @@ async function resolveLpClmmPoolByPair(params: {
 		return poolCandidates[0].clmmPoolId || poolCandidates[0].poolId;
 	}
 	if (poolCandidates.length > 1) {
-		const formattedCandidates = poolCandidates.map((candidate) => ({
-			poolId: candidate.clmmPoolId || candidate.poolId,
-			pairSymbol: candidate.pairSymbol,
-		}));
 		throw new Error(
-			formatCetusFarmsPairError({
+			formatCetusFarmsPoolPairError({
 				coinTypeA,
 				coinTypeB,
-				pools: formattedCandidates,
+				pools: poolCandidates,
 			}),
 		);
 	}
@@ -2681,10 +2677,10 @@ async function executeSignedTransactionBlock(params: {
 	const status = response.effects?.status?.status ?? "unknown";
 	const error = response.effects?.status?.error ?? response.errors?.[0] ?? null;
 	if (status === "failure") {
-	throw new Error(
-		`Sui signed transaction execute failed: ${error ?? "unknown error"} (digest=${response.digest})`,
-	);
-}
+		throw new Error(
+			`Sui signed transaction execute failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+		);
+	}
 	return {
 		digest: response.digest,
 		status,

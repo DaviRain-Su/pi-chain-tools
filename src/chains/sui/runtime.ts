@@ -223,7 +223,12 @@ function collectKeystoreStringValues(
 	seen = new Set<object>(),
 ): string[] {
 	if (typeof entry === "string") return [entry];
-	if (!entry || typeof entry !== "object" || Array.isArray(entry) || depth > 2) {
+	if (
+		!entry ||
+		typeof entry !== "object" ||
+		Array.isArray(entry) ||
+		depth > 2
+	) {
 		return [];
 	}
 
@@ -344,9 +349,7 @@ function resolveSuiKeypairFromLocalKeystore(): Ed25519Keypair | null {
 					if (keypair) {
 						if (!fallbackKeypair) fallbackKeypair = keypair;
 						if (activeAddress) {
-							const candidateAddress = normalizeAddress(
-								keypair.toSuiAddress(),
-							);
+							const candidateAddress = normalizeAddress(keypair.toSuiAddress());
 							if (candidateAddress === activeAddress) {
 								return keypair;
 							}
