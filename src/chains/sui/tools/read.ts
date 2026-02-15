@@ -20,6 +20,7 @@ import {
 	suiNetworkSchema,
 } from "../runtime.js";
 import {
+	STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
 	getStableLayerSupply,
 	resolveStableLayerNetwork,
 } from "../stablelayer.js";
@@ -89,6 +90,48 @@ type SuiPortfolioAsset = {
 		iconUrl: string | null;
 	} | null;
 };
+
+type KnownSuiAssetMetadata = {
+	symbol: string;
+	name: string;
+	description: string;
+	iconUrl: null;
+	decimals: number;
+};
+
+const KNOWN_SUI_ASSET_METADATA_BY_COIN_TYPE = new Map<
+	string,
+	KnownSuiAssetMetadata
+>([
+	[
+		SUI_COIN_TYPE,
+		{
+			symbol: "SUI",
+			name: "Sui",
+			description: "Sui gas and base token",
+			iconUrl: null,
+			decimals: 9,
+		},
+	],
+	[
+		STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+		{
+			symbol: "USDC",
+			name: "USD Coin",
+			description: "USD Coin",
+			iconUrl: null,
+			decimals: 6,
+		},
+	],
+]);
+
+function resolveKnownSuiAssetMetadata(
+	coinType: string,
+): KnownSuiAssetMetadata | null {
+	const normalized = coinType.trim();
+	const exact = KNOWN_SUI_ASSET_METADATA_BY_COIN_TYPE.get(normalized);
+	return exact ?? null;
+}
 
 type SuiPortfolioSummary = {
 	assetCount: number;
@@ -506,7 +549,7 @@ async function buildPortfolioSummary(params: {
 
 	const metadataByCoinType = new Map<
 		string,
-		Awaited<ReturnType<typeof client.getCoinMetadata>>
+		Awaited<ReturnType<typeof client.getCoinMetadata>> | null
 	>();
 
 	if (includeMetadata) {
@@ -526,6 +569,7 @@ async function buildPortfolioSummary(params: {
 
 	const assets = filteredBalances.map((entry) => {
 		const metadata = metadataByCoinType.get(entry.coinType) ?? null;
+		const fallbackMetadata = resolveKnownSuiAssetMetadata(entry.coinType);
 		const entryWithFunds = entry as unknown as {
 			fundsInAddressBalance?: unknown;
 		};
@@ -542,11 +586,20 @@ async function buildPortfolioSummary(params: {
 				? 9
 				: typeof metadata?.decimals === "number"
 					? metadata.decimals
-					: null;
+					: (fallbackMetadata?.decimals ?? null);
 		const uiAmount =
 			typeof decimals === "number"
 				? formatCoinAmount(effectiveBalance, decimals)
 				: null;
+		const metadataSymbol =
+			metadata?.symbol?.trim() ||
+			fallbackMetadata?.symbol ||
+			fallbackCoinSymbol(entry.coinType);
+		const metadataName =
+			metadata?.name?.trim() || fallbackMetadata?.name || metadataSymbol;
+		const metadataDescription =
+			metadata?.description?.trim() || fallbackMetadata?.description || "";
+		const metadataIconUrl = metadata?.iconUrl ?? null;
 		return {
 			coinType: entry.coinType,
 			totalBalance: entry.totalBalance,
@@ -556,12 +609,12 @@ async function buildPortfolioSummary(params: {
 			coinObjectCount: entry.coinObjectCount,
 			lockedBalance: entry.lockedBalance,
 			fundsInAddressBalance,
-			metadata: metadata
+			metadata: includeMetadata
 				? {
-						symbol: metadata.symbol,
-						name: metadata.name,
-						description: metadata.description,
-						iconUrl: metadata.iconUrl ?? null,
+						symbol: metadataSymbol,
+						name: metadataName,
+						description: metadataDescription,
+						iconUrl: metadataIconUrl,
 					}
 				: null,
 		};
@@ -643,15 +696,17 @@ export function createSuiReadTools() {
 					} else {
 						try {
 							const metadata = await client.getCoinMetadata?.({ coinType });
-							symbol = metadata?.symbol?.trim() || null;
-							decimals =
-								typeof metadata?.decimals === "number"
-									? metadata.decimals
-									: null;
-						} catch {
-							symbol = null;
-							decimals = null;
-						}
+							if (metadata) {
+								symbol = metadata.symbol?.trim() || null;
+								decimals =
+									typeof metadata.decimals === "number"
+										? metadata.decimals
+										: null;
+							}
+						} catch {}
+						const fallback = resolveKnownSuiAssetMetadata(coinType);
+						symbol = symbol || fallback?.symbol || null;
+						decimals = decimals ?? fallback?.decimals ?? null;
 					}
 					const uiAmount =
 						typeof decimals === "number"

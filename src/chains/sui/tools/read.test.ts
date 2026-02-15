@@ -56,6 +56,8 @@ vi.mock("../runtime.js", async () => {
 });
 
 vi.mock("../stablelayer.js", () => ({
+	STABLE_LAYER_DEFAULT_USDC_COIN_TYPE:
+		"0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC",
 	getStableLayerSupply: stableLayerMocks.getStableLayerSupply,
 	resolveStableLayerNetwork: stableLayerMocks.resolveStableLayerNetwork,
 }));
@@ -204,6 +206,39 @@ describe("sui_getBalance", () => {
 			totalBalance: "0",
 			effectiveBalance: "10186",
 			fundsInAddressBalance: "10186",
+			uiAmount: "0.010186",
+		});
+	});
+
+	it("falls back to known metadata for native-usdc coin type when metadata RPC is unavailable", async () => {
+		const stableUsdcCoinType =
+			"0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC";
+		const getBalance = vi.fn().mockResolvedValue({
+			coinType: stableUsdcCoinType,
+			coinObjectCount: 1,
+			lockedBalance: {},
+			totalBalance: "10186",
+		});
+		const getCoinMetadata = vi
+			.fn()
+			.mockRejectedValue(new Error("metadata unavailable"));
+		runtimeMocks.getSuiClient.mockReturnValue({ getBalance, getCoinMetadata });
+		runtimeMocks.formatCoinAmount.mockReturnValue("0.010186");
+
+		const tool = getTool("sui_getBalance");
+		const result = await tool.execute("t4", {
+			owner: "0xusdc",
+			coinType: stableUsdcCoinType,
+		});
+
+		expect(runtimeMocks.formatCoinAmount).toHaveBeenCalledWith("10186", 6);
+		expect(result.content[0]?.text).toContain("USDC");
+		expect(result.details).toMatchObject({
+			owner: "0xusdc",
+			coinType: stableUsdcCoinType,
+			totalBalance: "10186",
+			effectiveBalance: "10186",
+			decimals: 6,
 			uiAmount: "0.010186",
 		});
 	});
@@ -486,6 +521,51 @@ describe("sui_getPortfolio", () => {
 					uiAmount: "0.010186",
 				}),
 			]),
+		});
+	});
+
+	it("uses known metadata fallback for portfolio assets when RPC metadata is missing", async () => {
+		const stableUsdcCoinType =
+			"0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC";
+		const getAllBalances = vi.fn().mockResolvedValue([
+			{
+				coinType: stableUsdcCoinType,
+				coinObjectCount: 1,
+				totalBalance: "10186",
+				lockedBalance: {},
+			},
+		]);
+		const getCoinMetadata = vi
+			.fn()
+			.mockRejectedValue(new Error("metadata unavailable"));
+		runtimeMocks.getSuiClient.mockReturnValue({
+			getAllBalances,
+			getCoinMetadata,
+		});
+		runtimeMocks.formatCoinAmount.mockReturnValue("0.010186");
+
+		const tool = getTool("sui_getPortfolio");
+		const result = await tool.execute("p-fallback", {
+			owner: "0xportfolio",
+			network: "mainnet",
+		});
+
+		expect(getAllBalances).toHaveBeenCalledWith({ owner: "0xportfolio" });
+		expect(result.content[0]?.text).toContain("USDC");
+		expect(result.content[0]?.text).toContain("0.010186");
+		expect(result.details).toMatchObject({
+			assetCount: 1,
+			assets: [
+				{
+					coinType: stableUsdcCoinType,
+					decimals: 6,
+					uiAmount: "0.010186",
+					metadata: {
+						symbol: "USDC",
+						name: "USD Coin",
+					},
+				},
+			],
 		});
 	});
 
