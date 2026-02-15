@@ -244,6 +244,23 @@ function formatPortfolioAssetLine(
 	return `${index + 1}. ${shortCoinType(asset.coinType)} (${symbol}): ${rawNote} (${objectCountText})`;
 }
 
+function formatAssetHeadline(assets: SuiPortfolioAsset[]): string {
+	const snippets: string[] = [];
+	for (const asset of assets) {
+		const symbol = asset.metadata?.symbol || fallbackCoinSymbol(asset.coinType);
+		if (!asset.uiAmount || asset.uiAmount === "0" || asset.uiAmount === "0.0") {
+			continue;
+		}
+		const amount = asset.uiAmount;
+		snippets.push(`${symbol}=${amount}`);
+		if (snippets.length >= 3) break;
+	}
+	if (snippets.length === 0) {
+		return "no readable token balance";
+	}
+	return snippets.join(", ");
+}
+
 function resolveAggregatorEnv(network: string): Env {
 	if (network === "mainnet") return Env.Mainnet;
 	if (network === "testnet") return Env.Testnet;
@@ -774,7 +791,7 @@ export function createSuiReadTools() {
 				});
 				const previewAssets = portfolio.assets.slice(0, HUMAN_READABLE_LIMIT);
 				const lines = [
-					`Balances (${network}) for ${owner}: ${portfolio.assetCount} asset(s)`,
+					`Balances (${network}) for ${owner}: ${portfolio.assetCount} asset(s) [${formatAssetHeadline(previewAssets)}]`,
 				];
 
 				for (const [index, asset] of previewAssets.entries()) {
@@ -1425,7 +1442,7 @@ export function createSuiReadTools() {
 				const suiUi = portfolio.suiBalance?.uiAmount ?? "0";
 				const suiRaw = portfolio.suiBalance?.effectiveBalance ?? "0";
 				const lines = [
-					`Portfolio: ${portfolio.assetCount} assets (SUI=${suiUi} / ${suiRaw} MIST)`,
+					`Portfolio: ${portfolio.assetCount} assets [${formatAssetHeadline(portfolio.assets)}] (SUI=${suiUi} / ${suiRaw} MIST)`,
 					`owner: ${owner}`,
 					`network: ${network}`,
 					"Wallet assets (>0):",
