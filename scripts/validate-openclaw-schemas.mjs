@@ -12,21 +12,30 @@ const args = new Set(process.argv.slice(2));
 const isStrict = args.has("--strict");
 const isJsonOutput = args.has("--json");
 const isListRequested = args.has("--list");
+const isListStrict = args.has("--list-strict");
 const isHelpRequested = args.has("--help") || args.has("-h");
-const allowedArgs = new Set(["--strict", "--json", "--list", "--help", "-h"]);
+const allowedArgs = new Set([
+	"--strict",
+	"--json",
+	"--list",
+	"--list-strict",
+	"--help",
+	"-h",
+]);
 const unknownArgs = process.argv
 	.slice(2)
 	.filter((arg) => !allowedArgs.has(arg));
 
 function printUsage() {
 	console.log(
-		"Usage: node scripts/validate-openclaw-schemas.mjs [--strict] [--json] [--list] [--help|-h]\n\n" +
+		"Usage: node scripts/validate-openclaw-schemas.mjs [--strict] [--json] [--list] [--list-strict] [--help|-h]\n\n" +
 			"Validate OpenClaw BTC5m schema artifacts in docs/schemas.\n\n" +
 			"Options:\n" +
-			"  --strict    print grouped diagnostics + fix guidance\n" +
-			"  --json      print machine-readable JSON result\n" +
-			"  --list      list configured schema files (resolved paths + existence)\n" +
-			"  --help,-h   show this message\n\n" +
+			"  --strict       print grouped diagnostics + fix guidance\n" +
+			"  --json         print machine-readable JSON result\n" +
+			"  --list         list configured schema files (resolved paths + existence)\n" +
+			"  --list-strict  when listing, fail if any configured schema file is missing\n" +
+			"  --help,-h      show this message\n\n" +
 			"Files:\n" +
 			"  openclaw-btc5m-workflow.schema.json\n" +
 			"  openclaw-btc5m-runtime-state.schema.json\n" +
@@ -293,22 +302,43 @@ async function getSchemaFileList() {
 async function printListOutput() {
 	const list = await getSchemaFileList();
 	const existing = list.filter((item) => item.exists);
+	const missing = list.filter((item) => !item.exists);
+
+	const payload = {
+		status: isListStrict && missing.length > 0 ? "failed" : "list",
+		summary: {
+			totalFiles: list.length,
+			existingFiles: existing.length,
+			missingFiles: missing.length,
+			allExist: missing.length === 0,
+		},
+		files: list,
+	};
+
 	if (isJsonOutput) {
-		console.log(
-			JSON.stringify(
-				{
-					status: "list",
-					summary: {
-						totalFiles: list.length,
-						existingFiles: existing.length,
+		if (missing.length > 0 && isListStrict) {
+			console.log(
+				JSON.stringify(
+					{
+						...payload,
+						errors: missing.map((item) =>
+							createError(
+								item.fileName,
+								"missing_file",
+								`missing schema file: ${item.fileName}`,
+								`Expected at: ${item.filePath}`,
+							),
+						),
 					},
-					files: list,
-				},
-				null,
-				2,
-			),
-		);
-		return;
+					null,
+					2,
+				),
+			);
+			return false;
+		}
+
+		console.log(JSON.stringify(payload, null, 2));
+		return true;
 	}
 
 	console.log("Configured schema files:");
@@ -318,6 +348,22 @@ async function printListOutput() {
 		console.log(`  size: ${item.exists ? `${item.sizeBytes} bytes` : "n/a"}`);
 	}
 	console.log(`Summary: ${existing.length}/${list.length} files exist.`);
+
+	if (isListStrict && missing.length > 0) {
+		printCompact(
+			missing.map((item) =>
+				createError(
+					item.fileName,
+					"missing_file",
+					`missing schema file: ${item.fileName}`,
+					`Expected at: ${item.filePath}`,
+				),
+			),
+		);
+		return false;
+	}
+
+	return true;
 }
 
 async function main() {
@@ -332,8 +378,11 @@ async function main() {
 		process.exit(1);
 	}
 
-	if (isListRequested) {
-		await printListOutput();
+	if (isListRequested || isListStrict) {
+		const listOk = await printListOutput();
+		if (!listOk) {
+			process.exit(1);
+		}
 		return;
 	}
 

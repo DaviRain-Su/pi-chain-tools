@@ -1207,6 +1207,11 @@ npm run schema:validate -- --list
 # 使用 JSON：
 npm run schema:validate -- --list --json
 
+# 列表严格校验（列表里任一文件缺失则退出 1）
+npm run schema:validate -- --list-strict
+npm run schema:validate -- --list-strict --json
+# 返回示例（失败）：{ "status": "failed", "errors": [...] }
+
 # 查看参数说明
 npm run schema:validate -- --help
 ```
