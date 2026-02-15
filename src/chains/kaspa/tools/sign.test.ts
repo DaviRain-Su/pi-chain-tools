@@ -313,6 +313,24 @@ describe("kaspa sign tools", () => {
 			expect(signedFromPathAlias.signatures).toEqual([
 				"sig-wallet-private-key-file-json",
 			]);
+
+			const resultInlineBeatsFile = await signTool.execute(
+				"kaspa-sign-wallet-inline-beats-file",
+				{
+					request,
+					signerProvider: "kaspa-wallet",
+					privateKey: "explicit-private-key",
+					privateKeyPath: tempKeyPath,
+					signatureEncoding: "hex",
+				},
+			);
+			const signedInlineBeatsFile = JSON.parse(
+				(resultInlineBeatsFile.details as { rawTransaction: string })
+					.rawTransaction,
+			) as { signatures: string[] };
+			expect(signedInlineBeatsFile.signatures).toEqual([
+				"sig-wallet-explicit-private-key",
+			]);
 		} finally {
 			if (originalEnv === undefined) {
 				process.env.KASPA_PRIVATE_KEY = "";
