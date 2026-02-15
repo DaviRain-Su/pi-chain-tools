@@ -1,5 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { readdir } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
 const schemaDir = path.join(process.cwd(), "docs", "schemas");
@@ -9,8 +8,45 @@ const schemaFiles = [
 	"openclaw-btc5m-retry-policy.schema.json",
 ];
 
+const args = new Set(process.argv.slice(2));
+const isStrict = args.has("--strict");
+const isJsonOutput = args.has("--json");
+
+const errorGuidance = {
+	schema_dir_missing: {
+		help: "Initialize/checkout repo with docs/schemas directory present.",
+		fix: "Check workflow/CI working directory and repository contents.",
+	},
+	missing_file: {
+		help: "Schema file does not exist.",
+		fix: "Add the missing schema file under docs/schemas and ensure it is committed.",
+	},
+	invalid_json: {
+		help: "Schema file is not valid JSON.",
+		fix: "Fix JSON syntax (commas, quotes, trailing commas).",
+	},
+	root_type_invalid: {
+		help: "Parsed JSON is not an object schema root.",
+		fix: "Use an object as the root schema shape (top-level { ... }).",
+	},
+	missing_schema_field: {
+		help: "Required top-level metadata field is missing/invalid.",
+		fix: "Fill in $schema/title/$id with non-empty strings.",
+	},
+	unresolved_defs_ref: {
+		help: "Local $ref points to undefined $defs definition.",
+		fix: "Use #/$defs/<name> and ensure target name exists in schema.",
+	},
+};
+
+/**
+ * @typedef {{ code: string; file: string; message: string; detail?: string }} SchemaValidationError
+ */
+
 function collectRefs(node, out = []) {
-	if (node === null || typeof node !== "object") return out;
+	if (node === null || typeof node !== "object") {
+		return out;
+	}
 
 	if (Array.isArray(node)) {
 		for (const item of node) {
@@ -26,9 +62,9 @@ function collectRefs(node, out = []) {
 			value.startsWith("#/$defs/")
 		) {
 			out.push(value);
-		} else {
-			collectRefs(value, out);
+			continue;
 		}
+		collectRefs(value, out);
 	}
 
 	return out;
@@ -69,73 +105,194 @@ function hasNested(schema, ref) {
 	return true;
 }
 
+function createError(file, code, message, detail) {
+	return {
+		file,
+		code,
+		message,
+		detail,
+	};
+}
+
 async function validateFile(fileName) {
 	const filePath = path.join(schemaDir, fileName);
-	const raw = await readFile(filePath, "utf8");
-	let schema;
+	let raw;
 
 	try {
-		schema = JSON.parse(raw);
+		raw = await readFile(filePath, "utf8");
 	} catch {
-		return [`${fileName}: invalid JSON`];
+		return [
+			createError(
+				fileName,
+				"missing_file",
+				`missing schema file: ${fileName}`,
+				"No such file or directory.",
+			),
+		];
+	}
+
+	let schema;
+	try {
+		schema = JSON.parse(raw);
+	} catch (error) {
+		const parseMessage =
+			error instanceof Error ? error.message : "Unknown JSON parse error";
+		return [
+			createError(fileName, "invalid_json", "invalid JSON", parseMessage),
+		];
 	}
 
 	if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
-		return [`${fileName}: root schema must be a JSON object`];
+		return [
+			createError(
+				fileName,
+				"root_type_invalid",
+				"root schema must be a JSON object",
+			),
+		];
 	}
 
 	const errors = [];
 	if (typeof schema.$schema !== "string" || schema.$schema.length === 0) {
-		errors.push(`${fileName}: missing or invalid $schema`);
+		errors.push(
+			createError(
+				fileName,
+				"missing_schema_field",
+				"missing or invalid $schema",
+			),
+		);
 	}
 	if (typeof schema.title !== "string" || schema.title.length === 0) {
-		errors.push(`${fileName}: missing or invalid title`);
+		errors.push(
+			createError(fileName, "missing_schema_field", "missing or invalid title"),
+		);
 	}
 	if (typeof schema.$id !== "string" || schema.$id.length === 0) {
-		errors.push(`${fileName}: missing or invalid $id`);
+		errors.push(
+			createError(fileName, "missing_schema_field", "missing or invalid $id"),
+		);
 	}
 
 	const refs = collectRefs(schema);
 	for (const ref of refs) {
 		if (!hasNested(schema, ref)) {
-			errors.push(`${fileName}: unresolved local $defs ref ${ref}`);
+			errors.push(
+				createError(
+					fileName,
+					"unresolved_defs_ref",
+					`unresolved local $defs ref ${ref}`,
+				),
+			);
 		}
 	}
 
 	return errors;
 }
 
-async function main() {
-	try {
-		const dirEntries = await readdir(schemaDir, { withFileTypes: true });
-		const existingFiles = new Set(
-			dirEntries.filter((entry) => entry.isFile()).map((entry) => entry.name),
-		);
-
-		for (const target of schemaFiles) {
-			if (!existingFiles.has(target)) {
-				console.error(`MISSING: ${target}`);
-				process.exitCode = 1;
-			}
+function groupByCode(errors) {
+	const grouped = new Map();
+	for (const error of errors) {
+		if (!grouped.has(error.code)) {
+			grouped.set(error.code, []);
 		}
+		grouped.get(error.code)?.push(error);
+	}
+	return grouped;
+}
+
+function printCompact(errors) {
+	for (const error of errors) {
+		const suffix = error.detail ? ` (${error.detail})` : "";
+		console.error(`SCHEMA_INVALID: ${error.file}: ${error.message}${suffix}`);
+	}
+}
+
+function printStrict(errors) {
+	const grouped = groupByCode(errors);
+	const codes = [...grouped.keys()].sort();
+
+	console.error("SCHEMA_VALIDATION_FAILED");
+	for (const code of codes) {
+		const items = grouped.get(code) ?? [];
+		const guidance = errorGuidance[code] ?? {
+			help: "Validation failed.",
+			fix: "Please inspect and fix the issue first.",
+		};
+
+		console.error(`\n[${code}] ${guidance.help}`);
+		console.error(`  fix: ${guidance.fix}`);
+		for (const item of items) {
+			const suffix = item.detail ? ` | ${item.detail}` : "";
+			console.error(`  - ${item.file}: ${item.message}${suffix}`);
+		}
+	}
+}
+
+function printJsonOutput(errors) {
+	console.error(
+		JSON.stringify(
+			{
+				status: "failed",
+				errors,
+			},
+			null,
+			2,
+		),
+	);
+}
+
+async function main() {
+	let hasDir = true;
+	try {
+		await readdir(schemaDir, { withFileTypes: true });
 	} catch {
-		console.error(`SCHEMA_DIR_MISSING: ${schemaDir}`);
+		hasDir = false;
+		if (isJsonOutput) {
+			printJsonOutput([
+				createError(
+					"",
+					"schema_dir_missing",
+					`SCHEMA_DIR_MISSING: ${schemaDir}`,
+				),
+			]);
+		} else {
+			console.error(`SCHEMA_DIR_MISSING: ${schemaDir}`);
+		}
+	}
+
+	if (!hasDir) {
 		process.exit(1);
 	}
 
 	const errors = [];
 	for (const fileName of schemaFiles) {
-		const fileErrors = await validateFile(fileName);
-		errors.push(...fileErrors);
+		errors.push(...(await validateFile(fileName)));
 	}
 
 	if (errors.length > 0) {
-		for (const err of errors) {
-			console.error(`SCHEMA_INVALID: ${err}`);
+		if (isJsonOutput) {
+			printJsonOutput(errors);
+		} else if (isStrict) {
+			printStrict(errors);
+		} else {
+			printCompact(errors);
 		}
 		process.exit(1);
 	}
 
+	if (isJsonOutput) {
+		console.log(
+			JSON.stringify(
+				{
+					status: "ok",
+					files: schemaFiles,
+				},
+				null,
+				2,
+			),
+		);
+		return;
+	}
 	console.log("SCHEMA_VALIDATION_OK");
 }
 

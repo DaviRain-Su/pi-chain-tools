@@ -35,8 +35,19 @@ npm run schema:validate
 
 ## 常见失败与排查
 
-- `SCHEMA_DIR_MISSING`：检查仓库是否有 `docs/schemas` 目录。
-- `MISSING: <file>`：检查对应文件是否存在且被提交。
-- `invalid JSON`：检查 JSON 语法（逗号/引号/括号）。
-- `missing or invalid $schema/title/$id`：补齐元信息。
-- `unresolved local $defs ref`：检查 `$ref` 是否为 `#/$defs/...` 且目标 `$defs` 存在。
+- `schema_dir_missing`：检查仓库是否有 `docs/schemas` 目录。
+- `missing_file`：检查对应文件是否存在且被提交。
+- `invalid_json`：检查 JSON 语法（逗号/引号/括号）。
+- `missing_schema_field`：补齐元信息（`$schema` / `title` / `$id`）。
+- `unresolved_defs_ref`：检查 `$ref` 是否为 `#/$defs/...` 且目标 `$defs` 存在。
+- `root_type_invalid`：检查 schema 文件顶层是否为对象。
+
+```bash
+# 严格输出（推荐）
+npm run schema:validate -- --strict
+
+# JSON 输出（适配系统）
+# 成功返回：{ "status": "ok", "files": [...] }
+# 失败返回：{ "status": "failed", "errors": [...] }
+npm run schema:validate -- --json
+```
