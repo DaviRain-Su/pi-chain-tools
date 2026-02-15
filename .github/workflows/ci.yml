@@ -38,11 +38,8 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Validate OpenClaw BTC5m schema file manifest
-        run: npm run schema:check-files:json
-
-      - name: Validate OpenClaw BTC5m schema content
-        run: npm run schema:validate
+      - name: Validate OpenClaw BTC5m schema artifacts
+        run: npm run schema:ci-check
 
       - name: Security check
         run: npm run security:check

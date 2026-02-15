@@ -22,6 +22,7 @@ npm run schema:validate
 ```bash
 npm run schema:check-files         # 人类可读输出（严格清单检查，失败即退出 1）
 npm run schema:check-files:json    # JSON 输出（推荐用于 CI 机器消费，严格清单检查）
+npm run schema:ci-check            # 一步到位：清单 + 全量 schema 内容校验
 ```
 
 脚本会检查：
@@ -36,6 +37,11 @@ npm run schema:check-files:json    # JSON 输出（推荐用于 CI 机器消费�
 参见仓库的 `.github/workflows/ci.yml`，或直接复用：
 
 ```yaml
+- name: Validate OpenClaw BTC5m schema artifacts
+  id: validate-openclaw-schema-artifacts
+  run: npm run schema:ci-check
+
+# 细分步骤（可选）
 - name: Validate OpenClaw BTC5m schema file manifest
   id: validate-openclaw-schema-manifest
   run: |
