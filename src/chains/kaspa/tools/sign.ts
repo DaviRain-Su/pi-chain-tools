@@ -49,13 +49,53 @@ type KaspaSignerProvider =
 	| "kaspa-wasm32-sdk"
 	| "custom";
 
+type KaspaWalletCorePrivateKey = {
+	toPublicKey: () => { toString: () => string };
+	toAddress: (network: string) => { toString: () => string };
+};
+
+type KaspaWalletCoreModule = {
+	initKaspaFramework: () => Promise<unknown>;
+	kaspacore: {
+		PrivateKey: {
+			fromString: (privateKey: string) => KaspaWalletCorePrivateKey;
+		};
+	};
+};
+
+type KaspaSignerPrivateKeyResolution = {
+	privateKey: string;
+	source: string;
+};
+
+type KaspaPrivateKeyNetworkAddress = {
+	network: string;
+	address: string;
+};
+
+type KaspaPrivateKeyInfo = {
+	publicKey: string;
+	addresses: KaspaPrivateKeyNetworkAddress[];
+	source: string;
+	privateKeyPreview: string;
+};
+
 const DEFAULT_SIGNATURE_ENCODING = "hex";
 const DEFAULT_SIGNER_PROVIDER = "auto" as const;
 const KASPA_DEFAULT_SIGNATURE_HASH_ALGORITHM = "sha256";
 const KASPA_SIGNER_PRIVATE_KEY_ENV = "KASPA_PRIVATE_KEY";
 const KASPA_SIGNER_PRIVATE_KEY_PATH_ENV = "KASPA_PRIVATE_KEY_PATH";
+const KASPA_PRIVATE_KEY_ADDRESS_PLANS = [
+	{ network: "mainnet", walletNetwork: "kaspa" },
+	{ network: "testnet10", walletNetwork: "kaspatest" },
+	{ network: "testnet11", walletNetwork: "kaspatest" },
+] as const satisfies Array<{
+	network: "mainnet" | "testnet10" | "testnet11";
+	walletNetwork: "kaspa" | "kaspatest";
+}>;
 
 const KASPA_SIGNER_CACHE = new Map<string, KaspaWalletSignerResolution>();
+let KASPA_WALLET_MODULE_CACHE: Promise<KaspaWalletCoreModule> | null = null;
 
 interface KaspaWalletSignerInput {
 	privateKey: string;
@@ -179,15 +219,18 @@ function normalizeKaspaPrivateKey(privateKey: string): string {
 	return normalized;
 }
 
-function resolveKaspaSignerPrivateKey(params: {
+function resolveKaspaSignerPrivateKeyWithSource(params: {
 	privateKey?: string;
 	privateKeyEnv?: string;
 	privateKeyFile?: string;
 	privateKeyPath?: string;
 	privateKeyPathEnv?: string;
-}): string {
+}): KaspaSignerPrivateKeyResolution {
 	if (typeof params.privateKey === "string" && params.privateKey.trim()) {
-		return normalizeKaspaPrivateKey(params.privateKey);
+		return {
+			privateKey: normalizeKaspaPrivateKey(params.privateKey),
+			source: "inline privateKey",
+		};
 	}
 	const resolvedPrivateKeyFile =
 		params.privateKeyFile?.trim() || params.privateKeyPath?.trim() || undefined;
@@ -198,13 +241,19 @@ function resolveKaspaSignerPrivateKey(params: {
 				`Unable to load Kaspa private key from privateKeyFile ${resolvedPrivateKeyFile}`,
 			);
 		}
-		return normalizeKaspaPrivateKey(fromFile);
+		return {
+			privateKey: normalizeKaspaPrivateKey(fromFile),
+			source: `privateKeyFile:${resolvedPrivateKeyFile}`,
+		};
 	}
 	const envName = params.privateKeyEnv?.trim() || KASPA_SIGNER_PRIVATE_KEY_ENV;
 	if (envName) {
 		const envValue = process.env[envName];
 		if (envValue?.trim()) {
-			return normalizeKaspaPrivateKey(envValue);
+			return {
+				privateKey: normalizeKaspaPrivateKey(envValue),
+				source: `privateKeyEnv:${envName}`,
+			};
 		}
 	}
 	const keyPathEnv = (
@@ -216,7 +265,10 @@ function resolveKaspaSignerPrivateKey(params: {
 		if (!fromFile) {
 			throw new Error(`Unable to load Kaspa private key from ${keyPathEnv}`);
 		}
-		return normalizeKaspaPrivateKey(fromFile);
+		return {
+			privateKey: normalizeKaspaPrivateKey(fromFile),
+			source: `privateKeyPathEnv:${keyPathEnv}=>${envFilePath}`,
+		};
 	}
 	if (keyPathEnv !== KASPA_SIGNER_PRIVATE_KEY_PATH_ENV) {
 		const fallbackPath = process.env[KASPA_SIGNER_PRIVATE_KEY_PATH_ENV];
@@ -227,12 +279,106 @@ function resolveKaspaSignerPrivateKey(params: {
 					`Unable to load Kaspa private key from ${KASPA_SIGNER_PRIVATE_KEY_PATH_ENV}`,
 				);
 			}
-			return normalizeKaspaPrivateKey(fromFile);
+			return {
+				privateKey: normalizeKaspaPrivateKey(fromFile),
+				source: `privateKeyPathEnv:${KASPA_SIGNER_PRIVATE_KEY_PATH_ENV}=>${fallbackPath}`,
+			};
 		}
 	}
 	throw new Error(
 		`No Kaspa signer key available. Provide privateKey, set ${KASPA_SIGNER_PRIVATE_KEY_ENV}, or configure ${KASPA_SIGNER_PRIVATE_KEY_PATH_ENV}.`,
 	);
+}
+
+function resolveKaspaSignerPrivateKey(params: {
+	privateKey?: string;
+	privateKeyEnv?: string;
+	privateKeyFile?: string;
+	privateKeyPath?: string;
+	privateKeyPathEnv?: string;
+}): string {
+	return resolveKaspaSignerPrivateKeyWithSource(params).privateKey;
+}
+
+function maskKaspaSecret(value: string): string {
+	const normalized = value.trim();
+	if (!normalized) {
+		return "<empty>";
+	}
+	if (normalized.length <= 12) {
+		return `${"*".repeat(normalized.length)}`;
+	}
+	return `${normalized.slice(0, 8)}...${normalized.slice(-4)}`;
+}
+
+async function getKaspaWalletModule(): Promise<KaspaWalletCoreModule> {
+	if (!KASPA_WALLET_MODULE_CACHE) {
+		KASPA_WALLET_MODULE_CACHE = (async () => {
+			const raw = await import("@kaspa/wallet");
+			const initKaspaFramework = getModuleExport<() => Promise<unknown>>(
+				raw,
+				"initKaspaFramework",
+			);
+			const kaspacore = getModuleExport<Record<string, unknown>>(
+				raw,
+				"kaspacore",
+			);
+			if (!initKaspaFramework || !kaspacore) {
+				throw new Error("Unable to load @kaspa/wallet module.");
+			}
+			const privateKeyFactory = getModuleExport<Record<string, unknown>>(
+				kaspacore,
+				"PrivateKey",
+			);
+			if (!privateKeyFactory?.fromString) {
+				throw new Error(
+					"@kaspa/wallet runtime is missing PrivateKey.fromString()",
+				);
+			}
+			await initKaspaFramework();
+			return raw as KaspaWalletCoreModule;
+		})();
+	}
+	return KASPA_WALLET_MODULE_CACHE;
+}
+
+function resolveKaspaPrivateKeyNetworks(
+	networks?: Array<"mainnet" | "testnet10" | "testnet11">,
+): typeof KASPA_PRIVATE_KEY_ADDRESS_PLANS {
+	if (!networks || networks.length === 0) {
+		return KASPA_PRIVATE_KEY_ADDRESS_PLANS;
+	}
+	const normalized = new Set(networks);
+	return KASPA_PRIVATE_KEY_ADDRESS_PLANS.filter((entry) =>
+		normalized.has(entry.network),
+	);
+}
+
+async function resolveKaspaPrivateKeyInfo(params: {
+	privateKey?: string;
+	privateKeyEnv?: string;
+	privateKeyFile?: string;
+	privateKeyPath?: string;
+	privateKeyPathEnv?: string;
+	networks?: Array<"mainnet" | "testnet10" | "testnet11">;
+}): Promise<KaspaPrivateKeyInfo> {
+	const resolved = resolveKaspaSignerPrivateKeyWithSource(params);
+	const walletModule = await getKaspaWalletModule();
+	const privateKeyObj = walletModule.kaspacore.PrivateKey.fromString(
+		resolved.privateKey,
+	);
+	const publicKey = privateKeyObj.toPublicKey().toString();
+	const requested = resolveKaspaPrivateKeyNetworks(params.networks);
+	const addresses: KaspaPrivateKeyNetworkAddress[] = requested.map((entry) => ({
+		network: entry.network,
+		address: privateKeyObj.toAddress(entry.walletNetwork).toString(),
+	}));
+	return {
+		publicKey,
+		addresses,
+		source: resolved.source,
+		privateKeyPreview: maskKaspaSecret(resolved.privateKey),
+	};
 }
 
 function buildKaspaSigningContextInput(
@@ -1072,6 +1218,85 @@ function raiseError(): never {
 
 export function createKaspaSignTools() {
 	return [
+		defineTool({
+			name: `${KASPA_TOOL_PREFIX}privateKeyInfo`,
+			label: "Kaspa Private Key Info",
+			description:
+				"Resolve Kaspa private key source and derive public key / network addresses.",
+			parameters: Type.Object({
+				privateKey: Type.Optional(
+					Type.String({
+						description:
+							"Private key bytes/encoding for info derivation. Optional if using env/path mode.",
+					}),
+				),
+				privateKeyEnv: Type.Optional(
+					Type.String({
+						description:
+							"Optional env var name for private key fallback (default: KASPA_PRIVATE_KEY).",
+					}),
+				),
+				privateKeyFile: Type.Optional(
+					Type.String({
+						description:
+							"Optional local file path containing private key content; supports JSON {privateKey|private_key|secretKey|secret_key}.",
+					}),
+				),
+				privateKeyPath: Type.Optional(
+					Type.String({
+						description:
+							"Alias for local file path containing private key content (preferred).",
+					}),
+				),
+				privateKeyPathEnv: Type.Optional(
+					Type.String({
+						description:
+							"Optional env var name for private key file path fallback (default: KASPA_PRIVATE_KEY_PATH).",
+					}),
+				),
+				networks: Type.Optional(
+					Type.Array(
+						Type.Union([
+							Type.Literal("mainnet"),
+							Type.Literal("testnet10"),
+							Type.Literal("testnet11"),
+						]),
+						{
+							minItems: 1,
+						},
+					),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as {
+					privateKey?: string;
+					privateKeyEnv?: string;
+					privateKeyFile?: string;
+					privateKeyPath?: string;
+					privateKeyPathEnv?: string;
+					networks?: Array<"mainnet" | "testnet10" | "testnet11">;
+				};
+				const result = await resolveKaspaPrivateKeyInfo(params);
+				const addressSummary = result.addresses
+					.map((entry) => `${entry.network}=${entry.address}`)
+					.join("; ");
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Kaspa private key info: publicKey=${result.publicKey}, source=${result.source}, privateKey=${result.privateKeyPreview}, addresses=[${addressSummary}]`,
+						},
+					],
+					details: {
+						schema: "kaspa.privatekey.info.v1",
+						source: result.source,
+						publicKey: result.publicKey,
+						addresses: result.addresses,
+						privateKeyPreview: result.privateKeyPreview,
+					},
+				};
+			},
+		}),
 		defineTool({
 			name: `${KASPA_TOOL_PREFIX}signTransferTransaction`,
 			label: "Kaspa Sign Transfer Transaction",
