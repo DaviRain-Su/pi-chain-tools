@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 
 import { Type } from "@sinclair/typebox";
 
@@ -47,6 +50,8 @@ type KaspaSignerProvider =
 
 const DEFAULT_SIGNATURE_ENCODING = "hex";
 const DEFAULT_SIGNER_PROVIDER = "auto" as const;
+const KASPA_SIGNER_PRIVATE_KEY_ENV = "KASPA_PRIVATE_KEY";
+const KASPA_SIGNER_PRIVATE_KEY_PATH_ENV = "KASPA_PRIVATE_KEY_PATH";
 
 const KASPA_SIGNER_CACHE = new Map<string, KaspaWalletSignerResolution>();
 
@@ -117,6 +122,101 @@ function parseKaspaTransactionPayload(value?: string): unknown | undefined {
 	} catch {
 		return trimmed;
 	}
+}
+
+function expandKaspaPath(rawPath: string): string {
+	const trimmed = rawPath.trim();
+	if (!trimmed) {
+		return trimmed;
+	}
+	if (trimmed.startsWith("~/")) {
+		return path.resolve(homedir(), trimmed.slice(2));
+	}
+	return path.resolve(trimmed);
+}
+
+function resolveKaspaPrivateKeyFromFile(rawFilePath: string): string | null {
+	const resolvedPath = expandKaspaPath(rawFilePath);
+	if (!existsSync(resolvedPath)) {
+		return null;
+	}
+	try {
+		const raw = readFileSync(resolvedPath, "utf8");
+		const trimmed = raw.trim();
+		if (!trimmed) {
+			return null;
+		}
+		try {
+			const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+			const candidates = [
+				"privateKey",
+				"private_key",
+				"secretKey",
+				"secret_key",
+			];
+			for (const key of candidates) {
+				const candidate = parsed[key];
+				if (typeof candidate === "string" && candidate.trim()) {
+					return candidate.trim();
+				}
+			}
+		} catch {
+			// treat as raw private key blob when JSON parse fails
+		}
+		return trimmed;
+	} catch {
+		return null;
+	}
+}
+
+function normalizeKaspaPrivateKey(privateKey: string): string {
+	const normalized = privateKey.trim();
+	if (!normalized) {
+		throw new Error("privateKey cannot be empty");
+	}
+	return normalized;
+}
+
+function resolveKaspaSignerPrivateKey(params: {
+	privateKey?: string;
+	privateKeyEnv?: string;
+	privateKeyFile?: string;
+}): string {
+	if (typeof params.privateKey === "string" && params.privateKey.trim()) {
+		return normalizeKaspaPrivateKey(params.privateKey);
+	}
+	if (
+		typeof params.privateKeyFile === "string" &&
+		params.privateKeyFile.trim()
+	) {
+		const fromFile = resolveKaspaPrivateKeyFromFile(params.privateKeyFile);
+		if (!fromFile) {
+			throw new Error(
+				`Unable to load Kaspa private key from privateKeyFile ${params.privateKeyFile}`,
+			);
+		}
+		return normalizeKaspaPrivateKey(fromFile);
+	}
+	const envName = params.privateKeyEnv?.trim() || KASPA_SIGNER_PRIVATE_KEY_ENV;
+	if (envName) {
+		const envValue = process.env[envName];
+		if (envValue?.trim()) {
+			return normalizeKaspaPrivateKey(envValue);
+		}
+	}
+	const envFilePath = process.env[KASPA_SIGNER_PRIVATE_KEY_PATH_ENV];
+	if (envFilePath?.trim()) {
+		const fromFile = resolveKaspaPrivateKeyFromFile(envFilePath);
+		if (!fromFile) {
+			throw new Error(
+				`Unable to load Kaspa private key from ${KASPA_SIGNER_PRIVATE_KEY_PATH_ENV}`,
+			);
+		}
+		return normalizeKaspaPrivateKey(fromFile);
+	}
+	throw new Error(
+		`No Kaspa signer key available. Provide privateKey, set ${KASPA_SIGNER_PRIVATE_KEY_ENV}, or configure ${KASPA_SIGNER_PRIVATE_KEY_PATH_ENV}.`,
+	);
 }
 
 function buildKaspaSigningContextInput(
@@ -387,11 +487,18 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 	signatureEncoding?: string;
 	signerProvider?: KaspaSignerProvider;
 	providerModule?: string;
-	privateKey: string;
+	privateKey?: string;
+	privateKeyEnv?: string;
+	privateKeyFile?: string;
 	replaceExistingSignatures?: boolean;
 }): Promise<KaspaSignedSubmissionResult> {
 	const resolvedProvider: KaspaSignerProvider =
 		params.signerProvider ?? DEFAULT_SIGNER_PROVIDER;
+	const resolvedPrivateKey = resolveKaspaSignerPrivateKey({
+		privateKey: params.privateKey,
+		privateKeyEnv: params.privateKeyEnv,
+		privateKeyFile: params.privateKeyFile,
+	});
 	const body = resolveKaspaTransactionSubmissionRequest(
 		params.rawTransaction?.trim(),
 		params.request,
@@ -424,7 +531,7 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 			? body.rawTransaction
 			: JSON.stringify(transaction);
 	const signerResult = await signer({
-		privateKey: params.privateKey,
+		privateKey: resolvedPrivateKey,
 		request: body,
 		transaction,
 		rawTransaction,
@@ -1030,10 +1137,24 @@ export function createKaspaSignTools() {
 							"Unsigned submit request object (contains the transaction skeleton).",
 					}),
 				),
-				privateKey: Type.String({
-					description:
-						"Private key bytes/encoding for wallet signing. Forwarded to selected provider only.",
-				}),
+				privateKey: Type.Optional(
+					Type.String({
+						description:
+							"Private key bytes/encoding for wallet signing. Prefer env/local file options and avoid inline privateKey in production.",
+					}),
+				),
+				privateKeyEnv: Type.Optional(
+					Type.String({
+						description:
+							"Optional env var name for private key fallback (default: KASPA_PRIVATE_KEY).",
+					}),
+				),
+				privateKeyFile: Type.Optional(
+					Type.String({
+						description:
+							"Optional local file path containing private key content; supports JSON {privateKey|private_key|secretKey|secret_key}.",
+					}),
+				),
 				signerProvider: Type.Optional(
 					Type.Union([
 						Type.Literal("auto"),
@@ -1060,7 +1181,9 @@ export function createKaspaSignTools() {
 				const params = rawParams as {
 					rawTransaction?: string;
 					request?: unknown;
-					privateKey: string;
+					privateKey?: string;
+					privateKeyEnv?: string;
+					privateKeyFile?: string;
 					signerProvider?: KaspaSignerProvider;
 					providerModule?: string;
 					signatureEncoding?: string;
@@ -1070,6 +1193,8 @@ export function createKaspaSignTools() {
 					rawTransaction: params.rawTransaction,
 					request: params.request,
 					privateKey: params.privateKey,
+					privateKeyEnv: params.privateKeyEnv,
+					privateKeyFile: params.privateKeyFile,
 					signerProvider: params.signerProvider ?? "auto",
 					providerModule: params.providerModule,
 					signatureEncoding: params.signatureEncoding,
@@ -1114,7 +1239,9 @@ export function signKaspaSubmitRequest(params: {
 export function signKaspaSubmitRequestWithWallet(params: {
 	rawTransaction?: string;
 	request?: unknown;
-	privateKey: string;
+	privateKey?: string;
+	privateKeyEnv?: string;
+	privateKeyFile?: string;
 	signerProvider?: KaspaSignerProvider;
 	providerModule?: string;
 	signatureEncoding?: string;

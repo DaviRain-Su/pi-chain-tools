@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { createKaspaComposeTools } from "./compose.js";
@@ -213,5 +216,49 @@ describe("kaspa sign tools", () => {
 			signatures: string[];
 		};
 		expect(signedRaw.signatures).toEqual(["sig-wallet-private-key-mock"]);
+	});
+
+	it("supports resolving private key from env or file without inline privateKey", async () => {
+		const signTool = getSignTool("kaspa_signTransferTransactionWithWallet");
+		const request = await requestFromUnsignedBuild();
+		const originalEnv = process.env.KASPA_PRIVATE_KEY;
+		process.env.KASPA_PRIVATE_KEY = "private-key-env";
+		const tempDir = mkdtempSync(path.join(tmpdir(), "kaspa-key-"));
+		const tempKeyPath = path.join(tempDir, "kaspa-key.json");
+		writeFileSync(
+			tempKeyPath,
+			JSON.stringify({ private_key: "private-key-file-json" }),
+			"utf8",
+		);
+		try {
+			const resultFromEnv = await signTool.execute("kaspa-sign-wallet-env", {
+				request,
+				signerProvider: "kaspa-wallet",
+				signatureEncoding: "hex",
+			});
+			const signedFromEnv = JSON.parse(
+				(resultFromEnv.details as { rawTransaction: string }).rawTransaction,
+			) as { signatures: string[] };
+			expect(signedFromEnv.signatures).toEqual(["sig-wallet-private-key-env"]);
+
+			const resultFromFile = await signTool.execute("kaspa-sign-wallet-file", {
+				request,
+				signerProvider: "kaspa-wallet",
+				privateKeyFile: tempKeyPath,
+				signatureEncoding: "hex",
+			});
+			const signedFromFile = JSON.parse(
+				(resultFromFile.details as { rawTransaction: string }).rawTransaction,
+			) as { signatures: string[] };
+			expect(signedFromFile.signatures).toEqual([
+				"sig-wallet-private-key-file-json",
+			]);
+		} finally {
+			if (originalEnv === undefined) {
+				process.env.KASPA_PRIVATE_KEY = undefined;
+			} else {
+				process.env.KASPA_PRIVATE_KEY = originalEnv;
+			}
+		}
 	});
 });
