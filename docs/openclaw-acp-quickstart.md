@@ -1230,8 +1230,10 @@ npm run schema:validate -- --list
 npm run schema:validate -- --list --json
 
 # 列表严格校验（列表里任一文件缺失或不是文件则退出 1）
+# --list --strict 也会触发严格行为（便于统一调用习惯）
 npm run schema:validate -- --list-strict
 npm run schema:validate -- --list-strict --json
+npm run schema:validate -- --list --strict --json
 # 返回示例（失败）：{ "status": "failed", "errors": [...] }
 
 # 生产环境推荐：使用脚本入口（清晰/可复制）

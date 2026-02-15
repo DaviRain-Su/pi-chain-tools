@@ -79,6 +79,19 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		});
 	});
 
+	it("treats --list --strict as strict list mode when files are missing", () => {
+		const workspace = createWorkspace(["openclaw-btc5m-workflow.schema.json"]);
+		workspaces.push(workspace);
+
+		const result = runValidator(workspace, ["--list", "--strict", "--json"]);
+		expect(result.status).toBe(1);
+		const payload = JSON.parse(result.stdout);
+		expect(payload.status).toBe("failed");
+		expect(payload.summary.allExist).toBe(false);
+		expect(payload.summary.missingFiles).toBe(REQUIRED_FILES.length - 1);
+		expect(payload.errors).toHaveLength(REQUIRED_FILES.length - 1);
+	});
+
 	it("returns list status even if some file is missing without list-strict", () => {
 		const workspace = createWorkspace(["openclaw-btc5m-workflow.schema.json"]);
 		workspaces.push(workspace);

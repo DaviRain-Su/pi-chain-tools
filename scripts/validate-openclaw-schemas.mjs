@@ -12,7 +12,7 @@ const args = new Set(process.argv.slice(2));
 const isStrict = args.has("--strict");
 const isJsonOutput = args.has("--json");
 const isListRequested = args.has("--list");
-const isListStrict = args.has("--list-strict");
+const isListStrict = args.has("--list-strict") || (isListRequested && isStrict);
 const isHelpRequested = args.has("--help") || args.has("-h");
 const allowedArgs = new Set([
 	"--strict",
@@ -31,7 +31,7 @@ function printUsage() {
 		"Usage: node scripts/validate-openclaw-schemas.mjs [--strict] [--json] [--list] [--list-strict] [--help|-h]\n\n" +
 			"Validate OpenClaw BTC5m schema artifacts in docs/schemas.\n\n" +
 			"Options:\n" +
-			"  --strict       print grouped diagnostics + fix guidance\n" +
+			"  --strict       print grouped diagnostics + fix guidance. In list mode, also enforces list-strict\n" +
 			"  --json         print machine-readable JSON result\n" +
 			"  --list         list configured schema files (resolved paths + existence)\n" +
 			"  --list-strict  when listing, fail if any configured schema file is missing\n" +

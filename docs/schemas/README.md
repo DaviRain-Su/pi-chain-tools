@@ -65,6 +65,8 @@ npm run schema:validate -- --list --json
 
 # 列文件严格校验（任一 schema 缺失或不是文件 -> 失败并返回 status failed）
 npm run schema:validate -- --list-strict --json
+# 或者统一使用 --strict + --list 也会触发严格行为：
+npm run schema:validate -- --list --strict --json
 
 # 文件清单入口（推荐用于 CI 与机器消费）
 npm run schema:check-files
