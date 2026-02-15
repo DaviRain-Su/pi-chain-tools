@@ -1168,7 +1168,10 @@ npm run schema:validate
 - 建议在 CI 增加独立 step（仓库已落地在 `.github/workflows/ci.yml`）：
 
 ```yaml
-- name: Validate OpenClaw BTC5m schema
+- name: Validate OpenClaw BTC5m schema file manifest
+  run: npm run schema:check-files
+
+- name: Validate OpenClaw BTC5m schema content
   run: npm run schema:validate
 ```
 
@@ -1211,6 +1214,16 @@ npm run schema:validate -- --list --json
 npm run schema:validate -- --list-strict
 npm run schema:validate -- --list-strict --json
 # 返回示例（失败）：{ "status": "failed", "errors": [...] }
+
+# 生产环境推荐：使用脚本入口（清晰/可复制）
+npm run schema:check-files
+
+# 推荐的 CI 片段（可直接复用）
+# 验证文件清单（manifest）与内容（schema 结构）
+# - name: Validate OpenClaw BTC5m schema manifest
+#   run: npm run schema:check-files
+# - name: Validate OpenClaw BTC5m schema content
+#   run: npm run schema:validate
 
 # 查看参数说明
 npm run schema:validate -- --help

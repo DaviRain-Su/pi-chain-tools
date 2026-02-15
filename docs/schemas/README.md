@@ -29,7 +29,10 @@ npm run schema:validate
 参见仓库的 `.github/workflows/ci.yml`，或直接复用：
 
 ```yaml
-- name: Validate OpenClaw BTC5m schemas
+- name: Validate OpenClaw BTC5m schema file manifest
+  run: npm run schema:check-files
+
+- name: Validate OpenClaw BTC5m schema content
   run: npm run schema:validate
 ```
 
