@@ -9,7 +9,10 @@ import {
 	fetchKaspaAddressBalance,
 	summarizeKaspaAddressBalanceResult,
 } from "./read.js";
-import { signKaspaSubmitRequestWithWallet } from "./sign.js";
+import {
+	signKaspaSubmitRequestWithWallet,
+	resolveKaspaPrivateKeyInfo,
+} from "./sign.js";
 
 type KaspaWorkflowRunMode = "analysis" | "simulate" | "execute";
 
@@ -137,6 +140,21 @@ type KaspaBalanceQuickIntent = {
 	network?: string;
 };
 
+type KaspaWalletQuickParams = {
+	intentText?: string;
+	text?: string;
+	network?: string;
+	privateKeyFile?: string;
+	privateKeyPath?: string;
+	privateKeyPathEnv?: string;
+	privateKeyEnv?: string;
+};
+
+type KaspaWalletQuickIntent = {
+	network?: string;
+	privateKeyFile?: string;
+};
+
 function normalizeKaspaTransferQuickMinimalInput(
 	rawParams: unknown,
 ): KaspaTransferQuickMinimalParams {
@@ -188,6 +206,34 @@ function normalizeKaspaBalanceQuickInput(
 	const params = rawParams as KaspaBalanceQuickParams;
 	const inlineText = typeof params.intentText === "string" ? params.intentText.trim() : "";
 	const fallbackText = typeof params.text === "string" ? params.text.trim() : "";
+	const normalizedIntent = inlineText || fallbackText;
+	return {
+		...params,
+		intentText: normalizedIntent || params.intentText,
+	};
+}
+
+function normalizeKaspaWalletQuickInput(
+	rawParams: unknown,
+): KaspaWalletQuickParams {
+	if (typeof rawParams === "string") {
+		const trimmed = rawParams.trim();
+		return trimmed ? { intentText: trimmed } : {};
+	}
+	if (
+		!rawParams ||
+		typeof rawParams !== "object" ||
+		Array.isArray(rawParams)
+	) {
+		throw new Error(
+			"w3rt_read_kaspa_wallet_v0 requires a natural language intent string or an object payload.",
+		);
+	}
+	const params = rawParams as KaspaWalletQuickParams;
+	const inlineText =
+		typeof params.intentText === "string" ? params.intentText.trim() : undefined;
+	const fallbackText =
+		typeof params.text === "string" ? params.text.trim() : undefined;
 	const normalizedIntent = inlineText || fallbackText;
 	return {
 		...params,
@@ -276,6 +322,56 @@ function parseKaspaBalanceIntentText(
 	return {
 		address,
 		network: parseKaspaBalanceIntentNetwork(input),
+	};
+}
+
+function cleanKaspaWalletPathToken(value: string): string {
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return trimmed;
+	}
+	return trimmed
+		.replace(/^[\s"'「【\(\[\{<]+/, "")
+		.replace(/[\\]\s*$/, "")
+		.replace(/[,\s。；;:!?！？!。'"”’』\)\]\}]+$/g, "")
+		.trim();
+}
+
+function resolveKaspaWalletNetworkAlias(rawNetwork?: string): "mainnet" | "testnet10" | "testnet11" {
+	const normalized = parseKaspaNetwork(rawNetwork);
+	return normalized === "testnet" ? "testnet10" : normalized;
+}
+
+const KASPA_WALLET_QUICK_DEFAULT_PATH_BY_NETWORK = {
+	mainnet: "~/.kaspa/mainnet.private_key",
+	testnet10: "~/.kaspa/testnet10.private_key",
+	testnet11: "~/.kaspa/testnet11.private_key",
+} as const;
+
+const KASPA_WALLET_PATH_FROM_TEXT_REGEX =
+	/("([^"]+?\.private_key)"|'([^']+?\.private_key)'|([^\s"'“”‘’\\[\\](){}【】]+?\.private_key))/i;
+
+function parseKaspaWalletIntentText(
+	intentText: string | undefined,
+): KaspaWalletQuickIntent {
+	if (!intentText?.trim()) {
+		return {};
+	}
+	const input = intentText.trim();
+	const parsedPathMatch =
+		KASPA_WALLET_PATH_FROM_TEXT_REGEX.exec(input);
+	const quotedPath = parsedPathMatch?.[2] || parsedPathMatch?.[3];
+	const tokenPath = parsedPathMatch?.[4];
+	let privateKeyFile = quotedPath || tokenPath;
+	if (privateKeyFile) {
+		privateKeyFile = cleanKaspaWalletPathToken(privateKeyFile);
+		if (privateKeyFile && !/[\\/]/.test(privateKeyFile)) {
+			privateKeyFile = `${process.env.HOME || ""}/.kaspa/${privateKeyFile}`;
+		}
+	}
+	return {
+		network: parseKaspaBalanceIntentNetwork(input),
+		privateKeyFile: privateKeyFile || undefined,
 	};
 }
 
@@ -602,6 +698,57 @@ async function runKaspaBalanceQuickWorkflow(
 			},
 			apiBaseUrl: result.apiBaseUrl,
 			data: result.data,
+		},
+	};
+}
+
+async function runKaspaWalletQuickWorkflow(
+	params: KaspaWalletQuickParams,
+): Promise<KaspaTransferQuickWorkflowResult> {
+	const parsedIntent = parseKaspaWalletIntentText(params.intentText);
+	const resolvedNetwork = resolveKaspaWalletNetworkAlias(
+		params.network || parsedIntent.network,
+	);
+	const explicitPath =
+		params.privateKeyFile?.trim() || params.privateKeyPath?.trim();
+	const pathFromIntent = parsedIntent.privateKeyFile?.trim();
+	const privateKeyFile = explicitPath || pathFromIntent;
+	const resolvedPrivateKeyFile =
+		privateKeyFile || KASPA_WALLET_QUICK_DEFAULT_PATH_BY_NETWORK[resolvedNetwork];
+
+	const requestNetworks = params.network || parsedIntent.network;
+	const networks =
+		requestNetworks
+			? [resolveKaspaWalletNetworkAlias(requestNetworks)]
+			: undefined;
+	const info = await resolveKaspaPrivateKeyInfo({
+		privateKeyFile: resolvedPrivateKeyFile,
+		privateKeyPath: params.privateKeyPath,
+		privateKeyPathEnv: params.privateKeyPathEnv,
+		privateKeyEnv: params.privateKeyEnv,
+		networks: networks,
+	});
+	const addressSummary = info.addresses
+		.map((entry) => `${entry.network}=${entry.address}`)
+		.join("; ");
+	return {
+		content: [
+			{
+				type: "text",
+				text: `Kaspa local wallet read (${resolvedNetwork}): publicKey=${info.publicKey}, source=${info.source}, privateKey=${info.privateKeyPreview}, addresses=${addressSummary}`,
+			},
+		],
+		details: {
+			schema: "kaspa.privatekey.info.v1",
+			network: resolvedNetwork,
+			source: info.source,
+			publicKey: info.publicKey,
+			addresses: info.addresses,
+			privateKeyPreview: info.privateKeyPreview,
+			query: {
+				intentText: params.intentText,
+				privateKeyFile: resolvedPrivateKeyFile,
+			},
 		},
 	};
 }
@@ -1239,6 +1386,25 @@ function extractTxIdFromSubmitResult(data: unknown): string | null {
 			async execute(_toolCallId, rawParams) {
 				const params = normalizeKaspaBalanceQuickInput(rawParams);
 				return runKaspaBalanceQuickWorkflow(params);
+			},
+		}),
+		defineTool({
+			name: "w3rt_read_kaspa_wallet_v0",
+			label: "Kaspa Wallet (local read)",
+			description:
+				"Read local Kaspa private-key file and derive public key/address from natural language.",
+			parameters: Type.Object({
+				intentText: Type.Optional(Type.String()),
+				text: Type.Optional(Type.String()),
+				network: kaspaNetworkSchema(),
+				privateKeyFile: Type.Optional(Type.String()),
+				privateKeyPath: Type.Optional(Type.String()),
+				privateKeyPathEnv: Type.Optional(Type.String()),
+				privateKeyEnv: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = normalizeKaspaWalletQuickInput(rawParams);
+				return runKaspaWalletQuickWorkflow(params);
 			},
 		}),
 		defineTool({

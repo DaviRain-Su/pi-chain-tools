@@ -354,7 +354,7 @@ function resolveKaspaPrivateKeyNetworks(
 	);
 }
 
-async function resolveKaspaPrivateKeyInfo(params: {
+export async function resolveKaspaPrivateKeyInfo(params: {
 	privateKey?: string;
 	privateKeyEnv?: string;
 	privateKeyFile?: string;
