@@ -213,3 +213,121 @@ If you already have order IDs, you can replace `marketSlug` with:
 - `继续执行刚才这笔，确认主网执行`
 - `继续执行，确认码 EVM-...`
 - `把超时 30 分钟且未成交率<40%的 BTC5m 挂单全部撤掉，再确认主网执行`
+
+## 6) OpenClaw Agent Template (copy-paste)
+
+Use this template in an OpenClaw system workflow or playbook engine:
+
+### 1. Bootstrap
+
+- `w3rt_getCapabilityHandshake_v0`
+- `w3rt_getPolicy_v0`
+- `w3rt_setPolicy_v0` (optional, set production-safe transfer policy)
+
+### 2. BTC5m trade playbook (reliable 3-phase)
+
+```json
+{
+  "steps": [
+    {
+      "name": "preflight-markets",
+      "tool": "evm_polymarketGetBtc5mMarkets",
+      "params": { "network": "polygon", "limit": 3 }
+    },
+    {
+      "name": "preflight-advice",
+      "tool": "evm_polymarketGetBtc5mAdvice",
+      "params": { "network": "polygon" }
+    },
+    {
+      "name": "analysis",
+      "tool": "w3rt_run_evm_polymarket_workflow_v0",
+      "params": {
+        "runMode": "analysis",
+        "runId": "wf-btc5m-01",
+        "network": "polygon",
+        "intentType": "evm.polymarket.btc5m.trade",
+        "stakeUsd": 20,
+        "maxSpreadBps": 120,
+        "minDepthUsd": 100,
+        "minConfidence": 0.6,
+        "useAiAssist": true,
+        "requoteStaleOrders": true
+      }
+    },
+    {
+      "name": "simulate",
+      "tool": "w3rt_run_evm_polymarket_workflow_v0",
+      "params": {
+        "runMode": "simulate",
+        "runId": "wf-btc5m-01",
+        "network": "polygon"
+      }
+    },
+    {
+      "name": "execute",
+      "tool": "w3rt_run_evm_polymarket_workflow_v0",
+      "params": {
+        "runMode": "execute",
+        "runId": "wf-btc5m-01",
+        "network": "polygon",
+        "confirmMainnet": true,
+        "confirmToken": "${analysis.confirmToken}"
+      },
+      "guard": [
+        "analysis step must include details.confirmToken and not throw"
+      ]
+    }
+  ]
+}
+```
+
+### 3. BTC5m cancel playbook
+
+```json
+{
+  "steps": [
+    {
+      "tool": "w3rt_run_evm_polymarket_workflow_v0",
+      "params": {
+        "runMode": "analysis",
+        "runId": "wf-btc5m-cancel-01",
+        "network": "polygon",
+        "intentType": "evm.polymarket.btc5m.cancel",
+        "maxFillRatio": 0.2,
+        "maxAgeMinutes": 15,
+        "cancelAll": true
+      }
+    },
+    {
+      "tool": "w3rt_run_evm_polymarket_workflow_v0",
+      "params": {
+        "runMode": "simulate",
+        "runId": "wf-btc5m-cancel-01",
+        "network": "polygon"
+      }
+    },
+    {
+      "tool": "w3rt_run_evm_polymarket_workflow_v0",
+      "params": {
+        "runMode": "execute",
+        "runId": "wf-btc5m-cancel-01",
+        "network": "polygon",
+        "confirmMainnet": true,
+        "confirmToken": "${analysis.confirmToken}"
+      }
+    }
+  ]
+}
+```
+
+### 4. Playbook run rules
+
+- If `runMode:analysis` or `runMode:simulate` fails guard (`guard_blocked` / `no_liquidity` / `price_too_high`), stop and notify operator, do not execute.
+- Read from artifact JSON paths:
+  - `details.confirmToken`
+  - `details.artifacts.analysis.summary`
+  - `details.artifacts.simulate.summary`
+- Keep `runId` stable per ticket:
+  - one ticket = one `runId`, so `simulate/execute` can reuse context.
+- For NL-driven follow-up, agent may pass `intentText` with `确认码 EVM-...` and/or `确认主网执行` instead of separate param fields.
