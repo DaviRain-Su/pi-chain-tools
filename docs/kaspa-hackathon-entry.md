@@ -195,10 +195,67 @@
 - 调用 `kaspa_getTransaction`、`kaspa_getTransactionOutput` 或 `kaspa_getAddressUtxos`
 - 每个 read 结果会返回统一字段：
   - `standardized.summary`
-  - `standardized.inputs`
-  - `standardized.outputs`
-  - `standardized.fees`
-  - 并且同步展开到顶层 `summary` / `inputs` / `outputs` / `fees`，便于直接展示。
+- `standardized.inputs`
+- `standardized.outputs`
+- `standardized.fees`
+- 并且同步展开到顶层 `summary` / `inputs` / `outputs` / `fees`，便于直接展示。
+
+#### Step G：自然语言测试例子（可直接复制到调用面板）
+
+- `w3rt_run_kaspa_send_v0`（最少参数，测试网）
+
+```json
+{
+  "tool": "w3rt_run_kaspa_send_v0",
+  "params": {
+    "intentText": "从 kaspa:qxyz... 转给 kaspa:qabc... 0.01",
+    "network": "testnet11",
+    "runMode": "analysis"
+  }
+}
+```
+
+- `w3rt_run_kaspa_send_v0`（执行，并带 acceptance polling）
+
+```json
+{
+  "tool": "w3rt_run_kaspa_send_v0",
+  "params": {
+    "intentText": "从 kaspa:qxyz... 转给 kaspa:qabc... 0.01",
+    "network": "testnet11",
+    "runMode": "execute",
+    "checkAcceptance": true,
+    "pollAcceptance": true,
+    "acceptancePollIntervalMs": 2000,
+    "acceptancePollTimeoutMs": 30000
+  }
+}
+```
+
+- `kaspa_getTransaction`（标准化消费模板）
+
+```json
+{
+  "tool": "kaspa_getTransaction",
+  "params": {
+    "transactionId": "8f...",
+    "network": "testnet11"
+  }
+}
+```
+
+- `kaspa_getAddressUtxos`（标准化消费模板）
+
+```json
+{
+  "tool": "kaspa_getAddressUtxos",
+  "params": {
+    "address": "kaspa:qxyz...",
+    "network": "testnet11",
+    "limit": 20
+  }
+}
+```
 
 ## 8. 交付与后续建议
 
