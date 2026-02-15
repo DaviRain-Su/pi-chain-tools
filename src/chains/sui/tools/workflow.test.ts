@@ -585,6 +585,27 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("parses swap intentText with English minimum output phrase", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf2p", {
+			runId: "wf-sui-02p",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "swap 1 SUI to USDC with at least 0.5 USDC",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.swap.cetus",
+			intent: {
+				type: "sui.swap.cetus",
+				inputCoinType: "0x2::sui::SUI",
+				outputCoinType: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				amountRaw: "500000",
+				byAmountIn: false,
+			},
+		});
+	});
+
 	it("requires known output token when using minimum output phrase", async () => {
 		const tool = getTool();
 		await expect(

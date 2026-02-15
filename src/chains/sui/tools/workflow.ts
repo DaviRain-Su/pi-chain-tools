@@ -838,7 +838,7 @@ function parseSwapAmountRawFromText(params: {
 	if (explicitRaw) return explicitRaw;
 
 	const minOutputMatch = params.text.match(
-		/(?:至少拿到|最少拿到|最小输出|最低输出|至少.*拿到)\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9_]{1,15})?/i,
+		/(?:至少拿到|最少拿到|最小输出|最低输出|至少.*拿到|at\s*least|min(?:imum)?(?:\s*output)|min\s*out)\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9_]{1,15})?/i,
 	);
 	if (minOutputMatch?.[1]) {
 		const amountUi = minOutputMatch[1];
@@ -1433,7 +1433,9 @@ function parseIntentText(text?: string): ParsedIntentHints {
 			resolvedOutput || outputCoinType || "",
 		)?.coinType;
 		const swapMinOutputMode =
-			/(?:至少拿到|最少拿到|最小输出|最低输出|至少.*拿到)/i.test(text);
+			/(?:至少拿到|最少拿到|最小输出|最低输出|至少.*拿到|at\s*least|min(?:imum)?(?:\s*output)|min\s*out)/i.test(
+				text,
+			);
 		const inputForAmount = resolvedInputType || resolvedInput || inputCoinType;
 		const outputForAmount =
 			resolvedOutputType || resolvedOutput || outputCoinType;
