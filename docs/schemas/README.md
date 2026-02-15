@@ -32,3 +32,11 @@ npm run schema:validate
 - name: Validate OpenClaw BTC5m schemas
   run: npm run schema:validate
 ```
+
+## 常见失败与排查
+
+- `SCHEMA_DIR_MISSING`：检查仓库是否有 `docs/schemas` 目录。
+- `MISSING: <file>`：检查对应文件是否存在且被提交。
+- `invalid JSON`：检查 JSON 语法（逗号/引号/括号）。
+- `missing or invalid $schema/title/$id`：补齐元信息。
+- `unresolved local $defs ref`：检查 `$ref` 是否为 `#/$defs/...` 且目标 `$defs` 存在。

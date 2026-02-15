@@ -1174,6 +1174,28 @@ npm run schema:validate
 
 - 三份 schema 说明见：`docs/schemas/README.md`
 
+#### 11.6 失败排障速查（`schema:validate`）
+
+当 CI/本地校验报错时，可按下面快速定位：
+
+| 错误输出 | 含义 | 处理方式 |
+|---|---|---|
+| `SCHEMA_DIR_MISSING` | `docs/schemas` 目录不存在或路径不正确 | 检查仓库是否包含该目录；确保工作流在仓库根目录运行。 |
+| `MISSING: openclaw-btc5m-...json` | 某个 schema 文件未提交/未拉取 | 补齐 `docs/schemas/openclaw-btc5m-*.json` 文件，或检查 CI checkout 是否正确。 |
+| `invalid JSON` | JSON 语法错误（多见于逗号、引号、尾随逗号） | 用 `node -e "console.log(JSON.parse(require('fs').readFileSync('docs/schemas/openclaw-btc5m-workflow.schema.json','utf8')));"` 验证，或在编辑器启用 JSON 格式化。 |
+| `missing or invalid $schema/title/$id` | Schema 元信息缺失 | 按约定补齐 `$schema` / `title` / `$id` 字段。 |
+| `unresolved local $defs ref` | `$ref` 指向不存在的本地定义 | 常见是写成 `#/defs/...` 而不是 `#/$defs/...`，或拼写 `$defs` 名称。 |
+| `SCHEMA_VALIDATION_OK` | 校验通过 | 可直接进入下一步（workflow 与状态逻辑验证）。 |
+
+- 失败重跑建议（看完整错误上下文）：
+
+```bash
+npm run schema:validate
+node scripts/validate-openclaw-schemas.mjs
+```
+
+- 若仅怀疑某一条 schema，可临时注释 `schemaFiles` 列表进行快速定位。
+
 ### 12) 状态读取速查（执行器实现更稳）
 
 | 节点 | 读 | 写 |
