@@ -222,15 +222,58 @@ describe("kaspa sign tools", () => {
 		const signTool = getSignTool("kaspa_signTransferTransactionWithWallet");
 		const request = await requestFromUnsignedBuild();
 		const originalEnv = process.env.KASPA_PRIVATE_KEY;
+		const originalPathEnv = process.env.KASPA_PRIVATE_KEY_PATH;
+		const customPathEnvName = "KASPA_TEST_KEY_PATH";
+		const originalCustomPathEnv = process.env[customPathEnvName];
 		process.env.KASPA_PRIVATE_KEY = "private-key-env";
 		const tempDir = mkdtempSync(path.join(tmpdir(), "kaspa-key-"));
 		const tempKeyPath = path.join(tempDir, "kaspa-key.json");
+		const customKeyPath = path.join(tempDir, "kaspa-key-custom.json");
 		writeFileSync(
 			tempKeyPath,
 			JSON.stringify({ private_key: "private-key-file-json" }),
 			"utf8",
 		);
+		writeFileSync(
+			customKeyPath,
+			JSON.stringify({ secret_key: "private-key-env-file" }),
+			"utf8",
+		);
 		try {
+			process.env.KASPA_PRIVATE_KEY_PATH = tempKeyPath;
+			process.env.KASPA_PRIVATE_KEY = "";
+			const resultFromPath = await signTool.execute("kaspa-sign-wallet-path", {
+				request,
+				signerProvider: "kaspa-wallet",
+				signatureEncoding: "hex",
+			});
+			const signedFromPath = JSON.parse(
+				(resultFromPath.details as { rawTransaction: string }).rawTransaction,
+			) as { signatures: string[] };
+			expect(signedFromPath.signatures).toEqual([
+				"sig-wallet-private-key-file-json",
+			]);
+
+			process.env[customPathEnvName] = customKeyPath;
+			process.env.KASPA_PRIVATE_KEY = "";
+			const resultFromCustomPathEnv = await signTool.execute(
+				"kaspa-sign-wallet-custom-path-env",
+				{
+					request,
+					signerProvider: "kaspa-wallet",
+					privateKeyPathEnv: customPathEnvName,
+					signatureEncoding: "hex",
+				},
+			);
+			const signedFromCustomPathEnv = JSON.parse(
+				(resultFromCustomPathEnv.details as { rawTransaction: string })
+					.rawTransaction,
+			) as { signatures: string[] };
+			expect(signedFromCustomPathEnv.signatures).toEqual([
+				"sig-wallet-private-key-env-file",
+			]);
+
+			process.env.KASPA_PRIVATE_KEY = "private-key-env";
 			const resultFromEnv = await signTool.execute("kaspa-sign-wallet-env", {
 				request,
 				signerProvider: "kaspa-wallet",
@@ -255,9 +298,19 @@ describe("kaspa sign tools", () => {
 			]);
 		} finally {
 			if (originalEnv === undefined) {
-				process.env.KASPA_PRIVATE_KEY = undefined;
+				process.env.KASPA_PRIVATE_KEY = "";
 			} else {
 				process.env.KASPA_PRIVATE_KEY = originalEnv;
+			}
+			if (originalPathEnv === undefined) {
+				process.env.KASPA_PRIVATE_KEY_PATH = "";
+			} else {
+				process.env.KASPA_PRIVATE_KEY_PATH = originalPathEnv;
+			}
+			if (originalCustomPathEnv === undefined) {
+				process.env[customPathEnvName] = "";
+			} else {
+				process.env[customPathEnvName] = originalCustomPathEnv;
 			}
 		}
 	});
