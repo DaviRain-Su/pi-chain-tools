@@ -1151,6 +1151,49 @@ function buildPolymarketTradeFailureGuidance(params: {
 	if (message) reasons.add(message);
 
 	const normalized = message.toLowerCase();
+	if (/cannot resolve tokenid|provide tokenid/.test(normalized)) {
+		suggestions.add(
+			"请在参数中补充 tokenId；或给出 marketSlug + side（如 btc-updown-5m + up/down）让系统自动解析。",
+		);
+	}
+	if (
+		/no market price available|market price unavailable|provide limitprice/i.test(
+			normalized,
+		)
+	) {
+		suggestions.add(
+			"当前盘口无可用价格，建议检查 BTC5m 市场是否存活，或在执行参数里显式指定 limitPrice。",
+		);
+	}
+	if (/limitprice .*exceeds|maxentryprice/i.test(normalized)) {
+		suggestions.add(
+			"入场价格约束过严（maxEntryPrice），可提高 maxEntryPrice 或改用更保守的交易配置再重试。",
+		);
+	}
+	if (/invalid order size|order size/.test(normalized)) {
+		suggestions.add(
+			"下单规模异常，请检查 stakeUsd、行情价格与 market 的精度设置，必要时降低 stakeUsd 重新尝试。",
+		);
+	}
+	if (/polymarket guard check failed|guard check failed/.test(normalized)) {
+		suggestions.add(
+			"下单风控未通过。可放宽 maxSpreadBps/minDepthUsd/maxStakeUsd/minConfidence 后先重新模拟再执行。",
+		);
+	}
+	if (
+		/failed to load @polymarket\/clob-client|clobclient exports|createauthedclobclient/i.test(
+			normalized,
+		)
+	) {
+		suggestions.add(
+			"无法加载 Polymarket CLOB 依赖，建议检查本地依赖版本并重新安装 @polymarket/clob-client。",
+		);
+	}
+	if (/getorder is not supported/.test(normalized)) {
+		suggestions.add(
+			"CLOB 客户端方法缺失，建议升级依赖版本后重试；或先改用行情查询与下单主路径。",
+		);
+	}
 	if (
 		/no polymarket private key|private key provided|polymarket private key/.test(
 			normalized,

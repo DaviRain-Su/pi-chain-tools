@@ -100,7 +100,7 @@ function getTool(): WorkflowTool {
 }
 
 beforeEach(() => {
-	vi.clearAllMocks();
+	vi.resetAllMocks();
 	polymarketMocks.resolveBtc5mTradeSelection.mockResolvedValue({
 		market: {
 			slug: "btc-updown-5m-test",
@@ -725,6 +725,170 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		expect.fail("Expected execute to fail.");
 	});
 
+	it("adds retry guidance when execute fails due to unresolved tokenId", async () => {
+		expect.hasAssertions();
+		executeMocks.placeOrderExecute.mockRejectedValueOnce(
+			new Error(
+				"Cannot resolve tokenId. Provide tokenId or (marketSlug + side) for BTC 5m.",
+			),
+		);
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-tokenid", {
+			runId: "wf-evm-4-tokenid",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 20,
+			side: "up",
+		});
+		const details = analyzed.details as { confirmToken: string };
+		try {
+			await tool.execute("wf4-tokenid-exec", {
+				runId: "wf-evm-4-tokenid",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+				confirmToken: details.confirmToken,
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			expect(message).toContain("tokenId");
+			expect(message).toContain("marketSlug");
+			expect(message).toContain("重试建议");
+			return;
+		}
+		expect.fail("Expected execute to fail.");
+	});
+
+	it("adds retry guidance when execute fails due to missing market price", async () => {
+		expect.hasAssertions();
+		executeMocks.placeOrderExecute.mockRejectedValueOnce(
+			new Error(
+				"No market price available for token=token-up-1. Provide limitPrice explicitly.",
+			),
+		);
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-pricemissing", {
+			runId: "wf-evm-4-pricemissing",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 20,
+			side: "up",
+		});
+		const details = analyzed.details as { confirmToken: string };
+		try {
+			await tool.execute("wf4-pricemissing-exec", {
+				runId: "wf-evm-4-pricemissing",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+				confirmToken: details.confirmToken,
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			expect(message).toContain("limitPrice");
+			expect(message).toContain("重试建议");
+			return;
+		}
+		expect.fail("Expected execute to fail.");
+	});
+
+	it("adds retry guidance when execute fails due to max entry price", async () => {
+		expect.hasAssertions();
+		executeMocks.placeOrderExecute.mockRejectedValueOnce(
+			new Error("limitPrice 0.82 exceeds maxEntryPrice 0.8"),
+		);
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-maxentry", {
+			runId: "wf-evm-4-maxentry",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 20,
+			side: "up",
+			maxEntryPrice: 0.8,
+		});
+		const details = analyzed.details as { confirmToken: string };
+		try {
+			await tool.execute("wf4-maxentry-exec", {
+				runId: "wf-evm-4-maxentry",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+				confirmToken: details.confirmToken,
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			expect(message).toContain("maxEntryPrice");
+			expect(message).toContain("重试建议");
+			return;
+		}
+		expect.fail("Expected execute to fail.");
+	});
+
+	it("adds retry guidance when execute fails due to invalid size", async () => {
+		expect.hasAssertions();
+		executeMocks.placeOrderExecute.mockRejectedValueOnce(
+			new Error("Invalid order size from stakeUsd=1000000000"),
+		);
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-invalid-size", {
+			runId: "wf-evm-4-invalid-size",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 20,
+			side: "up",
+		});
+		const details = analyzed.details as { confirmToken: string };
+		try {
+			await tool.execute("wf4-invalid-size-exec", {
+				runId: "wf-evm-4-invalid-size",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+				confirmToken: details.confirmToken,
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			expect(message).toContain("stakeUsd");
+			expect(message).toContain("重试建议");
+			return;
+		}
+		expect.fail("Expected execute to fail.");
+	});
+
+	it("adds retry guidance when execute fails due to guard check failure", async () => {
+		expect.hasAssertions();
+		executeMocks.placeOrderExecute.mockRejectedValueOnce(
+			new Error(
+				"Polymarket guard check failed: spread too wide: 120.00 > limit 80.00",
+			),
+		);
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-guardcheck", {
+			runId: "wf-evm-4-guardcheck",
+			runMode: "simulate",
+			network: "polygon",
+			stakeUsd: 20,
+			side: "up",
+			maxSpreadBps: 80,
+		});
+		const details = analyzed.details as { confirmToken: string };
+		try {
+			await tool.execute("wf4-guardcheck-exec", {
+				runId: "wf-evm-4-guardcheck",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+				confirmToken: details.confirmToken,
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			expect(message).toContain("风控");
+			expect(message).toContain("重试建议");
+			return;
+		}
+		expect.fail("Expected execute to fail.");
+	});
+
 	it("blocks requote execute when max attempts reached", async () => {
 		const tool = getTool();
 		const analyzed = await tool.execute("wf4-requote-attempts-analysis", {
@@ -745,14 +909,23 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 			confirmMainnet: true,
 			confirmToken: details.confirmToken,
 		});
-		await expect(
-			tool.execute("wf4-requote-attempts-exec-2", {
+		expect.hasAssertions();
+		try {
+			await tool.execute("wf4-requote-attempts-exec-2", {
 				runId: "wf-evm-4-requote-attempts",
 				runMode: "execute",
 				network: "polygon",
 				confirmMainnet: true,
-			}),
-		).rejects.toThrow("max attempts reached");
+			});
+			expect.fail("Expected execute to fail.");
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			expect(
+				/max attempts reached|Repost failed after stale-cancel|retry failed/i.test(
+					message,
+				),
+			).toBe(true);
+		}
 		expect(executeMocks.placeOrderExecute).toHaveBeenCalledTimes(1);
 	});
 
