@@ -9,10 +9,11 @@ import {
 } from "../../evm/policy.js";
 import { createEvmToolset } from "../../evm/toolset.js";
 import { createNearToolset } from "../../near/toolset.js";
+import { createKaspaToolset } from "../../kaspa/toolset.js";
 import { createSolanaWorkflowToolset } from "../../solana/workflow-toolset.js";
 import { createSuiToolset } from "../../sui/toolset.js";
 
-type SupportedChain = "solana" | "sui" | "near" | "evm";
+type SupportedChain = "solana" | "sui" | "near" | "evm" | "kaspa";
 type RiskLevel = "low" | "medium" | "high";
 
 type WorkflowCapability = {
@@ -207,6 +208,56 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 		],
 	},
 	{
+		chain: "kaspa",
+		status: "beta",
+		highlights: [
+			"Kaspa address tag lookup for identity/annotation enrichment",
+			"Kaspa address transaction history (including pagination)",
+			"Read-only Kaspa chain indexing inputs for real-time workflows",
+		],
+		signer: {
+			autoSources: [],
+			envKeys: [],
+		},
+		workflows: [
+			{
+				tool: "kaspa_getAddressTag",
+				description: "Read Kaspa address tag metadata for enriched analysis and monitoring.",
+				intentTypes: ["kaspa.address.tag"],
+				nlExamples: [
+					"查一下 kaspa 地址的标签信息",
+					"读取某个 kaspa 地址的身份标签",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
+				tool: "kaspa_getAddressTransactions",
+				description:
+					"Read recent Kaspa transactions and pagination metadata for an address.",
+				intentTypes: ["kaspa.address.transactions"],
+				nlExamples: [
+					"查一下这个 kaspa 地址最近的交易",
+					"分页查看某个地址的 Kaspa 交易历史",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+		],
+	},
+	{
 		chain: "evm",
 		status: "beta",
 		highlights: [
@@ -288,6 +339,7 @@ function collectMetaToolsets(): ChainToolset[] {
 		createSolanaWorkflowToolset(),
 		createSuiToolset(),
 		createNearToolset(),
+		createKaspaToolset(),
 		createEvmToolset(),
 	];
 }
@@ -360,7 +412,8 @@ function parseSupportedChain(value?: string): SupportedChain | "all" {
 		value === "solana" ||
 		value === "sui" ||
 		value === "near" ||
-		value === "evm"
+		value === "evm" ||
+		value === "kaspa"
 	) {
 		return value;
 	}
@@ -732,6 +785,7 @@ export function createMetaReadTools() {
 						Type.Literal("solana"),
 						Type.Literal("sui"),
 						Type.Literal("near"),
+						Type.Literal("kaspa"),
 						Type.Literal("evm"),
 					]),
 				),
@@ -779,6 +833,7 @@ export function createMetaReadTools() {
 						Type.Literal("solana"),
 						Type.Literal("sui"),
 						Type.Literal("near"),
+						Type.Literal("kaspa"),
 						Type.Literal("evm"),
 					]),
 				),

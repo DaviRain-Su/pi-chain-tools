@@ -30,6 +30,21 @@ vi.mock("../../near/toolset.js", () => ({
 	}),
 }));
 
+vi.mock("../../kaspa/toolset.js", () => ({
+	createKaspaToolset: () => ({
+		chain: "kaspa",
+		groups: [
+			{
+				name: "read",
+				tools: [
+					{ name: "kaspa_getAddressTag" },
+					{ name: "kaspa_getAddressTransactions" },
+				],
+			},
+		],
+	}),
+}));
+
 vi.mock("../../sui/toolset.js", () => ({
 	createSuiToolset: () => ({
 		chain: "sui",
@@ -161,13 +176,14 @@ describe("meta capability tools", () => {
 				maxRisk: "high",
 			},
 			digest: {
-				chainCount: 4,
+				chainCount: 5,
 			},
 			chains: expect.arrayContaining([
 				expect.objectContaining({ chain: "solana" }),
 				expect.objectContaining({ chain: "sui" }),
 				expect.objectContaining({ chain: "near" }),
 				expect.objectContaining({ chain: "evm" }),
+				expect.objectContaining({ chain: "kaspa" }),
 			]),
 		});
 	});
@@ -206,9 +222,11 @@ describe("meta capability tools", () => {
 			chains: expect.arrayContaining([
 				expect.objectContaining({ chain: "solana" }),
 				expect.objectContaining({ chain: "evm" }),
+				expect.objectContaining({ chain: "kaspa" }),
 			]),
 			toolsets: expect.arrayContaining([
 				expect.objectContaining({ chain: "solana" }),
+				expect.objectContaining({ chain: "kaspa" }),
 			]),
 		});
 		for (const chain of details.chains) {
@@ -259,7 +277,7 @@ describe("meta capability tools", () => {
 				version: "0.1.0",
 			},
 			capabilityDigest: {
-				chainCount: 4,
+				chainCount: 5,
 			},
 			policyDigest: {
 				evmTransfer: expect.objectContaining({
