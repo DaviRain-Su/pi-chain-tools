@@ -1237,8 +1237,8 @@ npm run schema:validate -- --list --strict --json
 # 返回示例（失败）：{ "status": "failed", "errors": [...] }
 
 # 生产环境推荐：使用脚本入口（清晰/可复制）
-npm run schema:check-files         # 人类可读版本（默认文本）
-npm run schema:check-files:json    # 机器可读 JSON 版本
+npm run schema:check-files         # 人类可读版本（严格清单检查，失败即退出 1）
+npm run schema:check-files:json    # 机器可读 JSON 版本（严格清单检查，失败即退出 1）
 
 # 推荐的 CI 片段（可直接复用）
 # 验证文件清单（manifest）与内容（schema 结构）

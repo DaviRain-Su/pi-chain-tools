@@ -106,6 +106,21 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		expect(payload.files).toHaveLength(REQUIRED_FILES.length);
 	});
 
+	it("fails --list-strict without --json in strict human-readable mode", () => {
+		const workspace = createWorkspace(["openclaw-btc5m-workflow.schema.json"]);
+		workspaces.push(workspace);
+
+		const result = runValidator(workspace, ["--list-strict"]);
+		expect(result.status).toBe(1);
+		expect(result.stdout + result.stderr).toContain("SCHEMA_INVALID");
+		expect(result.stdout + result.stderr).toContain(
+			"invalid schema file: openclaw-btc5m-runtime-state.schema.json",
+		);
+		expect(result.stdout + result.stderr).toContain(
+			"invalid schema file: openclaw-btc5m-retry-policy.schema.json",
+		);
+	});
+
 	it("fails --list-strict if a configured file path exists but is directory", () => {
 		const workspace = createWorkspace([
 			"openclaw-btc5m-workflow.schema.json",

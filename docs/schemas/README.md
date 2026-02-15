@@ -20,8 +20,8 @@ npm run schema:validate
 以及文件清单**严格**校验（便于“文件缺失/缺失目录”提前拦截）：
 
 ```bash
-npm run schema:check-files         # 人类可读输出
-npm run schema:check-files:json    # JSON 输出（推荐用于 CI 机器消费）
+npm run schema:check-files         # 人类可读输出（严格清单检查，失败即退出 1）
+npm run schema:check-files:json    # JSON 输出（推荐用于 CI 机器消费，严格清单检查）
 ```
 
 脚本会检查：
