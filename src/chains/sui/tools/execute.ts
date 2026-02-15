@@ -16,6 +16,7 @@ import {
 	getSuiClient,
 	getSuiExplorerTransactionUrl,
 	getSuiRpcEndpoint,
+	getSuiSignerLookupPaths,
 	normalizeAtPath,
 	parsePositiveBigInt,
 	parseSuiNetwork,
@@ -248,6 +249,69 @@ function resolveCetusNetwork(network: SuiNetwork): "mainnet" | "testnet" {
 	);
 }
 
+type SuiSignerSource = "fromPrivateKey" | "SUI_PRIVATE_KEY" | "localKeystore";
+
+function stringifyError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function formatSignerHintMessage(): string {
+	const paths = getSuiSignerLookupPaths();
+	return `Checked keystore=${paths.keystorePath}; activeAddress=${
+		paths.activeAddress ?? "<not configured>"
+	}; clientConfig=${paths.clientConfigPath}.`;
+}
+
+function resolveSuiExecutionSigner(fromPrivateKey?: string): {
+	signer: Awaited<ReturnType<typeof resolveSuiKeypair>>;
+	signerSource: SuiSignerSource;
+} {
+	const explicitPrivateKey = fromPrivateKey?.trim();
+	if (explicitPrivateKey) {
+		try {
+			return {
+				signer: resolveSuiKeypair(explicitPrivateKey),
+				signerSource: "fromPrivateKey",
+			};
+		} catch (error) {
+			throw new Error(
+				`fromPrivateKey is invalid or unsupported for execute: ${stringifyError(
+					error,
+				)}. Provide a valid suiprivkey (ED25519) or use SUI_PRIVATE_KEY/local keystore.`,
+			);
+		}
+	}
+
+	const envPrivateKey = process.env.SUI_PRIVATE_KEY?.trim();
+	if (envPrivateKey) {
+		try {
+			return {
+				signer: resolveSuiKeypair(envPrivateKey),
+				signerSource: "SUI_PRIVATE_KEY",
+			};
+		} catch (error) {
+			throw new Error(
+				`SUI_PRIVATE_KEY is configured but invalid for execute: ${stringifyError(
+					error,
+				)}. Set a valid ED25519 suiprivkey in SUI_PRIVATE_KEY or omit it to use local keystore.`,
+			);
+		}
+	}
+
+	try {
+		return {
+			signer: resolveSuiKeypair(),
+			signerSource: "localKeystore",
+		};
+	} catch (error) {
+		throw new Error(
+			`No local signer available for execute: ${stringifyError(
+				error,
+			)}. ${formatSignerHintMessage()} Provide fromPrivateKey (suiprivkey) or place a valid ED25519 key in ${"local keystore"}.`,
+		);
+	}
+}
+
 function resolveRequestType(
 	waitForLocalExecution?: boolean,
 ): "WaitForLocalExecution" | "WaitForEffectsCert" {
@@ -390,7 +454,9 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 
-				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const { signer, signerSource } = resolveSuiExecutionSigner(
+					params.fromPrivateKey,
+				);
 				const fromAddress = signer.toSuiAddress();
 				const toAddress = normalizeAtPath(params.toAddress);
 				const amountMist = resolveTransferAmount(params);
@@ -435,6 +501,7 @@ export function createSuiExecuteTools() {
 						status,
 						error,
 						fromAddress,
+						signerSource,
 						toAddress,
 						amountMist: amountMistRaw,
 						amountSui: formatCoinAmount(amountMistRaw, 9),
@@ -502,7 +569,9 @@ export function createSuiExecuteTools() {
 					);
 				}
 
-				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const { signer, signerSource } = resolveSuiExecutionSigner(
+					params.fromPrivateKey,
+				);
 				const fromAddress = signer.toSuiAddress();
 				const toAddress = normalizeAtPath(params.toAddress);
 				const amountRawBigInt = parsePositiveBigInt(
@@ -580,6 +649,7 @@ export function createSuiExecuteTools() {
 						status,
 						error,
 						fromAddress,
+						signerSource,
 						toAddress,
 						coinType,
 						amountRaw,
@@ -671,7 +741,9 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const env = resolveAggregatorEnv(network);
-				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const { signer, signerSource } = resolveSuiExecutionSigner(
+					params.fromPrivateKey,
+				);
 				const fromAddress = signer.toSuiAddress();
 				const amountRaw = parsePositiveBigInt(params.amountRaw, "amountRaw");
 				const byAmountIn = params.byAmountIn !== false;
@@ -745,6 +817,7 @@ export function createSuiExecuteTools() {
 						status,
 						error,
 						fromAddress,
+						signerSource,
 						inputCoinType: params.inputCoinType.trim(),
 						outputCoinType: params.outputCoinType.trim(),
 						requestAmountRaw: amountRaw.toString(),
@@ -822,7 +895,9 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const cetusNetwork = resolveCetusNetwork(network);
-				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const { signer, signerSource } = resolveSuiExecutionSigner(
+					params.fromPrivateKey,
+				);
 				const fromAddress = signer.toSuiAddress();
 				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
 				const initCetusSDK = await getInitCetusSDK();
@@ -882,6 +957,7 @@ export function createSuiExecuteTools() {
 						status,
 						error,
 						fromAddress,
+						signerSource,
 						network,
 						rpcUrl,
 						cetusNetwork,
@@ -941,7 +1017,9 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const cetusNetwork = resolveCetusNetwork(network);
-				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const { signer, signerSource } = resolveSuiExecutionSigner(
+					params.fromPrivateKey,
+				);
 				const fromAddress = signer.toSuiAddress();
 				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
 				const initCetusSDK = await getInitCetusSDK();
@@ -995,6 +1073,7 @@ export function createSuiExecuteTools() {
 						status,
 						error,
 						fromAddress,
+						signerSource,
 						network,
 						rpcUrl,
 						cetusNetwork,
@@ -1040,7 +1119,9 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const cetusNetwork = resolveCetusV2Network(network);
-				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const { signer, signerSource } = resolveSuiExecutionSigner(
+					params.fromPrivateKey,
+				);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildCetusFarmsStakeTransaction({
 					network: cetusNetwork,
@@ -1086,6 +1167,7 @@ export function createSuiExecuteTools() {
 						status,
 						error,
 						fromAddress,
+						signerSource,
 						network,
 						cetusNetwork,
 						rpcUrl: params.rpcUrl?.trim() ?? null,
@@ -1126,7 +1208,9 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const cetusNetwork = resolveCetusV2Network(network);
-				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const { signer, signerSource } = resolveSuiExecutionSigner(
+					params.fromPrivateKey,
+				);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildCetusFarmsUnstakeTransaction({
 					network: cetusNetwork,
@@ -1169,6 +1253,7 @@ export function createSuiExecuteTools() {
 						status,
 						error,
 						fromAddress,
+						signerSource,
 						network,
 						cetusNetwork,
 						rpcUrl: params.rpcUrl?.trim() ?? null,
@@ -1206,7 +1291,9 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const cetusNetwork = resolveCetusV2Network(network);
-				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const { signer, signerSource } = resolveSuiExecutionSigner(
+					params.fromPrivateKey,
+				);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildCetusFarmsHarvestTransaction({
 					network: cetusNetwork,
@@ -1249,6 +1336,7 @@ export function createSuiExecuteTools() {
 						status,
 						error,
 						fromAddress,
+						signerSource,
 						network,
 						cetusNetwork,
 						rpcUrl: params.rpcUrl?.trim() ?? null,
@@ -1297,7 +1385,9 @@ export function createSuiExecuteTools() {
 					params.amountUsdcRaw,
 					"amountUsdcRaw",
 				);
-				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const { signer, signerSource } = resolveSuiExecutionSigner(
+					params.fromPrivateKey,
+				);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildStableLayerMintTransaction({
 					network: stableLayerNetwork,
@@ -1341,6 +1431,7 @@ export function createSuiExecuteTools() {
 						status,
 						error,
 						fromAddress,
+						signerSource,
 						network,
 						stableLayerNetwork,
 						stableCoinType: params.stableCoinType.trim(),
@@ -1398,7 +1489,9 @@ export function createSuiExecuteTools() {
 				if (!burnAll && amountStableRaw == null) {
 					throw new Error("amountStableRaw is required unless burnAll=true.");
 				}
-				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const { signer, signerSource } = resolveSuiExecutionSigner(
+					params.fromPrivateKey,
+				);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildStableLayerBurnTransaction({
 					network: stableLayerNetwork,
@@ -1442,6 +1535,7 @@ export function createSuiExecuteTools() {
 						status,
 						error,
 						fromAddress,
+						signerSource,
 						network,
 						stableLayerNetwork,
 						stableCoinType: params.stableCoinType.trim(),
@@ -1478,7 +1572,9 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const stableLayerNetwork = resolveStableLayerNetwork(network);
-				const signer = resolveSuiKeypair(params.fromPrivateKey);
+				const { signer, signerSource } = resolveSuiExecutionSigner(
+					params.fromPrivateKey,
+				);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildStableLayerClaimTransaction({
 					network: stableLayerNetwork,
@@ -1520,6 +1616,7 @@ export function createSuiExecuteTools() {
 						status,
 						error,
 						fromAddress,
+						signerSource,
 						network,
 						stableLayerNetwork,
 						stableCoinType: params.stableCoinType.trim(),

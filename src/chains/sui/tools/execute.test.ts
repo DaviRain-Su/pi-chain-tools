@@ -250,6 +250,38 @@ describe("sui_transferSui", () => {
 			}),
 		).rejects.toThrow("insufficient gas");
 	});
+
+	it("reports detailed hint when signer is unavailable", async () => {
+		runtimeMocks.resolveSuiKeypair.mockImplementationOnce(() => {
+			throw new Error("No signer key available.");
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({
+			signAndExecuteTransaction: vi.fn(),
+		});
+
+		const tool = getTool("sui_transferSui");
+		await expect(
+			tool.execute("t4", {
+				toAddress,
+				amountMist: "1000",
+			}),
+		).rejects.toThrow("No local signer available for execute");
+	});
+
+	it("reports explicit invalid private key hint", async () => {
+		runtimeMocks.resolveSuiKeypair.mockImplementationOnce(() => {
+			throw new Error("Invalid key");
+		});
+
+		const tool = getTool("sui_transferSui");
+		await expect(
+			tool.execute("t5", {
+				toAddress,
+				amountMist: "1000",
+				fromPrivateKey: "bad-key",
+			}),
+		).rejects.toThrow("fromPrivateKey is invalid or unsupported");
+	});
 });
 
 describe("sui_transferCoin", () => {
