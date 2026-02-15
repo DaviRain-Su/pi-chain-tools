@@ -731,6 +731,77 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		);
 	});
 
+	it("parses transfer.coin intentText by symbol and converts ui amount to raw", async () => {
+		const tool = getTool();
+		const destination =
+			"0x8888888888888888888888888888888888888888888888888888888888888888";
+		const result = await tool.execute("wf2-coin", {
+			runId: "wf-sui-02-coin",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: `把 1.5 USDC 转给 ${destination}`,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.transfer.coin",
+			intent: {
+				type: "sui.transfer.coin",
+				coinType: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				amountRaw: "1500000",
+				toAddress: destination,
+			},
+		});
+	});
+
+	it("throws clear message when intentText transfer symbol is ambiguous", async () => {
+		cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockImplementation(
+			async ({ symbol }) => {
+				const normalized = symbol.trim().toUpperCase();
+				if (normalized === "XWAL")
+					return [
+						"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::ha::WAL",
+						"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb::hb::WAL",
+					];
+				return [];
+			},
+		);
+		const tool = getTool();
+		const destination =
+			"0x8888888888888888888888888888888888888888888888888888888888888888";
+		await expect(
+			tool.execute("wf2-coin-ambiguous", {
+				runId: "wf-sui-02-coin-ambiguous",
+				runMode: "analysis",
+				network: "mainnet",
+				intentText: `转 0.5 XWAL 到 ${destination}`,
+			}),
+		).rejects.toThrow(/coin symbol "XWAL" is ambiguous/i);
+	});
+
+	it("requires known decimals for transfer.ui amount from unknown token symbol", async () => {
+		cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockImplementation(
+			async ({ symbol }) => {
+				const normalized = symbol.trim().toUpperCase();
+				if (normalized === "MYST")
+					return [
+						"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc::mi::MYST",
+					];
+				return [];
+			},
+		);
+		const tool = getTool();
+		const destination =
+			"0x7777777777777777777777777777777777777777777777777777777777777777";
+		await expect(
+			tool.execute("wf2-coin-unknown-decimals", {
+				runId: "wf-sui-02-coin-unknown-decimals",
+				runMode: "analysis",
+				network: "mainnet",
+				intentText: `转 1.2 MYST 到 ${destination}`,
+			}),
+		).rejects.toThrow(/unknown decimals/i);
+	});
+
 	it("blocks mainnet execute when confirmMainnet is missing", async () => {
 		const tool = getTool();
 		const destination =

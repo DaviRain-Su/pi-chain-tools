@@ -570,6 +570,97 @@ const DEFAULT_CETUS_TICK_LOWER = -443636;
 const DEFAULT_CETUS_TICK_UPPER = 443636;
 
 const TOKEN_NAME_PATTERN = "[A-Za-z][A-Za-z0-9_]{1,15}";
+const TRANSFER_AMOUNT_WITH_SYMBOL_PATTERN =
+	/(\d+(?:\.\d+)?)\s*([A-Za-z][A-Za-z0-9_]{1,15})/i;
+const NATURAL_LANGUAGE_TOKEN_STOP_WORDS = new Set([
+	"TO",
+	"FROM",
+	"FOR",
+	"IN",
+	"ON",
+	"AT",
+	"WITH",
+	"AND",
+	"OR",
+	"THE",
+	"THIS",
+	"THAT",
+	"AN",
+	"A",
+	"BY",
+	"AS",
+	"OF",
+	"IT",
+	"ONCHAIN",
+	"SEND",
+	"SENDING",
+	"SENT",
+	"SENDS",
+	"TRANSFER",
+	"TRANSFERS",
+	"TRANSFERRING",
+	"SWAP",
+	"EXCHANGE",
+	"EXCHANGES",
+	"EXCHANGING",
+	"ADD",
+	"REMOVE",
+	"OPEN",
+	"CLOSE",
+	"STAKE",
+	"FARM",
+	"FARMS",
+	"HARVEST",
+	"REWARD",
+	"REWARDS",
+	"CLAIM",
+	"LP",
+	"POSITION",
+	"POOL",
+	"WALLET",
+	"ADDRESS",
+	"MAINNET",
+	"TESTNET",
+	"DEVNET",
+	"LOCALNET",
+	"LOCAL",
+	"NETWORK",
+	"MAIN",
+	"CONFIRM",
+	"CONFIRMS",
+	"CONFIRMED",
+	"RISK",
+	"YES",
+	"NO",
+	"TRUE",
+	"FALSE",
+	"ANALYZE",
+	"ANALYSE",
+	"SIMULATE",
+	"EXECUTE",
+	"RUN",
+	"RUNS",
+	"RUNNING",
+	"CONFIRMS",
+]);
+
+const COIN_SYMBOL_RESOLUTION_CACHE = new Map<string, string[]>();
+
+function normalizeTokenSymbol(value: string): string {
+	return value.trim().toUpperCase();
+}
+
+function isSymbolStopWord(value: string): boolean {
+	return NATURAL_LANGUAGE_TOKEN_STOP_WORDS.has(normalizeTokenSymbol(value));
+}
+
+function formatCoinTypeResolutionCandidates(values: string[]): string {
+	if (!values.length) return "";
+	return values
+		.map((value, index) => `${index + 1}. ${value}`)
+		.slice(0, 4)
+		.join(", ");
+}
 
 function parseTokenPairFromText(text: string): {
 	left: string;
@@ -717,6 +808,46 @@ function parseMinOutputNarrativeAmounts(params: {
 		minAmountA: result.minAmountA,
 		minAmountB: result.minAmountB,
 	};
+}
+
+function parseTransferAmountSymbolFromText(text: string): {
+	amountRaw?: string;
+	coinType?: string;
+} {
+	const amountMatch = text.match(TRANSFER_AMOUNT_WITH_SYMBOL_PATTERN);
+	if (!amountMatch) return {};
+	const amountRaw = amountMatch[1];
+	const coinType = amountMatch[2]?.trim().toUpperCase();
+	return {
+		amountRaw: amountRaw || undefined,
+		coinType: coinType || undefined,
+	};
+}
+
+function normalizeTransferAmountRaw(params: {
+	amountRaw?: string;
+	coinType: string;
+	allowUiAmount?: boolean;
+}): string {
+	const amount = params.amountRaw?.trim();
+	if (!amount) {
+		throw new Error("amountRaw is required for sui.transfer.coin");
+	}
+	if (!/^\d+$/.test(amount)) {
+		if (params.allowUiAmount) {
+			const token = resolveKnownSuiTokenByCoinType(params.coinType);
+			if (!token) {
+				throw new Error(
+					`transfer.coin amountRaw must be a raw integer string. "${amount}" looks like decimal or invalid format for ${params.coinType} (unknown decimals).`,
+				);
+			}
+			return decimalUiAmountToRaw(amount, token.decimals, "amountRaw");
+		}
+		throw new Error(
+			`transfer.coin amountRaw must be a raw integer string. "${amount}" looks like decimal or invalid format.`,
+		);
+	}
+	return amount;
 }
 
 function normalizePairSymbolHints(params: {
@@ -881,15 +1012,39 @@ async function resolveCoinTypeBySymbol(params: {
 	const known = resolveKnownSuiToken(raw);
 	if (known) return known.coinType;
 
+	const symbol = normalizeTokenSymbol(raw);
+	const key = `${params.network}:${symbol}`;
+	const cached = COIN_SYMBOL_RESOLUTION_CACHE.get(key);
+	if (cached) {
+		if (cached.length === 1) return cached[0];
+		if (cached.length > 1) {
+			throw new Error(
+				`coin symbol "${raw}" is ambiguous on ${params.network} (${formatCoinTypeResolutionCandidates(
+					cached,
+				)}). Please provide a full coinType explicitly.`,
+			);
+		}
+		return undefined;
+	}
+
+	let matches: string[] = [];
 	try {
-		const matches = await resolveCetusTokenTypesBySymbol({
+		matches = await resolveCetusTokenTypesBySymbol({
 			network: resolveCetusV2Network(params.network),
 			rpcUrl: params.rpcUrl,
 			symbol: raw,
 		});
-		if (matches.length === 1) return matches[0];
 	} catch {
 		// ignore and fail with undefined
+	}
+	COIN_SYMBOL_RESOLUTION_CACHE.set(key, matches);
+	if (matches.length === 1) return matches[0];
+	if (matches.length > 1) {
+		throw new Error(
+			`coin symbol "${raw}" is ambiguous on ${params.network} (${formatCoinTypeResolutionCandidates(
+				matches,
+			)}). Please provide a full coinType explicitly.`,
+		);
 	}
 	return undefined;
 }
@@ -907,11 +1062,22 @@ function collectCoinTypeCandidates(text: string): string[] {
 		...text.matchAll(/0x[a-fA-F0-9]{1,64}::[A-Za-z0-9_]+::[A-Za-z0-9_]+/g),
 	].map((entry) => entry[0]);
 	const symbolMatches = [...text.matchAll(/\b[A-Za-z][A-Za-z0-9_]{1,15}\b/g)]
-		.map((entry) => entry[0])
+		.map((entry) => entry[0].trim())
+		.map((symbol) => symbol.toUpperCase())
+		.filter((symbol) => !isSymbolStopWord(symbol))
+		.filter((symbol) => symbol.length <= 10);
+	const knownSymbolMatches = symbolMatches
 		.map((symbol) => resolveKnownSuiToken(symbol)?.coinType)
 		.filter((value): value is string => Boolean(value));
+	const unknownSymbolMatches = symbolMatches.filter(
+		(value) => !resolveKnownSuiToken(value),
+	);
 
-	const merged = [...coinTypesFromTag, ...symbolMatches];
+	const merged = [
+		...coinTypesFromTag,
+		...knownSymbolMatches,
+		...unknownSymbolMatches,
+	];
 	const deduped: string[] = [];
 	const seen = new Set<string>();
 	for (const candidate of merged) {
@@ -1485,6 +1651,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		sideBSymbol: pair?.right,
 		text,
 	});
+	const transferAmount = parseTransferAmountSymbolFromText(text);
 	const controlHints: Pick<
 		ParsedIntentHints,
 		"confirmMainnet" | "confirmToken" | "confirmRisk"
@@ -1603,8 +1770,8 @@ function parseIntentText(text?: string): ParsedIntentHints {
 			...controlHints,
 			intentType: "sui.transfer.coin",
 			toAddress: objectIdMatches[0],
-			coinType: coinTypeCandidates[0],
-			amountRaw: integerMatch?.[0],
+			coinType: transferAmount.coinType || coinTypeCandidates[0],
+			amountRaw: transferAmount.amountRaw || integerMatch?.[0],
 		};
 	}
 
@@ -1987,11 +2154,16 @@ async function normalizeIntent(
 			params.coinType || parsed.coinType,
 			parsedNetwork,
 		);
-		const amountRaw = params.amountRaw?.trim() || parsed.amountRaw;
+		const providedAmountRaw = params.amountRaw?.trim();
 		if (!toAddress)
 			throw new Error("toAddress is required for sui.transfer.coin");
 		if (!coinType)
 			throw new Error("coinType is required for sui.transfer.coin");
+		const amountRaw = normalizeTransferAmountRaw({
+			amountRaw: providedAmountRaw || parsed.amountRaw,
+			coinType,
+			allowUiAmount: !providedAmountRaw,
+		});
 		if (!amountRaw)
 			throw new Error("amountRaw is required for sui.transfer.coin");
 		return {
