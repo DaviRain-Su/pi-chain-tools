@@ -92,6 +92,11 @@ describe("kaspa sign tools", () => {
 			rawTransaction: string;
 			requestHash: string;
 			unsignedRequestHash: string;
+			signingContext?: {
+				mode: "manual";
+				hashInput: { fingerprint: string; signatureEncoding: string };
+				metadata: { replaceExistingSignatures: boolean };
+			};
 		};
 		expect(result.content[0]?.text).toContain("Kaspa signatures attached");
 		expect(details.schema).toBe("kaspa.transaction.signed.v1");
@@ -104,6 +109,11 @@ describe("kaspa sign tools", () => {
 		expect(signedRaw.signatureEncoding).toBe("hex");
 		expect(signedRaw.signatures).toEqual(["sig-1", "sig-2"]);
 		expect(details.request.transaction.signatures).toEqual(["sig-1", "sig-2"]);
+		expect(details.signingContext?.mode).toBe("manual");
+		expect(details.signingContext?.hashInput?.fingerprint).toMatch(
+			/^[0-9a-f]{64}$/,
+		);
+		expect(details.signingContext?.hashInput?.signatureEncoding).toBe("hex");
 	});
 
 	it("replaces existing signatures when requested", async () => {
@@ -149,8 +159,26 @@ describe("kaspa sign tools", () => {
 			source?: string;
 			rawTransaction: string;
 			request: { transaction: { signatures: string[] } };
+			signingContext?: {
+				mode: "wallet";
+				hashInput: {
+					fingerprint: string;
+					signatureEncoding: string;
+					network?: string;
+				};
+				metadata: { provider?: string; replaceExistingSignatures?: boolean };
+			};
 		};
 		expect(details.source).toBe("kaspa-wallet:kaspa-wallet");
+		expect(details.signingContext?.mode).toBe("wallet");
+		expect(details.signingContext?.metadata?.provider).toBe("kaspa-wallet");
+		expect(details.signingContext?.metadata?.replaceExistingSignatures).toBe(
+			false,
+		);
+		expect(details.signingContext?.hashInput?.fingerprint).toMatch(
+			/^[0-9a-f]{64}$/,
+		);
+		expect(details.signingContext?.hashInput?.signatureEncoding).toBe("hex");
 		const signedRaw = JSON.parse(details.rawTransaction) as {
 			signatures: string[];
 		};

@@ -13,6 +13,24 @@ type KaspaSignedSubmissionResult = {
 	signatureCount: number;
 	encoding: string;
 	source?: string;
+	signingContext?: KaspaSigningContext;
+};
+
+type KaspaSigningMethod = "manual" | "wallet";
+
+type KaspaSigningContext = {
+	mode: KaspaSigningMethod;
+	hashInput: {
+		fingerprint: string;
+		signatureEncoding: string;
+		network?: string;
+		inputShape: string;
+	};
+	metadata: {
+		provider?: KaspaSignerProvider;
+		providerModule?: string;
+		replaceExistingSignatures: boolean;
+	};
 };
 
 type KaspaSignerProvider =
@@ -24,7 +42,7 @@ type KaspaSignerProvider =
 const DEFAULT_SIGNATURE_ENCODING = "hex";
 const DEFAULT_SIGNER_PROVIDER = "auto" as const;
 
-const KASPA_SIGNER_CACHE = new Map<string, KaspaWalletSigner>();
+const KASPA_SIGNER_CACHE = new Map<string, KaspaWalletSignerResolution>();
 
 interface KaspaWalletSignerInput {
 	privateKey: string;
@@ -85,6 +103,18 @@ function parseKaspaTransactionPayload(value?: string): unknown | undefined {
 	} catch {
 		return trimmed;
 	}
+}
+
+function buildKaspaSigningInputFingerprint(
+	transaction: Record<string, unknown>,
+	signatureEncoding: string,
+	network?: string,
+): string {
+	return buildKaspaRequestFingerprint({
+		transaction: stripSignatures(transaction),
+		signatureEncoding,
+		network,
+	});
 }
 
 function resolveKaspaTransactionSubmissionRequest(
@@ -197,6 +227,7 @@ function buildSignedKaspaRequest(params: {
 	signatureEncoding: string;
 	signatures: string[];
 	source?: string;
+	signingContext: KaspaSigningContext;
 }): KaspaSignedSubmissionResult {
 	const request = params.body;
 	const transaction = cloneTransactionPayload(request.transaction);
@@ -225,6 +256,7 @@ function buildSignedKaspaRequest(params: {
 		signatureCount: unique.length,
 		encoding: params.signatureEncoding,
 		source: params.source,
+		signingContext: params.signingContext,
 	};
 }
 
@@ -260,11 +292,30 @@ function signKaspaSubmitTransaction(params: {
 	if (!nextSignatures.length) {
 		throw new Error("Unable to construct a non-empty signature list");
 	}
+	const signingTransaction = cloneTransactionPayload(body.transaction);
+	const network = detectKaspaRequestNetwork(signingTransaction);
+	const signingContext: KaspaSigningContext = {
+		mode: "manual",
+		hashInput: {
+			fingerprint: buildKaspaSigningInputFingerprint(
+				signingTransaction,
+				resolvedEncoding,
+				network,
+			),
+			signatureEncoding: resolvedEncoding,
+			network,
+			inputShape: "transaction-without-signatures",
+		},
+		metadata: {
+			replaceExistingSignatures: Boolean(params.replaceExistingSignatures),
+		},
+	};
 	return buildSignedKaspaRequest({
 		body,
 		signatureEncoding: resolvedEncoding,
 		signatures: nextSignatures,
 		source: "manual",
+		signingContext,
 	});
 }
 
@@ -293,11 +344,18 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 	if (!/^[a-zA-Z0-9_\-]+$/.test(normalizedEncoding)) {
 		throw new Error("signatureEncoding must be an identifier string");
 	}
-	const signer = await resolveKaspaWalletSigner(
+	const signerResolution = await resolveKaspaWalletSigner(
 		resolvedProvider,
 		params.providerModule?.trim(),
 	);
+	const signer = signerResolution.signer;
 	const transaction = cloneTransactionPayload(body.transaction);
+	const network = detectKaspaRequestNetwork(transaction);
+	const signingHash = buildKaspaSigningInputFingerprint(
+		transaction,
+		normalizedEncoding,
+		network,
+	);
 	const rawTransaction =
 		typeof body.rawTransaction === "string"
 			? body.rawTransaction
@@ -307,11 +365,9 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 		request: body,
 		transaction,
 		rawTransaction,
-		network: detectKaspaRequestNetwork(transaction),
+		network,
 		signatureEncoding: normalizedEncoding,
-		hash: buildKaspaRequestFingerprint({
-			transaction,
-		}),
+		hash: signingHash,
 	});
 	if (signatures.length === 0) {
 		throw new Error("Unable to produce any signature from wallet backend");
@@ -320,11 +376,27 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 		? signatures
 		: [...cloneSignatures(transaction.signatures), ...signatures];
 	const source = `kaspa-wallet:${resolvedProvider}`;
+	const signerResolutionModule = signerResolution.backend?.moduleName;
+	const signingContext: KaspaSigningContext = {
+		mode: "wallet",
+		hashInput: {
+			fingerprint: signingHash,
+			signatureEncoding: normalizedEncoding,
+			network,
+			inputShape: "transaction-without-signatures",
+		},
+		metadata: {
+			provider: resolvedProvider,
+			providerModule: signerResolutionModule,
+			replaceExistingSignatures: Boolean(params.replaceExistingSignatures),
+		},
+	};
 	return buildSignedKaspaRequest({
 		body,
 		signatureEncoding: normalizedEncoding,
 		signatures: finalSignatures,
 		source,
+		signingContext,
 	});
 }
 
@@ -337,10 +409,19 @@ function detectKaspaRequestNetwork(
 	return undefined;
 }
 
+type KaspaWalletSignerResolution = {
+	signer: KaspaWalletSigner;
+	backend: {
+		provider: KaspaSignerProvider;
+		moduleName: string;
+		label: string;
+	};
+};
+
 async function resolveKaspaWalletSigner(
 	provider: KaspaSignerProvider,
 	providerModule?: string,
-): Promise<KaspaWalletSigner> {
+): Promise<KaspaWalletSignerResolution> {
 	const cacheKey = `${provider}::${providerModule || ""}`;
 	const cached = KASPA_SIGNER_CACHE.get(cacheKey);
 	if (cached) return cached;
@@ -351,8 +432,16 @@ async function resolveKaspaWalletSigner(
 			const moduleValue = await import(candidate.moduleName);
 			const signer = buildKaspaWalletSignerFromModule(moduleValue);
 			if (signer) {
-				KASPA_SIGNER_CACHE.set(cacheKey, signer);
-				return signer;
+				const resolution: KaspaWalletSignerResolution = {
+					signer,
+					backend: {
+						provider,
+						moduleName: candidate.moduleName,
+						label: candidate.label,
+					},
+				};
+				KASPA_SIGNER_CACHE.set(cacheKey, resolution);
+				return resolution;
 			}
 		} catch (error) {
 			lastError = error instanceof Error ? error : new Error(String(error));
@@ -618,31 +707,81 @@ function createSignerFromFactory(
 	};
 }
 
-function extractSignaturesFromValue(value: unknown): string[] {
+function pickSignatureValue(candidate: unknown): string | null {
+	if (typeof candidate === "string") {
+		const signature = candidate.trim();
+		return signature || null;
+	}
+	if (candidate && typeof candidate === "object") {
+		const record = candidate as Record<string, unknown>;
+		const direct =
+			typeof record.signature === "string"
+				? record.signature
+				: typeof record.sig === "string"
+					? record.sig
+					: undefined;
+		if (typeof direct === "string" && direct.trim()) {
+			return direct.trim();
+		}
+		if (record.signature && Array.isArray(record.signature)) {
+			const values = record.signature
+				.filter((entry): entry is string => typeof entry === "string")
+				.map((entry) => entry.trim())
+				.filter((entry) => Boolean(entry));
+			if (values.length > 0) {
+				return values[0] ?? null;
+			}
+		}
+	}
+	return null;
+}
+
+function collectSignatureValues(value: unknown): string[] {
+	if (value == null) {
+		return [];
+	}
 	if (typeof value === "string") {
 		const signature = value.trim();
 		return signature ? [signature] : [];
 	}
 	if (Array.isArray(value)) {
-		return value
-			.filter((entry): entry is string => typeof entry === "string")
-			.map((entry) => entry.trim())
-			.filter((entry) => Boolean(entry));
+		const signatures: string[] = [];
+		for (const entry of value) {
+			if (typeof entry === "string") {
+				const signature = entry.trim();
+				if (signature) {
+					signatures.push(signature);
+				}
+				continue;
+			}
+			signatures.push(...collectSignatureValues(entry));
+		}
+		return signatures;
 	}
-	if (value && typeof value === "object") {
+	if (typeof value === "object") {
 		const record = value as Record<string, unknown>;
-		if (typeof record.signature === "string") {
-			const sig = record.signature.trim();
-			if (sig) return [sig];
+		const direct = pickSignatureValue(record);
+		const signatures: string[] = [];
+		if (direct) {
+			signatures.push(direct);
 		}
 		if (Array.isArray(record.signatures)) {
-			return (record.signatures as unknown[])
-				.filter((entry): entry is string => typeof entry === "string")
-				.map((entry) => entry.trim())
-				.filter((entry) => Boolean(entry));
+			signatures.push(...collectSignatureValues(record.signatures));
 		}
+		return signatures;
 	}
 	return [];
+}
+
+function extractSignaturesFromValue(value: unknown): string[] {
+	const signatures = collectSignatureValues(value).map((entry) => entry.trim());
+	const unique = new Set<string>();
+	for (const signature of signatures) {
+		if (signature) {
+			unique.add(signature);
+		}
+	}
+	return [...unique];
 }
 
 function raiseError(): never {
@@ -716,6 +855,7 @@ export function createKaspaSignTools() {
 						encoding: signed.encoding,
 						appliedSignatures: signed.signatureCount,
 						source: "manual",
+						signingContext: signed.signingContext,
 					},
 				};
 			},
@@ -799,6 +939,7 @@ export function createKaspaSignTools() {
 						encoding: signed.encoding,
 						appliedSignatures: signed.signatureCount,
 						source: signed.source,
+						signingContext: signed.signingContext,
 					},
 				};
 			},
