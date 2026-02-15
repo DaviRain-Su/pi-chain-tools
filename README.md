@@ -18,6 +18,10 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - Workflow artifact summaries use a stable schema: `summaryLine` (string) + `summary` (`schema = w3rt.workflow.summary.v1`)
 - Pi extension registration now prefers workflow `summary.line` as first response line for `w3rt_run_*` tools.
 
+### Hackathon Submission
+
+- `docs/monad-ai-hackathon.md`：Monad AI Hackathon 参赛文档（赛道选择、架构优势、展示脚本与评审话术）
+
 ## Solana Tool Groups
 
 - `read`: balance, account info, multiple accounts, blockhash, rent exemption minimum, transaction, signatures, token accounts, token balance, portfolio, DeFi positions (token protocol tags + native stake scan + Orca/Meteora LP), Kamino lending positions + market catalog, Orca Whirlpool positions, Meteora DLMM positions, Jupiter/Raydium quote + meta APIs
