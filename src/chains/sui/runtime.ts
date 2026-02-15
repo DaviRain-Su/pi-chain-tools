@@ -180,6 +180,25 @@ function normalizeAddress(value: string): string {
 	return lower.startsWith("0x") ? lower : `0x${lower}`;
 }
 
+export function getSuiSignerLookupPaths(): {
+	keystorePath: string;
+	clientConfigPath: string;
+	configDir: string;
+	activeAddress: string | null;
+} {
+	const configDir = resolveSuiConfigDir();
+	const keystorePath =
+		process.env[SUI_KEYSTORE_PATH_ENV]?.trim() ||
+		path.join(configDir, "sui.keystore");
+	const clientConfigPath = resolveSuiClientConfigPath();
+	return {
+		keystorePath,
+		clientConfigPath,
+		configDir,
+		activeAddress: parseActiveAddress(clientConfigPath),
+	};
+}
+
 function parseActiveAddress(clientConfigPath: string): string | null {
 	try {
 		const content = readFileSync(clientConfigPath, "utf8");
@@ -341,6 +360,19 @@ export function resolveSuiOwnerAddress(owner?: string): string {
 	);
 }
 
+function resolveSuiKeypairFailureMessage(): string {
+	const { keystorePath, clientConfigPath, activeAddress } =
+		getSuiSignerLookupPaths();
+	return [
+		"No signer key available.",
+		"Tried: fromPrivateKey, SUI_PRIVATE_KEY, local keystore.",
+		`Checked keystore=${keystorePath}; activeAddress=${
+			activeAddress ?? "<not configured>"
+		}; clientConfig=${clientConfigPath}`,
+		"Set fromPrivateKey (suiprivkey...), SUI_PRIVATE_KEY, or configure local key (sui.keystore) with an ED25519 key.",
+	].join(" ");
+}
+
 export function resolveSuiKeypair(privateKey?: string): Ed25519Keypair {
 	const key = privateKey?.trim() || process.env.SUI_PRIVATE_KEY?.trim();
 	if (!key) {
@@ -348,9 +380,7 @@ export function resolveSuiKeypair(privateKey?: string): Ed25519Keypair {
 		if (fallbackKeypair) {
 			return fallbackKeypair;
 		}
-		throw new Error(
-			"No signer key available. Set fromPrivateKey (suiprivkey...), SUI_PRIVATE_KEY, or configure SUI_KEYSTORE_PATH / ~/.sui/sui_config/sui.keystore with an ED25519 key.",
-		);
+		throw new Error(resolveSuiKeypairFailureMessage());
 	}
 
 	const parsed = decodeSuiPrivateKey(key);

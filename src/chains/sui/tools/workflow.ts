@@ -130,6 +130,7 @@ type WorkflowParams = {
 	intentType?: SuiWorkflowIntent["type"];
 	intentText?: string;
 	network?: string;
+	fromPrivateKey?: string;
 	toAddress?: string;
 	amountSui?: number;
 	amountRaw?: string;
@@ -196,6 +197,7 @@ type StableLayerWorkflowParams = {
 	intentType?: StableLayerWorkflowIntent["type"];
 	intentText?: string;
 	network?: string;
+	fromPrivateKey?: string;
 	stableCoinType?: string;
 	amountUsdcRaw?: string;
 	amountStableRaw?: string;
@@ -249,6 +251,7 @@ type CetusFarmsWorkflowParams = {
 	intentType?: CetusFarmsWorkflowIntent["type"];
 	intentText?: string;
 	network?: string;
+	fromPrivateKey?: string;
 	rpcUrl?: string;
 	poolId?: string;
 	clmmPositionId?: string;
@@ -283,6 +286,7 @@ type SuiDefiWorkflowParams = {
 	intentType?: string;
 	intentText?: string;
 	network?: string;
+	fromPrivateKey?: string;
 	toAddress?: string;
 	amountSui?: number;
 	amountRaw?: string;
@@ -2039,9 +2043,10 @@ async function executeSimulatedTransactionBlock(params: {
 	rpcUrl?: string;
 	transaction: Transaction;
 	expectedSignerAddress?: string;
+	fromPrivateKey?: string;
 	waitForLocalExecution?: boolean;
 }): Promise<Record<string, unknown>> {
-	const signer = resolveSuiKeypair();
+	const signer = resolveSuiKeypair(params.fromPrivateKey);
 	const signerAddress = signer.toSuiAddress();
 	if (params.expectedSignerAddress?.trim()) {
 		const normalizedExpected = normalizeSuiAddressForCompare(
@@ -2788,6 +2793,7 @@ async function executeIntent(
 	if (intent.type === "sui.transfer.sui") {
 		const tool = resolveExecutionTool("sui_transferSui");
 		return tool.execute("wf-execute", {
+			fromPrivateKey: params.fromPrivateKey,
 			toAddress: intent.toAddress,
 			amountMist: intent.amountMist,
 			amountSui: intent.amountSui,
@@ -2799,6 +2805,7 @@ async function executeIntent(
 	if (intent.type === "sui.transfer.coin") {
 		const tool = resolveExecutionTool("sui_transferCoin");
 		return tool.execute("wf-execute", {
+			fromPrivateKey: params.fromPrivateKey,
 			toAddress: intent.toAddress,
 			coinType: intent.coinType,
 			amountRaw: intent.amountRaw,
@@ -2811,6 +2818,7 @@ async function executeIntent(
 	if (intent.type === "sui.lp.cetus.add") {
 		const tool = resolveExecutionTool("sui_cetusAddLiquidity");
 		return tool.execute("wf-execute", {
+			fromPrivateKey: params.fromPrivateKey,
 			poolId: intent.poolId,
 			positionId: intent.positionId,
 			coinTypeA: intent.coinTypeA,
@@ -2831,6 +2839,7 @@ async function executeIntent(
 	if (intent.type === "sui.lp.cetus.remove") {
 		const tool = resolveExecutionTool("sui_cetusRemoveLiquidity");
 		return tool.execute("wf-execute", {
+			fromPrivateKey: params.fromPrivateKey,
 			poolId: intent.poolId,
 			positionId: intent.positionId,
 			coinTypeA: intent.coinTypeA,
@@ -2847,6 +2856,7 @@ async function executeIntent(
 	}
 	const tool = resolveExecutionTool("sui_swapCetus");
 	return tool.execute("wf-execute", {
+		fromPrivateKey: params.fromPrivateKey,
 		inputCoinType: intent.inputCoinType,
 		outputCoinType: intent.outputCoinType,
 		amountRaw: intent.amountRaw,
@@ -2870,6 +2880,7 @@ async function executeStableLayerIntent(
 	if (intent.type === "sui.stablelayer.mint") {
 		const tool = resolveExecutionTool("sui_stableLayerMint");
 		return tool.execute("wf-stablelayer-execute", {
+			fromPrivateKey: params.fromPrivateKey,
 			stableCoinType: intent.stableCoinType,
 			amountUsdcRaw: intent.amountUsdcRaw,
 			usdcCoinType: intent.usdcCoinType,
@@ -2881,6 +2892,7 @@ async function executeStableLayerIntent(
 	if (intent.type === "sui.stablelayer.burn") {
 		const tool = resolveExecutionTool("sui_stableLayerBurn");
 		return tool.execute("wf-stablelayer-execute", {
+			fromPrivateKey: params.fromPrivateKey,
 			stableCoinType: intent.stableCoinType,
 			amountStableRaw: intent.amountStableRaw,
 			burnAll: intent.burnAll,
@@ -2891,6 +2903,7 @@ async function executeStableLayerIntent(
 	}
 	const tool = resolveExecutionTool("sui_stableLayerClaim");
 	return tool.execute("wf-stablelayer-execute", {
+		fromPrivateKey: params.fromPrivateKey,
 		stableCoinType: intent.stableCoinType,
 		network,
 		waitForLocalExecution: params.waitForLocalExecution,
@@ -2906,6 +2919,7 @@ async function executeCetusFarmsIntent(
 	if (intent.type === "sui.cetus.farms.stake") {
 		const tool = resolveExecutionTool("sui_cetusFarmsStake");
 		return tool.execute("wf-cetus-farms-execute", {
+			fromPrivateKey: params.fromPrivateKey,
 			poolId: intent.poolId,
 			clmmPositionId: intent.clmmPositionId,
 			clmmPoolId: intent.clmmPoolId,
@@ -2920,6 +2934,7 @@ async function executeCetusFarmsIntent(
 	if (intent.type === "sui.cetus.farms.unstake") {
 		const tool = resolveExecutionTool("sui_cetusFarmsUnstake");
 		return tool.execute("wf-cetus-farms-execute", {
+			fromPrivateKey: params.fromPrivateKey,
 			poolId: intent.poolId,
 			positionNftId: intent.positionNftId,
 			network,
@@ -2930,6 +2945,7 @@ async function executeCetusFarmsIntent(
 	}
 	const tool = resolveExecutionTool("sui_cetusFarmsHarvest");
 	return tool.execute("wf-cetus-farms-execute", {
+		fromPrivateKey: params.fromPrivateKey,
 		poolId: intent.poolId,
 		positionNftId: intent.positionNftId,
 		network,
@@ -3060,6 +3076,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
+				fromPrivateKey: Type.Optional(Type.String()),
 				intentType: Type.Optional(
 					Type.Union([
 						Type.Literal("sui.transfer.sui"),
@@ -3209,7 +3226,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 
 				if (runMode === "simulate") {
 					const simulateRiskCheck = assessSuiIntentRisk(intent, null);
-					const signer = resolveSuiKeypair();
+					const signer = resolveSuiKeypair(params.fromPrivateKey);
 					const sender = signer.toSuiAddress();
 					const { tx, artifacts } = await buildSimulation(
 						intent,
@@ -3339,6 +3356,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								network,
 								transaction: priorSession.simulatedTransaction as Transaction,
 								expectedSignerAddress: priorSession?.simulatedSignerAddress,
+								fromPrivateKey: params.fromPrivateKey,
 								waitForLocalExecution: params.waitForLocalExecution,
 							})
 						: await executeIntent(intent, params, network).then((result) =>
@@ -3391,6 +3409,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
+				fromPrivateKey: Type.Optional(Type.String()),
 				intentType: Type.Optional(
 					Type.Union([
 						Type.Literal("sui.stablelayer.mint"),
@@ -3502,7 +3521,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				}
 
 				if (runMode === "simulate") {
-					const signer = resolveSuiKeypair();
+					const signer = resolveSuiKeypair(params.fromPrivateKey);
 					const sender = signer.toSuiAddress();
 					const { tx, artifacts } = await buildStableLayerSimulation(
 						intent,
@@ -3619,6 +3638,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									network,
 									transaction: priorSession.simulatedTransaction as Transaction,
 									expectedSignerAddress: priorSession?.simulatedSignerAddress,
+									fromPrivateKey: params.fromPrivateKey,
 									waitForLocalExecution: params.waitForLocalExecution,
 								}),
 							}
@@ -3665,6 +3685,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
+				fromPrivateKey: Type.Optional(Type.String()),
 				intentType: Type.Optional(
 					Type.Union([
 						Type.Literal("sui.cetus.farms.stake"),
@@ -3778,7 +3799,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				}
 
 				if (runMode === "simulate") {
-					const signer = resolveSuiKeypair();
+					const signer = resolveSuiKeypair(params.fromPrivateKey);
 					const sender = signer.toSuiAddress();
 					const { tx, artifacts } = await buildCetusFarmsSimulation(
 						intent,
@@ -3898,6 +3919,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									rpcUrl: params.rpcUrl,
 									transaction: priorSession.simulatedTransaction as Transaction,
 									expectedSignerAddress: priorSession?.simulatedSignerAddress,
+									fromPrivateKey: params.fromPrivateKey,
 									waitForLocalExecution: params.waitForLocalExecution,
 								}),
 							}
@@ -3944,6 +3966,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
+				fromPrivateKey: Type.Optional(Type.String()),
 				intentType: Type.Optional(Type.String()),
 				intentText: Type.Optional(Type.String()),
 				network: suiNetworkSchema(),

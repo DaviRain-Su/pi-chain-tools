@@ -169,7 +169,7 @@ describe("resolveSuiKeypair", () => {
 		});
 		useTempSuiConfigDir(configDir);
 
-		expect(() => resolveSuiKeypair()).toThrow("SUI_KEYSTORE_PATH");
+		expect(() => resolveSuiKeypair()).toThrow("fromPrivateKey");
 	});
 });
 

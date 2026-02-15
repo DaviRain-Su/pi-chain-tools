@@ -35,6 +35,7 @@ type SuiTransferParams = {
 	toAddress: string;
 	amountMist?: string;
 	amountSui?: number;
+	fromPrivateKey?: string;
 	network?: string;
 	rpcUrl?: string;
 	waitForLocalExecution?: boolean;
@@ -45,6 +46,7 @@ type SuiTransferCoinParams = {
 	toAddress: string;
 	coinType: string;
 	amountRaw: string;
+	fromPrivateKey?: string;
 	network?: string;
 	rpcUrl?: string;
 	waitForLocalExecution?: boolean;
@@ -56,6 +58,7 @@ type SuiSwapCetusParams = {
 	inputCoinType: string;
 	outputCoinType: string;
 	amountRaw: string;
+	fromPrivateKey?: string;
 	byAmountIn?: boolean;
 	slippageBps?: number;
 	providers?: string[];
@@ -70,6 +73,7 @@ type SuiSwapCetusParams = {
 type SuiCetusAddLiquidityParams = {
 	poolId: string;
 	positionId: string;
+	fromPrivateKey?: string;
 	coinTypeA: string;
 	coinTypeB: string;
 	tickLower: number;
@@ -89,6 +93,7 @@ type SuiCetusAddLiquidityParams = {
 type SuiCetusRemoveLiquidityParams = {
 	poolId: string;
 	positionId: string;
+	fromPrivateKey?: string;
 	coinTypeA: string;
 	coinTypeB: string;
 	deltaLiquidity: string;
@@ -108,6 +113,7 @@ type SuiCetusFarmsStakeParams = {
 	clmmPoolId: string;
 	coinTypeA: string;
 	coinTypeB: string;
+	fromPrivateKey?: string;
 	network?: string;
 	rpcUrl?: string;
 	waitForLocalExecution?: boolean;
@@ -117,6 +123,7 @@ type SuiCetusFarmsStakeParams = {
 type SuiCetusFarmsUnstakeParams = {
 	poolId: string;
 	positionNftId: string;
+	fromPrivateKey?: string;
 	network?: string;
 	rpcUrl?: string;
 	waitForLocalExecution?: boolean;
@@ -126,6 +133,7 @@ type SuiCetusFarmsUnstakeParams = {
 type SuiCetusFarmsHarvestParams = {
 	poolId: string;
 	positionNftId: string;
+	fromPrivateKey?: string;
 	network?: string;
 	rpcUrl?: string;
 	waitForLocalExecution?: boolean;
@@ -135,6 +143,7 @@ type SuiCetusFarmsHarvestParams = {
 type SuiStableLayerMintParams = {
 	stableCoinType: string;
 	amountUsdcRaw: string;
+	fromPrivateKey?: string;
 	usdcCoinType?: string;
 	network?: string;
 	rpcUrl?: string;
@@ -145,6 +154,7 @@ type SuiStableLayerMintParams = {
 type SuiStableLayerBurnParams = {
 	stableCoinType: string;
 	amountStableRaw?: string;
+	fromPrivateKey?: string;
 	burnAll?: boolean;
 	network?: string;
 	rpcUrl?: string;
@@ -154,6 +164,7 @@ type SuiStableLayerBurnParams = {
 
 type SuiStableLayerClaimParams = {
 	stableCoinType: string;
+	fromPrivateKey?: string;
 	network?: string;
 	rpcUrl?: string;
 	waitForLocalExecution?: boolean;
@@ -342,6 +353,12 @@ export function createSuiExecuteTools() {
 				"Sign and execute a native SUI transfer. Uses amountMist or amountSui.",
 			parameters: Type.Object({
 				toAddress: Type.String({ description: "Recipient Sui address" }),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional ED25519 private key for signing (suiprivkey...).",
+					}),
+				),
 				amountMist: Type.Optional(
 					Type.String({
 						description: "Amount in MIST (u64 integer string), e.g. 1000000",
@@ -373,7 +390,7 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 
-				const signer = resolveSuiKeypair();
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
 				const fromAddress = signer.toSuiAddress();
 				const toAddress = normalizeAtPath(params.toAddress);
 				const amountMist = resolveTransferAmount(params);
@@ -436,6 +453,12 @@ export function createSuiExecuteTools() {
 				"Sign and execute a non-SUI coin transfer by merging coin objects as needed",
 			parameters: Type.Object({
 				toAddress: Type.String({ description: "Recipient Sui address" }),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional ED25519 private key for signing (suiprivkey...).",
+					}),
+				),
 				coinType: Type.String({
 					description:
 						"Coin type to transfer (non-SUI), e.g. 0x...::coin::COIN",
@@ -479,7 +502,7 @@ export function createSuiExecuteTools() {
 					);
 				}
 
-				const signer = resolveSuiKeypair();
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
 				const fromAddress = signer.toSuiAddress();
 				const toAddress = normalizeAtPath(params.toAddress);
 				const amountRawBigInt = parsePositiveBigInt(
@@ -586,6 +609,12 @@ export function createSuiExecuteTools() {
 				amountRaw: Type.String({
 					description: "Raw integer amount for quote/swap",
 				}),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional ED25519 private key for signing (suiprivkey...).",
+					}),
+				),
 				byAmountIn: Type.Optional(
 					Type.Boolean({
 						description:
@@ -642,7 +671,7 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const env = resolveAggregatorEnv(network);
-				const signer = resolveSuiKeypair();
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
 				const fromAddress = signer.toSuiAddress();
 				const amountRaw = parsePositiveBigInt(params.amountRaw, "amountRaw");
 				const byAmountIn = params.byAmountIn !== false;
@@ -776,6 +805,12 @@ export function createSuiExecuteTools() {
 				rewarderCoinTypes: Type.Optional(
 					Type.Array(Type.String(), { minItems: 0, maxItems: 16 }),
 				),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional ED25519 private key for signing (suiprivkey...).",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
@@ -785,7 +820,7 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const cetusNetwork = resolveCetusNetwork(network);
-				const signer = resolveSuiKeypair();
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
 				const fromAddress = signer.toSuiAddress();
 				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
 				const initCetusSDK = await getInitCetusSDK();
@@ -887,6 +922,12 @@ export function createSuiExecuteTools() {
 				rewarderCoinTypes: Type.Optional(
 					Type.Array(Type.String(), { minItems: 0, maxItems: 16 }),
 				),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional ED25519 private key for signing (suiprivkey...).",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
@@ -896,7 +937,7 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const cetusNetwork = resolveCetusNetwork(network);
-				const signer = resolveSuiKeypair();
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
 				const fromAddress = signer.toSuiAddress();
 				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
 				const initCetusSDK = await getInitCetusSDK();
@@ -979,6 +1020,12 @@ export function createSuiExecuteTools() {
 				clmmPoolId: Type.String({ description: "Related Cetus CLMM pool id" }),
 				coinTypeA: Type.String({ description: "CLMM coinTypeA" }),
 				coinTypeB: Type.String({ description: "CLMM coinTypeB" }),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional ED25519 private key for signing (suiprivkey...).",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
@@ -989,7 +1036,7 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const cetusNetwork = resolveCetusV2Network(network);
-				const signer = resolveSuiKeypair();
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildCetusFarmsStakeTransaction({
 					network: cetusNetwork,
@@ -1059,6 +1106,12 @@ export function createSuiExecuteTools() {
 				positionNftId: Type.String({
 					description: "Farms position NFT id returned by stake",
 				}),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional ED25519 private key for signing (suiprivkey...).",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
@@ -1069,7 +1122,7 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const cetusNetwork = resolveCetusV2Network(network);
-				const signer = resolveSuiKeypair();
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildCetusFarmsUnstakeTransaction({
 					network: cetusNetwork,
@@ -1133,6 +1186,12 @@ export function createSuiExecuteTools() {
 				positionNftId: Type.String({
 					description: "Farms position NFT id used for reward harvest",
 				}),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional ED25519 private key for signing (suiprivkey...).",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
@@ -1143,7 +1202,7 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const cetusNetwork = resolveCetusV2Network(network);
-				const signer = resolveSuiKeypair();
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildCetusFarmsHarvestTransaction({
 					network: cetusNetwork,
@@ -1214,6 +1273,12 @@ export function createSuiExecuteTools() {
 						description: `USDC coin type override (default ${STABLE_LAYER_DEFAULT_USDC_COIN_TYPE})`,
 					}),
 				),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional ED25519 private key for signing (suiprivkey...).",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
@@ -1228,7 +1293,7 @@ export function createSuiExecuteTools() {
 					params.amountUsdcRaw,
 					"amountUsdcRaw",
 				);
-				const signer = resolveSuiKeypair();
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildStableLayerMintTransaction({
 					network: stableLayerNetwork,
@@ -1306,6 +1371,12 @@ export function createSuiExecuteTools() {
 							"When true, burn all wallet balance for stableCoinType and ignore amountStableRaw",
 					}),
 				),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional ED25519 private key for signing (suiprivkey...).",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
@@ -1323,7 +1394,7 @@ export function createSuiExecuteTools() {
 				if (!burnAll && amountStableRaw == null) {
 					throw new Error("amountStableRaw is required unless burnAll=true.");
 				}
-				const signer = resolveSuiKeypair();
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildStableLayerBurnTransaction({
 					network: stableLayerNetwork,
@@ -1387,6 +1458,12 @@ export function createSuiExecuteTools() {
 				stableCoinType: Type.String({
 					description: "Stable Layer coin type, e.g. 0x...::btc_usdc::BtcUSDC",
 				}),
+				fromPrivateKey: Type.Optional(
+					Type.String({
+						description:
+							"Optional ED25519 private key for signing (suiprivkey...).",
+					}),
+				),
 				network: suiNetworkSchema(),
 				rpcUrl: Type.Optional(Type.String()),
 				waitForLocalExecution: Type.Optional(Type.Boolean()),
@@ -1397,7 +1474,7 @@ export function createSuiExecuteTools() {
 				const network = parseSuiNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 				const stableLayerNetwork = resolveStableLayerNetwork(network);
-				const signer = resolveSuiKeypair();
+				const signer = resolveSuiKeypair(params.fromPrivateKey);
 				const fromAddress = signer.toSuiAddress();
 				const tx = await buildStableLayerClaimTransaction({
 					network: stableLayerNetwork,
