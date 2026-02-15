@@ -517,17 +517,43 @@ const KNOWN_SUI_TOKEN_BY_COIN_TYPE = new Map<string, KnownSuiToken>(
 	KNOWN_SUI_TOKENS.map((token) => [token.coinType, token] as const),
 );
 
+const TOKEN_NAME_PATTERN = "[A-Za-z][A-Za-z0-9_]{1,15}";
+
 function parseTokenPairFromText(text: string): {
 	left: string;
 	right: string;
 } | null {
-	const match = text.match(
-		/\b([A-Za-z][A-Za-z0-9_]{1,15})\s*\/\s*([A-Za-z][A-Za-z0-9_]{1,15})\b/i,
+	const slashMatch = text.match(
+		new RegExp(
+			`\\b(${TOKEN_NAME_PATTERN})\\s*\\/\\s*(${TOKEN_NAME_PATTERN})\\b`,
+			"i",
+		),
 	);
-	if (!match?.[1] || !match?.[2]) {
-		return null;
+	if (slashMatch?.[1] && slashMatch?.[2]) {
+		return { left: slashMatch[1].trim(), right: slashMatch[2].trim() };
 	}
-	return { left: match[1].trim(), right: match[2].trim() };
+
+	const arrowMatch = text.match(
+		new RegExp(
+			`\\b(${TOKEN_NAME_PATTERN})\\s*(?:->|=>|→|↔|↔️|to|换|换成|换为|兑|兑换|兑换为|换入|兑换到)\\s*(${TOKEN_NAME_PATTERN})\\b`,
+			"i",
+		),
+	);
+	if (arrowMatch?.[1] && arrowMatch?.[2]) {
+		return { left: arrowMatch[1].trim(), right: arrowMatch[2].trim() };
+	}
+
+	const pairWordMatch = text.match(
+		new RegExp(
+			`\\b(${TOKEN_NAME_PATTERN})\\s*(?:和|与)\\s*(${TOKEN_NAME_PATTERN})\\s*交易对\\b`,
+			"i",
+		),
+	);
+	if (pairWordMatch?.[1] && pairWordMatch?.[2]) {
+		return { left: pairWordMatch[1].trim(), right: pairWordMatch[2].trim() };
+	}
+
+	return null;
 }
 
 function normalizePairSymbolHints(params: {
@@ -1194,7 +1220,11 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		};
 	}
 
-	if (/(swap|兑换|换币|交易对|换成|换为|兑换成)/i.test(lower)) {
+	if (
+		/(swap|兑换|换币|交易对|换成|换为|兑换成|->|=>|→|↔|↔️| to | to$|^to\s)/i.test(
+			lower,
+		)
+	) {
 		const inputCoinType = coinTypeCandidates[0];
 		const outputCoinType = coinTypeCandidates[1];
 		const [resolvedInput, resolvedOutput] = pair

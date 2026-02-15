@@ -503,6 +503,46 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("parses swap intentText with keyword connector pair", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf2d", {
+			runId: "wf-sui-02d",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "把 0.25 SUI -> USDC 执行",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.swap.cetus",
+			intent: {
+				type: "sui.swap.cetus",
+				inputCoinType: "0x2::sui::SUI",
+				outputCoinType: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				amountRaw: "250000000",
+			},
+		});
+	});
+
+	it("parses swap intentText with to-keyword pair", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf2e", {
+			runId: "wf-sui-02e",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "swap 10 SUI to USDC",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.swap.cetus",
+			intent: {
+				type: "sui.swap.cetus",
+				inputCoinType: "0x2::sui::SUI",
+				outputCoinType: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				amountRaw: "10000000000",
+			},
+		});
+	});
+
 	it("resolves unknown symbols in swap intentText via farms token index", async () => {
 		cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockImplementation(
 			async ({ symbol }) => {
