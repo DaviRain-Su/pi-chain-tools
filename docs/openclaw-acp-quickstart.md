@@ -331,3 +331,198 @@ Use this template in an OpenClaw system workflow or playbook engine:
 - Keep `runId` stable per ticket:
   - one ticket = one `runId`, so `simulate/execute` can reuse context.
 - For NL-driven follow-up, agent may pass `intentText` with `确认码 EVM-...` and/or `确认主网执行` instead of separate param fields.
+
+## 7) OpenClaw 状态机模板（生产编排器可直接复用）
+
+下面给出一个更贴近编排器的 JSON 状态机示例（可改造成你的 OpenClaw workflow DSL）：
+
+```json
+{
+  "version": "1.0",
+  "workflow": {
+    "id": "polymarket-btc5m-ticket",
+    "description": "BTC5m trade with 3-phase safety check",
+    "input": {
+      "runId": "wf-btc5m-01",
+      "network": "polygon",
+      "stakeUsd": 20,
+      "maxSpreadBps": 120,
+      "minDepthUsd": 100,
+      "minConfidence": 0.6,
+      "intentType": "evm.polymarket.btc5m.trade",
+      "useAiAssist": true,
+      "requoteStaleOrders": true,
+      "maxFillRatio": 0.4
+    },
+    "states": {
+      "analysis": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": {
+          "runMode": "analysis",
+          "runId": "{{state.input.runId}}",
+          "network": "{{state.input.network}}",
+          "intentType": "{{state.input.intentType}}",
+          "stakeUsd": "{{state.input.stakeUsd}}",
+          "maxSpreadBps": "{{state.input.maxSpreadBps}}",
+          "minDepthUsd": "{{state.input.minDepthUsd}}",
+          "minConfidence": "{{state.input.minConfidence}}",
+          "useAiAssist": "{{state.input.useAiAssist}}",
+          "requoteStaleOrders": "{{state.input.requoteStaleOrders}}",
+          "maxFillRatio": "{{state.input.maxFillRatio}}"
+        },
+        "onSuccess": {
+          "to": "simulate",
+          "assign": {
+            "confirmToken": "{{result.details.confirmToken}}",
+            "status": "{{result.details.artifacts.analysis.status}}"
+          }
+        },
+        "onFailure": {
+          "to": "alarm",
+          "if": "true",
+          "error": "analysis_failed"
+        },
+        "guard": {
+          "stopIf": [
+            "result.content[0].text includes 'blocked'",
+            "result.details.artifacts.analysis.status in ['guard_blocked','no_liquidity','price_too_high']"
+          ]
+        }
+      },
+      "simulate": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": {
+          "runMode": "simulate",
+          "runId": "{{state.input.runId}}",
+          "network": "{{state.input.network}}"
+        },
+        "onSuccess": {
+          "to": "execute_guard",
+          "assign": {
+            "simulateStatus": "{{result.details.artifacts.simulate.status}}"
+          }
+        },
+        "onFailure": {
+          "to": "alarm",
+          "if": "true",
+          "error": "simulate_failed"
+        }
+      },
+      "execute_guard": {
+        "type": "condition",
+        "if": "{{state.executeAllowed}}",
+        "expression": "!(state.confirmToken && state.simulateStatus in ['guard_blocked','no_liquidity','price_too_high'])",
+        "onTrue": { "to": "execute" },
+        "onFalse": { "to": "alarm" }
+      },
+      "execute": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": {
+          "runMode": "execute",
+          "runId": "{{state.input.runId}}",
+          "network": "{{state.input.network}}",
+          "confirmMainnet": true,
+          "confirmToken": "{{state.confirmToken}}"
+        },
+        "onSuccess": {
+          "to": "done"
+        },
+        "onFailure": {
+          "to": "alarm",
+          "if": "true",
+          "error": "execute_failed"
+        }
+      },
+      "alarm": {
+        "type": "manual",
+        "notify": "{{error.message}}",
+        "needOperator": true
+      },
+      "done": {
+        "type": "terminal",
+        "result": "complete"
+      }
+    },
+    "startAt": "analysis",
+    "finalState": "done"
+  }
+}
+```
+
+### 可直接落地的执行约束
+
+在上面的状态机里，建议在运行时加 3 条约束（可放在 OpenClaw 的节点中间件）：
+
+1. **同一 runId 回放约束**：
+   - `analysis/simulate/execute` 必须复用同一个 `runId`。
+   - 不可在 execute 时换意图或网络。
+2. **确认口令约束**：
+   - execute 前必须检查 `state.confirmToken` 存在；
+   - 如未通过，直接进入 `alarm` 并提示“确认码缺失/过期”。
+3. **风险停摆约束**：
+   - 在 `analysis` 和 `simulate` 任何出现 `guard_blocked/no_liquidity/price_too_high` 均阻断执行分支。
+
+### 与现有工具参数的映射
+
+| 状态机字段 | 对应工具字段 |
+|---|---|
+| `state.input.runId` | `runId` |
+| `state.input.network` | `network` |
+| `state.input.stakeUsd` | `stakeUsd` |
+| `state.input.maxSpreadBps` | `maxSpreadBps` |
+| `state.input.minDepthUsd` | `minDepthUsd` |
+| `state.input.minConfidence` | `minConfidence` |
+| `state.confirmToken` | `confirmToken` |
+| `state.confirmToken` 缺失 | `alarm` |
+
+### 适配到 OpenClaw 的最小规则示例（伪 YAML）
+
+```yaml
+- name: preflight_market
+  tool: evm_polymarketGetBtc5mMarkets
+  args: { network: polygon, limit: 3 }
+
+- name: analyze
+  tool: w3rt_run_evm_polymarket_workflow_v0
+  args:
+    runMode: analysis
+    runId: "wf-btc5m-{{ticket.id}}"
+    network: polygon
+    intentType: evm.polymarket.btc5m.trade
+    stakeUsd: 20
+  on_success_set:
+    - confirmToken: $.details.confirmToken
+    - analyzeStatus: $.details.artifacts.analysis.status
+  on_success_if: "result.details.artifacts.analysis.status in ['ready']"
+  on_skip: notify_and_halt
+
+- name: simulate
+  depends_on: analyze
+  tool: w3rt_run_evm_polymarket_workflow_v0
+  args:
+    runMode: simulate
+    runId: "wf-btc5m-{{ticket.id}}"
+    network: polygon
+  on_success_set:
+    - simulateStatus: $.details.artifacts.simulate.status
+
+- name: execute
+  depends_on: simulate
+  if: "ctx.confirmToken != null"
+  tool: w3rt_run_evm_polymarket_workflow_v0
+  args:
+    runMode: execute
+    runId: "wf-btc5m-{{ticket.id}}"
+    network: polygon
+    confirmMainnet: true
+    confirmToken: "{{ctx.confirmToken}}"
+```
+
+### 生产建议（高可用）
+
+- 将模拟失败与防护失败归类为 `ALERT`；执行分支默认不自动重试。
+- `requoteStaleOrders=true` 时执行时间变长，建议给 `simulate/execute` 预留 60~120s 超时窗。
+- 可在成功 execute 后追加轮询 `evm_polymarketGetOrderStatus`，把 `orderStatus` 存档到工单上下文。
