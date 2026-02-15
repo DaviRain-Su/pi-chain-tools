@@ -1,126 +1,125 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/DaviRain-Su/pi-chain-tools/blob/main/docs/schemas/openclaw-btc5m-runtime-state.schema.json",
-  "title": "BTC5m OpenClaw Runtime State",
-  "type": "object",
-  "required": [
-    "runId",
-    "network",
-    "intentType",
-    "phase",
-    "confirmToken",
-    "analysisStatus",
-    "simulateStatus"
-  ],
-  "additionalProperties": false,
-  "properties": {
-    "runId": {
-      "type": "string",
-      "minLength": 1
-    },
-    "network": {
-      "type": "string"
-    },
-    "intentType": {
-      "type": "string",
-      "enum": [
-        "evm.polymarket.btc5m.trade",
-        "evm.polymarket.btc5m.cancel"
-      ]
-    },
-    "phase": {
-      "type": "string",
-      "enum": [
-        "analysis",
-        "simulate",
-        "execute"
-      ]
-    },
-    "confirmToken": {
-      "type": ["string", "null"]
-    },
-    "analysisStatus": {
-      "type": "string",
-      "enum": ["ready", "guard_blocked", "no_liquidity", "price_too_high"]
-    },
-    "simulateStatus": {
-      "type": "string",
-      "enum": ["ready", "guard_blocked", "no_liquidity", "price_too_high", "disabled"]
-    },
-    "guardEvaluation": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["passed", "issues", "metrics"],
-      "properties": {
-        "passed": {
-          "type": "boolean"
-        },
-        "issues": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["code", "message"],
-            "additionalProperties": false,
-            "properties": {
-              "code": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              }
-            }
-          }
-        },
-        "metrics": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["spreadBps", "depthUsdAtLimit", "adviceConfidence"],
-          "properties": {
-            "spreadBps": {
-              "type": ["number", "null"]
-            },
-            "depthUsdAtLimit": {
-              "type": ["number", "null"]
-            },
-            "adviceConfidence": {
-              "type": ["number", "null"]
-            }
-          }
-        }
-      }
-    },
-    "orderId": {
-      "type": ["string", "null"]
-    },
-    "orderStatus": {
-      "type": ["object", "null"],
-      "additionalProperties": true
-    },
-    "artifacts": {
-      "type": "object",
-      "additionalProperties": true
-    },
-    "lastError": {
-      "type": ["string", "null"]
-    },
-    "lastErrorAt": {
-      "type": ["string", "null"],
-      "format": "date-time"
-    }
-  },
-  "$defs": {
-    "StateIssue": {
-      "type": "object",
-      "required": ["code", "message"],
-      "additionalProperties": false,
-      "properties": {
-        "code": {
-          "type": "string"
-        },
-        "message": {
-          "type": "string"
-        }
-      }
-    }
-  }
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://github.com/DaviRain-Su/pi-chain-tools/blob/main/docs/schemas/openclaw-btc5m-runtime-state.schema.json",
+	"title": "BTC5m OpenClaw Runtime State",
+	"type": "object",
+	"required": [
+		"runId",
+		"network",
+		"intentType",
+		"phase",
+		"confirmToken",
+		"analysisStatus",
+		"simulateStatus"
+	],
+	"additionalProperties": false,
+	"properties": {
+		"runId": {
+			"type": "string",
+			"minLength": 1
+		},
+		"network": {
+			"type": "string"
+		},
+		"intentType": {
+			"type": "string",
+			"enum": ["evm.polymarket.btc5m.trade", "evm.polymarket.btc5m.cancel"]
+		},
+		"phase": {
+			"type": "string",
+			"enum": ["analysis", "simulate", "execute"]
+		},
+		"confirmToken": {
+			"type": ["string", "null"]
+		},
+		"analysisStatus": {
+			"type": "string",
+			"enum": ["ready", "guard_blocked", "no_liquidity", "price_too_high"]
+		},
+		"simulateStatus": {
+			"type": "string",
+			"enum": [
+				"ready",
+				"guard_blocked",
+				"no_liquidity",
+				"price_too_high",
+				"disabled"
+			]
+		},
+		"guardEvaluation": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["passed", "issues", "metrics"],
+			"properties": {
+				"passed": {
+					"type": "boolean"
+				},
+				"issues": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"required": ["code", "message"],
+						"additionalProperties": false,
+						"properties": {
+							"code": {
+								"type": "string"
+							},
+							"message": {
+								"type": "string"
+							}
+						}
+					}
+				},
+				"metrics": {
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["spreadBps", "depthUsdAtLimit", "adviceConfidence"],
+					"properties": {
+						"spreadBps": {
+							"type": ["number", "null"]
+						},
+						"depthUsdAtLimit": {
+							"type": ["number", "null"]
+						},
+						"adviceConfidence": {
+							"type": ["number", "null"]
+						}
+					}
+				}
+			}
+		},
+		"orderId": {
+			"type": ["string", "null"]
+		},
+		"orderStatus": {
+			"type": ["object", "null"],
+			"additionalProperties": true
+		},
+		"artifacts": {
+			"type": "object",
+			"additionalProperties": true
+		},
+		"lastError": {
+			"type": ["string", "null"]
+		},
+		"lastErrorAt": {
+			"type": ["string", "null"],
+			"format": "date-time"
+		}
+	},
+	"$defs": {
+		"StateIssue": {
+			"type": "object",
+			"required": ["code", "message"],
+			"additionalProperties": false,
+			"properties": {
+				"code": {
+					"type": "string"
+				},
+				"message": {
+					"type": "string"
+				}
+			}
+		}
+	}
 }

@@ -1,66 +1,66 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/DaviRain-Su/pi-chain-tools/blob/main/docs/schemas/openclaw-btc5m-retry-policy.schema.json",
-  "title": "OpenClaw BTC5m Retry Policy",
-  "type": "object",
-  "required": ["retryPolicy"],
-  "additionalProperties": false,
-  "properties": {
-    "retryPolicy": {
-      "type": "object",
-      "required": ["retry", "humanReviewState"],
-      "additionalProperties": false,
-      "properties": {
-        "retryableErrorRegex": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          },
-          "minItems": 1
-        },
-        "nonRetryableErrorRegex": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "retry": {
-          "type": "object",
-          "required": ["maxAttempts", "backoffMs"],
-          "additionalProperties": false,
-          "properties": {
-            "maxAttempts": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "backoffMs": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "type": "integer",
-                "minimum": 1
-              }
-            }
-          }
-        },
-        "cooldownBeforeRetrySec": {
-          "type": "number",
-          "minimum": 0
-        },
-        "humanReviewState": {
-          "type": "string",
-          "minLength": 1
-        },
-        "phases": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["analysis", "simulate", "execute"]
-          }
-        }
-      }
-    }
-  }
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://github.com/DaviRain-Su/pi-chain-tools/blob/main/docs/schemas/openclaw-btc5m-retry-policy.schema.json",
+	"title": "OpenClaw BTC5m Retry Policy",
+	"type": "object",
+	"required": ["retryPolicy"],
+	"additionalProperties": false,
+	"properties": {
+		"retryPolicy": {
+			"type": "object",
+			"required": ["retry", "humanReviewState"],
+			"additionalProperties": false,
+			"properties": {
+				"retryableErrorRegex": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"minLength": 1
+					},
+					"minItems": 1
+				},
+				"nonRetryableErrorRegex": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"minLength": 1
+					}
+				},
+				"retry": {
+					"type": "object",
+					"required": ["maxAttempts", "backoffMs"],
+					"additionalProperties": false,
+					"properties": {
+						"maxAttempts": {
+							"type": "integer",
+							"minimum": 1
+						},
+						"backoffMs": {
+							"type": "array",
+							"minItems": 1,
+							"items": {
+								"type": "integer",
+								"minimum": 1
+							}
+						}
+					}
+				},
+				"cooldownBeforeRetrySec": {
+					"type": "number",
+					"minimum": 0
+				},
+				"humanReviewState": {
+					"type": "string",
+					"minLength": 1
+				},
+				"phases": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"enum": ["analysis", "simulate", "execute"]
+					}
+				}
+			}
+		}
+	}
 }
