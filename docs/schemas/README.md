@@ -20,7 +20,8 @@ npm run schema:validate
 以及文件清单**严格**校验（便于“文件缺失/缺失目录”提前拦截）：
 
 ```bash
-npm run schema:check-files
+npm run schema:check-files         # 人类可读输出
+npm run schema:check-files:json    # JSON 输出（推荐用于 CI 机器消费）
 ```
 
 脚本会检查：
@@ -39,7 +40,7 @@ npm run schema:check-files
   id: validate-openclaw-schema-manifest
   run: |
     set -euo pipefail
-    manifest_json="$(npm run -s schema:check-files)"
+    manifest_json="$(npm run -s schema:check-files:json)"
     echo "$manifest_json" > /tmp/openclaw-schema-manifest.json
     node - <<'NODE'
     const fs = require('fs');
@@ -85,7 +86,7 @@ npm run schema:validate -- --list-strict --json
 npm run schema:validate -- --list --strict --json
 
 # 文件清单入口（推荐用于 CI 与机器消费）
-npm run schema:check-files
+npm run schema:check-files:json
 # 成功示例：{ "status": "list", "summary": { ... } }
 # 失败示例：{ "status": "failed", "errors": [ { "code": "missing_file", "file": "..." } ] }
 

@@ -1169,7 +1169,7 @@ npm run schema:validate
 
 ```yaml
 - name: Validate OpenClaw BTC5m schema file manifest
-  run: npm run schema:check-files
+  run: npm run schema:check-files:json
 
 - name: Validate OpenClaw BTC5m schema content
   run: npm run schema:validate
@@ -1179,7 +1179,7 @@ npm run schema:validate
 
 ```bash
 # 保存 JSON 输出用于快速定位
-npm run schema:check-files | tee /tmp/openclaw-schema-manifest.json
+npm run schema:check-files:json | tee /tmp/openclaw-schema-manifest.json
 node - <<'NODE'
 const fs = require('fs');
 const payload = JSON.parse(fs.readFileSync('/tmp/openclaw-schema-manifest.json', 'utf8'));
@@ -1237,7 +1237,8 @@ npm run schema:validate -- --list --strict --json
 # 返回示例（失败）：{ "status": "failed", "errors": [...] }
 
 # 生产环境推荐：使用脚本入口（清晰/可复制）
-npm run schema:check-files
+npm run schema:check-files         # 人类可读版本（默认文本）
+npm run schema:check-files:json    # 机器可读 JSON 版本
 
 # 推荐的 CI 片段（可直接复用）
 # 验证文件清单（manifest）与内容（schema 结构）
@@ -1245,7 +1246,7 @@ npm run schema:check-files
 #   id: validate-openclaw-schema-manifest
 #   run: |
 #     set -euo pipefail
-#     manifest_json="$(npm run -s schema:check-files)"
+#     manifest_json="$(npm run -s schema:check-files:json)"
 #     echo "$manifest_json" > /tmp/openclaw-schema-manifest.json
 #     node - <<'NODE'
 #     const fs = require('fs');

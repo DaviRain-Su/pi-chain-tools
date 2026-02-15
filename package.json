@@ -27,7 +27,8 @@
 		"build": "npm run typecheck",
 		"check": "npm run lint && npm run typecheck && npm run schema:validate",
 		"schema:validate": "node scripts/validate-openclaw-schemas.mjs",
-		"schema:check-files": "node scripts/validate-openclaw-schemas.mjs --list-strict --json",
+		"schema:check-files": "node scripts/validate-openclaw-schemas.mjs --list-strict",
+		"schema:check-files:json": "node scripts/validate-openclaw-schemas.mjs --list-strict --json",
 		"security:check": "node scripts/security-audit.mjs",
 		"test": "vitest run",
 		"ci": "npm run check && npm run security:check && npm test"
