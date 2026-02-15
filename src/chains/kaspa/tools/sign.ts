@@ -61,6 +61,14 @@ type KaspaWalletCoreModule = {
 			fromString: (privateKey: string) => KaspaWalletCorePrivateKey;
 		};
 	};
+	Wallet: {
+		fromMnemonic: (
+			seedPhrase: string,
+			networkOptions: { network: string },
+		) => {
+			HDWallet: { deriveChild: (path: string) => { privateKey: KaspaWalletCorePrivateKey } };
+		};
+	};
 };
 
 type KaspaSignerPrivateKeyResolution = {
@@ -85,6 +93,10 @@ const DEFAULT_SIGNER_PROVIDER = "auto" as const;
 const KASPA_DEFAULT_SIGNATURE_HASH_ALGORITHM = "sha256";
 const KASPA_SIGNER_PRIVATE_KEY_ENV = "KASPA_PRIVATE_KEY";
 const KASPA_SIGNER_PRIVATE_KEY_PATH_ENV = "KASPA_PRIVATE_KEY_PATH";
+const KASPA_SIGNER_MNEMONIC_ENV = "KASPA_MNEMONIC";
+const KASPA_SIGNER_MNEMONIC_PATH_ENV = "KASPA_MNEMONIC_PATH";
+const KASPA_SIGNER_MNEMONIC_DERIVATION_PATH_ENV =
+	"KASPA_MNEMONIC_DERIVATION_PATH";
 const KASPA_PRIVATE_KEY_ADDRESS_PLANS = [
 	{ network: "mainnet", walletNetwork: "kaspa" },
 	{ network: "testnet10", walletNetwork: "kaspatest" },
@@ -93,6 +105,8 @@ const KASPA_PRIVATE_KEY_ADDRESS_PLANS = [
 	network: "mainnet" | "testnet10" | "testnet11";
 	walletNetwork: "kaspa" | "kaspatest";
 }>;
+const KASPA_DEFAULT_MNEMONIC_DERIVATION_PATH = "m/44'/111111'/0'/0/0";
+const KASPA_MNEMONIC_WORD_COUNTS = new Set([12, 24]);
 
 const KASPA_SIGNER_CACHE = new Map<string, KaspaWalletSignerResolution>();
 let KASPA_WALLET_MODULE_CACHE: Promise<KaspaWalletCoreModule> | null = null;
@@ -211,12 +225,149 @@ function resolveKaspaPrivateKeyFromFile(rawFilePath: string): string | null {
 	}
 }
 
+function resolveKaspaMnemonicFromFile(rawFilePath: string): string | null {
+	const resolvedPath = expandKaspaPath(rawFilePath);
+	if (!existsSync(resolvedPath)) {
+		return null;
+	}
+	try {
+		const raw = readFileSync(resolvedPath, "utf8");
+		const trimmed = raw.trim();
+		if (!trimmed) {
+			return null;
+		}
+		try {
+			const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+			const candidates = [
+				"mnemonic",
+				"seedPhrase",
+				"seed_phrase",
+			];
+			for (const key of candidates) {
+				const candidate = parsed[key];
+				if (typeof candidate === "string" && candidate.trim()) {
+					return candidate.trim();
+				}
+			}
+		} catch {
+			// treat as raw mnemonic text when JSON parse fails
+		}
+		return trimmed;
+	} catch {
+		return null;
+	}
+}
+
 function normalizeKaspaPrivateKey(privateKey: string): string {
 	const normalized = privateKey.trim();
 	if (!normalized) {
 		throw new Error("privateKey cannot be empty");
 	}
 	return normalized;
+}
+
+function normalizeKaspaMnemonic(rawMnemonic: string): string {
+	const normalized = rawMnemonic
+		.trim()
+		.toLowerCase()
+		.replace(/\s+/g, " ");
+	if (!normalized) {
+		throw new Error("mnemonic cannot be empty");
+	}
+	const words = normalized.split(" ").filter(Boolean);
+	if (!KASPA_MNEMONIC_WORD_COUNTS.has(words.length)) {
+		throw new Error("mnemonic must be 12 or 24 words");
+	}
+	return normalized;
+}
+
+function normalizeKaspaDerivationPath(rawPath: string): string {
+	const normalized = rawPath.trim();
+	if (!normalized) {
+		throw new Error("mnemonicDerivationPath cannot be empty");
+	}
+	if (!/^m(?:\/\d+'?){3,}$/.test(normalized)) {
+		throw new Error(
+			"mnemonicDerivationPath must be BIP32-like, for example m/44'/111111'/0'/0/0",
+		);
+	}
+	return normalized;
+}
+
+function resolveKaspaSignerMnemonicWithSource(params: {
+	mnemonic?: string;
+	mnemonicFile?: string;
+	mnemonicPath?: string;
+	mnemonicEnv?: string;
+	mnemonicPathEnv?: string;
+}): { mnemonic: string; source: string } {
+	if (typeof params.mnemonic === "string" && params.mnemonic.trim()) {
+		return {
+			mnemonic: normalizeKaspaMnemonic(params.mnemonic),
+			source: "mnemonic",
+		};
+	}
+
+	const resolvedMnemonicFile =
+		params.mnemonicFile?.trim() || params.mnemonicPath?.trim() || undefined;
+	if (resolvedMnemonicFile) {
+		const fromFile = resolveKaspaMnemonicFromFile(resolvedMnemonicFile);
+		if (!fromFile) {
+			throw new Error(
+				`Unable to load Kaspa mnemonic from mnemonicFile ${resolvedMnemonicFile}`,
+			);
+		}
+		return {
+			mnemonic: normalizeKaspaMnemonic(fromFile),
+			source: `mnemonicFile:${resolvedMnemonicFile}`,
+		};
+	}
+
+	const envName = params.mnemonicEnv?.trim() || KASPA_SIGNER_MNEMONIC_ENV;
+	if (envName) {
+		const envValue = process.env[envName];
+		if (envValue?.trim()) {
+			return {
+				mnemonic: normalizeKaspaMnemonic(envValue),
+				source: `mnemonicEnv:${envName}`,
+			};
+		}
+	}
+
+	const keyPathEnv = (
+		params.mnemonicPathEnv?.trim() || KASPA_SIGNER_MNEMONIC_PATH_ENV
+	).trim();
+	const mnemonicPathEnvValue = process.env[keyPathEnv];
+	if (mnemonicPathEnvValue?.trim()) {
+		const fromFile = resolveKaspaMnemonicFromFile(mnemonicPathEnvValue);
+		if (!fromFile) {
+			throw new Error(`Unable to load Kaspa mnemonic from ${keyPathEnv}`);
+		}
+		return {
+			mnemonic: normalizeKaspaMnemonic(fromFile),
+			source: `mnemonicPathEnv:${keyPathEnv}=>${mnemonicPathEnvValue}`,
+		};
+	}
+
+	if (keyPathEnv !== KASPA_SIGNER_MNEMONIC_PATH_ENV) {
+		const fallbackMnemonicPath = process.env[KASPA_SIGNER_MNEMONIC_PATH_ENV];
+		if (fallbackMnemonicPath?.trim()) {
+			const fromFile = resolveKaspaMnemonicFromFile(fallbackMnemonicPath);
+			if (!fromFile) {
+				throw new Error(
+					`Unable to load Kaspa mnemonic from ${KASPA_SIGNER_MNEMONIC_PATH_ENV}`,
+				);
+			}
+			return {
+				mnemonic: normalizeKaspaMnemonic(fromFile),
+				source: `mnemonicPathEnv:${KASPA_SIGNER_MNEMONIC_PATH_ENV}=>${fallbackMnemonicPath}`,
+			};
+		}
+	}
+
+	throw new Error(
+		`No Kaspa mnemonic available. Provide mnemonic, set ${KASPA_SIGNER_MNEMONIC_ENV}, or configure ${KASPA_SIGNER_MNEMONIC_PATH_ENV}.`,
+	);
 }
 
 function resolveKaspaSignerPrivateKeyWithSource(params: {
@@ -335,6 +486,13 @@ async function getKaspaWalletModule(): Promise<KaspaWalletCoreModule> {
 					"@kaspa/wallet runtime is missing PrivateKey.fromString()",
 				);
 			}
+			const walletFactory = getModuleExport<Record<string, unknown>>(
+				raw,
+				"Wallet",
+			);
+			if (!walletFactory?.fromMnemonic) {
+				throw new Error("Unable to load @kaspa/wallet Wallet.fromMnemonic()");
+			}
 			await initKaspaFramework();
 			return raw as KaspaWalletCoreModule;
 		})();
@@ -360,24 +518,89 @@ export async function resolveKaspaPrivateKeyInfo(params: {
 	privateKeyFile?: string;
 	privateKeyPath?: string;
 	privateKeyPathEnv?: string;
+	mnemonic?: string;
+	mnemonicEnv?: string;
+	mnemonicFile?: string;
+	mnemonicPath?: string;
+	mnemonicPathEnv?: string;
+	mnemonicDerivationPath?: string;
 	networks?: Array<"mainnet" | "testnet10" | "testnet11">;
 }): Promise<KaspaPrivateKeyInfo> {
-	const resolved = resolveKaspaSignerPrivateKeyWithSource(params);
 	const walletModule = await getKaspaWalletModule();
-	const privateKeyObj = walletModule.kaspacore.PrivateKey.fromString(
-		resolved.privateKey,
+	let resolvedPrivateKey:
+		| {
+				mode: "privateKey";
+				value: string;
+				source: string;
+		  }
+		| { mode: "none" } = { mode: "none" };
+	try {
+		const source = resolveKaspaSignerPrivateKeyWithSource(params);
+		resolvedPrivateKey = {
+			mode: "privateKey",
+			value: source.privateKey,
+			source: source.source,
+		};
+	} catch (error) {
+		if (!/No Kaspa signer key available/.test(String(error))) {
+			throw error;
+		}
+	}
+
+	if (resolvedPrivateKey.mode === "privateKey") {
+		const privateKeyObj = walletModule.kaspacore.PrivateKey.fromString(
+			resolvedPrivateKey.value,
+		);
+		const publicKey = privateKeyObj.toPublicKey().toString();
+		const requested = resolveKaspaPrivateKeyNetworks(params.networks);
+		const addresses: KaspaPrivateKeyNetworkAddress[] = requested.map((entry) => ({
+			network: entry.network,
+			address: privateKeyObj.toAddress(entry.walletNetwork).toString(),
+		}));
+		return {
+			publicKey,
+			addresses,
+			source: resolvedPrivateKey.source,
+			privateKeyPreview: maskKaspaSecret(resolvedPrivateKey.value),
+		};
+	}
+
+	const resolvedMnemonic = resolveKaspaSignerMnemonicWithSource(params);
+	const mnemonicDerivationPath = normalizeKaspaDerivationPath(
+		params.mnemonicDerivationPath?.trim() ||
+			process.env[KASPA_SIGNER_MNEMONIC_DERIVATION_PATH_ENV]?.trim() ||
+			KASPA_DEFAULT_MNEMONIC_DERIVATION_PATH,
 	);
-	const publicKey = privateKeyObj.toPublicKey().toString();
+	const walletFactory = walletModule.Wallet;
+	const wallet = (seed: string, network: string) => {
+		return walletFactory.fromMnemonic(seed, {
+			network,
+		});
+	};
+
 	const requested = resolveKaspaPrivateKeyNetworks(params.networks);
-	const addresses: KaspaPrivateKeyNetworkAddress[] = requested.map((entry) => ({
-		network: entry.network,
-		address: privateKeyObj.toAddress(entry.walletNetwork).toString(),
-	}));
+	const addresses: KaspaPrivateKeyNetworkAddress[] = requested.map((entry) => {
+		const childWallet = wallet(resolvedMnemonic.mnemonic, entry.walletNetwork);
+		const child = childWallet.HDWallet.deriveChild(mnemonicDerivationPath);
+		const publicAddress = child.privateKey.toAddress(entry.walletNetwork).toString();
+		return {
+			network: entry.network,
+			address: publicAddress,
+		};
+	});
+
+	const mnemonicPreviewWallet = wallet(resolvedMnemonic.mnemonic, "kaspatest");
+	const mnemonicPreviewPrivateKey = mnemonicPreviewWallet.HDWallet.deriveChild(
+		mnemonicDerivationPath,
+	).privateKey.toString();
 	return {
-		publicKey,
+		publicKey: wallet(resolvedMnemonic.mnemonic, "kaspatest")
+			.HDWallet.deriveChild(mnemonicDerivationPath)
+			.privateKey.toPublicKey()
+			.toString(),
 		addresses,
-		source: resolved.source,
-		privateKeyPreview: maskKaspaSecret(resolved.privateKey),
+		source: resolvedMnemonic.source,
+		privateKeyPreview: maskKaspaSecret(mnemonicPreviewPrivateKey),
 	};
 }
 

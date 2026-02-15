@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs";
 import process from "node:process";
 import { createRequire } from "node:module";
 
-const DEFAULT_DERIVATION_PATH = "m/44'/972'/0'/0'/0'";
+const DEFAULT_DERIVATION_PATH = "m/44'/111111'/0'/0/0";
 
 function printUsage() {
 	console.log(`
@@ -21,7 +21,7 @@ Options:
   --account-limit <number>    扫描 account 上限（scan 模式，默认 20）
   --change-limit <number>     扫描 change 上限（scan 模式，默认 3）
   --index-limit <number>      扫描 index 上限（scan 模式，默认 20）
-  --coin-type <number>        派生币种索引（默认 972）
+  --coin-type <number>        派生币种索引（默认 111111）
   --help                      显示帮助
 `);
 }
@@ -34,7 +34,7 @@ function parseArgs(argv) {
 		accountLimit: 20,
 		changeLimit: 3,
 		indexLimit: 20,
-		coinType: 972,
+			coinType: 111111,
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];

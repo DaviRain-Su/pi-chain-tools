@@ -148,11 +148,19 @@ type KaspaWalletQuickParams = {
 	privateKeyPath?: string;
 	privateKeyPathEnv?: string;
 	privateKeyEnv?: string;
+	mnemonic?: string;
+	mnemonicFile?: string;
+	mnemonicPath?: string;
+	mnemonicPathEnv?: string;
+	mnemonicEnv?: string;
+	mnemonicDerivationPath?: string;
 };
 
 type KaspaWalletQuickIntent = {
 	network?: string;
 	privateKeyFile?: string;
+	mnemonic?: string;
+	mnemonicDerivationPath?: string;
 };
 
 function normalizeKaspaTransferQuickMinimalInput(
@@ -350,6 +358,22 @@ const KASPA_WALLET_QUICK_DEFAULT_PATH_BY_NETWORK = {
 
 const KASPA_WALLET_PATH_FROM_TEXT_REGEX =
 	/("([^"]+?\.private_key)"|'([^']+?\.private_key)'|([^\s"'“”‘’\\[\\](){}【】]+?\.private_key))/i;
+const KASPA_MNEMONIC_FROM_TEXT_REGEX =
+	/(?:\b(?:mnemonic|助记词|seed\s*phrase)\b)[^a-z0-9]{0,16}(?:\s*[:：]\s*|\s+)(["“"])?([a-zA-Z]+(?:\s+[a-zA-Z]+){11,23})(\1)/gi;
+const KASPA_DERIVATION_PATH_FROM_TEXT_REGEX =
+	/\bm\/(?:\d+'?)(?:\/\d+'?){2,}\b/gi;
+
+function normalizeKaspaWalletIntentMnemonic(value: string): string | undefined {
+	const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
+	const words = normalized.split(" ").filter(Boolean);
+	if (words.length !== 12 && words.length !== 24) {
+		return undefined;
+	}
+	if (!words.every((word) => /^[a-z]{3,}$/.test(word))) {
+		return undefined;
+	}
+	return words.join(" ");
+}
 
 function parseKaspaWalletIntentText(
 	intentText: string | undefined,
@@ -362,7 +386,23 @@ function parseKaspaWalletIntentText(
 		KASPA_WALLET_PATH_FROM_TEXT_REGEX.exec(input);
 	const quotedPath = parsedPathMatch?.[2] || parsedPathMatch?.[3];
 	const tokenPath = parsedPathMatch?.[4];
+	const mnemonicMatch = KASPA_MNEMONIC_FROM_TEXT_REGEX.exec(input);
 	let privateKeyFile = quotedPath || tokenPath;
+	let mnemonic =
+		normalizeKaspaWalletIntentMnemonic(mnemonicMatch?.[2] || "");
+	let mnemonicDerivationPath = (input.match(KASPA_DERIVATION_PATH_FROM_TEXT_REGEX) || [])[0];
+
+	if (!mnemonic) {
+		const fallbackCandidates =
+			input.match(/\b[a-zA-Z]+(?:\s+[a-zA-Z]+){11,23}\b/g) || [];
+		for (const candidate of fallbackCandidates) {
+			const normalized = normalizeKaspaWalletIntentMnemonic(candidate);
+			if (normalized) {
+				mnemonic = normalized;
+				break;
+			}
+		}
+	}
 	if (privateKeyFile) {
 		privateKeyFile = cleanKaspaWalletPathToken(privateKeyFile);
 		if (privateKeyFile && !/[\\/]/.test(privateKeyFile)) {
@@ -372,6 +412,8 @@ function parseKaspaWalletIntentText(
 	return {
 		network: parseKaspaBalanceIntentNetwork(input),
 		privateKeyFile: privateKeyFile || undefined,
+		mnemonic: mnemonic || undefined,
+		mnemonicDerivationPath,
 	};
 }
 
@@ -714,6 +756,9 @@ async function runKaspaWalletQuickWorkflow(
 		params.privateKeyFile?.trim() || params.privateKeyPath?.trim();
 	const pathFromIntent = parsedIntent.privateKeyFile?.trim();
 	const privateKeyFile = explicitPath || pathFromIntent;
+	const mnemonic = params.mnemonic?.trim() || parsedIntent.mnemonic;
+	const mnemonicDerivationPath =
+		params.mnemonicDerivationPath?.trim() || parsedIntent.mnemonicDerivationPath;
 	const resolvedPrivateKeyFile =
 		privateKeyFile || KASPA_WALLET_QUICK_DEFAULT_PATH_BY_NETWORK[resolvedNetwork];
 
@@ -727,8 +772,14 @@ async function runKaspaWalletQuickWorkflow(
 		privateKeyPath: params.privateKeyPath,
 		privateKeyPathEnv: params.privateKeyPathEnv,
 		privateKeyEnv: params.privateKeyEnv,
-		networks: networks,
-	});
+		mnemonic: mnemonic,
+			mnemonicFile: params.mnemonicFile,
+			mnemonicPath: params.mnemonicPath,
+			mnemonicPathEnv: params.mnemonicPathEnv,
+			mnemonicEnv: params.mnemonicEnv,
+			mnemonicDerivationPath,
+			networks: networks,
+		});
 	const addressSummary = info.addresses
 		.map((entry) => `${entry.network}=${entry.address}`)
 		.join("; ");
@@ -1402,7 +1453,41 @@ function extractTxIdFromSubmitResult(data: unknown): string | null {
 				privateKeyPath: Type.Optional(Type.String()),
 				privateKeyPathEnv: Type.Optional(Type.String()),
 				privateKeyEnv: Type.Optional(Type.String()),
-			}),
+				mnemonic: Type.Optional(
+					Type.String({
+						description: "12/24-word mnemonic phrase for address derivation.",
+					}),
+				),
+				mnemonicFile: Type.Optional(
+					Type.String({
+						description:
+							"Path to local file containing mnemonic words; supports JSON {mnemonic|seedPhrase|seed_phrase}.",
+					}),
+				),
+				mnemonicPath: Type.Optional(
+					Type.String({
+						description: "Alias for local file path containing mnemonic words.",
+					}),
+				),
+					mnemonicPathEnv: Type.Optional(
+						Type.String({
+							description:
+								"Optional env var name for mnemonic file path (default: KASPA_MNEMONIC_PATH).",
+						}),
+					),
+					mnemonicEnv: Type.Optional(
+						Type.String({
+							description:
+								"Optional env var name for mnemonic fallback (default: KASPA_MNEMONIC).",
+						}),
+					),
+					mnemonicDerivationPath: Type.Optional(
+						Type.String({
+							description:
+								"BIP32 derivation path for mnemonic-based address generation, e.g. m/44'/111111'/0'/0/0.",
+						}),
+					),
+				}),
 			async execute(_toolCallId, rawParams) {
 				const params = normalizeKaspaWalletQuickInput(rawParams);
 				return runKaspaWalletQuickWorkflow(params);
