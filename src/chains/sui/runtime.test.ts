@@ -129,6 +129,24 @@ describe("resolveSuiKeypair", () => {
 		expect(resolved.toSuiAddress()).toBe(active.toSuiAddress());
 	});
 
+	it("parses keystore entries stored as objects", () => {
+		setOptionalEnv("SUI_PRIVATE_KEY", undefined);
+		const account = Ed25519Keypair.generate();
+		const configDir = withTempSuiConfig({
+			activeAddress: account.toSuiAddress(),
+			keystoreEntries: [
+				{
+					publicKey: account.getPublicKey().toBase64(),
+					secretKey: account.getSecretKey(),
+				},
+			],
+		});
+		useTempSuiConfigDir(configDir);
+
+		const resolved = resolveSuiKeypair();
+		expect(resolved.toSuiAddress()).toBe(account.toSuiAddress());
+	});
+
 	it("falls back to the first valid keystore entry when active_address does not match", () => {
 		setOptionalEnv("SUI_PRIVATE_KEY", undefined);
 		const first = Ed25519Keypair.generate();
@@ -151,7 +169,7 @@ describe("resolveSuiKeypair", () => {
 		});
 		useTempSuiConfigDir(configDir);
 
-		expect(() => resolveSuiKeypair()).toThrow("sui.keystore");
+		expect(() => resolveSuiKeypair()).toThrow("SUI_KEYSTORE_PATH");
 	});
 });
 

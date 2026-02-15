@@ -220,9 +220,8 @@ function parseEd25519FromKeyMaterial(
 	return null;
 }
 
-function parseEd25519FromKeystoreEntry(entry: unknown): Ed25519Keypair | null {
-	if (typeof entry !== "string") return null;
-	const trimmed = entry.trim();
+function parseEd25519FromStringLike(input: string): Ed25519Keypair | null {
+	const trimmed = input.trim();
 	if (!trimmed) return null;
 
 	if (trimmed.startsWith("suiprivkey")) {
@@ -247,6 +246,11 @@ function parseEd25519FromKeystoreEntry(entry: unknown): Ed25519Keypair | null {
 	}
 }
 
+function parseEd25519FromKeystoreEntry(entry: unknown): Ed25519Keypair | null {
+	if (typeof entry !== "string") return null;
+	return parseEd25519FromStringLike(entry);
+}
+
 function resolveSuiKeypairFromLocalKeystore(): Ed25519Keypair | null {
 	const configDir = resolveSuiConfigDir();
 	const keystorePath =
@@ -262,6 +266,38 @@ function resolveSuiKeypairFromLocalKeystore(): Ed25519Keypair | null {
 
 		let fallbackKeypair: Ed25519Keypair | null = null;
 		for (const entry of parsed) {
+			if (typeof entry === "object" && entry && !Array.isArray(entry)) {
+				const record = entry as Record<string, unknown>;
+				const values = [
+					record.secretKey,
+					record.privateKey,
+					record.private_key,
+					record.privKey,
+					record.priv_key,
+					record.encodedPrivateKey,
+					record.value,
+				];
+				for (const value of values) {
+					if (typeof value === "string") {
+						const keypair = parseEd25519FromStringLike(value);
+						if (keypair) {
+							if (!fallbackKeypair) fallbackKeypair = keypair;
+							if (activeAddress) {
+								const candidateAddress = normalizeAddress(
+									keypair.toSuiAddress(),
+								);
+								if (candidateAddress === activeAddress) {
+									return keypair;
+								}
+								continue;
+							}
+							break;
+						}
+					}
+				}
+				continue;
+			}
+
 			const keypair = parseEd25519FromKeystoreEntry(entry);
 			if (!keypair) continue;
 			if (!fallbackKeypair) fallbackKeypair = keypair;
@@ -301,7 +337,7 @@ export function resolveSuiOwnerAddress(owner?: string): string {
 	}
 
 	throw new Error(
-		"No Sui owner address available. Provide owner, or configure sui client active-address in client.yaml, or set SUI_PRIVATE_KEY / sui.keystore.",
+		"No Sui owner address available. Provide owner, or configure Sui client active-address (client.yaml), or set SUI_PRIVATE_KEY / SUI_KEYSTORE_PATH / ~/.sui/sui_config/sui.keystore.",
 	);
 }
 
@@ -313,7 +349,7 @@ export function resolveSuiKeypair(privateKey?: string): Ed25519Keypair {
 			return fallbackKeypair;
 		}
 		throw new Error(
-			"No signer key available. Set SUI_PRIVATE_KEY (suiprivkey...) or configure ~/.sui/sui_config/sui.keystore with an ED25519 key.",
+			"No signer key available. Set fromPrivateKey (suiprivkey...), SUI_PRIVATE_KEY, or configure SUI_KEYSTORE_PATH / ~/.sui/sui_config/sui.keystore with an ED25519 key.",
 		);
 	}
 
