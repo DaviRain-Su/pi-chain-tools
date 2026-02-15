@@ -17,6 +17,11 @@ Options:
   --mnemonic-file <path>      从文件读取助记词（首行优先）
   --output <path>             （可选）将私钥写入文件
   --format <json|raw>         输出格式，默认 json
+  --scan-for <address>        给定目标地址时扫描常见 BIP44 派生路径，尝试找出匹配路径
+  --account-limit <number>    扫描 account 上限（scan 模式，默认 20）
+  --change-limit <number>     扫描 change 上限（scan 模式，默认 3）
+  --index-limit <number>      扫描 index 上限（scan 模式，默认 20）
+  --coin-type <number>        派生币种索引（默认 972）
   --help                      显示帮助
 `);
 }
@@ -26,6 +31,10 @@ function parseArgs(argv) {
 		network: "testnet-10",
 		path: DEFAULT_DERIVATION_PATH,
 		format: "json",
+		accountLimit: 20,
+		changeLimit: 3,
+		indexLimit: 20,
+		coinType: 972,
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -46,6 +55,35 @@ function parseArgs(argv) {
 		}
 		if (arg === "--path" || arg === "-p") {
 			out.path = argv[index + 1] ?? out.path;
+			index += 1;
+			continue;
+		}
+		if (arg === "--scan-for") {
+			out.scanTarget = argv[index + 1];
+			index += 1;
+			continue;
+		}
+		if (arg === "--account-limit") {
+			const parsed = Number.parseInt(argv[index + 1] ?? "", 10);
+			if (!Number.isNaN(parsed) && parsed > 0) out.accountLimit = parsed;
+			index += 1;
+			continue;
+		}
+		if (arg === "--change-limit") {
+			const parsed = Number.parseInt(argv[index + 1] ?? "", 10);
+			if (!Number.isNaN(parsed) && parsed > 0) out.changeLimit = parsed;
+			index += 1;
+			continue;
+		}
+		if (arg === "--index-limit") {
+			const parsed = Number.parseInt(argv[index + 1] ?? "", 10);
+			if (!Number.isNaN(parsed) && parsed > 0) out.indexLimit = parsed;
+			index += 1;
+			continue;
+		}
+		if (arg === "--coin-type") {
+			const parsed = Number.parseInt(argv[index + 1] ?? "", 10);
+			if (!Number.isNaN(parsed) && parsed > 0) out.coinType = parsed;
 			index += 1;
 			continue;
 		}
@@ -92,6 +130,7 @@ function summarize(output) {
 	const payload = {
 		network: output.network,
 		walletNetwork: output.walletNetwork,
+		coinType: output.coinType,
 		derivationPath: output.path,
 		rootXprvHead: output.rootXprv.slice(0, 30) + "...",
 		privateKey: output.privateKey,
@@ -113,6 +152,40 @@ async function loadKaspaWalletModule() {
 			"未找到 @kaspa/wallet。请先执行：npm i @kaspa/wallet 或从项目依赖中确认安装。",
 		);
 	}
+}
+
+async function resolveKaspaAddressMatch({
+	wallet,
+	target,
+	coinType,
+	network,
+	accountLimit,
+	changeLimit,
+	indexLimit,
+	}) {
+	for (let account = 0; account < accountLimit; account += 1) {
+		for (let change = 0; change < changeLimit; change += 1) {
+			for (let index = 0; index < indexLimit; index += 1) {
+				const candidatePaths = [
+					`m/44'/${coinType}'/${account}'/${change}/${index}`,
+					`m/44'/${coinType}'/${account}'/${change}/${index}'`,
+					`m/44'/${coinType}'/${account}'/${change}'/${index}`,
+					`m/44'/${coinType}'/${account}'/${change}'/${index}'`,
+				];
+				for (const path of candidatePaths) {
+					const child = wallet.HDWallet.deriveChild(path);
+					const receiveAddress = child.privateKey.toAddress(network).toString();
+					if (receiveAddress === target) {
+						return {
+							path,
+							privateKey: child.privateKey.toString(),
+						};
+					}
+				}
+			}
+		}
+	}
+	return null;
 }
 
 async function main() {
@@ -141,6 +214,29 @@ async function main() {
 	const wallet = Wallet.fromMnemonic(mnemonic, {
 		network: walletNetwork,
 	});
+	if (opts.scanTarget) {
+		const match = await resolveKaspaAddressMatch({
+			wallet,
+			target: opts.scanTarget,
+			coinType: opts.coinType,
+			network: walletNetwork,
+			accountLimit: opts.accountLimit,
+			changeLimit: opts.changeLimit,
+			indexLimit: opts.indexLimit,
+		});
+		if (!match) {
+			console.error(
+				`\n未在扫描范围内命中目标地址（m/44'/${opts.coinType}'/account'/change/index*）\n` +
+					`扫描范围: account 0-${opts.accountLimit - 1}, change 0-${opts.changeLimit - 1}, index 0-${opts.indexLimit - 1}`,
+			);
+		} else {
+			console.log(
+				`Found match for target address ${opts.scanTarget}: derivation path=${match.path}`,
+			);
+			console.log(`privateKey=${match.privateKey}`);
+		}
+		return;
+	}
 	const child = wallet.HDWallet.deriveChild(opts.path);
 	const privateKey = child.privateKey.toString();
 	const receiveAddress = child.privateKey.toAddress(walletNetwork).toString();
