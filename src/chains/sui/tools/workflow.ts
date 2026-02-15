@@ -22,6 +22,7 @@ import {
 	getSuiSignerLookupPaths,
 	parsePositiveBigInt,
 	parseSuiNetwork,
+	listSuiKeystoreAddresses,
 	resolveSuiKeypair,
 	resolveSuiOwnerAddress,
 	suiNetworkSchema,
@@ -358,6 +359,8 @@ type WorkflowSimulationSignerContext = {
 	sender: string;
 	canSign: boolean;
 	signerSource: "fromPrivateKey" | "walletAddress";
+	signerAddress?: string;
+	localSignerAddresses: string[];
 };
 type SuiWorkflowSignerSource =
 	| "fromPrivateKey"
@@ -448,22 +451,26 @@ function resolveWorkflowSimulationSigner(
 ): WorkflowSimulationSignerContext {
 	if (fromPrivateKey?.trim()) {
 		const signer = resolveSuiWorkflowExecutionSigner(fromPrivateKey);
+		const sender = signer.signer.toSuiAddress();
 		return {
-			sender: signer.signer.toSuiAddress(),
+			sender,
 			canSign: true,
 			signerSource: "fromPrivateKey",
+			signerAddress: sender,
+			localSignerAddresses: [],
 		};
 	}
 
 	const sender = resolveSuiOwnerAddress();
+	const localSignerAddresses = listSuiKeystoreAddresses();
 	let canSign: boolean;
+	let resolvedSignerAddress: string | undefined;
 	try {
 		const signer = resolveSuiWorkflowExecutionSigner();
-		const signerAddress = normalizeSuiAddressForCompare(
-			signer.signer.toSuiAddress(),
-		);
+		const signerAddress = signer.signer.toSuiAddress();
+		resolvedSignerAddress = signerAddress;
 		const senderAddress = normalizeSuiAddressForCompare(sender);
-		canSign = signerAddress === senderAddress;
+		canSign = normalizeSuiAddressForCompare(signerAddress) === senderAddress;
 	} catch {
 		canSign = false;
 	}
@@ -472,6 +479,8 @@ function resolveWorkflowSimulationSigner(
 		sender,
 		canSign,
 		signerSource: canSign ? "fromPrivateKey" : "walletAddress",
+		signerAddress: resolvedSignerAddress,
+		localSignerAddresses,
 	};
 }
 
@@ -2672,10 +2681,10 @@ async function executeSignedTransactionBlock(params: {
 	const status = response.effects?.status?.status ?? "unknown";
 	const error = response.effects?.status?.error ?? response.errors?.[0] ?? null;
 	if (status === "failure") {
-		throw new Error(
-			`Sui signed transaction execute failed: ${error ?? "unknown error"} (digest=${response.digest})`,
-		);
-	}
+	throw new Error(
+		`Sui signed transaction execute failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+	);
+}
 	return {
 		digest: response.digest,
 		status,
@@ -2767,7 +2776,7 @@ async function executeSimulatedTransactionBlock(params: {
 			throw error;
 		}
 		throw new Error(
-			`No local signer available for simulated tx execute${params.expectedSignerAddress ? ` (expected=${params.expectedSignerAddress})` : ""}. ${error instanceof Error ? error.message : String(error)} Provide fromPrivateKey (suiprivkey), signed payload (signedTransactionBytesBase64 + signedSignatures), or configure SUI_PRIVATE_KEY/local keystore.`,
+			`No local signer available for simulated tx execute${params.expectedSignerAddress ? ` (expected=${params.expectedSignerAddress})` : ""}. ${error instanceof Error ? error.message : String(error)} ${formatLocalSignerHint(params.expectedSignerAddress)} Provide fromPrivateKey (suiprivkey), signed payload (signedTransactionBytesBase64 + signedSignatures), or configure SUI_PRIVATE_KEY/local keystore.`,
 		);
 	}
 }
@@ -2785,6 +2794,25 @@ function stringifyError(error: unknown): string {
 		return error.message;
 	}
 	return String(error);
+}
+
+function formatLocalSignerHint(expectedSignerAddress?: string): string {
+	const { activeAddress } = getSuiSignerLookupPaths();
+	const localSignerAddresses = listSuiKeystoreAddresses();
+	const known = localSignerAddresses
+		.slice(0, 4)
+		.map((address) => shortenSummaryValue(address))
+		.join(", ");
+	const activeAddressHint = activeAddress
+		? ` activeAddress=${shortenSummaryValue(activeAddress)}`
+		: "";
+	const expectedSignerHint = expectedSignerAddress
+		? ` expectedSigner=${shortenSummaryValue(expectedSignerAddress)}`
+		: "";
+	if (localSignerAddresses.length === 0) {
+		return `No local keys parsed from keystore.${activeAddressHint}${expectedSignerHint}`;
+	}
+	return `Local keystore candidates: ${known}${activeAddressHint}${expectedSignerHint}`;
 }
 
 function isRecordObject(value: unknown): value is Record<string, unknown> {
@@ -2993,6 +3021,7 @@ function formatSimulationSummary(params: {
 	status: string;
 	signerAddress: string;
 	canExecuteWithLocalSigner?: boolean;
+	localSignerAddresses?: string[];
 	unsignedPayload: {
 		unsignedTransactionBytesBase64?: string;
 		unsignedPayloadError?: string;
@@ -3010,13 +3039,28 @@ function formatSimulationSummary(params: {
 		? "execute can proceed with local signer"
 		: "execute requires fromPrivateKey / SUI_PRIVATE_KEY / local keystore or signed payload";
 	const localSignerHintSuffix = ` (${localSignerHint})`;
+	let guidance = "";
+	if (!params.canExecuteWithLocalSigner) {
+		const knownKeys = (params.localSignerAddresses ?? [])
+			.slice(0, 3)
+			.map(shortenSummaryValue);
+		const keyHint = knownKeys.length
+			? ` localKeystoreKeys=${knownKeys.join(", ")}`
+			: " localKeystoreKeys=<none>";
+		const senderHint = ` signerMismatchFor=${shortenSummaryValue(params.signerAddress)}`;
+		if (params.unsignedPayload.unsignedTransactionBytesBase64) {
+			guidance = `${senderHint}${keyHint}。要本地签名执行，请用钱包签名后提供 signedTransactionBytesBase64 + signedSignatures（或 signedSignature）重试。`;
+		} else {
+			guidance = `${senderHint}${keyHint}。本次未导出 unsignedPayload（签名不完整）。请先提供 fromPrivateKey，或确保本地签名器可用且与 sender 地址一致。`;
+		}
+	}
 	if (params.unsignedPayload.unsignedTransactionBytesBase64) {
-		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported${localSignerHintSuffix}${riskSuffix}`;
+		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported${localSignerHintSuffix}${riskSuffix}${guidance ? `\n${guidance}` : ""}`;
 	}
 	if (params.unsignedPayload.unsignedPayloadError) {
-		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=unavailable${localSignerHintSuffix}${riskSuffix}`;
+		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=unavailable${localSignerHintSuffix}${riskSuffix}${guidance ? `\n${guidance}` : ""}`;
 	}
-	return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress}${riskSuffix}`;
+	return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress}${riskSuffix}${guidance ? `\n${guidance}` : ""}`;
 }
 
 function buildSuiAnalysisSummaryLine(
@@ -3968,6 +4012,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									status,
 									signerAddress: sender,
 									canExecuteWithLocalSigner: simulationSigner.canSign,
+									localSignerAddresses: simulationSigner.localSignerAddresses,
 									unsignedPayload,
 									riskCheck: simulateRiskCheck,
 								}),
@@ -3985,6 +4030,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								simulate: {
 									signerAddress: sender,
 									signerSource: simulationSigner.signerSource,
+									localSignerAddress: simulationSigner.signerAddress,
+									localSignerAddresses: simulationSigner.localSignerAddresses,
 									canExecuteWithLocalSigner: simulationSigner.canSign,
 									status,
 									error,
@@ -4269,6 +4316,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									status,
 									signerAddress: sender,
 									canExecuteWithLocalSigner: simulationSigner.canSign,
+									localSignerAddresses: simulationSigner.localSignerAddresses,
 									unsignedPayload,
 								}),
 							},
@@ -4286,6 +4334,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								simulate: {
 									signerAddress: sender,
 									signerSource: simulationSigner.signerSource,
+									localSignerAddress: simulationSigner.signerAddress,
+									localSignerAddresses: simulationSigner.localSignerAddresses,
 									canExecuteWithLocalSigner: simulationSigner.canSign,
 									status,
 									error,
@@ -4555,6 +4605,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									status,
 									signerAddress: sender,
 									canExecuteWithLocalSigner: simulationSigner.canSign,
+									localSignerAddresses: simulationSigner.localSignerAddresses,
 									unsignedPayload,
 								}),
 							},
@@ -4572,6 +4623,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 								simulate: {
 									signerAddress: sender,
 									signerSource: simulationSigner.signerSource,
+									localSignerAddress: simulationSigner.signerAddress,
+									localSignerAddresses: simulationSigner.localSignerAddresses,
 									canExecuteWithLocalSigner: simulationSigner.canSign,
 									status,
 									error,

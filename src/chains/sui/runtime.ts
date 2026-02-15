@@ -375,6 +375,39 @@ function resolveSuiKeypairFromLocalKeystore(): Ed25519Keypair | null {
 	}
 }
 
+export function listSuiKeystoreAddresses(): string[] {
+	const configDir = resolveSuiConfigDir();
+	const keystorePath =
+		process.env[SUI_KEYSTORE_PATH_ENV]?.trim() ||
+		path.join(configDir, "sui.keystore");
+
+	try {
+		const raw = readFileSync(keystorePath, "utf8");
+		const parsed = JSON.parse(raw) as unknown;
+		if (!Array.isArray(parsed)) return [];
+
+		const addresses = new Set<string>();
+		for (const entry of parsed) {
+			if (typeof entry === "object" && entry && !Array.isArray(entry)) {
+				for (const value of collectKeystoreStringValues(entry)) {
+					const keypair = parseEd25519FromStringLike(value);
+					if (!keypair) continue;
+					addresses.add(normalizeAddress(keypair.toSuiAddress()));
+				}
+				continue;
+			}
+
+			const keypair = parseEd25519FromKeystoreEntry(entry);
+			if (!keypair) continue;
+			addresses.add(normalizeAddress(keypair.toSuiAddress()));
+		}
+
+		return [...addresses];
+	} catch {
+		return [];
+	}
+}
+
 export function resolveSuiOwnerAddress(owner?: string): string {
 	if (typeof owner === "string" && owner.trim().length > 0) {
 		return normalizeAtPath(owner.trim());

@@ -26,6 +26,7 @@ const runtimeMocks = vi.hoisted(() => {
 	return {
 		getSuiClient: vi.fn(),
 		getSuiRpcEndpoint: vi.fn(() => "https://fullnode.mainnet.sui.io:443"),
+		listSuiKeystoreAddresses: vi.fn(() => []),
 		parsePositiveBigInt: vi.fn((value: string) => BigInt(value)),
 		parseSuiNetwork: vi.fn(() => "mainnet"),
 		resolveSuiOwnerAddress: vi.fn(
@@ -96,6 +97,7 @@ vi.mock("../runtime.js", async () => {
 		...actual,
 		getSuiClient: runtimeMocks.getSuiClient,
 		getSuiRpcEndpoint: runtimeMocks.getSuiRpcEndpoint,
+		listSuiKeystoreAddresses: runtimeMocks.listSuiKeystoreAddresses,
 		parsePositiveBigInt: runtimeMocks.parsePositiveBigInt,
 		parseSuiNetwork: runtimeMocks.parseSuiNetwork,
 		resolveSuiOwnerAddress: runtimeMocks.resolveSuiOwnerAddress,
@@ -244,6 +246,7 @@ function getTool(name = "w3rt_run_sui_workflow_v0"): WorkflowTool {
 beforeEach(() => {
 	vi.clearAllMocks();
 	runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+	runtimeMocks.listSuiKeystoreAddresses.mockReturnValue([]);
 	cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockResolvedValue([]);
 	cetusV2Mocks.formatCetusFarmsPairError.mockImplementation(
 		({ coinTypeA, coinTypeB }) =>
@@ -473,12 +476,47 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		expect(result.content[0]?.text).toContain(
 			"execute requires fromPrivateKey / SUI_PRIVATE_KEY / local keystore or signed payload",
 		);
+		expect(result.content[0]?.text).toContain("签名不完整");
 		expect(result.details).toMatchObject({
 			artifacts: {
 				simulate: {
 					canExecuteWithLocalSigner: false,
 					signerSource: "walletAddress",
+					localSignerAddresses: [],
 					summaryLine: expect.stringContaining("localSigner=unavailable"),
+				},
+			},
+		});
+	});
+
+	it("returns local signer diagnostics when local keystore has candidate keys", async () => {
+		const tool = getTool();
+		runtimeMocks.listSuiKeystoreAddresses.mockReturnValue([
+			"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		]);
+		runtimeMocks.resolveSuiKeypair.mockImplementationOnce(() => {
+			throw new Error("No local signer in test");
+		});
+
+		const result = await tool.execute("sui-runmode-key-diagnostics", {
+			runId: "wf-sui-runmode-diag-01",
+			runMode: "simulate",
+			network: "mainnet",
+			intentType: "sui.transfer.sui",
+			toAddress:
+				"0x6666666666666666666666666666666666666666666666666666666666666666",
+			amountSui: 0.000001,
+		});
+
+		expect(result.content[0]?.text).toContain("localKeystoreKeys");
+		expect(result.details).toMatchObject({
+			artifacts: {
+				simulate: {
+					localSignerAddresses: [
+						"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+						"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+					],
 				},
 			},
 		});
