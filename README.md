@@ -661,10 +661,20 @@ CI workflow (npm, via GitHub Actions):
 
 ```bash
 npm ci
+npm run ci
+```
+
+Security checks are enforced by `npm run ci`, which runs:
+
+```bash
 npm run check
+npm run security:check
 npm test
 ```
 
+For details on the allowlist and remediation workflow, see:
+
+- `docs/security-audit.md`
 - Local default package manager: Bun
 - CI package manager: npm (`npm ci` + lockfile)
 - npm peer strategy: project-level `.npmrc` sets `legacy-peer-deps=true` to allow mixed SDK peer ranges (Sui + Solana ecosystems).

@@ -6,13 +6,7 @@ import {
 	type SwapRequest as JupiterSdkSwapRequest,
 	createJupiterApiClient,
 } from "@jup-ag/api";
-import {
-	DEFAULT_RECENT_SLOT_DURATION_MS,
-	PROGRAM_ID as KAMINO_PROGRAM_ID,
-	KaminoAction,
-	KaminoMarket,
-	VanillaObligation,
-} from "@kamino-finance/klend-sdk";
+
 import {
 	closePositionInstructions,
 	decreaseLiquidityInstructions,
@@ -23,11 +17,7 @@ import {
 	openPositionInstructions,
 } from "@orca-so/whirlpools";
 import { fetchAllMaybeWhirlpool } from "@orca-so/whirlpools-client";
-import {
-	API_URLS as RAYDIUM_API_URLS,
-	Api as RaydiumApiClient,
-	type API_URL_CONFIG as RaydiumApiUrlConfig,
-} from "@raydium-io/raydium-sdk-v2";
+
 import { Type } from "@sinclair/typebox";
 import {
 	AccountRole,
@@ -74,6 +64,87 @@ export const DANGEROUS_RPC_METHODS = new Set([
 const DANGEROUS_RPC_METHODS_NORMALIZED = new Set(
 	[...DANGEROUS_RPC_METHODS].map((method) => method.toLowerCase()),
 );
+
+const KAMINO_PROGRAM_ID = "KLend2g3cP87fffoy8q1mQqGKjrxjC8boSyAYavgmjD";
+
+const RAYDIUM_API_URLS = {
+	BASE_HOST: "https://api-v3.raydium.io",
+	SWAP_HOST: "https://transaction-v1.raydium.io",
+	PRIORITY_FEE: "/main/auto-fee",
+};
+
+type KaminoRepayCurrentSlot = bigint;
+
+type KaminoActionInstructionSet = {
+	setupIxs: unknown[];
+	lendingIxs: unknown[];
+	cleanupIxs: unknown[];
+	setupIxsLabels: string[];
+	lendingIxsLabels: string[];
+	cleanupIxsLabels: string[];
+	getObligationPda: () => Promise<string>;
+};
+
+type KaminoReserveLike = {
+	getLiquidityMint: () => unknown;
+	address: string;
+	symbol?: string | null;
+};
+
+type KaminoMarketLike = {
+	load: (...args: unknown[]) => Promise<{
+		getReserveByMint: (mint: unknown) => KaminoReserveLike | null;
+	}>;
+};
+
+type KaminoModule = {
+	DEFAULT_RECENT_SLOT_DURATION_MS: number;
+	PROGRAM_ID: string;
+	KaminoAction: {
+		buildDepositTxns: (
+			...args: unknown[]
+		) => Promise<KaminoActionInstructionSet>;
+		buildBorrowTxns: (
+			...args: unknown[]
+		) => Promise<KaminoActionInstructionSet>;
+		buildWithdrawTxns: (
+			...args: unknown[]
+		) => Promise<KaminoActionInstructionSet>;
+		buildRepayTxns: (...args: unknown[]) => Promise<KaminoActionInstructionSet>;
+		buildDepositAndBorrowTxns: (
+			...args: unknown[]
+		) => Promise<KaminoActionInstructionSet>;
+		buildRepayAndWithdrawTxns: (
+			...args: unknown[]
+		) => Promise<KaminoActionInstructionSet>;
+		actionToIxs: (action: KaminoActionInstructionSet) => KitInstruction[];
+	};
+	KaminoMarket: KaminoMarketLike;
+	VanillaObligation: new (...args: unknown[]) => unknown;
+};
+
+type RaydiumModule = {
+	Api: new (
+		config: unknown,
+	) => {
+		api: {
+			request: (params: unknown) => Promise<unknown>;
+			get: (path: string) => Promise<unknown>;
+		};
+	};
+	API_URLS: {
+		BASE_HOST: string;
+		SWAP_HOST: string;
+		PRIORITY_FEE: string;
+	};
+};
+
+type RaydiumApiUrlConfig = {
+	BASE_HOST?: string;
+	SWAP_HOST?: string;
+};
+
+type RaydiumApiClient = InstanceType<RaydiumModule["Api"]>;
 
 type TokenAmountInfo = {
 	amount: string;
@@ -338,6 +409,11 @@ let jupiterClientCache: {
 	client: JupiterApiClient;
 } | null = null;
 
+let klendModuleCache: KaminoModule | null = null;
+let klendLoadError: Error | null = null;
+let raydiumModuleCache: RaydiumModule | null = null;
+let raydiumLoadError: Error | null = null;
+
 let raydiumClientCache: {
 	key: string;
 	client: RaydiumApiClient;
@@ -384,6 +460,62 @@ export function assertRaydiumNetworkSupported(network?: string): void {
 	}
 }
 
+function makeMissingKaminoDependencyError(): Error {
+	return new Error(
+		"kamino-sdk is not installed. Install @kamino-finance/klend-sdk to use Kamino lending features.",
+	);
+}
+
+function makeMissingRaydiumDependencyError(): Error {
+	return new Error(
+		"raydium-sdk is not installed. Install @raydium-io/raydium-sdk-v2 to use Raydium API features.",
+	);
+}
+
+async function getKlendModule(): Promise<KaminoModule> {
+	if (klendModuleCache) {
+		return klendModuleCache;
+	}
+	if (klendLoadError) {
+		throw klendLoadError;
+	}
+	try {
+		const module = (await import(
+			"@kamino-finance/klend-sdk"
+		)) as unknown as KaminoModule;
+		klendModuleCache = module;
+		return module;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		klendLoadError = new Error(
+			`${makeMissingKaminoDependencyError().message} ${message}`,
+		);
+		throw klendLoadError;
+	}
+}
+
+async function getRaydiumModule(): Promise<RaydiumModule> {
+	if (raydiumModuleCache) {
+		return raydiumModuleCache;
+	}
+	if (raydiumLoadError) {
+		throw raydiumLoadError;
+	}
+	try {
+		const module = (await import(
+			"@raydium-io/raydium-sdk-v2"
+		)) as unknown as RaydiumModule;
+		raydiumModuleCache = module;
+		return module;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		raydiumLoadError = new Error(
+			`${makeMissingRaydiumDependencyError().message} ${message}`,
+		);
+		throw raydiumLoadError;
+	}
+}
+
 export function getRaydiumApiBaseUrl(): string {
 	const configured = process.env.RAYDIUM_API_BASE_URL?.trim();
 	if (configured && configured.length > 0) {
@@ -423,13 +555,14 @@ function getRaydiumClientCacheKey(): string {
 	return `${baseHost}::${swapHost}`;
 }
 
-function getRaydiumApiClient(): RaydiumApiClient {
+async function getRaydiumApiClient(): Promise<RaydiumApiClient> {
 	const cacheKey = getRaydiumClientCacheKey();
 	if (raydiumClientCache?.key === cacheKey) {
 		return raydiumClientCache.client;
 	}
 
-	const client = new RaydiumApiClient({
+	const module = await getRaydiumModule();
+	const client = new module.Api({
 		cluster: "mainnet",
 		timeout: 20_000,
 		logRequests: false,
@@ -799,8 +932,6 @@ function normalizeBigIntFields(value: unknown): unknown {
 	return Object.fromEntries(entries);
 }
 
-type KaminoRepayCurrentSlot = Parameters<typeof KaminoAction.buildRepayTxns>[7];
-
 async function resolveKaminoRepayCurrentSlot(
 	network: SolanaNetwork,
 	value: string | number | bigint | undefined,
@@ -864,6 +995,12 @@ export async function buildKaminoDepositInstructions(
 		request.extraComputeUnits,
 	);
 	const requestElevationGroup = request.requestElevationGroup === true;
+	const {
+		DEFAULT_RECENT_SLOT_DURATION_MS,
+		KaminoAction,
+		KaminoMarket,
+		VanillaObligation,
+	} = await getKlendModule();
 
 	const rpc = createSolanaRpc(getRpcEndpoint(network));
 	const kaminoMarket = await KaminoMarket.load(
@@ -958,6 +1095,12 @@ export async function buildKaminoBorrowInstructions(
 		request.extraComputeUnits,
 	);
 	const requestElevationGroup = request.requestElevationGroup === true;
+	const {
+		DEFAULT_RECENT_SLOT_DURATION_MS,
+		KaminoAction,
+		KaminoMarket,
+		VanillaObligation,
+	} = await getKlendModule();
 
 	const rpc = createSolanaRpc(getRpcEndpoint(network));
 	const kaminoMarket = await KaminoMarket.load(
@@ -1052,6 +1195,12 @@ export async function buildKaminoWithdrawInstructions(
 		request.extraComputeUnits,
 	);
 	const requestElevationGroup = request.requestElevationGroup === true;
+	const {
+		DEFAULT_RECENT_SLOT_DURATION_MS,
+		KaminoAction,
+		KaminoMarket,
+		VanillaObligation,
+	} = await getKlendModule();
 
 	const rpc = createSolanaRpc(getRpcEndpoint(network));
 	const kaminoMarket = await KaminoMarket.load(
@@ -1150,6 +1299,12 @@ export async function buildKaminoRepayInstructions(
 		network,
 		request.currentSlot,
 	);
+	const {
+		DEFAULT_RECENT_SLOT_DURATION_MS,
+		KaminoAction,
+		KaminoMarket,
+		VanillaObligation,
+	} = await getKlendModule();
 
 	const rpc = createSolanaRpc(getRpcEndpoint(network));
 	const kaminoMarket = await KaminoMarket.load(
@@ -1254,6 +1409,12 @@ export async function buildKaminoDepositAndBorrowInstructions(
 		request.extraComputeUnits,
 	);
 	const requestElevationGroup = request.requestElevationGroup === true;
+	const {
+		DEFAULT_RECENT_SLOT_DURATION_MS,
+		KaminoAction,
+		KaminoMarket,
+		VanillaObligation,
+	} = await getKlendModule();
 
 	const rpc = createSolanaRpc(getRpcEndpoint(network));
 	const kaminoMarket = await KaminoMarket.load(
@@ -1375,6 +1536,12 @@ export async function buildKaminoRepayAndWithdrawInstructions(
 		network,
 		request.currentSlot,
 	);
+	const {
+		DEFAULT_RECENT_SLOT_DURATION_MS,
+		KaminoAction,
+		KaminoMarket,
+		VanillaObligation,
+	} = await getKlendModule();
 
 	const rpc = createSolanaRpc(getRpcEndpoint(network));
 	const kaminoMarket = await KaminoMarket.load(
@@ -2692,7 +2859,7 @@ export async function callRaydiumApi(
 	const method = options.method ?? "GET";
 	const normalizedPath = getRaydiumApiPath(path);
 	try {
-		const client = getRaydiumApiClient();
+		const client = await getRaydiumApiClient();
 		return await client.api.request({
 			baseURL: getRaydiumApiBaseUrl(),
 			url: normalizedPath,
@@ -2717,7 +2884,7 @@ export async function callRaydiumApi(
 
 export async function getRaydiumPriorityFee(): Promise<unknown> {
 	try {
-		const client = getRaydiumApiClient();
+		const client = await getRaydiumApiClient();
 		return await client.api.get(RAYDIUM_API_URLS.PRIORITY_FEE);
 	} catch {
 		const baseUrl = getRaydiumPriorityFeeApiBaseUrl();

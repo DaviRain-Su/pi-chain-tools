@@ -283,13 +283,76 @@ function toolsetSummaryFrom(toolset: ChainToolset): ToolsetSummary {
 	};
 }
 
-function collectToolsetSummaries(): ToolsetSummary[] {
+function collectMetaToolsets(): ChainToolset[] {
 	return [
-		toolsetSummaryFrom(createSolanaWorkflowToolset()),
-		toolsetSummaryFrom(createSuiToolset()),
-		toolsetSummaryFrom(createNearToolset()),
-		toolsetSummaryFrom(createEvmToolset()),
+		createSolanaWorkflowToolset(),
+		createSuiToolset(),
+		createNearToolset(),
+		createEvmToolset(),
 	];
+}
+
+function collectToolsetSummaries(): ToolsetSummary[] {
+	return collectMetaToolsets().map(toolsetSummaryFrom);
+}
+
+function discoverWorkflowTools(toolset: ChainToolset): Set<string> {
+	const tools = new Set<string>();
+	for (const group of toolset.groups) {
+		if (group.name !== "execute") {
+			continue;
+		}
+		for (const tool of group.tools) {
+			if (tool.name.startsWith("w3rt_run_")) {
+				tools.add(tool.name);
+			}
+		}
+	}
+	return tools;
+}
+
+function withAutoDiscoveredWorkflowMetadata(
+	baseCapabilities: ChainCapability[],
+	toolsets: ChainToolset[],
+): ChainCapability[] {
+	const toolsetByChain = new Map<string, ChainToolset>(
+		toolsets.map((entry) => [entry.chain, entry]),
+	);
+	const FALLBACK_EXECUTION = {
+		executable: true,
+		requiresSigner: true,
+		requiresMainnetConfirmation: true,
+		requiresConfirmToken: true,
+		defaultRunMode: "analysis" as const,
+		riskLevel: "medium" as const,
+	};
+	return baseCapabilities.map((chain) => {
+		const toolset = toolsetByChain.get(chain.chain);
+		if (!toolset) {
+			return chain;
+		}
+		const available = discoverWorkflowTools(toolset);
+		if (available.size === 0) {
+			return chain;
+		}
+		const baseline = chain.workflows.filter((workflow) =>
+			available.has(workflow.tool),
+		);
+		const existing = new Set(baseline.map((workflow) => workflow.tool));
+		const discovered = [...available]
+			.filter((name) => !existing.has(name))
+			.map((name) => ({
+				tool: name,
+				description: `Workflow tool discovered at runtime (${name}). Intent list is not statically described yet.`,
+				intentTypes: [],
+				nlExamples: [],
+				execution: FALLBACK_EXECUTION,
+			}));
+		return {
+			...chain,
+			workflows: [...baseline, ...discovered],
+		};
+	});
 }
 
 function parseSupportedChain(value?: string): SupportedChain | "all" {
@@ -340,7 +403,9 @@ function filterCapabilities(query: CapabilityQuery): ChainCapability[] {
 		query.chain === "all"
 			? CHAIN_CAPABILITIES
 			: CHAIN_CAPABILITIES.filter((entry) => entry.chain === query.chain);
-	const workflowsFiltered = chainScoped
+	const toolsets = collectMetaToolsets();
+	const discovered = withAutoDiscoveredWorkflowMetadata(chainScoped, toolsets);
+	return discovered
 		.map((chain) => ({
 			...chain,
 			workflows: chain.workflows.filter((workflow) => {
@@ -354,7 +419,6 @@ function filterCapabilities(query: CapabilityQuery): ChainCapability[] {
 			}),
 		}))
 		.filter((chain) => chain.workflows.length > 0);
-	return workflowsFiltered;
 }
 
 function summarizeCapabilitiesText(params: {

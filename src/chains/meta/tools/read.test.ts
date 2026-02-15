@@ -11,7 +11,10 @@ vi.mock("../../evm/toolset.js", () => ({
 			},
 			{
 				name: "execute",
-				tools: [{ name: "w3rt_run_evm_polymarket_workflow_v0" }],
+				tools: [
+					{ name: "w3rt_run_evm_polymarket_workflow_v0" },
+					{ name: "w3rt_run_evm_transfer_workflow_v0" },
+				],
 			},
 		],
 	}),

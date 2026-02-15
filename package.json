@@ -26,8 +26,9 @@
 		"typecheck": "tsc --noEmit",
 		"build": "npm run typecheck",
 		"check": "npm run lint && npm run typecheck",
+		"security:check": "node scripts/security-audit.mjs",
 		"test": "vitest run",
-		"ci": "npm run check && npm test"
+		"ci": "npm run check && npm run security:check && npm test"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",
@@ -38,13 +39,10 @@
 		"@cetusprotocol/vaults-sdk": "^1.7.0",
 		"@ethersproject/wallet": "^5.8.0",
 		"@jup-ag/api": "^6.0.48",
-		"@kamino-finance/klend-sdk": "^7.3.18",
-		"@meteora-ag/dlmm": "^1.9.3",
 		"@mysten/bcs": "^1.9.2",
 		"@mysten/sui": "^1.45.2",
 		"@mysten/utils": "^0.2.0",
 		"@polymarket/clob-client": "^5.2.3",
-		"@raydium-io/raydium-sdk-v2": "^0.2.32-alpha",
 		"@sinclair/typebox": "^0.34.41",
 		"@solana/spl-token": "^0.4.11",
 		"@solana/web3.js": "^1.98.4",
@@ -52,8 +50,27 @@
 		"near-api-js": "^7.1.0",
 		"stable-layer-sdk": "^2.0.0"
 	},
+	"peerDependencies": {
+		"@kamino-finance/klend-sdk": "^7.3.18",
+		"@raydium-io/raydium-sdk-v2": "^0.2.32-alpha",
+		"@meteora-ag/dlmm": "^1.9.3"
+	},
+	"peerDependenciesMeta": {
+		"@kamino-finance/klend-sdk": {
+			"optional": true
+		},
+		"@raydium-io/raydium-sdk-v2": {
+			"optional": true
+		},
+		"@meteora-ag/dlmm": {
+			"optional": true
+		}
+	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
+		"@kamino-finance/klend-sdk": "^7.3.18",
+		"@meteora-ag/dlmm": "^1.9.3",
+		"@raydium-io/raydium-sdk-v2": "^0.2.32-alpha",
 		"@types/node": "^20.17.24",
 		"typescript": "^5.8.3",
 		"vitest": "^3.2.4"

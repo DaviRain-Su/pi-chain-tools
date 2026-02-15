@@ -1,0 +1,43 @@
+{
+	"name": "pi-chain-tools-security-audit-allowlist",
+	"version": "1.0.0",
+	"threshold": "high",
+	"ignore": {
+		"@kamino-finance/farms-sdk": {
+			"maxSeverity": "high",
+			"reason": "Transitive high vulnerability from Kamino/Farms SDK chain; upgrade requires coordinated protocol dependency migration."
+		},
+		"@kamino-finance/klend-sdk": {
+			"maxSeverity": "high",
+			"reason": "Transitive high vulnerability from klend runtime dependencies; tracked for dependency modernization."
+		},
+		"@kamino-finance/kliquidity-sdk": {
+			"maxSeverity": "high",
+			"reason": "Transitive high vulnerability in Kamino liquidity stack; requires upstream bump to all related Solana/DeFi integrations."
+		},
+		"@meteora-ag/dlmm": {
+			"maxSeverity": "high",
+			"reason": "Transitive high vulnerability through Solana ecosystem packages; no direct functional alternative in this release."
+		},
+		"@raydium-io/raydium-sdk-v2": {
+			"maxSeverity": "high",
+			"reason": "Transitive high vulnerability via Solana staking/deFi dependency graph."
+		},
+		"@solana/buffer-layout-utils": {
+			"maxSeverity": "high",
+			"reason": "Transitive dependency used by Spl-token-based integrations; tracked with upstream fix request."
+		},
+		"@solana/spl-stake-pool": {
+			"maxSeverity": "high",
+			"reason": "Transitive vulnerability chain from Spl-token / Kamino integrations."
+		},
+		"@solana/spl-token": {
+			"maxSeverity": "high",
+			"reason": "Current Solana stack depends on this package; keeping runtime parity across tools."
+		},
+		"bigint-buffer": {
+			"maxSeverity": "high",
+			"reason": "Transitive vulnerable transitive dependency from Solana buffer layout utils."
+		}
+	}
+}

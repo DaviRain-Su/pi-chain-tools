@@ -16,6 +16,9 @@ export type EvmHttpRequestParams = {
 	headers?: Record<string, string>;
 	body?: unknown;
 	timeoutMs?: number;
+	maxRetries?: number;
+	retryBaseMs?: number;
+	maxRetryDelayMs?: number;
 };
 
 export class EvmHttpError extends Error {
@@ -135,6 +138,40 @@ export function stringifyUnknown(value: unknown): string {
 	}
 }
 
+function sleep(ms: number): Promise<void> {
+	if (ms <= 0) return Promise.resolve();
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+}
+
+function computeRetryDelay(params: {
+	attemp: number;
+	baseMs: number;
+	maxMs: number;
+}): number {
+	const exponential = params.baseMs * 2 ** params.attemp;
+	return Math.min(Math.max(params.baseMs, exponential), params.maxMs);
+}
+
+function isRetryableStatus(status: number): boolean {
+	if (status === 429) return true;
+	if (status >= 500 && status <= 599) return true;
+	return false;
+}
+
+function isRetryableFetchError(error: unknown): boolean {
+	if (error instanceof EvmHttpError) {
+		return isRetryableStatus(error.status);
+	}
+	if (error instanceof DOMException && error.name === "AbortError") {
+		return true;
+	}
+	if (error instanceof TypeError) {
+		return true;
+	}
+	return false;
+}
 function encodeQueryValue(value: string | number | boolean): string {
 	return encodeURIComponent(String(value));
 }
@@ -155,14 +192,18 @@ export function buildUrlWithQuery(
 }
 
 export async function evmHttpJson<T>(params: EvmHttpRequestParams): Promise<T> {
-	const controller = new AbortController();
-	const timeoutMs = params.timeoutMs ?? 15_000;
-	const timeout = setTimeout(() => controller.abort(), timeoutMs);
 	const method = params.method ?? "GET";
 	const headers: Record<string, string> = {
 		accept: "application/json",
 		...(params.headers ?? {}),
 	};
+	const maxRetries = Math.max(0, Math.trunc(params.maxRetries ?? 2));
+	const retryBaseMs = Math.max(0, Math.trunc(params.retryBaseMs ?? 250));
+	const maxRetryDelayMs = Math.max(
+		retryBaseMs,
+		params.maxRetryDelayMs ?? 2_000,
+	);
+	const timeoutMs = params.timeoutMs ?? 15_000;
 
 	let bodyText: string | undefined;
 	if (params.body != null) {
@@ -173,35 +214,66 @@ export async function evmHttpJson<T>(params: EvmHttpRequestParams): Promise<T> {
 				: JSON.stringify(params.body);
 	}
 
-	try {
-		const response = await fetch(params.url, {
-			method,
-			headers,
-			body: bodyText,
-			signal: controller.signal,
-		});
-		const responseText = await response.text();
-		if (!response.ok) {
-			throw new EvmHttpError({
-				message: `HTTP ${response.status} ${response.statusText} (${params.url})`,
-				status: response.status,
-				url: params.url,
-				responseText,
-			});
-		}
-		if (!responseText.trim()) {
-			return null as T;
-		}
+	for (let attempt = 0; attempt <= maxRetries; attempt++) {
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), timeoutMs);
 		try {
-			return JSON.parse(responseText) as T;
+			const response = await fetch(params.url, {
+				method,
+				headers,
+				body: bodyText,
+				signal: controller.signal,
+			});
+			const responseText = await response.text();
+			if (!response.ok) {
+				if (isRetryableStatus(response.status) && attempt < maxRetries) {
+					await sleep(
+						computeRetryDelay({
+							attemp: attempt,
+							baseMs: retryBaseMs,
+							maxMs: maxRetryDelayMs,
+						}),
+					);
+					continue;
+				}
+				throw new EvmHttpError({
+					message: `HTTP ${response.status} ${response.statusText} (${params.url})`,
+					status: response.status,
+					url: params.url,
+					responseText,
+				});
+			}
+			if (!responseText.trim()) {
+				throw new Error(`Empty response from ${params.url}`);
+			}
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(responseText);
+			} catch (error) {
+				throw new Error(
+					`Invalid JSON from ${params.url}: ${stringifyUnknown(error)}`,
+				);
+			}
+			if (parsed == null) {
+				throw new Error(`Response payload is null from ${params.url}`);
+			}
+			return parsed as T;
 		} catch (error) {
-			throw new Error(
-				`Invalid JSON from ${params.url}: ${stringifyUnknown(error)}`,
+			if (attempt >= maxRetries || !isRetryableFetchError(error)) {
+				throw error;
+			}
+			await sleep(
+				computeRetryDelay({
+					attemp: attempt,
+					baseMs: retryBaseMs,
+					maxMs: maxRetryDelayMs,
+				}),
 			);
+		} finally {
+			clearTimeout(timeout);
 		}
-	} finally {
-		clearTimeout(timeout);
 	}
+	throw new Error(`Failed to fetch ${params.url}`);
 }
 
 export function parseSide(value?: string): "buy" | "sell" {
