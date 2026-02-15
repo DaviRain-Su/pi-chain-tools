@@ -81,6 +81,7 @@ const stableLayerMocks = vi.hoisted(() => ({
 
 const cetusV2Mocks = vi.hoisted(() => ({
 	resolveCetusV2Network: vi.fn(() => "mainnet"),
+	resolveCetusTokenTypesBySymbol: vi.fn(),
 	buildCetusFarmsStakeTransaction: vi.fn(),
 	buildCetusFarmsUnstakeTransaction: vi.fn(),
 	buildCetusFarmsHarvestTransaction: vi.fn(),
@@ -214,6 +215,7 @@ vi.mock("../stablelayer.js", () => ({
 
 vi.mock("../cetus-v2.js", () => ({
 	resolveCetusV2Network: cetusV2Mocks.resolveCetusV2Network,
+	resolveCetusTokenTypesBySymbol: cetusV2Mocks.resolveCetusTokenTypesBySymbol,
 	buildCetusFarmsStakeTransaction: cetusV2Mocks.buildCetusFarmsStakeTransaction,
 	buildCetusFarmsUnstakeTransaction:
 		cetusV2Mocks.buildCetusFarmsUnstakeTransaction,
@@ -240,6 +242,7 @@ function getTool(name = "w3rt_run_sui_workflow_v0"): WorkflowTool {
 beforeEach(() => {
 	vi.clearAllMocks();
 	runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+	cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockResolvedValue([]);
 	runtimeMocks.getSuiClient.mockReturnValue({
 		devInspectTransactionBlock: vi.fn().mockResolvedValue({
 			effects: {
@@ -498,6 +501,47 @@ describe("w3rt_run_sui_workflow_v0", () => {
 				amountRaw: "1250000000",
 			},
 		});
+	});
+
+	it("resolves unknown symbols in swap intentText via farms token index", async () => {
+		cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockImplementation(
+			async ({ symbol }) => {
+				const normalized = symbol.trim().toUpperCase();
+				if (normalized === "HAWAL")
+					return [
+						"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::hal::HAWAL",
+					];
+				if (normalized === "WAL")
+					return [
+						"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb::wal::WAL",
+					];
+				return [];
+			},
+		);
+		const tool = getTool();
+		const result = await tool.execute("wf2c", {
+			runId: "wf-sui-02c",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Sui 主网把 1 HAWAL/WAL 换成",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.swap.cetus",
+			intent: {
+				type: "sui.swap.cetus",
+				inputCoinType:
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::hal::HAWAL",
+				outputCoinType:
+					"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb::wal::WAL",
+				amountRaw: "1",
+			},
+		});
+		expect(cetusV2Mocks.resolveCetusTokenTypesBySymbol).toHaveBeenCalledWith(
+			expect.objectContaining({
+				symbol: "HAWAL",
+			}),
+		);
 	});
 
 	it("blocks mainnet execute when confirmMainnet is missing", async () => {
@@ -785,6 +829,48 @@ describe("w3rt_run_sui_workflow_v0", () => {
 				positionId: "0xdef",
 				coinTypeA: "0x2::sui::SUI",
 				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				tickLower: -5,
+				tickUpper: 5,
+				amountA: "10",
+				amountB: "20",
+			},
+		});
+	});
+
+	it("resolves LP add symbol pair via farms token index", async () => {
+		cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockImplementation(
+			async ({ symbol }) => {
+				const normalized = symbol.trim().toUpperCase();
+				if (normalized === "HAWAL")
+					return [
+						"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::hal::HAWAL",
+					];
+				if (normalized === "WAL")
+					return [
+						"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb::wal::WAL",
+					];
+				return [];
+			},
+		);
+		const tool = getTool();
+		const result = await tool.execute("wf5c-dynamic", {
+			runId: "wf-sui-05c-dynamic",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"添加流动性 pool: 0xabc position: 0xdef HAWAL/WAL tick: -5 to 5 amountA: 10 amountB: 20",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				poolId: "0xabc",
+				positionId: "0xdef",
+				coinTypeA:
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::hal::HAWAL",
+				coinTypeB:
+					"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb::wal::WAL",
 				tickLower: -5,
 				tickUpper: 5,
 				amountA: "10",

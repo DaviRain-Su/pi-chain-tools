@@ -23,6 +23,8 @@ type CetusFarmsPoolPair = {
 	coinTypeA: string;
 	coinTypeB: string;
 	pairSymbol: string;
+	symbolA: string;
+	symbolB: string;
 };
 
 type FarmsPositionLike = {
@@ -308,6 +310,31 @@ function getCoinSymbolFallback(coinType: string): string {
 	return segments[segments.length - 1] || coinType;
 }
 
+type TokenSymbolIndexEntry = {
+	symbol: string;
+	coinType: string;
+};
+
+type TokenSymbolIndex = Map<string, TokenSymbolIndexEntry[]>;
+
+const tokenSymbolIndexCache = new Map<
+	string,
+	{ expiresAt: number; index: TokenSymbolIndex }
+>();
+const tokenSymbolIndexInflight = new Map<string, Promise<TokenSymbolIndex>>();
+const TOKEN_SYMBOL_INDEX_TTL_MS = 5 * 60 * 1000;
+
+function resolveCetusV2CacheKey(
+	network: CetusV2Network,
+	rpcUrl?: string,
+): string {
+	return `${network}|${rpcUrl || ""}`;
+}
+
+function normalizeTokenSymbol(value: string): string {
+	return value.trim().toUpperCase();
+}
+
 async function resolveCetusFarmsPoolPairs(params: {
 	network: CetusV2Network;
 	rpcUrl?: string;
@@ -319,6 +346,8 @@ async function resolveCetusFarmsPoolPairs(params: {
 			coinTypeA: string;
 			coinTypeB: string;
 			pairSymbol: string;
+			symbolA: string;
+			symbolB: string;
 		}
 	>
 > {
@@ -328,6 +357,8 @@ async function resolveCetusFarmsPoolPairs(params: {
 			coinTypeA: string;
 			coinTypeB: string;
 			pairSymbol: string;
+			symbolA: string;
+			symbolB: string;
 		}
 	>();
 	const uniquePoolIds = [...new Set(params.clmmPoolIds)];
@@ -398,10 +429,90 @@ async function resolveCetusFarmsPoolPairs(params: {
 			coinTypeA: pair.coinTypeA,
 			coinTypeB: pair.coinTypeB,
 			pairSymbol: `${symbolA}/${symbolB}`,
+			symbolA,
+			symbolB,
 		});
 	}
 
 	return resolvedPairs;
+}
+
+async function buildTokenSymbolIndex(params: {
+	network: CetusV2Network;
+	rpcUrl?: string;
+}): Promise<TokenSymbolIndex> {
+	const index: TokenSymbolIndex = new Map<string, TokenSymbolIndexEntry[]>();
+	const { pools } = await getCetusFarmsPools({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+	});
+	const clmmPoolIds = pools
+		.map((pool) => pool.clmm_pool_id)
+		.filter((value) => typeof value === "string" && value.length > 0);
+	const pairByPool = await resolveCetusFarmsPoolPairs({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		clmmPoolIds,
+	});
+	for (const pair of pairByPool.values()) {
+		const coinTypes = [
+			{ coinType: pair.coinTypeA, symbol: pair.symbolA },
+			{ coinType: pair.coinTypeB, symbol: pair.symbolB },
+		];
+		for (const { coinType, symbol } of coinTypes) {
+			const normalizedSymbol = normalizeTokenSymbol(symbol);
+			const existing = index.get(normalizedSymbol) ?? [];
+			if (!existing.find((entry) => entry.coinType === coinType)) {
+				existing.push({ symbol, coinType });
+			}
+			index.set(normalizedSymbol, existing);
+		}
+	}
+	return index;
+}
+
+async function getTokenSymbolIndex(params: {
+	network: CetusV2Network;
+	rpcUrl?: string;
+}): Promise<TokenSymbolIndex> {
+	const cacheKey = resolveCetusV2CacheKey(params.network, params.rpcUrl);
+	const cached = tokenSymbolIndexCache.get(cacheKey);
+	if (cached && cached.expiresAt > Date.now()) {
+		return cached.index;
+	}
+
+	const inflight = tokenSymbolIndexInflight.get(cacheKey);
+	if (inflight) {
+		return inflight;
+	}
+
+	const promise = buildTokenSymbolIndex({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+	}).finally(() => {
+		tokenSymbolIndexInflight.delete(cacheKey);
+	});
+	tokenSymbolIndexInflight.set(cacheKey, promise);
+	const index = await promise;
+	tokenSymbolIndexCache.set(cacheKey, {
+		expiresAt: Date.now() + TOKEN_SYMBOL_INDEX_TTL_MS,
+		index,
+	});
+	return index;
+}
+
+export async function resolveCetusTokenTypesBySymbol(params: {
+	network: CetusV2Network;
+	rpcUrl?: string;
+	symbol: string;
+}): Promise<string[]> {
+	const normalizedSymbol = normalizeTokenSymbol(params.symbol);
+	const index = await getTokenSymbolIndex({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+	});
+	const entries = index.get(normalizedSymbol) ?? [];
+	return entries.map((entry) => entry.coinType);
 }
 
 function formatCetusFarmsPairList(
@@ -453,6 +564,8 @@ export async function findCetusFarmsPoolsByTokenPair(params: {
 				coinTypeA: pair.coinTypeA,
 				coinTypeB: pair.coinTypeB,
 				pairSymbol: pair.pairSymbol,
+				symbolA: pair.symbolA,
+				symbolB: pair.symbolB,
 			};
 		})
 		.filter((entry): entry is CetusFarmsPoolPair => Boolean(entry));

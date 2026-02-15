@@ -9,6 +9,7 @@ import {
 	buildCetusFarmsStakeTransaction,
 	buildCetusFarmsUnstakeTransaction,
 	findCetusFarmsPoolsByTokenPair,
+	resolveCetusTokenTypesBySymbol,
 	resolveCetusV2Network,
 } from "../cetus-v2.js";
 import {
@@ -530,12 +531,8 @@ function normalizePairSymbolHints(params: {
 	coinTypeB?: string;
 }): [string | undefined, string | undefined] {
 	return [
-		params.coinTypeA?.trim()
-			? normalizeCoinTypeOrSymbol(params.coinTypeA.trim())
-			: undefined,
-		params.coinTypeB?.trim()
-			? normalizeCoinTypeOrSymbol(params.coinTypeB.trim())
-			: undefined,
+		params.coinTypeA?.trim().toUpperCase() || undefined,
+		params.coinTypeB?.trim().toUpperCase() || undefined,
 	];
 }
 
@@ -588,13 +585,42 @@ function resolveKnownSuiToken(input: string): KnownSuiToken | undefined {
 	return KNOWN_SUI_TOKEN_BY_ALIAS.get(normalized);
 }
 
-function normalizeCoinTypeOrSymbol(value?: string): string | undefined {
-	if (!value?.trim()) return undefined;
-	const normalized = value.trim();
-	if (/^0x[a-fA-F0-9]{1,64}::[A-Za-z0-9_]+::[A-Za-z0-9_]+$/.test(normalized)) {
-		return normalized;
+function isStructTag(value: string): boolean {
+	return /^0x[a-fA-F0-9]{1,64}::[A-Za-z0-9_]+::[A-Za-z0-9_]+$/.test(
+		value.trim(),
+	);
+}
+
+async function resolveCoinTypeBySymbol(params: {
+	network: SuiNetwork;
+	rpcUrl?: string;
+	value?: string;
+}): Promise<string | undefined> {
+	const raw = params.value?.trim();
+	if (!raw) return undefined;
+	if (isStructTag(raw)) return raw;
+	const known = resolveKnownSuiToken(raw);
+	if (known) return known.coinType;
+
+	try {
+		const matches = await resolveCetusTokenTypesBySymbol({
+			network: resolveCetusV2Network(params.network),
+			rpcUrl: params.rpcUrl,
+			symbol: raw,
+		});
+		if (matches.length === 1) return matches[0];
+	} catch {
+		// ignore and fail with undefined
 	}
-	return resolveKnownSuiToken(normalized)?.coinType;
+	return undefined;
+}
+
+async function resolveCoinTypeFromHint(
+	value: string | undefined,
+	network: SuiNetwork,
+	rpcUrl?: string,
+): Promise<string | undefined> {
+	return resolveCoinTypeBySymbol({ network, rpcUrl, value });
 }
 
 function collectCoinTypeCandidates(text: string): string[] {
@@ -1422,14 +1448,17 @@ async function normalizeCetusFarmsIntent(
 		coinTypeA: parsed.pairSymbolA || params.coinTypeA,
 		coinTypeB: parsed.pairSymbolB || params.coinTypeB,
 	});
-	const resolvedCoinTypeA =
-		normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) ||
-		parsed.coinTypeA ||
-		resolvedPair[0];
-	const resolvedCoinTypeB =
-		normalizeCoinTypeOrSymbol(params.coinTypeB?.trim()) ||
-		parsed.coinTypeB ||
-		resolvedPair[1];
+	const parsedNetwork = parseSuiNetwork(params.network);
+	const resolvedCoinTypeA = await resolveCoinTypeFromHint(
+		params.coinTypeA || parsed.coinTypeA || resolvedPair[0],
+		parsedNetwork,
+		params.rpcUrl,
+	);
+	const resolvedCoinTypeB = await resolveCoinTypeFromHint(
+		params.coinTypeB || parsed.coinTypeB || resolvedPair[1],
+		parsedNetwork,
+		params.rpcUrl,
+	);
 
 	if (!poolId && intentType === "sui.cetus.farms.stake") {
 		if (resolvedCoinTypeA && resolvedCoinTypeB) {
@@ -1458,10 +1487,8 @@ async function normalizeCetusFarmsIntent(
 		const clmmPositionId =
 			params.clmmPositionId?.trim() || parsed.clmmPositionId;
 		const clmmPoolId = params.clmmPoolId?.trim() || parsed.clmmPoolId;
-		const coinTypeA =
-			resolvedCoinTypeA || normalizeCoinTypeOrSymbol(params.coinTypeA?.trim());
-		const coinTypeB =
-			resolvedCoinTypeB || normalizeCoinTypeOrSymbol(params.coinTypeB?.trim());
+		const coinTypeA = resolvedCoinTypeA;
+		const coinTypeB = resolvedCoinTypeB;
 		if (!clmmPositionId) {
 			throw new Error(
 				"clmmPositionId is required for intentType=sui.cetus.farms.stake",
@@ -1548,6 +1575,7 @@ async function normalizeIntent(
 	network: SuiNetwork,
 ): Promise<SuiWorkflowIntent> {
 	const parsed = parseIntentText(params.intentText);
+	const parsedNetwork = parseSuiNetwork(network);
 	const intentType = inferIntentType(params, parsed);
 
 	if (intentType === "sui.transfer.sui") {
@@ -1569,8 +1597,10 @@ async function normalizeIntent(
 
 	if (intentType === "sui.transfer.coin") {
 		const toAddress = params.toAddress?.trim() || parsed.toAddress;
-		const coinType =
-			normalizeCoinTypeOrSymbol(params.coinType?.trim()) || parsed.coinType;
+		const coinType = await resolveCoinTypeFromHint(
+			params.coinType || parsed.coinType,
+			parsedNetwork,
+		);
 		const amountRaw = params.amountRaw?.trim() || parsed.amountRaw;
 		if (!toAddress)
 			throw new Error("toAddress is required for sui.transfer.coin");
@@ -1590,10 +1620,14 @@ async function normalizeIntent(
 	if (intentType === "sui.lp.cetus.add") {
 		let poolId = params.poolId?.trim() || parsed.poolId;
 		let positionId = params.positionId?.trim() || parsed.positionId;
-		const coinTypeA =
-			normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) || parsed.coinTypeA;
-		const coinTypeB =
-			normalizeCoinTypeOrSymbol(params.coinTypeB?.trim()) || parsed.coinTypeB;
+		const coinTypeA = await resolveCoinTypeFromHint(
+			params.coinTypeA || parsed.coinTypeA,
+			parsedNetwork,
+		);
+		const coinTypeB = await resolveCoinTypeFromHint(
+			params.coinTypeB || parsed.coinTypeB,
+			parsedNetwork,
+		);
 		const tickLower = params.tickLower ?? parsed.tickLower;
 		const tickUpper = params.tickUpper ?? parsed.tickUpper;
 		const amountA = params.amountA?.trim() || parsed.amountA;
@@ -1675,10 +1709,14 @@ async function normalizeIntent(
 	if (intentType === "sui.lp.cetus.remove") {
 		let poolId = params.poolId?.trim() || parsed.poolId;
 		let positionId = params.positionId?.trim() || parsed.positionId;
-		const coinTypeA =
-			normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) || parsed.coinTypeA;
-		const coinTypeB =
-			normalizeCoinTypeOrSymbol(params.coinTypeB?.trim()) || parsed.coinTypeB;
+		const coinTypeA = await resolveCoinTypeFromHint(
+			params.coinTypeA || parsed.coinTypeA,
+			parsedNetwork,
+		);
+		const coinTypeB = await resolveCoinTypeFromHint(
+			params.coinTypeB || parsed.coinTypeB,
+			parsedNetwork,
+		);
 		const deltaLiquidity =
 			params.deltaLiquidity?.trim() || parsed.deltaLiquidity;
 		const minAmountA = params.minAmountA?.trim() || parsed.minAmountA || "0";
@@ -1749,13 +1787,14 @@ async function normalizeIntent(
 		};
 	}
 
-	const inputCoinType =
-		normalizeCoinTypeOrSymbol(params.inputCoinType?.trim()) ||
-		parsed.inputCoinType ||
-		normalizeCoinTypeOrSymbol(params.coinType?.trim());
-	const outputCoinType =
-		normalizeCoinTypeOrSymbol(params.outputCoinType?.trim()) ||
-		parsed.outputCoinType;
+	const inputCoinType = await resolveCoinTypeFromHint(
+		params.inputCoinType || parsed.inputCoinType || params.coinType,
+		parsedNetwork,
+	);
+	const outputCoinType = await resolveCoinTypeFromHint(
+		params.outputCoinType || parsed.outputCoinType,
+		parsedNetwork,
+	);
 	const amountRaw = params.amountRaw?.trim() || parsed.amountRaw;
 	if (!inputCoinType)
 		throw new Error("inputCoinType is required for sui.swap.cetus");
