@@ -178,6 +178,32 @@ export type KaspaAddressUtxosResult = {
 	data: KaspaAddressUtxosResponse;
 };
 
+type KaspaReadStandardizedRecord = Record<string, unknown>;
+
+type KaspaReadStandardizedSummary = {
+	network?: string;
+	address?: string;
+	transactionId?: string;
+	outputIndex?: number;
+	status?: "accepted" | "pending" | "unknown";
+	inputCount?: number;
+	outputCount?: number;
+	count?: number;
+	totalInputAmount?: string;
+	totalOutputAmount?: string;
+	totalAmount?: string;
+	feeAmount?: string;
+	blockTime?: number;
+	confirmations?: number;
+};
+
+type KaspaReadStandardizedOutput = {
+	summary: KaspaReadStandardizedSummary;
+	inputs: KaspaReadStandardizedRecord[];
+	outputs: KaspaReadStandardizedRecord[];
+	fees: Record<string, unknown>;
+};
+
 type KaspaAddressSortedUtxosResult = {
 	address: string;
 	network: string;
@@ -521,6 +547,368 @@ function summarizeKaspaResponse(value: unknown): string {
 	} catch {
 		return "(unserializable response)";
 	}
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	if (!value || typeof value !== "object") {
+		return undefined;
+	}
+	return value as Record<string, unknown>;
+}
+
+function getKaspaFirstString(
+	record: Record<string, unknown> | undefined,
+	keys: string[],
+): string | undefined {
+	if (!record) return undefined;
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "string") {
+			const normalized = value.trim();
+			if (normalized) {
+				return normalized;
+			}
+		}
+	}
+	return undefined;
+}
+
+function getKaspaFirstNumber(
+	record: Record<string, unknown> | undefined,
+	keys: string[],
+): number | undefined {
+	if (!record) return undefined;
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return value;
+		}
+		if (typeof value === "string") {
+			const trimmed = value.trim();
+			if (!trimmed) continue;
+			const parsed = Number(trimmed);
+			if (Number.isFinite(parsed)) {
+				return parsed;
+			}
+		}
+	}
+	return undefined;
+}
+
+function getKaspaFirstField(
+	record: Record<string, unknown> | undefined,
+	keys: string[],
+): unknown {
+	if (!record) return undefined;
+	for (const key of keys) {
+		const value = record[key];
+		if (value !== undefined) {
+			return value;
+		}
+	}
+	return undefined;
+}
+
+function parseKaspaReadAmountAtomic(value: unknown): bigint | undefined {
+	if (value == null) return undefined;
+	if (typeof value === "number") {
+		if (!Number.isFinite(value) || value < 0) {
+			return undefined;
+		}
+		return parseKaspaReadAmountAtomic(value.toString());
+	}
+	if (typeof value !== "string") {
+		return undefined;
+	}
+	const trimmed = value.trim();
+	if (!trimmed) return undefined;
+	if (trimmed.includes("e") || trimmed.includes("E")) return undefined;
+	const match = /^(\d+)(?:\.(\d+))?$/.exec(trimmed);
+	if (!match) return undefined;
+	const [, wholeRaw, fracRaw = ""] = match;
+	if (fracRaw.length > KASPA_DECIMALS) return undefined;
+	const atomic = `${wholeRaw}${fracRaw.padEnd(KASPA_DECIMALS, "0")}`;
+	try {
+		return BigInt(atomic);
+	} catch {
+		return undefined;
+	}
+}
+
+function parseKaspaReadAmount(value: unknown): string {
+	const parsed = parseKaspaReadAmountAtomic(value);
+	return parsed === undefined ? "0" : parsed.toString();
+}
+
+function extractKaspaTxPayload(data: unknown): Record<string, unknown> {
+	const record = asRecord(data);
+	if (!record) return {};
+	const nested = asRecord(record.transaction);
+	return nested ?? record;
+}
+
+function extractKaspaPayloadArray(data: unknown): unknown[] {
+	if (Array.isArray(data)) return data;
+	const record = asRecord(data);
+	if (!record) return [];
+	const candidates = ["utxos", "outputs", "data", "items"];
+	for (const key of candidates) {
+		const value = record[key];
+		if (Array.isArray(value)) {
+			return value;
+		}
+	}
+	return [];
+}
+
+function buildKaspaReadTransactionInputs(
+	transaction: Record<string, unknown>,
+): KaspaReadStandardizedRecord[] {
+	const inputRecords = extractKaspaPayloadArray(transaction.inputs);
+	const result: KaspaReadStandardizedRecord[] = [];
+	for (const [index, rawInput] of inputRecords.entries()) {
+		const input = asRecord(rawInput) ?? {};
+		const outputIndex = getKaspaFirstNumber(input, [
+			"index",
+			"outputIndex",
+			"vout",
+		]);
+		result.push({
+			type: "input",
+			index,
+			txId:
+				getKaspaFirstString(input, [
+					"txId",
+					"txid",
+					"txHash",
+					"hash",
+					"prevTxId",
+				]) ?? "unknown",
+			outputIndex: outputIndex === undefined ? 0 : outputIndex,
+			amount: parseKaspaReadAmount(getKaspaFirstField(input, ["amount", "value", "satoshis"])),
+			address: getKaspaFirstString(input, ["address", "sender", "from"]),
+			scriptPublicKey: getKaspaFirstString(input, [
+				"scriptPublicKey",
+				"scriptPubKey",
+				"pkScript",
+			]),
+		});
+	}
+	return result;
+}
+
+function buildKaspaReadTransactionOutputs(
+	transaction: Record<string, unknown>,
+): KaspaReadStandardizedRecord[] {
+	const outputRecords = extractKaspaPayloadArray(transaction.outputs);
+	const result: KaspaReadStandardizedRecord[] = [];
+	for (const [index, rawOutput] of outputRecords.entries()) {
+		const output = asRecord(rawOutput) ?? {};
+		result.push({
+			type: "output",
+			index,
+			address: getKaspaFirstString(output, ["address", "recipient", "to"]),
+			amount: parseKaspaReadAmount(
+				getKaspaFirstField(output, ["amount", "value", "satoshis"]),
+			),
+			scriptPublicKey: getKaspaFirstString(output, [
+				"scriptPublicKey",
+				"scriptPubKey",
+				"pkScript",
+			]),
+		});
+	}
+	return result;
+}
+
+function buildKaspaReadTransactionFees(
+	transaction: Record<string, unknown>,
+): Record<string, unknown> {
+	const result: Record<string, unknown> = {};
+	const fee = getKaspaFirstField(transaction, [
+		"fee",
+		"feeAmount",
+		"networkFee",
+		"gas",
+	]);
+	if (fee !== undefined) {
+		result.feeAmount = parseKaspaReadAmount(fee);
+	}
+	const mass = getKaspaFirstField(transaction, [
+		"mass",
+		"estimatedMass",
+		"massLimit",
+	]);
+	if (mass !== undefined) {
+		result.mass = typeof mass === "number" || typeof mass === "string"
+			? String(mass)
+			: summarizeKaspaResponse(mass);
+	}
+	return result;
+}
+
+function summarizeKaspaReadTransactionFromPayload(
+	txPayload: Record<string, unknown>,
+): KaspaReadStandardizedSummary {
+	const statusCandidate = getKaspaFirstField(txPayload, [
+		"isAccepted",
+		"accepted",
+		"is_accepted",
+	]);
+	const confirmedCandidate = getKaspaFirstField(txPayload, ["confirmed"]);
+	const confirmations = getKaspaFirstNumber(txPayload, [
+		"confirmations",
+		"confirmationsCount",
+	]);
+	const blockTime = getKaspaFirstNumber(txPayload, ["blockTime", "block_time"]);
+	if (typeof statusCandidate === "boolean") {
+		return {
+			status: statusCandidate ? "accepted" : "pending",
+			blockTime,
+			confirmations,
+		};
+	}
+	if (typeof confirmedCandidate === "boolean") {
+		return {
+			status: confirmedCandidate ? "accepted" : "pending",
+			blockTime,
+			confirmations,
+		};
+	}
+	if (
+		(confirmations !== undefined && confirmations > 0) ||
+		typeof blockTime === "number"
+	) {
+		return {
+			status: "accepted",
+			blockTime,
+			confirmations,
+		};
+	}
+	return {
+		status: "unknown",
+		blockTime,
+		confirmations,
+	};
+}
+
+function buildKaspaReadTransactionStandardization(
+	transactionId: string,
+	result: KaspaTransactionResult,
+): KaspaReadStandardizedOutput {
+	const txPayload = extractKaspaTxPayload(result.data);
+	const inputs = buildKaspaReadTransactionInputs(txPayload);
+	const outputs = buildKaspaReadTransactionOutputs(txPayload);
+	const fees = buildKaspaReadTransactionFees(txPayload);
+	const statusSummary = summarizeKaspaReadTransactionFromPayload(txPayload);
+	const totalInputAmount = inputs.reduce(
+		(sum, input) =>
+			sum + (parseKaspaReadAmountAtomic(input.amount) || 0n),
+		0n,
+	);
+	const totalOutputAmount = outputs.reduce(
+		(sum, output) =>
+			sum + (parseKaspaReadAmountAtomic(output.amount) || 0n),
+		0n,
+	);
+	return {
+		summary: {
+			transactionId,
+			network: result.network,
+			status: statusSummary.status,
+			inputCount: inputs.length,
+			outputCount: outputs.length,
+			totalInputAmount: totalInputAmount.toString(),
+			totalOutputAmount: totalOutputAmount.toString(),
+			feeAmount: typeof fees.feeAmount === "string" ? fees.feeAmount : undefined,
+			blockTime: statusSummary.blockTime,
+			confirmations: statusSummary.confirmations,
+		},
+		inputs,
+		outputs,
+		fees,
+	};
+}
+
+function buildKaspaReadTransactionOutputStandardization(
+	result: KaspaTransactionOutputResult,
+): KaspaReadStandardizedOutput {
+	const outputPayload = asRecord(result.data) ?? {};
+	const root = asRecord(outputPayload.output) ?? outputPayload;
+	const outputEntry = {
+		type: "output",
+		index: getKaspaFirstNumber(root, ["index", "outputIndex", "vout"]) ?? 0,
+		txId: result.transactionId,
+		address: getKaspaFirstString(root, ["address", "recipient", "to"]),
+		amount: parseKaspaReadAmount(
+			getKaspaFirstField(root, ["amount", "value", "satoshis"]),
+		),
+		scriptPublicKey: getKaspaFirstString(root, [
+			"scriptPublicKey",
+			"scriptPubKey",
+			"pkScript",
+		]),
+	};
+	return {
+		summary: {
+			transactionId: result.transactionId,
+			outputIndex: result.outputIndex,
+			network: result.network,
+			outputCount: 1,
+			totalAmount: outputEntry.amount,
+			feeAmount: "0",
+			inputCount: 0,
+			status: "unknown",
+		},
+		inputs: [],
+		outputs: [outputEntry],
+		fees: { feeAmount: "0", outputCount: 1 },
+	};
+}
+
+function buildKaspaReadUtxoStandardization(
+	result: KaspaAddressUtxosResult,
+): KaspaReadStandardizedOutput {
+	const rawUtxos = extractKaspaPayloadArray(result.data);
+	const outputs: KaspaReadStandardizedRecord[] = [];
+	for (const [index, rawUtxo] of rawUtxos.entries()) {
+		const utxo = asRecord(rawUtxo) ?? {};
+		outputs.push({
+			type: "utxo",
+			index:
+				getKaspaFirstNumber(utxo, ["index", "outputIndex", "vout"]) ??
+				index,
+			txId:
+				getKaspaFirstString(utxo, ["txId", "txid", "txHash", "hash"]) ??
+				"unknown",
+			amount: parseKaspaReadAmount(
+				getKaspaFirstField(utxo, ["amount", "value", "satoshis"]),
+			),
+			address: getKaspaFirstString(utxo, ["address", "owner"]),
+			scriptPublicKey: getKaspaFirstString(utxo, [
+				"scriptPublicKey",
+				"scriptPubKey",
+				"pkScript",
+			]),
+		});
+	}
+	const totalAmount = outputs.reduce(
+		(sum, utxo) => sum + (parseKaspaReadAmountAtomic(utxo.amount) || 0n),
+		0n,
+	);
+	return {
+		summary: {
+			address: result.address,
+			network: result.network,
+			count: outputs.length,
+			totalAmount: totalAmount.toString(),
+			outputCount: outputs.length,
+			feeAmount: "0",
+		},
+		inputs: [],
+		outputs,
+		fees: { feeAmount: "0" },
+	};
 }
 
 export async function fetchKaspaAddressTag(
@@ -1148,13 +1536,18 @@ export function summarizeKaspaTransactionListResult(
 export function summarizeKaspaTransactionResult(
 	result: KaspaTransactionResult,
 ): string {
-	return `Kaspa transaction lookup network=${result.network} tx=${result.transactionId} data=${summarizeKaspaResponse(result.data)}`;
+	const normalized = buildKaspaReadTransactionStandardization(
+		result.transactionId,
+		result,
+	);
+	return `Kaspa transaction lookup network=${result.network} tx=${result.transactionId} summary=${summarizeKaspaResponse(normalized.summary)} inputs=${normalized.inputs.length} outputs=${normalized.outputs.length} fees=${summarizeKaspaResponse(normalized.fees)} data=${summarizeKaspaResponse(result.data)}`;
 }
 
 export function summarizeKaspaTransactionOutputResult(
 	result: KaspaTransactionOutputResult,
 ): string {
-	return `Kaspa transaction output network=${result.network} tx=${result.transactionId} outputIndex=${result.outputIndex} data=${summarizeKaspaResponse(result.data)}`;
+	const standardized = buildKaspaReadTransactionOutputStandardization(result);
+	return `Kaspa transaction output network=${result.network} tx=${result.transactionId} outputIndex=${result.outputIndex} summary=${summarizeKaspaResponse(standardized.summary)} data=${summarizeKaspaResponse(result.data)}`;
 }
 
 export function summarizeKaspaTransactionAcceptanceResult(
@@ -1192,7 +1585,8 @@ export function summarizeKaspaAddressBalanceResult(
 export function summarizeKaspaAddressUtxosResult(
 	result: KaspaAddressUtxosResult,
 ): string {
-	return `Kaspa address utxos network=${result.network} address=${result.address} limit=${result.limit ?? "all"} data=${summarizeKaspaResponse(result.data)}`;
+	const standardized = buildKaspaReadUtxoStandardization(result);
+	return `Kaspa address utxos network=${result.network} address=${result.address} summary=${summarizeKaspaResponse(standardized.summary)} limit=${result.limit ?? "all"} data=${summarizeKaspaResponse(result.data)}`;
 }
 
 export function summarizeKaspaAddressSortedUtxosResult(
@@ -1386,12 +1780,16 @@ export function createKaspaReadToolsLegacy() {
 					content: [
 						{ type: "text", text: summarizeKaspaTransactionResult(result) },
 					],
-					details: {
+						details: {
 						schema: "kaspa.transaction.v1",
 						network: result.network,
 						transactionId: result.transactionId,
 						apiBaseUrl: result.apiBaseUrl,
 						data: result.data,
+						standardized: buildKaspaReadTransactionStandardization(
+							result.transactionId,
+							result,
+						),
 					},
 				};
 			},
@@ -1417,13 +1815,14 @@ export function createKaspaReadToolsLegacy() {
 							text: summarizeKaspaTransactionOutputResult(result),
 						},
 					],
-					details: {
+						details: {
 						schema: "kaspa.transaction.output.v1",
 						network: result.network,
 						transactionId: result.transactionId,
 						outputIndex: result.outputIndex,
 						apiBaseUrl: result.apiBaseUrl,
 						data: result.data,
+						standardized: buildKaspaReadTransactionOutputStandardization(result),
 					},
 				};
 			},
@@ -1516,13 +1915,14 @@ export function createKaspaReadToolsLegacy() {
 							text: summarizeKaspaAddressUtxosResult(result),
 						},
 					],
-					details: {
+						details: {
 						schema: "kaspa.address.utxos.v1",
 						network: result.network,
 						address: result.address,
 						apiBaseUrl: result.apiBaseUrl,
 						limit: result.limit,
 						data: result.data,
+						standardized: buildKaspaReadUtxoStandardization(result),
 					},
 				};
 			},
@@ -1574,7 +1974,7 @@ export function createKaspaReadToolsLegacy() {
 							text: summarizeKaspaAddressSortedUtxosResult(result),
 						},
 					],
-					details: {
+						details: {
 						schema: "kaspa.address.utxos.sorted.v1",
 						network: result.network,
 						address: result.address,
@@ -1587,6 +1987,13 @@ export function createKaspaReadToolsLegacy() {
 						selectedCount: result.selectedCount,
 						summary: result.summary,
 						data: result.data,
+						standardized: buildKaspaReadUtxoStandardization({
+							address: result.address,
+							network: result.network,
+							apiBaseUrl: result.apiBaseUrl,
+							limit: result.limit,
+							data: result.data,
+						}),
 					},
 				};
 			},
@@ -1906,12 +2313,16 @@ export function createKaspaReadToolsLegacy() {
 					content: [
 						{ type: "text", text: summarizeKaspaTransactionResult(result) },
 					],
-					details: {
+						details: {
 						schema: "kaspa.transaction.v1",
 						network: result.network,
 						transactionId: result.transactionId,
 						apiBaseUrl: result.apiBaseUrl,
 						data: result.data,
+						standardized: buildKaspaReadTransactionStandardization(
+							result.transactionId,
+							result,
+						),
 					},
 				};
 			},
@@ -1937,13 +2348,14 @@ export function createKaspaReadToolsLegacy() {
 							text: summarizeKaspaTransactionOutputResult(result),
 						},
 					],
-					details: {
+						details: {
 						schema: "kaspa.transaction.output.v1",
 						network: result.network,
 						transactionId: result.transactionId,
 						outputIndex: result.outputIndex,
 						apiBaseUrl: result.apiBaseUrl,
 						data: result.data,
+						standardized: buildKaspaReadTransactionOutputStandardization(result),
 					},
 				};
 			},

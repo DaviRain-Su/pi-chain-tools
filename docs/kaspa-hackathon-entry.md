@@ -141,6 +141,19 @@
 - 输入：`request=<compose返回.request>`, `runMode=execute`, `network=mainnet`, `confirmMainnet=true`, `confirmToken=<analysis返回>`
 - 输出：提交回执（含 `txId`、`network`、`requestHash`、`preflightRiskLevel`、`preflightReadiness`、`broadcastStatus`）
 
+#### Step B'：演示 acceptance polling（重点）
+
+- 推荐在 `kaspa_submitTransaction` 的 `runMode=execute` 中叠加：
+  - `pollAcceptance=true`
+  - `acceptancePollIntervalMs=2000`
+  - `acceptancePollTimeoutMs=30000`
+- 观测返回：
+  - `acceptanceChecked=true`（有无触发轮询）
+  - `acceptanceCheckedAttempts`（轮询次数）
+  - `acceptanceTimedOut`（是否超时）
+  - `acceptanceStatus`（`accepted` / `pending` / `rejected` / `unknown`）
+- 在 `network=testnet` 中演示更快，可直接复用 `compose/request`，把 `confirmMainnet` 设置为 `false` 以方便多轮演示。
+
 #### Step C：workflow 一体化（推荐演示）
 
 - 调用 `w3rt_run_kaspa_workflow_v0`
