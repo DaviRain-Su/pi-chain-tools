@@ -1165,11 +1165,14 @@ if (!validRetry) {
 npm run schema:validate
 ```
 
-- 若你需要仅校验 OpenClaw JSON Schema（不影响业务测试），可在流水线单独建 step：
+- 建议在 CI 增加独立 step（仓库已落地在 `.github/workflows/ci.yml`）：
 
-```bash
-npm run schema:validate
+```yaml
+- name: Validate OpenClaw BTC5m schema
+  run: npm run schema:validate
 ```
+
+- 三份 schema 说明见：`docs/schemas/README.md`
 
 ### 12) 状态读取速查（执行器实现更稳）
 

@@ -32,5 +32,17 @@ jobs:
       - name: Install dependencies (npm ci)
         run: npm ci
 
-      - name: Lint, typecheck, audit, and tests
-        run: npm run ci
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Validate OpenClaw BTC5m schema
+        run: npm run schema:validate
+
+      - name: Security check
+        run: npm run security:check
+
+      - name: Unit tests
+        run: npm test
