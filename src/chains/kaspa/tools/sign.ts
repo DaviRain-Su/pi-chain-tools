@@ -32,6 +32,7 @@ type KaspaSigningContext = {
 	metadata: {
 		provider?: KaspaSignerProvider;
 		providerModule?: string;
+		providerApiShape?: string;
 		replaceExistingSignatures: boolean;
 	};
 };
@@ -58,6 +59,10 @@ interface KaspaWalletSignerInput {
 }
 
 type KaspaWalletSigner = (input: KaspaWalletSignerInput) => Promise<string[]>;
+type KaspaWalletSignerBinding = {
+	signer: KaspaWalletSigner;
+	signerApiShape: string;
+};
 type KaspaSignMethod = (...args: unknown[]) => unknown | Promise<unknown>;
 
 function getModuleExport<T>(value: unknown, key: string): T | undefined {
@@ -419,6 +424,7 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 		metadata: {
 			provider: resolvedProvider,
 			providerModule: signerResolutionModule,
+			providerApiShape: signerResolution.backend.providerApiShape,
 			replaceExistingSignatures: Boolean(params.replaceExistingSignatures),
 		},
 	};
@@ -446,6 +452,7 @@ type KaspaWalletSignerResolution = {
 		provider: KaspaSignerProvider;
 		moduleName: string;
 		label: string;
+		providerApiShape?: string;
 	};
 };
 
@@ -461,14 +468,15 @@ async function resolveKaspaWalletSigner(
 	for (const candidate of attempts) {
 		try {
 			const moduleValue = await import(candidate.moduleName);
-			const signer = buildKaspaWalletSignerFromModule(moduleValue);
-			if (signer) {
+			const signerBinding = buildKaspaWalletSignerFromModule(moduleValue);
+			if (signerBinding) {
 				const resolution: KaspaWalletSignerResolution = {
-					signer,
+					signer: signerBinding.signer,
 					backend: {
 						provider,
 						moduleName: candidate.moduleName,
 						label: candidate.label,
+						providerApiShape: signerBinding.signerApiShape,
 					},
 				};
 				KASPA_SIGNER_CACHE.set(cacheKey, resolution);
@@ -516,7 +524,7 @@ function buildKaspaSignerLoadPlan(
 
 function buildKaspaWalletSignerFromModule(
 	moduleValue: unknown,
-): KaspaWalletSigner | null {
+): KaspaWalletSignerBinding | null {
 	const defaultModule = getModuleExport<Record<string, unknown>>(
 		moduleValue,
 		"default",
@@ -525,31 +533,54 @@ function buildKaspaWalletSignerFromModule(
 	if (candidate == null || typeof candidate !== "object") {
 		return null;
 	}
-	const directCandidates: unknown[] = [
-		getModuleExport<(...args: unknown[]) => unknown>(
-			candidate,
-			"signKaspaTransaction",
-		),
-		getModuleExport<(...args: unknown[]) => unknown>(
-			candidate,
-			"signTransaction",
-		),
-		getModuleExport<(...args: unknown[]) => unknown>(candidate, "sign"),
-		getModuleExport<(...args: unknown[]) => unknown>(
-			defaultModule,
-			"signKaspaTransaction",
-		),
-		getModuleExport<(...args: unknown[]) => unknown>(
-			defaultModule,
-			"signTransaction",
-		),
-		getModuleExport<(...args: unknown[]) => unknown>(defaultModule, "sign"),
+	const directCandidates: Array<{ name: string; fn?: unknown }> = [
+		{
+			name: "signKaspaTransaction",
+			fn: getModuleExport<(...args: unknown[]) => unknown>(
+				candidate,
+				"signKaspaTransaction",
+			),
+		},
+		{
+			name: "signTransaction",
+			fn: getModuleExport<(...args: unknown[]) => unknown>(
+				candidate,
+				"signTransaction",
+			),
+		},
+		{
+			name: "sign",
+			fn: getModuleExport<(...args: unknown[]) => unknown>(candidate, "sign"),
+		},
+		{
+			name: "signKaspaTransaction",
+			fn: getModuleExport<(...args: unknown[]) => unknown>(
+				defaultModule,
+				"signKaspaTransaction",
+			),
+		},
+		{
+			name: "signTransaction",
+			fn: getModuleExport<(...args: unknown[]) => unknown>(
+				defaultModule,
+				"signTransaction",
+			),
+		},
+		{
+			name: "sign",
+			fn: getModuleExport<(...args: unknown[]) => unknown>(
+				defaultModule,
+				"sign",
+			),
+		},
 	];
 	for (const current of directCandidates) {
-		if (typeof current === "function") {
-			return makeFunctionKaspaSigner(
-				current as (...args: unknown[]) => unknown,
+		if (typeof current.fn === "function") {
+			const binding = makeFunctionKaspaSigner(
+				current.fn as (...args: unknown[]) => unknown,
 			);
+			binding.signerApiShape = `function:${current.name}(input|transaction|rawTransaction)`;
+			return binding;
 		}
 	}
 	const constructorCandidates = [
@@ -563,8 +594,11 @@ function buildKaspaWalletSignerFromModule(
 	for (const name of constructorCandidates) {
 		const ctor = getModuleExport<KaspaSignerConstructor>(candidate, name);
 		if (typeof ctor === "function") {
-			const signer = makeConstructorKaspaSigner(ctor);
-			if (signer) return signer;
+			const binding = makeConstructorKaspaSigner(ctor);
+			if (binding) {
+				binding.signerApiShape = `constructor:${name}`;
+				return binding;
+			}
 		}
 		const nested = getModuleExport<Record<string, unknown>>(
 			candidate,
@@ -572,8 +606,11 @@ function buildKaspaWalletSignerFromModule(
 		);
 		const nestedCtor = getModuleExport<KaspaSignerConstructor>(nested, name);
 		if (nestedCtor) {
-			const signer = makeConstructorKaspaSigner(nestedCtor);
-			if (signer) return signer;
+			const binding = makeConstructorKaspaSigner(nestedCtor);
+			if (binding) {
+				binding.signerApiShape = `constructor:${name}`;
+				return binding;
+			}
 		}
 	}
 	return null;
@@ -581,8 +618,8 @@ function buildKaspaWalletSignerFromModule(
 
 function makeFunctionKaspaSigner(
 	fn: (...args: unknown[]) => unknown,
-): KaspaWalletSigner {
-	return async function signWithFunction(
+): KaspaWalletSignerBinding {
+	const signer: KaspaWalletSigner = async function signWithFunction(
 		input: KaspaWalletSignerInput,
 	): Promise<string[]> {
 		const payload = {
@@ -626,6 +663,10 @@ function makeFunctionKaspaSigner(
 			`Kaspa wallet function signer failed to emit signatures${lastError ? `: ${lastError.message}` : ""}`,
 		);
 	};
+	return {
+		signer,
+		signerApiShape: "function:sign(...)",
+	};
 }
 
 type KaspaSignerConstructor =
@@ -634,7 +675,7 @@ type KaspaSignerConstructor =
 
 function makeConstructorKaspaSigner(
 	ctor: KaspaSignerConstructor,
-): KaspaWalletSigner | null {
+): KaspaWalletSignerBinding | null {
 	const staticFactories = [
 		"fromPrivateKey",
 		"fromSeed",
@@ -671,70 +712,80 @@ function createSignerFromFactory(
 	factory: (...args: unknown[]) => unknown,
 	factoryName: string,
 	signMethods: string[],
-): KaspaWalletSigner | null {
+): KaspaWalletSignerBinding | null {
 	if (typeof factory !== "function") return null;
-	return async (input: KaspaWalletSignerInput): Promise<string[]> => {
-		let instance: unknown;
-		const initAttemptList: unknown[][] = [
-			[input.privateKey],
-			[""],
-			[],
-			[undefined],
-		];
-		let initError: Error | undefined;
-		for (const initArgs of initAttemptList) {
-			try {
-				instance = factory(...initArgs);
-				if (instance && typeof instance === "object") {
+	return {
+		signer: async (input: KaspaWalletSignerInput): Promise<string[]> => {
+			let instance: unknown;
+			const initAttemptList: unknown[][] = [
+				[input.privateKey],
+				[""],
+				[],
+				[undefined],
+			];
+			let initError: Error | undefined;
+			for (const initArgs of initAttemptList) {
+				try {
+					instance = factory(...initArgs);
+					if (instance && typeof instance === "object") {
+						break;
+					}
+				} catch (error) {
+					initError = error instanceof Error ? error : new Error(String(error));
+				}
+			}
+			if (!instance || typeof instance !== "object") {
+				throw new Error(
+					`Kaspa wallet class factory (${factoryName}) cannot instantiate signer instance${initError ? `: ${initError.message}` : ""}`,
+				);
+			}
+			let directSignName: string | undefined;
+			let directSign: KaspaSignMethod | undefined;
+			for (const name of signMethods) {
+				const method = (instance as Record<string, unknown>)[name];
+				if (typeof method === "function") {
+					directSign = method as KaspaSignMethod;
+					directSignName = name;
 					break;
 				}
-			} catch (error) {
-				initError = error instanceof Error ? error : new Error(String(error));
 			}
-		}
-		if (!instance || typeof instance !== "object") {
-			throw new Error(
-				`Kaspa wallet class factory (${factoryName}) cannot instantiate signer instance${initError ? `: ${initError.message}` : ""}`,
-			);
-		}
-		const directSign = signMethods
-			.map((name) => (instance as Record<string, unknown>)[name])
-			.find((entry) => typeof entry === "function");
-		if (!directSign) {
-			throw new Error(
-				`Kaspa wallet class signer (${factoryName}) missing sign method: [${signMethods.join(", ")}]`,
-			);
-		}
-		const objectInput = {
-			transaction: input.transaction,
-			rawTransaction: input.rawTransaction,
-			hash: input.hash,
-			network: input.network,
-			signatureEncoding: input.signatureEncoding,
-			privateKey: input.privateKey,
-		};
-		const attempts = [
-			[objectInput],
-			[input.transaction, input.privateKey, input.signatureEncoding],
-			[input.rawTransaction, input.privateKey, input.signatureEncoding],
-		];
-		let lastError: Error | undefined;
-		for (const args of attempts) {
-			try {
-				const result = await Promise.resolve(
-					(directSign as KaspaSignMethod).call(instance, ...args),
+			if (!directSign) {
+				throw new Error(
+					`Kaspa wallet class signer (${factoryName}) missing sign method: [${signMethods.join(", ")}]`,
 				);
-				const signatures = extractSignaturesFromValue(result);
-				if (signatures.length > 0) {
-					return signatures;
-				}
-			} catch (error) {
-				lastError = error instanceof Error ? error : new Error(String(error));
 			}
-		}
-		throw new Error(
-			`Kaspa wallet class signer (${factoryName}) failed to emit signatures${lastError ? `: ${lastError.message}` : ""}`,
-		);
+			const objectInput = {
+				transaction: input.transaction,
+				rawTransaction: input.rawTransaction,
+				hash: input.hash,
+				network: input.network,
+				signatureEncoding: input.signatureEncoding,
+				privateKey: input.privateKey,
+			};
+			const attempts = [
+				[objectInput],
+				[input.transaction, input.privateKey, input.signatureEncoding],
+				[input.rawTransaction, input.privateKey, input.signatureEncoding],
+			];
+			let lastError: Error | undefined;
+			for (const args of attempts) {
+				try {
+					const result = await Promise.resolve(
+						directSign.call(instance, ...args),
+					);
+					const signatures = extractSignaturesFromValue(result);
+					if (signatures.length > 0) {
+						return signatures;
+					}
+				} catch (error) {
+					lastError = error instanceof Error ? error : new Error(String(error));
+				}
+			}
+			throw new Error(
+				`Kaspa wallet class signer (${factoryName}) failed to emit signatures${lastError ? `: ${lastError.message}` : ""}`,
+			);
+		},
+		signerApiShape: `constructor:${factoryName}(${signMethods[0] || "sign"})`,
 	};
 }
 
@@ -798,6 +849,12 @@ function collectSignatureValues(value: unknown): string[] {
 		}
 		if (Array.isArray(record.signatures)) {
 			signatures.push(...collectSignatureValues(record.signatures));
+		}
+		for (const [key, child] of Object.entries(record)) {
+			if (key === "signature" || key === "sig" || key === "signatures") {
+				continue;
+			}
+			signatures.push(...collectSignatureValues(child));
 		}
 		return signatures;
 	}

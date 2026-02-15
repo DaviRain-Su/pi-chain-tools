@@ -177,7 +177,11 @@ describe("kaspa sign tools", () => {
 					network?: string;
 					payloadPreview?: string;
 				};
-				metadata: { provider?: string; replaceExistingSignatures?: boolean };
+				metadata: {
+					provider?: string;
+					providerApiShape?: string;
+					replaceExistingSignatures?: boolean;
+				};
 			};
 		};
 		expect(details.source).toBe("kaspa-wallet:kaspa-wallet");
@@ -193,6 +197,9 @@ describe("kaspa sign tools", () => {
 			details.signingContext?.hashInput?.fingerprint,
 		);
 		expect(details.signingContext?.hashInput?.payloadPreview).toContain("{");
+		expect(details.signingContext?.metadata?.providerApiShape).toContain(
+			"function:signKaspaTransaction",
+		);
 		expect(details.signingContext?.hashInput?.signatureEncoding).toBe("hex");
 		const signedRaw = JSON.parse(details.rawTransaction) as {
 			signatures: string[];
