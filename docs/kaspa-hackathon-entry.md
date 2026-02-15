@@ -43,6 +43,7 @@
 - `kaspa_readState`：提交前读取链上状态。
 - `kaspa_rpc`：通用可配置 RPC 预检入口。
 - `kaspa_getAddressHistoryStats`：地址历史聚合指标（最近页内收支净变动/通过率）。
+- `kaspa_checkSubmitReadiness`：提交前纯预检入口（fee/mempool/read-state），输出 `riskLevel/readiness/preflight`，无主网执行副作用。
 
 其中 `read` 与 `execute` 工具均注册在同一条链工具集，方便 OpenClaw 的分组发现与能力路由。
 
@@ -64,6 +65,11 @@
   - 支持 `runMode=analysis` 与 `runMode=execute`
   - analysis 返回 `preflight` + `requestHash` + `confirmToken`（20 分钟内有效）
   - 主网提交必须 `confirmMainnet=true`
+  - 新增 `kaspa_checkSubmitReadiness` 作为独立无副作用预检工具（fee/mempool/read-state）
+- 官方能力扩展：
+  - 已确认 Kaspa 有官方 JS/TS 官方路线（Rusty Kaspa WASM 与钱包框架）可支持本地签名/交易构建能力
+  - 官方方向示例：`kaspa-wasm32-sdk`、`@kaspa/wallet`
+- 当前提交策略：先以“可交易编排交付”为主，交易签名流程仍由外部签名体提供 rawTransaction，后续可接入官方 SDK 打通内置签名流程
 - 注册与 OpenClaw 能力：
   - `src/chains/kaspa/toolset.ts`：新增 `groups: [{name: "read"}, {name: "execute"}]`
   - `src/chains/meta/tools/read.ts`：把 Kaspa 的执行能力加入能力清单（`execution.executable=true`）
@@ -73,6 +79,9 @@
 - Kaspa 已接入 `src/pi/kaspa-extension.ts`，并在 `src/pi/default-extension.ts` 统一加载。
 - `createKaspaToolset()` 会通过 `execute` 组对外暴露 `kaspa_submitTransaction`。
 - `meta` 能力计算会自动发现 `execute` 组，并将其标记为可执行工具。
+- OpenClaw 集成中，本条链能力面向两类场景：
+  - 赛事当前版本：读取+提交工具链（analysis/execute + receipt）
+  - 未来版本：钱包工具化（UTXO 组织、签名提案、账户发现）直接接入官方 JS/TS SDK
 
 ## 7. 演示脚本（评委展示建议）
 
@@ -108,6 +117,12 @@
 - 调用 `kaspa_submitTransaction`
 - 输入：`rawTransaction=<hex/base64>`, `runMode=execute`, `network=mainnet`, `confirmMainnet=true`, `confirmToken=<analysis返回>`
 - 输出：提交回执（含 `txId`、`network`、`requestHash`、`preflightRiskLevel`、`preflightReadiness`、`broadcastStatus`）
+
+#### Step A'：只做预检（推荐用于演示前置风控）
+
+- 调用 `kaspa_checkSubmitReadiness`
+- 输入：`rawTransaction=<hex/base64>`, `network=testnet`, 可选 `feeEndpoint/mempoolEndpoint/readStateEndpoint`
+- 输出：`kaspa.transaction.preflight.v1`（`readiness`、`riskLevel`、`preflight` 报告）
 
 ## 8. 交付与后续建议
 

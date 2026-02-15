@@ -1,22 +1,45 @@
 import { Type } from "@sinclair/typebox";
 
-export type KaspaNetwork = "mainnet" | "testnet";
+export type KaspaNetwork = "mainnet" | "testnet" | "testnet10" | "testnet11";
 
 export const KASPA_TOOL_PREFIX = "kaspa_";
 
-const KASPA_DEFAULT_BASE_URL = "https://api.kaspa.org";
+const KASPA_DEFAULT_BASE_URL_MAINNET = "https://api.kaspa.org";
+const KASPA_DEFAULT_BASE_URL_TESTNET10 = "https://api-tn10.kaspa.org";
+const KASPA_DEFAULT_BASE_URL_TESTNET11 = "https://api-tn11.kaspa.org";
 
 const KASPA_API_TIMEOUT_MS = 15_000;
 
 type KaspaApiHttpMethod = "GET" | "POST" | "PUT";
 
 export function kaspaNetworkSchema() {
-	return Type.Optional(Type.Union([Type.Literal("mainnet"), Type.Literal("testnet")]));
+	return Type.Optional(
+		Type.Union([
+			Type.Literal("mainnet"),
+			Type.Literal("testnet"),
+			Type.Literal("testnet10"),
+			Type.Literal("testnet11"),
+		]),
+	);
 }
 
 export function parseKaspaNetwork(value?: string): KaspaNetwork {
+	if (value === "mainnet") return "mainnet";
+	if (value === "testnet10" || value === "tn10") return "testnet10";
+	if (value === "testnet11" || value === "tn11") return "testnet11";
 	if (value === "testnet") return "testnet";
 	return "mainnet";
+}
+
+function resolveKaspaNetworkAlias(network: KaspaNetwork): Exclude<KaspaNetwork, "testnet"> {
+	if (network === "testnet") return "testnet10";
+	return network;
+}
+
+function getKaspaNetworkDefaultBaseUrl(network: Exclude<KaspaNetwork, "testnet">): string {
+	if (network === "mainnet") return KASPA_DEFAULT_BASE_URL_MAINNET;
+	if (network === "testnet10") return KASPA_DEFAULT_BASE_URL_TESTNET10;
+	return KASPA_DEFAULT_BASE_URL_TESTNET11;
 }
 
 export function getKaspaApiBaseUrl(
@@ -24,18 +47,48 @@ export function getKaspaApiBaseUrl(
 	network: KaspaNetwork = "mainnet",
 ): string {
 	if (overrideUrl?.trim()) return overrideUrl.trim();
+	const resolvedNetwork = resolveKaspaNetworkAlias(network);
 	const networkVar =
-		network === "mainnet"
+		resolvedNetwork === "mainnet"
 			? process.env.KASPA_API_MAINNET_URL?.trim()
-			: process.env.KASPA_API_TESTNET_URL?.trim();
+			: resolvedNetwork === "testnet10"
+				? (process.env.KASPA_API_TESTNET10_URL?.trim() ||
+					process.env.KASPA_API_TESTNET_URL?.trim())
+				: (process.env.KASPA_API_TESTNET11_URL?.trim() ||
+					process.env.KASPA_API_TESTNET10_URL?.trim() ||
+					process.env.KASPA_API_TESTNET_URL?.trim());
 	if (networkVar) return networkVar;
 	const env = process.env.KASPA_API_BASE_URL?.trim();
 	if (env) return env;
-	return KASPA_DEFAULT_BASE_URL;
+	return getKaspaNetworkDefaultBaseUrl(resolvedNetwork);
 }
 
-const KASPA_ADDRESS_BASE_REGEX = /^kaspa:[a-z0-9]+$/i;
-const KASPA_ADDRESS_STRICT_REGEX = /^kaspa:[a-z0-9]{61,63}$/i;
+const KASPA_ADDRESS_BASE_REGEX = /^kaspa[a-z]*:[a-z0-9]+$/i;
+const KASPA_ADDRESS_PREFIXES_BY_NETWORK: Record<
+	"mainnet" | "testnet10" | "testnet11",
+	readonly string[]
+> = {
+	mainnet: ["kaspa"],
+	testnet10: ["kaspatest"],
+	testnet11: ["kaspatest"],
+};
+const KASPA_ADDRESS_LEN_MIN_BY_NETWORK: Record<
+	"mainnet" | "testnet10" | "testnet11",
+	number
+> = {
+	mainnet: 58,
+	testnet10: 58,
+	testnet11: 58,
+};
+const KASPA_ADDRESS_LEN_MAX_BY_NETWORK: Record<
+	"mainnet" | "testnet10" | "testnet11",
+	number
+> = {
+	mainnet: 70,
+	testnet10: 70,
+	testnet11: 70,
+};
+const KASPA_ADDRESS_CHARSET_REGEX = /^[a-z0-9]+$/i;
 
 export function getKaspaApiKey(overrideApiKey?: string): string | undefined {
 	const explicit = overrideApiKey?.trim();
@@ -53,22 +106,28 @@ export function normalizeKaspaAddress(
 		throw new Error("address must be a valid Kaspa address (starting with kaspa:). ");
 	}
 	if (strict) {
-		if (!KASPA_ADDRESS_STRICT_REGEX.test(normalized)) {
+		const [networkPrefix = "", addressPayload = ""] = normalized.split(":", 2);
+		const resolvedNetwork = network
+			? resolveKaspaNetworkAlias(parseKaspaNetwork(network))
+			: "mainnet";
+		if (!KASPA_ADDRESS_PREFIXES_BY_NETWORK[resolvedNetwork].includes(networkPrefix)) {
 			throw new Error(
-				"Kaspa address must match base format (kaspa:[a-z0-9]{61,63})",
+				`Kaspa address prefix does not match expected network (${resolvedNetwork})`,
 			);
 		}
-		if (!/^[a-z0-9]+$/i.test(normalized.slice(6))) {
+		if (!KASPA_ADDRESS_CHARSET_REGEX.test(addressPayload)) {
 			throw new Error("Kaspa address payload must be base32-like");
 		}
 		if (
-			network === "mainnet" &&
-			!/^(kaspa:q|kaspa:p)/i.test(normalized)
+			addressPayload.length <
+				KASPA_ADDRESS_LEN_MIN_BY_NETWORK[resolvedNetwork] ||
+			addressPayload.length >
+				KASPA_ADDRESS_LEN_MAX_BY_NETWORK[resolvedNetwork]
 		) {
-			throw new Error("Mainnet Kaspa address should start with kaspa:q or kaspa:p");
+			throw new Error("Kaspa address payload length is out of expected bounds");
 		}
-		if (network === "testnet" && !/^kaspa:t/i.test(normalized)) {
-			throw new Error("Testnet Kaspa address should start with kaspa:t");
+		if (resolvedNetwork === "mainnet" && !/^[qp]/i.test(addressPayload)) {
+			throw new Error("Mainnet Kaspa address payload should start with q or p");
 		}
 	}
 	return normalized;

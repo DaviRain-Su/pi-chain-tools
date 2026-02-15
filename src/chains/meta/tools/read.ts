@@ -297,6 +297,24 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 				},
 			},
 			{
+				tool: "kaspa_checkSubmitReadiness",
+				description:
+					"Run fee/mempool/state preflight checks before execution (dry-run-like safety review).",
+				intentTypes: ["kaspa.transaction.preflight"],
+				nlExamples: [
+					"先跑一次提交预检看网络状态是否异常",
+					"提交前检查 fee/mempool/read-state 并判断 readiness",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
 				tool: "kaspa_getAddressHistoryStats",
 				description:
 					"Aggregate recent address history metrics from the latest transaction page.",
