@@ -2854,6 +2854,26 @@ describe("w3rt_run_near_workflow_v0", () => {
 		});
 	});
 
+	it("parses natural-language ref lp remove intent with dash-separated pair", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-11d", {
+			runId: "wf-near-11d",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Ref 移除 LP，NEAR-USDC，shares 100000，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.remove",
+			intent: {
+				type: "near.lp.ref.remove",
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+				shares: "100000",
+			},
+		});
+	});
+
 	it("parses natural-language ref lp remove with auto-withdraw hint", async () => {
 		const tool = getTool();
 		const result = await tool.execute("near-wf-11ca", {
