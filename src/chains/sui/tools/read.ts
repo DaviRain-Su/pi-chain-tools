@@ -114,6 +114,16 @@ const KNOWN_SUI_ASSET_METADATA_BY_COIN_TYPE = new Map<
 		},
 	],
 	[
+		"0x2::usdc::USDC",
+		{
+			symbol: "USDC",
+			name: "USD Coin",
+			description: "USD Coin",
+			iconUrl: null,
+			decimals: 6,
+		},
+	],
+	[
 		STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
 		{
 			symbol: "USDC",
@@ -209,9 +219,9 @@ function formatRawBalanceNote(asset: {
 		asset.fundsInAddressBalance &&
 		asset.fundsInAddressBalance !== asset.totalBalance
 	) {
-		return `${asset.effectiveBalance} raw (coinObjects=${asset.totalBalance}, inAddress=${asset.fundsInAddressBalance})`;
+		return `raw: ${asset.effectiveBalance} (coinObjects=${asset.totalBalance}, inAddress=${asset.fundsInAddressBalance})`;
 	}
-	return `${asset.effectiveBalance} raw`;
+	return `raw: ${asset.effectiveBalance}`;
 }
 
 function formatPortfolioAssetLine(
@@ -219,11 +229,19 @@ function formatPortfolioAssetLine(
 	asset: SuiPortfolioAsset,
 ): string {
 	const symbol = asset.metadata?.symbol || fallbackCoinSymbol(asset.coinType);
+	const displayName =
+		asset.metadata?.name && asset.metadata.name !== symbol
+			? ` (${asset.metadata.name})`
+			: "";
+	const objectCountText =
+		asset.coinObjectCount > 0
+			? `${asset.coinObjectCount} object(s)`
+			: "0 object";
 	const rawNote = formatRawBalanceNote(asset);
 	if (asset.uiAmount) {
-		return `${index + 1}. ${symbol}: ${asset.uiAmount} (${rawNote})`;
+		return `${index + 1}. ${symbol}${displayName}: ${asset.uiAmount} ${symbol} (${rawNote}, ${objectCountText})`;
 	}
-	return `${index + 1}. ${shortCoinType(asset.coinType)}: ${rawNote}`;
+	return `${index + 1}. ${shortCoinType(asset.coinType)} (${symbol}): ${rawNote} (${objectCountText})`;
 }
 
 function resolveAggregatorEnv(network: string): Env {

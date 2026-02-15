@@ -162,13 +162,15 @@ describe("sui_getBalance", () => {
 			coinType: "0x2::usdc::USDC",
 		});
 
-		expect(runtimeMocks.formatCoinAmount).not.toHaveBeenCalled();
-		expect(result.content[0]?.text).toContain("0x2::usdc::USDC");
+		expect(runtimeMocks.formatCoinAmount).toHaveBeenCalled();
+		expect(result.content[0]?.text).toContain("USDC");
 		expect(result.details).toMatchObject({
 			owner: "0xdef",
 			coinType: "0x2::usdc::USDC",
 			totalBalance: "987654",
-			uiAmount: null,
+			uiAmount: "987654",
+			decimals: 6,
+			symbol: "USDC",
 			mode: "singleCoin",
 		});
 	});
@@ -508,7 +510,7 @@ describe("sui_getPortfolio", () => {
 			network: "mainnet",
 		});
 
-		expect(result.content[0]?.text).toContain("USDC: 0.010186");
+		expect(result.content[0]?.text).toContain("USDC (USD Coin): 0.010186 USDC");
 		expect(result.content[0]?.text).toContain("coinObjects=0, inAddress=10186");
 		expect(result.details).toMatchObject({
 			assetCount: 2,
