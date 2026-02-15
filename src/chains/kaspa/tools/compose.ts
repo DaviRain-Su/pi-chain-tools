@@ -20,6 +20,7 @@ type KaspaComposeInput = {
 	amount?: string | number;
 	outputs?: unknown;
 	utxos: unknown[];
+	utxoSelectionStrategy?: "fifo" | "feeRate" | "feerate";
 	feeRate?: string | number;
 	dustLimit?: string | number;
 	changeAddress?: string;
@@ -65,6 +66,29 @@ const KASPA_DEFAULT_LOCK_TIME = 0;
 const KASPA_TX_BASE_MASS = 1_000n;
 const KASPA_INPUT_MASS = 180n;
 const KASPA_OUTPUT_MASS = 70n;
+
+type KaspaUtxoSelectionStrategy = "fifo" | "feeRate";
+
+type KaspaSelectionSummary = {
+	strategy: KaspaUtxoSelectionStrategy;
+	requestedUtxoCount: number;
+	selectedUtxoCount: number;
+	requiredAmount: string;
+	selectedAmount: string;
+	feeAmount: string;
+	hasChange: boolean;
+	changeAmount: string;
+	selectionOrder: string[];
+};
+
+type KaspaPickKaspaInputsResult = {
+	selected: KaspaUtxoInput[];
+	totalInput: bigint;
+	fee: bigint;
+	hasChange: boolean;
+	change: bigint;
+	selectionSummary: KaspaSelectionSummary;
+};
 
 function parseKaspaAmount(value: string | number, fieldName: string): bigint {
 	if (typeof value === "number") {
@@ -262,6 +286,33 @@ function parseKaspaUtxoSelectionStrategy(value: unknown): "fifo" | "feeRate" {
 	throw new Error("utxoSelectionStrategy must be 'fifo' or 'feeRate'");
 }
 
+function buildKaspaSelectionSummary(params: {
+	strategy: KaspaUtxoSelectionStrategy;
+	requestedUtxos: KaspaUtxoInput[];
+	selectedUtxos: KaspaUtxoInput[];
+	targetAmount: bigint;
+	fee: bigint;
+	hasChange: boolean;
+	change: bigint;
+}): KaspaSelectionSummary {
+	return {
+		strategy: params.strategy,
+		requestedUtxoCount: params.requestedUtxos.length,
+		selectedUtxoCount: params.selectedUtxos.length,
+		requiredAmount: params.targetAmount.toString(),
+		selectedAmount: params.selectedUtxos
+			.reduce((total, utxo) => total + BigInt(utxo.amount), 0n)
+			.toString(),
+		feeAmount: params.fee.toString(),
+		hasChange: params.hasChange,
+		changeAmount: params.hasChange ? params.change.toString() : "0",
+		selectionOrder: params.selectedUtxos.map(
+			(utxo, index) =>
+				`${index}:${utxo.txId}:${utxo.index}:${utxo.amount}`,
+		),
+	};
+}
+
 function parseKaspaFetchedUtxosPayload(data: unknown): unknown[] {
 	if (Array.isArray(data)) {
 		if (data.length === 0) {
@@ -378,14 +429,8 @@ function pickKaspaInputs(params: {
 	outputCount: number;
 	feeRate: bigint;
 	dustLimit: bigint;
-	selectionStrategy?: "fifo" | "feeRate";
-}): {
-	selected: KaspaUtxoInput[];
-	totalInput: bigint;
-	fee: bigint;
-	hasChange: boolean;
-	change: bigint;
-} {
+	selectionStrategy?: KaspaUtxoSelectionStrategy;
+}): KaspaPickKaspaInputsResult {
 	const sorted =
 		params.selectionStrategy === "fifo"
 			? [...params.utxos]
@@ -467,6 +512,15 @@ function pickKaspaInputs(params: {
 		fee: selectedFee,
 		hasChange: selectedHasChange,
 		change: selectedHasChange ? selectedChange : 0n,
+		selectionSummary: buildKaspaSelectionSummary({
+			strategy: params.selectionStrategy || "feeRate",
+			requestedUtxos: params.utxos,
+			selectedUtxos: selected,
+			targetAmount: params.targetAmount,
+			fee: selectedFee,
+			hasChange: selectedHasChange,
+			change: selectedChange,
+		}),
 	};
 }
 
@@ -564,6 +618,13 @@ export function createKaspaComposeTools(): RegisteredTool[] {
 						{ minItems: 1 },
 					),
 				),
+				utxoSelectionStrategy: Type.Optional(
+					Type.Union([
+						Type.Literal("fifo"),
+						Type.Literal("feeRate"),
+						Type.Literal("feerate"),
+					]),
+				),
 				feeRate: Type.Optional(
 					Type.Union([Type.String(), Type.Integer({ minimum: 1 })]),
 				),
@@ -607,12 +668,16 @@ export function createKaspaComposeTools(): RegisteredTool[] {
 				const utxos = parseKaspaUtxos(params.utxos);
 				const feeRate = parseKaspaFeeRate(params.feeRate);
 				const dustLimit = parseKaspaDustLimit(params.dustLimit);
+				const selectionStrategy = parseKaspaUtxoSelectionStrategy(
+					params.utxoSelectionStrategy,
+				);
 				const selected = pickKaspaInputs({
 					utxos,
 					targetAmount,
 					outputCount: outputs.length,
 					feeRate,
 					dustLimit,
+					selectionStrategy,
 				});
 				const finalOutputs: KaspaTransactionOutput[] = [...outputs];
 				if (selected.hasChange && selected.change > 0n) {
@@ -660,6 +725,7 @@ export function createKaspaComposeTools(): RegisteredTool[] {
 						.toString(),
 					feeAmount: selected.fee.toString(),
 					changeAmount: selected.hasChange ? selected.change.toString() : "0",
+					selection: selected.selectionSummary,
 					requestHash,
 				};
 
@@ -859,6 +925,7 @@ export function createKaspaComposeTools(): RegisteredTool[] {
 						.toString(),
 					feeAmount: selected.fee.toString(),
 					changeAmount: selected.hasChange ? selected.change.toString() : "0",
+					selection: selected.selectionSummary,
 					requestHash,
 				};
 				return {

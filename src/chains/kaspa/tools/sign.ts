@@ -26,6 +26,7 @@ type KaspaSigningContext = {
 	hashInput: {
 		fingerprint: string;
 		messageDigest: string;
+		hashAlgorithm: string;
 		signatureEncoding: string;
 		network?: string;
 		inputShape: string;
@@ -50,6 +51,7 @@ type KaspaSignerProvider =
 
 const DEFAULT_SIGNATURE_ENCODING = "hex";
 const DEFAULT_SIGNER_PROVIDER = "auto" as const;
+const KASPA_DEFAULT_SIGNATURE_HASH_ALGORITHM = "sha256";
 const KASPA_SIGNER_PRIVATE_KEY_ENV = "KASPA_PRIVATE_KEY";
 const KASPA_SIGNER_PRIVATE_KEY_PATH_ENV = "KASPA_PRIVATE_KEY_PATH";
 
@@ -471,15 +473,16 @@ function signKaspaSubmitTransaction(params: {
 		network,
 	);
 	const signingContext: KaspaSigningContext = {
-		mode: "manual",
-		hashInput: {
-			fingerprint: signingInput.fingerprint,
-			messageDigest: signingInput.fingerprint,
-			signatureEncoding: resolvedEncoding,
-			network,
-			inputShape: "transaction-without-signatures",
-			payloadPreview: buildSigningInputPreview(signingInput.payload),
-			signaturePayload: buildKaspaSigningPayload(signingInput.payload),
+			mode: "manual",
+			hashInput: {
+				fingerprint: signingInput.fingerprint,
+				messageDigest: signingInput.fingerprint,
+				hashAlgorithm: KASPA_DEFAULT_SIGNATURE_HASH_ALGORITHM,
+				signatureEncoding: resolvedEncoding,
+				network,
+				inputShape: "transaction-without-signatures",
+				payloadPreview: buildSigningInputPreview(signingInput.payload),
+				signaturePayload: buildKaspaSigningPayload(signingInput.payload),
 			schema: "kaspa-signing-input.v1",
 		},
 		metadata: {
@@ -566,14 +569,15 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 	const source = `kaspa-wallet:${resolvedProvider}`;
 	const signerResolutionModule = signerResolution.backend?.moduleName;
 	const signingContext: KaspaSigningContext = {
-		mode: "wallet",
-		hashInput: {
-			fingerprint: signingHash,
-			messageDigest: signingHash,
-			signatureEncoding: normalizedEncoding,
-			network,
-			inputShape: "transaction-without-signatures",
-			payloadPreview: buildSigningInputPreview(signingInput.payload),
+			mode: "wallet",
+			hashInput: {
+				fingerprint: signingHash,
+				messageDigest: signingHash,
+				hashAlgorithm: KASPA_DEFAULT_SIGNATURE_HASH_ALGORITHM,
+				signatureEncoding: normalizedEncoding,
+				network,
+				inputShape: "transaction-without-signatures",
+				payloadPreview: buildSigningInputPreview(signingInput.payload),
 			signaturePayload: buildKaspaSigningPayload(signingInput.payload),
 			schema: "kaspa-signing-input.v1",
 		},

@@ -125,6 +125,7 @@ describe("kaspa sign tools", () => {
 		expect(details.signingContext?.hashInput?.messageDigest).toBe(
 			details.signingContext?.hashInput?.fingerprint,
 		);
+		expect(details.signingContext?.hashInput?.hashAlgorithm).toBe("sha256");
 		expect(details.signingContext?.hashInput?.payloadPreview).toContain("{");
 		expect(details.signingContext?.hashInput?.signaturePayload).toContain('"');
 		expect(details.signingContext?.hashInput?.signatureEncoding).toBe("hex");
@@ -205,6 +206,7 @@ describe("kaspa sign tools", () => {
 		);
 		expect(details.signingContext?.hashInput?.payloadPreview).toContain("{");
 		expect(details.signingContext?.hashInput?.signaturePayload).toContain("{");
+		expect(details.signingContext?.hashInput?.hashAlgorithm).toBe("sha256");
 		expect(details.signingContext?.metadata?.providerApiShape).toContain(
 			"function:signKaspaTransaction",
 		);

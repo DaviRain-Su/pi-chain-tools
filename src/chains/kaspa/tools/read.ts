@@ -55,6 +55,18 @@ type KaspaAddressBalanceResponse = unknown;
 
 type KaspaAddressUtxosResponse = unknown;
 
+const KASPA_DECIMALS = 8;
+
+type KaspaUtxoSelectionStrategy = "fifo" | "feeRate";
+
+type KaspaUtxoAddressItem = {
+	txId: string;
+	index: number;
+	amount: string;
+	address?: string;
+	scriptPublicKey?: string;
+};
+
 type KaspaTokenResponse = unknown;
 
 type KaspaBlockResponse = unknown;
@@ -166,6 +178,26 @@ export type KaspaAddressUtxosResult = {
 	data: KaspaAddressUtxosResponse;
 };
 
+type KaspaAddressSortedUtxosResult = {
+	address: string;
+	network: string;
+	apiBaseUrl: string;
+	limit?: number;
+	offset?: number;
+	strategy: KaspaUtxoSelectionStrategy;
+	apiVersion?: string;
+	rawCount: number;
+	fetchedCount: number;
+	selectedCount: number;
+	data: KaspaUtxoAddressItem[];
+	summary: {
+		totalAmount: string;
+		selectedAmount: string;
+		selectedOutOf: number;
+		selectionOrder: string[];
+	};
+};
+
 export type KaspaTokenResult = {
 	tokenId: string;
 	network: string;
@@ -256,6 +288,187 @@ function normalizeKaspaEndpoint(path: string, method: KaspaRpcMethod): string {
 		return `/v1/rpc/${normalized}`;
 	}
 	return `/${normalized}`;
+}
+
+function parseKaspaAmount(value: string | number, fieldName: string): bigint {
+	if (typeof value === "number") {
+		if (!Number.isFinite(value) || value <= 0) {
+			throw new Error(`${fieldName} must be a number greater than 0`);
+		}
+		return parseKaspaAmount(value.toString(), fieldName);
+	}
+	if (typeof value === "string") {
+		const normalized = value.trim();
+		if (!/^[0-9]+(\.[0-9]+)?$/.test(normalized)) {
+			throw new Error(`${fieldName} must be a decimal string`);
+		}
+		if (normalized.includes("e") || normalized.includes("E")) {
+			throw new Error(`${fieldName} must not use exponential notation`);
+		}
+		const [whole = "", fractionRaw = ""] = normalized.split(".");
+		if (fractionRaw.length > KASPA_DECIMALS) {
+			throw new Error(
+				`${fieldName} precision cannot exceed ${KASPA_DECIMALS} decimal places`,
+			);
+		}
+		const fraction = fractionRaw.padEnd(KASPA_DECIMALS, "0");
+		const parsed = BigInt(`${whole}${fraction}`);
+		if (parsed <= 0n) {
+			throw new Error(`${fieldName} must be greater than 0`);
+		}
+		return parsed;
+	}
+	throw new Error(`${fieldName} must be a number or numeric string`);
+}
+
+function parseKaspaUtxoSelectionStrategy(
+	value: unknown,
+): KaspaUtxoSelectionStrategy {
+	if (typeof value !== "string") {
+		return "feeRate";
+	}
+	if (value === "fifo") {
+		return "fifo";
+	}
+	if (value === "feeRate" || value === "feerate") {
+		return "feeRate";
+	}
+	throw new Error("utxoSelectionStrategy must be 'fifo' or 'feeRate'");
+}
+
+function parseKaspaFetchedUtxosPayload(data: unknown): unknown[] {
+	if (Array.isArray(data)) {
+		if (data.length === 0) {
+			throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+		}
+		return data;
+	}
+	if (!data || typeof data !== "object") {
+		throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+	}
+	const payload = data as Record<string, unknown>;
+	if (Array.isArray(payload.utxos)) {
+		if (payload.utxos.length === 0) {
+			throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+		}
+		return payload.utxos;
+	}
+	if (Array.isArray(payload.outputs)) {
+		if (payload.outputs.length === 0) {
+			throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+		}
+		return payload.outputs;
+	}
+	if (Array.isArray(payload.data)) {
+		if (payload.data.length === 0) {
+			throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+		}
+		return payload.data;
+	}
+	throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+}
+
+function normalizeKaspaFetchedUtxo(
+	raw: unknown,
+	index: number,
+): KaspaUtxoAddressItem {
+	if (!raw || typeof raw !== "object") {
+		throw new Error(`utxos[${index}] must be an object`);
+	}
+	const candidate = raw as Record<string, unknown>;
+	const txId =
+		typeof candidate.txId === "string"
+			? candidate.txId.trim()
+			: typeof candidate.txid === "string"
+				? candidate.txid.trim()
+				: typeof candidate.txHash === "string"
+					? candidate.txHash.trim()
+					: typeof candidate.hash === "string"
+						? candidate.hash.trim()
+						: "";
+	if (!txId) {
+		throw new Error(`utxos[${index}].txId is required`);
+	}
+	const rawIndex =
+		typeof candidate.index === "number"
+			? candidate.index
+			: typeof candidate.outputIndex === "number"
+				? candidate.outputIndex
+				: typeof candidate.vout === "number"
+					? candidate.vout
+					: undefined;
+	if (
+		typeof rawIndex !== "number" ||
+		!Number.isInteger(rawIndex) ||
+		rawIndex < 0
+	) {
+		throw new Error(`utxos[${index}].index is required`);
+	}
+	const amountSource = candidate.amount ?? candidate.value ?? candidate.satoshis;
+	if (amountSource == null) {
+		throw new Error(`utxos[${index}].amount is required`);
+	}
+	const amount = parseKaspaAmount(
+		amountSource as string | number,
+		`utxos[${index}].amount`,
+	).toString();
+	const utxo: KaspaUtxoAddressItem = {
+		txId,
+		index: rawIndex,
+		amount,
+	};
+	if (typeof candidate.address === "string" && candidate.address.trim()) {
+		utxo.address = candidate.address.trim();
+	}
+	if (
+		typeof candidate.scriptPublicKey === "string" &&
+		candidate.scriptPublicKey.trim()
+	) {
+		utxo.scriptPublicKey = candidate.scriptPublicKey.trim();
+	}
+	return utxo;
+}
+
+function selectKaspaUtxoOrder(
+	utxos: KaspaUtxoAddressItem[],
+	strategy: KaspaUtxoSelectionStrategy,
+): KaspaUtxoAddressItem[] {
+	return strategy === "fifo"
+		? [...utxos]
+		: [...utxos].sort((a, b) => {
+				const aAmount = BigInt(a.amount);
+				const bAmount = BigInt(b.amount);
+				return aAmount === bAmount ? 0 : aAmount > bAmount ? -1 : 1;
+			});
+}
+
+function buildKaspaAddressUtxoSelectionSummary(params: {
+	strategy: KaspaUtxoSelectionStrategy;
+	requested: KaspaUtxoAddressItem[];
+	selected: KaspaUtxoAddressItem[];
+}): {
+	totalAmount: string;
+	selectedAmount: string;
+	selectedOutOf: number;
+	selectionOrder: string[];
+} {
+	const totalAmount = params.requested.reduce(
+		(sum, utxo) => sum + BigInt(utxo.amount),
+		0n,
+	);
+	const selectedAmount = params.selected.reduce(
+		(sum, utxo) => sum + BigInt(utxo.amount),
+		0n,
+	);
+	return {
+		totalAmount: totalAmount.toString(),
+		selectedAmount: selectedAmount.toString(),
+		selectedOutOf: params.selected.length,
+		selectionOrder: params.selected.map(
+			(utxo, index) =>
+				`${index}:${utxo.txId}:${utxo.index}:${utxo.amount}`,
+		),
+	};
 }
 
 function normalizeKaspaQueryPayload(
@@ -467,7 +680,7 @@ export async function fetchKaspaTransactionAcceptance(params: {
 	};
 }
 
-function parseKaspaAmount(value: unknown): number {
+function parseKaspaStatsAmount(value: unknown): number {
 	if (typeof value === "number") {
 		if (Number.isFinite(value)) {
 			return value;
@@ -519,8 +732,8 @@ export async function fetchKaspaAddressHistoryStats(params: {
 		if (transaction.isAccepted) {
 			acceptedTransactions += 1;
 		}
-		netAmountSent += parseKaspaAmount(transaction.amountSent);
-		netAmountReceived += parseKaspaAmount(transaction.amountReceived);
+		netAmountSent += parseKaspaStatsAmount(transaction.amountSent);
+		netAmountReceived += parseKaspaStatsAmount(transaction.amountReceived);
 	}
 	const latest = transactions[0];
 	return {
@@ -609,6 +822,69 @@ export async function fetchKaspaAddressUtxos(params: {
 		apiBaseUrl,
 		limit: normalizedLimit,
 		data,
+	};
+}
+
+export async function fetchKaspaAddressSortedUtxos(params: {
+	address: string;
+	limit?: number;
+	offset?: number;
+	selectionStrategy?: KaspaUtxoSelectionStrategy;
+	selectionLimit?: number;
+	network?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+	strictAddressCheck?: boolean;
+}): Promise<KaspaAddressSortedUtxosResult> {
+	const network = parseKaspaNetwork(params.network);
+	const address = normalizeKaspaAddress(
+		params.address,
+		network,
+		params.strictAddressCheck === true,
+	);
+	const normalizedLimit = parseKaspaLimit(params.limit);
+	const parsedOffset =
+		params.offset == null
+			? undefined
+			: parseKaspaPositiveInteger(params.offset, "offset", true);
+	const parsedSelectionLimit = params.selectionLimit
+		? parseKaspaPositiveInteger(params.selectionLimit, "selectionLimit")
+		: undefined;
+	const strategy = parseKaspaUtxoSelectionStrategy(params.selectionStrategy);
+	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
+	const apiKey = getKaspaApiKey(params.apiKey);
+	const source = await fetchKaspaAddressUtxos({
+		address,
+		limit: normalizedLimit,
+		offset: parsedOffset,
+		network,
+		apiBaseUrl: params.apiBaseUrl,
+		apiKey: params.apiKey,
+		strictAddressCheck: params.strictAddressCheck,
+	});
+	const requestedUtxos = parseKaspaFetchedUtxosPayload(source.data).map(
+		(rawUtxo, index) => normalizeKaspaFetchedUtxo(rawUtxo, index),
+	);
+	const selected = selectKaspaUtxoOrder(requestedUtxos, strategy);
+	const finalUtxos =
+		parsedSelectionLimit == null ? selected : selected.slice(0, parsedSelectionLimit);
+	return {
+		network,
+		address,
+		apiBaseUrl,
+		limit: normalizedLimit,
+		offset: parsedOffset,
+		strategy,
+		apiVersion: "v1",
+		rawCount: requestedUtxos.length,
+		fetchedCount: selected.length,
+		selectedCount: finalUtxos.length,
+		data: finalUtxos,
+		summary: buildKaspaAddressUtxoSelectionSummary({
+			strategy,
+			requested: requestedUtxos,
+			selected: finalUtxos,
+		}),
 	};
 }
 
@@ -917,6 +1193,12 @@ export function summarizeKaspaAddressUtxosResult(
 	result: KaspaAddressUtxosResult,
 ): string {
 	return `Kaspa address utxos network=${result.network} address=${result.address} limit=${result.limit ?? "all"} data=${summarizeKaspaResponse(result.data)}`;
+}
+
+export function summarizeKaspaAddressSortedUtxosResult(
+	result: KaspaAddressSortedUtxosResult,
+): string {
+	return `Kaspa address sorted utxos network=${result.network} address=${result.address} strategy=${result.strategy} raw=${result.rawCount} selected=${result.selectedCount} summary=${summarizeKaspaResponse(result.summary)}`;
 }
 
 export function summarizeKaspaTokenResult(result: KaspaTokenResult): string {
@@ -1240,6 +1522,70 @@ export function createKaspaReadToolsLegacy() {
 						address: result.address,
 						apiBaseUrl: result.apiBaseUrl,
 						limit: result.limit,
+						data: result.data,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${KASPA_TOOL_PREFIX}fetchUtxos`,
+			label: "Kaspa Fetch UTXOs",
+			description:
+				"Fetch Kaspa address UTXOs with normalized fields and strategy-based ordering.",
+			parameters: Type.Object({
+				address: Type.String({ minLength: 8 }),
+				limit: Type.Optional(Type.Number()),
+				offset: Type.Optional(Type.Number()),
+				selectionStrategy: Type.Optional(
+					Type.Union([
+						Type.Literal("fifo"),
+						Type.Literal("feeRate"),
+						Type.Literal("feerate"),
+					]),
+				),
+				selectionLimit: Type.Optional(
+					Type.Integer({
+						minimum: 1,
+						description:
+							"Optional maximum number of sorted UTXOs returned after strategy ordering.",
+					}),
+				),
+				network: kaspaNetworkSchema(),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				strictAddressCheck: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, params) {
+				const result = await fetchKaspaAddressSortedUtxos({
+					address: params.address,
+					limit: params.limit,
+					offset: params.offset,
+					selectionStrategy: params.selectionStrategy,
+					selectionLimit: params.selectionLimit,
+					network: params.network,
+					apiBaseUrl: params.apiBaseUrl,
+					apiKey: params.apiKey,
+					strictAddressCheck: params.strictAddressCheck,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeKaspaAddressSortedUtxosResult(result),
+						},
+					],
+					details: {
+						schema: "kaspa.address.utxos.sorted.v1",
+						network: result.network,
+						address: result.address,
+						apiBaseUrl: result.apiBaseUrl,
+						strategy: result.strategy,
+						limit: result.limit,
+						offset: result.offset,
+						rawCount: result.rawCount,
+						fetchedCount: result.fetchedCount,
+						selectedCount: result.selectedCount,
+						summary: result.summary,
 						data: result.data,
 					},
 				};

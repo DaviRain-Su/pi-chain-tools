@@ -155,6 +155,90 @@ describe("kaspa read tools", () => {
 		});
 	});
 
+	it("fetches and sorts address utxos with strategy and aliases", async () => {
+		mockFetchJson({
+			status: 200,
+			body: {
+				utxos: [
+					{ txId: "tx-a", index: 0, amount: "1.1" },
+					{ txId: "tx-b", index: 0, amount: "2" },
+					{ txId: "tx-c", index: 1, amount: "0.5" },
+				],
+			},
+		});
+
+		const tool = getTool("kaspa_fetchUtxos");
+		const result = await tool.execute("kaspa-fetch-utxos", {
+			address: "kaspa:qtestsender11111111111111111111111111111111111111111111111111",
+			selectionStrategy: "feerate",
+			selectionLimit: 2,
+		});
+		const details = result.details as {
+			network: string;
+			rawCount: number;
+			selectedCount: number;
+			strategy: string;
+			data: Array<{ txId: string; amount: string; index: number }>;
+			summary: {
+				selectionOrder: string[];
+				totalAmount: string;
+				selectedAmount: string;
+				selectedOutOf: number;
+			};
+		};
+		expect(details.network).toBe("mainnet");
+		expect(details.strategy).toBe("feeRate");
+		expect(details.rawCount).toBe(3);
+		expect(details.selectedCount).toBe(2);
+		expect(details.data).toHaveLength(2);
+		expect(details.data.map((entry) => entry.txId)).toEqual([
+			"tx-b",
+			"tx-a",
+		]);
+		expect(details.data[0].amount).toBe("200000000");
+		expect(details.summary.totalAmount).toBe("360000000");
+		expect(details.summary.selectedAmount).toBe("310000000");
+		expect(details.summary.selectedOutOf).toBe(2);
+		expect(details.summary.selectionOrder).toEqual([
+			"0:tx-b:0:200000000",
+			"1:tx-a:0:110000000",
+		]);
+		const calledUrl = new URL(fetchMock.mock.calls[0]?.[0]?.toString() ?? "");
+		expect(calledUrl.pathname).toContain("/v1/addresses/");
+	});
+
+	it("parses alias fields from fetchUtxos payload", async () => {
+		mockFetchJson({
+			status: 200,
+			body: {
+				outputs: [
+					{ txHash: "alias-utxo", vout: 2, satoshis: "2" },
+					{ txid: "alias-utxo-2", outputIndex: 1, value: "1.2" },
+				],
+			},
+		});
+
+		const tool = getTool("kaspa_fetchUtxos");
+		const result = await tool.execute("kaspa-fetch-utxos-alias", {
+			address: "kaspa:qtestsender11111111111111111111111111111111111111111111111111",
+			selectionStrategy: "fifo",
+		});
+		const details = result.details as {
+			data: Array<{ txId: string; index: number; amount: string }>;
+		};
+		expect(details.data).toHaveLength(2);
+		expect(details.data[0]).toMatchObject({
+			txId: "alias-utxo",
+			index: 2,
+			amount: "200000000",
+		});
+		expect(details.data[1]).toMatchObject({
+			txId: "alias-utxo-2",
+			index: 1,
+			amount: "120000000",
+		});
+	});
+
 	it("gets fee estimate", async () => {
 		mockFetchJson({
 			status: 200,
