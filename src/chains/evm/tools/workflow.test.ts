@@ -659,6 +659,72 @@ describe("w3rt_run_evm_polymarket_workflow_v0", () => {
 		).rejects.toThrow("primary place failed");
 	});
 
+	it("adds retry guidance when execute fails due to missing private key", async () => {
+		expect.hasAssertions();
+		executeMocks.placeOrderExecute.mockRejectedValueOnce(
+			new Error(
+				"No Polymarket private key provided. Set fromPrivateKey or POLYMARKET_PRIVATE_KEY.",
+			),
+		);
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-missing-key", {
+			runId: "wf-evm-4-missing-key",
+			runMode: "analysis",
+			network: "polygon",
+			stakeUsd: 20,
+			side: "up",
+		});
+		const details = analyzed.details as { confirmToken: string };
+		try {
+			await tool.execute("wf4-missing-key-exec", {
+				runId: "wf-evm-4-missing-key",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+				confirmToken: details.confirmToken,
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			expect(message).toContain("fromPrivateKey");
+			expect(message).toContain("重试建议");
+			return;
+		}
+		expect.fail("Expected execute to fail.");
+	});
+
+	it("adds retry guidance when execute fails due to geoblock", async () => {
+		expect.hasAssertions();
+		executeMocks.placeOrderExecute.mockRejectedValueOnce(
+			new Error(
+				"Polymarket geoblock blocked for country=CN. Execute is not allowed in this region.",
+			),
+		);
+		const tool = getTool();
+		const analyzed = await tool.execute("wf4-geoblock", {
+			runId: "wf-evm-4-geoblock",
+			runMode: "analysis",
+			network: "polygon",
+			stakeUsd: 20,
+			side: "up",
+		});
+		const details = analyzed.details as { confirmToken: string };
+		try {
+			await tool.execute("wf4-geoblock-exec", {
+				runId: "wf-evm-4-geoblock",
+				runMode: "execute",
+				network: "polygon",
+				confirmMainnet: true,
+				confirmToken: details.confirmToken,
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			expect(message).toContain("region");
+			expect(message).toContain("重试建议");
+			return;
+		}
+		expect.fail("Expected execute to fail.");
+	});
+
 	it("blocks requote execute when max attempts reached", async () => {
 		const tool = getTool();
 		const analyzed = await tool.execute("wf4-requote-attempts-analysis", {

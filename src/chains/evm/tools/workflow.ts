@@ -1139,6 +1139,70 @@ function buildPolymarketRiskHint(params: {
 	return `风险提示：${profileHint}风控未通过。原因：${issueText.join("；")}`;
 }
 
+function buildPolymarketTradeFailureGuidance(params: {
+	baseMessage: string;
+	errorMessage?: string;
+	intent: WorkflowTradeIntent;
+	guardEvaluation: Btc5mTradeGuardEvaluation;
+}): string {
+	const message = (params.errorMessage ?? "").trim();
+	const reasons = new Set<string>();
+	const suggestions = new Set<string>();
+	if (message) reasons.add(message);
+
+	const normalized = message.toLowerCase();
+	if (
+		/no polymarket private key|private key provided|polymarket private key/.test(
+			normalized,
+		)
+	) {
+		suggestions.add(
+			"请先配置 POLYMARKET_PRIVATE_KEY，或在参数中设置 fromPrivateKey。",
+		);
+	}
+	if (/\bfunder\b/.test(normalized)) {
+		suggestions.add("请先配置 POLYMARKET_FUNDER。");
+	}
+	if (
+		/api key|api secret|api passphrase|api credentials|derive polymarket api credentials/.test(
+			normalized,
+		)
+	) {
+		suggestions.add(
+			"请补齐 POLYMARKET_API_KEY、POLYMARKET_API_SECRET、POLYMARKET_API_PASSPHRASE。",
+		);
+	}
+	if (/geoblock|region|country|blocked/.test(normalized)) {
+		suggestions.add("请确认执行环境未受地域限制，必要时切换可用网络后重试。");
+	}
+	if (
+		/insufficient|not enough|余额不足|out of gas|underpriced|nonce/.test(
+			normalized,
+		)
+	) {
+		suggestions.add("请先补充资产/手续费余额后再重试。");
+	}
+
+	if (!params.guardEvaluation.passed) {
+		const riskHint = buildPolymarketRiskHint({
+			intent: params.intent,
+			guardEvaluation: params.guardEvaluation,
+		});
+		if (riskHint) reasons.add(riskHint);
+		suggestions.add(
+			"可放宽风险约束（maxSpreadBps/minDepthUsd/maxStakeUsd/minConfidence）后再模拟再试。",
+		);
+	} else if (reasons.size === 0) {
+		suggestions.add("建议稍后重试或检查交易参数。");
+	}
+
+	const reasonText = [...reasons].filter((reason) => reason.trim()).join("；");
+	const suggestionText = [...suggestions]
+		.filter((suggestion) => suggestion.trim())
+		.join("；");
+	return `${params.baseMessage}${reasonText ? `（原因：${reasonText}）` : ""} 重试建议：${suggestionText}`;
+}
+
 function buildCancelSummaryLine(params: {
 	intent: WorkflowCancelIntent;
 	phase: WorkflowRunMode;
@@ -1725,17 +1789,35 @@ export function createEvmWorkflowTools() {
 					assertMainnetConfirmation();
 					if (simulateStatus === "no_liquidity") {
 						throw new Error(
-							"Trade execute blocked: no ask liquidity in current orderbook.",
+							buildPolymarketTradeFailureGuidance({
+								baseMessage:
+									"Trade execute blocked: no ask liquidity in current orderbook.",
+								errorMessage: "no ask liquidity in current orderbook",
+								intent,
+								guardEvaluation,
+							}),
 						);
 					}
 					if (simulateStatus === "price_too_high") {
 						throw new Error(
-							`Trade execute blocked: entryPrice ${effectiveOrderPrice ?? "n/a"} exceeds maxEntryPrice ${intent.maxEntryPrice}.`,
+							buildPolymarketTradeFailureGuidance({
+								baseMessage: `Trade execute blocked: entryPrice ${effectiveOrderPrice ?? "n/a"} exceeds maxEntryPrice ${intent.maxEntryPrice}.`,
+								errorMessage: `entryPrice ${effectiveOrderPrice ?? "n/a"} exceeds maxEntryPrice ${intent.maxEntryPrice}.`,
+								intent,
+								guardEvaluation,
+							}),
 						);
 					}
 					if (simulateStatus === "guard_blocked") {
 						throw new Error(
-							`Trade execute blocked by guard checks: ${guardEvaluation.issues.map((issue) => issue.message).join(" | ")}`,
+							buildPolymarketTradeFailureGuidance({
+								baseMessage: "Trade execute blocked by guard checks.",
+								errorMessage: guardEvaluation.issues
+									.map((issue) => issue.message)
+									.join(" | "),
+								intent,
+								guardEvaluation,
+							}),
 						);
 					}
 					const requoteRuntime = intent.requoteStaleOrders
@@ -1751,17 +1833,33 @@ export function createEvmWorkflowTools() {
 					});
 					if (requoteRuntime?.blockedByAttempts) {
 						throw new Error(
-							`Trade execute blocked: requote max attempts reached (${requoteRuntime.attemptsUsed}/${requoteRuntime.maxAttempts}).`,
+							buildPolymarketTradeFailureGuidance({
+								baseMessage: `Trade execute blocked: requote max attempts reached (${requoteRuntime.attemptsUsed}/${requoteRuntime.maxAttempts}).`,
+								errorMessage: `requote max attempts reached (${requoteRuntime.attemptsUsed}/${requoteRuntime.maxAttempts}).`,
+								intent,
+								guardEvaluation,
+							}),
 						);
 					}
 					if (requoteRuntime?.blockedByCooldown) {
 						throw new Error(
-							`Trade execute throttled: wait ${requoteRuntime.remainingCooldownSeconds}s before next requote.`,
+							buildPolymarketTradeFailureGuidance({
+								baseMessage: "Trade execute throttled.",
+								errorMessage: `requote cooldown not elapsed (${requoteRuntime.remainingCooldownSeconds}s).`,
+								intent,
+								guardEvaluation,
+							}),
 						);
 					}
 					if (volatilityGuard.blocked) {
 						throw new Error(
-							`Trade execute blocked by requote volatility guard: drift=${volatilityGuard.driftBps?.toFixed(2)}bps > max=${volatilityGuard.maxDriftBps}.`,
+							buildPolymarketTradeFailureGuidance({
+								baseMessage:
+									"Trade execute blocked by requote volatility guard.",
+								errorMessage: `drift=${volatilityGuard.driftBps?.toFixed(2)}bps > max=${volatilityGuard.maxDriftBps}`,
+								intent,
+								guardEvaluation,
+							}),
 						);
 					}
 					let staleCancelResult: unknown = null;
@@ -1821,11 +1919,12 @@ export function createEvmWorkflowTools() {
 							buildPlaceOrderParams(executedLimitPrice),
 						);
 					} catch (primaryError) {
+						const primaryFailureMessage = stringifyUnknown(primaryError);
 						if (
 							intent.requoteStaleOrders &&
 							intent.requoteFallbackMode === "retry_aggressive"
 						) {
-							repost.primaryError = stringifyUnknown(primaryError);
+							repost.primaryError = primaryFailureMessage;
 							const fallbackPricing = resolveRequoteLimitPrice({
 								orderbook,
 								strategy: "aggressive",
@@ -1848,16 +1947,35 @@ export function createEvmWorkflowTools() {
 								} catch (fallbackError) {
 									repost.fallbackError = stringifyUnknown(fallbackError);
 									throw new Error(
-										`Repost failed after stale-cancel. primary=${repost.primaryError} | fallback=${repost.fallbackError}`,
+										`Repost failed after stale-cancel. ${buildPolymarketTradeFailureGuidance(
+											{
+												baseMessage: "Repost fallback order placement failed.",
+												errorMessage: `primary=${repost.primaryError} | fallback=${repost.fallbackError}`,
+												intent,
+												guardEvaluation,
+											},
+										)}`,
 									);
 								}
 							} else {
 								throw new Error(
-									`Repost failed after stale-cancel. primary=${repost.primaryError}`,
+									buildPolymarketTradeFailureGuidance({
+										baseMessage: "Repost failed after stale-cancel.",
+										errorMessage: repost.primaryError,
+										intent,
+										guardEvaluation,
+									}),
 								);
 							}
 						} else {
-							throw primaryError;
+							throw new Error(
+								buildPolymarketTradeFailureGuidance({
+									baseMessage: "Trade execute failed while placing order.",
+									errorMessage: primaryFailureMessage,
+									intent,
+									guardEvaluation,
+								}),
+							);
 						}
 					}
 					if (!executeResult) {
