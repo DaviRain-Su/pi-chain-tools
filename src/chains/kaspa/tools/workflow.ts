@@ -97,6 +97,7 @@ type KaspaTransferQuickIntent = {
 type KaspaTransferQuickMinimalParams = {
 	runMode?: string;
 	intentText?: string;
+	text?: string;
 	network?: string;
 	fromAddress?: string;
 	toAddress?: string;
@@ -112,6 +113,38 @@ type KaspaTransferQuickMinimalParams = {
 	acceptanceEndpoint?: string;
 	privateKey?: string;
 };
+
+function normalizeKaspaTransferQuickMinimalInput(
+	rawParams: unknown,
+): KaspaTransferQuickMinimalParams {
+	if (typeof rawParams === "string") {
+		const trimmed = rawParams.trim();
+		return trimmed
+			? {
+					intentText: trimmed,
+				}
+			: {};
+	}
+	if (
+		!rawParams ||
+		typeof rawParams !== "object" ||
+		Array.isArray(rawParams)
+	) {
+		throw new Error(
+			"w3rt_run_kaspa_send_v0 requires a natural language intent string or an object payload.",
+		);
+	}
+	const params = rawParams as KaspaTransferQuickMinimalParams;
+	const inlineText =
+		typeof params.intentText === "string" ? params.intentText.trim() : undefined;
+	const fallbackText =
+		typeof params.text === "string" ? params.text.trim() : undefined;
+	const normalizedIntent = inlineText || fallbackText;
+	return {
+		...params,
+		intentText: normalizedIntent || params.intentText,
+	};
+}
 
 type KaspaTransferQuickWorkflowResult = {
 	content: Array<{ type: string; text: string }>;
@@ -975,47 +1008,51 @@ function extractTxIdFromSubmitResult(data: unknown): string | null {
 			label: "Kaspa Send (natural)",
 			description:
 				"Minimal Kaspa transfer for natural language: `intentText` + optional runMode.",
-			parameters: Type.Object({
-				runMode: Type.Optional(
-					Type.Union([
-						Type.Literal("analysis"),
-						Type.Literal("simulate"),
-						Type.Literal("execute"),
-					]),
-				),
-				intentText: Type.Optional(Type.String()),
-				network: kaspaNetworkSchema(),
-				fromAddress: Type.Optional(Type.String()),
-				toAddress: Type.Optional(Type.String()),
-				amount: Type.Optional(Type.Union([Type.String(), Type.Number()])),
-				requestMemo: Type.Optional(Type.String()),
-				apiBaseUrl: Type.Optional(Type.String()),
-				apiKey: Type.Optional(Type.String()),
-				confirmMainnet: Type.Optional(Type.Boolean()),
-				checkAcceptance: Type.Optional(Type.Boolean()),
-				pollAcceptance: Type.Optional(
-					Type.Boolean({
-						description:
-							"Poll acceptance endpoint until non-pending state or timeout.",
-					}),
-				),
-				acceptancePollIntervalMs: Type.Optional(
-					Type.Integer({
-						minimum: 250,
-						description: "Acceptance poll interval in ms.",
-					}),
-				),
-				acceptancePollTimeoutMs: Type.Optional(
-					Type.Integer({
-						minimum: 1000,
-						description: "Acceptance polling timeout in ms.",
-					}),
-				),
-				acceptanceEndpoint: Type.Optional(Type.String()),
-				privateKey: Type.Optional(Type.String()),
-			}),
+			parameters: Type.Union([
+				Type.Object({
+					runMode: Type.Optional(
+						Type.Union([
+							Type.Literal("analysis"),
+							Type.Literal("simulate"),
+							Type.Literal("execute"),
+						]),
+					),
+					intentText: Type.Optional(Type.String()),
+					text: Type.Optional(Type.String()),
+					network: kaspaNetworkSchema(),
+					fromAddress: Type.Optional(Type.String()),
+					toAddress: Type.Optional(Type.String()),
+					amount: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+					requestMemo: Type.Optional(Type.String()),
+					apiBaseUrl: Type.Optional(Type.String()),
+					apiKey: Type.Optional(Type.String()),
+					confirmMainnet: Type.Optional(Type.Boolean()),
+					checkAcceptance: Type.Optional(Type.Boolean()),
+					pollAcceptance: Type.Optional(
+						Type.Boolean({
+							description:
+								"Poll acceptance endpoint until non-pending state or timeout.",
+						}),
+					),
+					acceptancePollIntervalMs: Type.Optional(
+						Type.Integer({
+							minimum: 250,
+							description: "Acceptance poll interval in ms.",
+						}),
+					),
+					acceptancePollTimeoutMs: Type.Optional(
+						Type.Integer({
+							minimum: 1000,
+							description: "Acceptance polling timeout in ms.",
+						}),
+					),
+					acceptanceEndpoint: Type.Optional(Type.String()),
+					privateKey: Type.Optional(Type.String()),
+				}),
+				Type.String({ description: "Natural language intent sentence." }),
+			]),
 			async execute(_toolCallId, rawParams) {
-				const params = rawParams as KaspaTransferQuickMinimalParams;
+				const params = normalizeKaspaTransferQuickMinimalInput(rawParams);
 				return runKaspaTransferQuickWorkflow({
 					runMode: params.runMode,
 					intentText: params.intentText,
