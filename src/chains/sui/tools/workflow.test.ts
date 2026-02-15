@@ -543,6 +543,48 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("parses swap intentText with minimum output phrase and output coin decimals", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf2m", {
+			runId: "wf-sui-02m",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "在 Sui 主网把 1 SUI 换成 USDC，至少拿到 1.2",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.swap.cetus",
+			intent: {
+				type: "sui.swap.cetus",
+				inputCoinType: "0x2::sui::SUI",
+				outputCoinType: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				amountRaw: "1200000",
+				byAmountIn: false,
+			},
+		});
+	});
+
+	it("parses swap intentText with minimum output phrase and explicit output symbol", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf2n", {
+			runId: "wf-sui-02n",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "把 SUI 换成 USDC，最少拿到 0.5 usdc",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.swap.cetus",
+			intent: {
+				type: "sui.swap.cetus",
+				inputCoinType: "0x2::sui::SUI",
+				outputCoinType: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				amountRaw: "500000",
+				byAmountIn: false,
+			},
+		});
+	});
+
 	it("resolves unknown symbols in swap intentText via farms token index", async () => {
 		cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockImplementation(
 			async ({ symbol }) => {

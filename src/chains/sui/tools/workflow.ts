@@ -105,6 +105,7 @@ type ParsedIntentHints = {
 	toAddress?: string;
 	amountSui?: number;
 	amountRaw?: string;
+	byAmountIn?: boolean;
 	coinType?: string;
 	inputCoinType?: string;
 	outputCoinType?: string;
@@ -827,12 +828,38 @@ function collectCoinTypeCandidates(text: string): string[] {
 function parseSwapAmountRawFromText(params: {
 	text: string;
 	inputCoinType?: string;
+	outputCoinType?: string;
 	fallbackAmountRaw?: string;
 }): string | undefined {
 	const explicitRaw =
 		params.text.match(/\bamountRaw\s*[=:]\s*([0-9]+)\b/i)?.[1] ??
 		params.text.match(/\b([0-9]+)\s*raw\b/i)?.[1];
 	if (explicitRaw) return explicitRaw;
+
+	const minOutputMatch = params.text.match(
+		/(?:至少拿到|最少拿到|最小输出|最低输出|至少.*拿到)\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z][A-Za-z0-9_]{1,15})?/i,
+	);
+	if (minOutputMatch?.[1]) {
+		const amountUi = minOutputMatch[1];
+		const symbol = minOutputMatch[2];
+		if (symbol) {
+			const token = resolveKnownSuiToken(symbol);
+			if (!token) {
+				throw new Error(
+					`swap amount uses token ${symbol} but token decimals unknown. Please specify amountRaw or use a supported symbol.`,
+				);
+			}
+			return decimalUiAmountToRaw(amountUi, token.decimals, "amountUi");
+		}
+		if (params.outputCoinType) {
+			const outputToken =
+				resolveKnownSuiTokenByCoinType(params.outputCoinType) ??
+				resolveKnownSuiToken(params.outputCoinType);
+			if (outputToken) {
+				return decimalUiAmountToRaw(amountUi, outputToken.decimals, "amountUi");
+			}
+		}
+	}
 
 	const symbolAmountMatches = [
 		...params.text.matchAll(
@@ -1393,14 +1420,27 @@ function parseIntentText(text?: string): ParsedIntentHints {
 					coinTypeB: pair.right,
 				})
 			: [undefined, undefined];
+		const resolvedInputType = resolveKnownSuiToken(
+			resolvedInput || inputCoinType || "",
+		)?.coinType;
+		const resolvedOutputType = resolveKnownSuiToken(
+			resolvedOutput || outputCoinType || "",
+		)?.coinType;
+		const swapMinOutputMode =
+			/(?:至少拿到|最少拿到|最小输出|最低输出|至少.*拿到)/i.test(text);
+		const inputForAmount = resolvedInputType || resolvedInput || inputCoinType;
+		const outputForAmount =
+			resolvedOutputType || resolvedOutput || outputCoinType;
 		return {
 			...controlHints,
 			intentType: "sui.swap.cetus",
 			inputCoinType: resolvedInput || inputCoinType,
 			outputCoinType: resolvedOutput || outputCoinType,
+			byAmountIn: swapMinOutputMode ? false : undefined,
 			amountRaw: parseSwapAmountRawFromText({
 				text,
-				inputCoinType,
+				inputCoinType: inputForAmount,
+				outputCoinType: outputForAmount,
 				fallbackAmountRaw: integerMatch?.[0],
 			}),
 		};
@@ -2034,7 +2074,7 @@ async function normalizeIntent(
 		inputCoinType,
 		outputCoinType,
 		amountRaw,
-		byAmountIn: params.byAmountIn !== false,
+		byAmountIn: parsed.byAmountIn ?? params.byAmountIn !== false,
 		slippageBps: params.slippageBps ?? 100,
 		providers: params.providers?.length ? params.providers : undefined,
 		depth: params.depth,
