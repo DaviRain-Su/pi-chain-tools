@@ -952,6 +952,31 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("parses LP remove intentText with shorthand min A/min B", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5d-remove-shorthand", {
+			runId: "wf-sui-05d-remove-shorthand",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"remove liquidity pool: 0xabc position: 0xdef SUI/USDC tick: -5 to 5 deltaLiquidity: 1000 min a: 1.2 min b: 2.5",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.remove",
+			intent: {
+				type: "sui.lp.cetus.remove",
+				poolId: "0xabc",
+				positionId: "0xdef",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				deltaLiquidity: "1000",
+				minAmountA: "1200000000",
+				minAmountB: "2500000",
+			},
+		});
+	});
+
 	it("rejects LP remove decimal min outputs when decimals are unknown", async () => {
 		const tool = getTool();
 		await expect(

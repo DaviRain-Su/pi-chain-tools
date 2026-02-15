@@ -1248,9 +1248,13 @@ function parseIntentText(text?: string): ParsedIntentHints {
 			/(?:deltaLiquidity|delta_liquidity|liquidityDelta|移除流动性|减少流动性|liquidity)\s*[:= ]\s*(\d+)/i,
 		) ?? null;
 	const minAmountAMatch =
-		text.match(/(?:minAmountA|min_a|minA)\s*[:= ]\s*(\d+(?:\.\d+)?)/i) ?? null;
+		text.match(
+			/(?:minAmountA|min_a|minA|min a|min amount A|a min|最小A|最少A|至少A)\s*[:= ]\s*(\d+(?:\.\d+)?)/i,
+		) ?? null;
 	const minAmountBMatch =
-		text.match(/(?:minAmountB|min_b|minB)\s*[:= ]\s*(\d+(?:\.\d+)?)/i) ?? null;
+		text.match(
+			/(?:minAmountB|min_b|minB|min b|min amount B|b min|最小B|最少B|至少B)\s*[:= ]\s*(\d+(?:\.\d+)?)/i,
+		) ?? null;
 	const controlHints: Pick<
 		ParsedIntentHints,
 		"confirmMainnet" | "confirmToken" | "confirmRisk"
