@@ -20,10 +20,7 @@ import {
 	VersionedTransaction,
 } from "@solana/web3.js";
 import { defineTool } from "../../../core/types.js";
-import {
-	parseRunMode,
-	parseRunModeHint,
-} from "../../shared/workflow-runtime.js";
+import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
 import {
 	KAMINO_MAINNET_MARKET_ADDRESS,
 	TOKEN_2022_PROGRAM_ID,
@@ -9718,11 +9715,12 @@ export function createSolanaWorkflowTools() {
 				feeAccount: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, params) {
-				const runMode = parseRunMode(
-					params.runMode ??
-						(parseRunModeHint(params.intentText) as
-							| WorkflowRunMode
-							| undefined),
+				const runMode = resolveWorkflowRunMode(
+					params.runMode,
+					params.intentText,
+					{
+						allowCompose: false,
+					},
 				);
 				const requestParams = params as Record<string, unknown>;
 				const hasCoreIntentInputs = hasIntentInputs(requestParams);

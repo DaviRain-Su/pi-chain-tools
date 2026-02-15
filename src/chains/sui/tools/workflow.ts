@@ -3,10 +3,7 @@ import { AggregatorClient, Env } from "@cetusprotocol/aggregator-sdk";
 import { Transaction } from "@mysten/sui/transactions";
 import { Type } from "@sinclair/typebox";
 import { type RegisteredTool, defineTool } from "../../../core/types.js";
-import {
-	parseRunMode,
-	parseRunModeHint,
-} from "../../shared/workflow-runtime.js";
+import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
 import {
 	buildCetusFarmsHarvestTransaction,
 	buildCetusFarmsStakeTransaction,
@@ -2644,10 +2641,9 @@ function resolveDefiWorkflowRoute(
 		return "w3rt_run_sui_stablelayer_workflow_v0";
 	}
 
-	const runMode = parseRunMode(
-		params.runMode ??
-			(parseRunModeHint(params.intentText) as WorkflowRunMode | undefined),
-	);
+	const runMode = resolveWorkflowRunMode(params.runMode, params.intentText, {
+		allowCompose: false,
+	});
 	const hasRoutingHints = Boolean(
 		intentType ||
 			params.stableCoinType?.trim() ||
@@ -2753,11 +2749,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as WorkflowParams;
-				const runMode = parseRunMode(
-					params.runMode ??
-						(parseRunModeHint(params.intentText) as
-							| WorkflowRunMode
-							| undefined),
+				const runMode = resolveWorkflowRunMode(
+					params.runMode,
+					params.intentText,
+					{
+						allowCompose: false,
+					},
 				);
 				const intentHints = parseIntentText(params.intentText);
 				const priorSession =
@@ -3051,11 +3048,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as StableLayerWorkflowParams;
-				const runMode = parseRunMode(
-					params.runMode ??
-						(parseRunModeHint(params.intentText) as
-							| WorkflowRunMode
-							| undefined),
+				const runMode = resolveWorkflowRunMode(
+					params.runMode,
+					params.intentText,
+					{
+						allowCompose: false,
+					},
 				);
 				const priorSession =
 					runMode === "execute"
@@ -3326,11 +3324,12 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as CetusFarmsWorkflowParams;
-				const runMode = parseRunMode(
-					params.runMode ??
-						(parseRunModeHint(params.intentText) as
-							| WorkflowRunMode
-							| undefined),
+				const runMode = resolveWorkflowRunMode(
+					params.runMode,
+					params.intentText,
+					{
+						allowCompose: false,
+					},
 				);
 				const priorSession =
 					runMode === "execute"

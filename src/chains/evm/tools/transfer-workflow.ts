@@ -1,10 +1,7 @@
 import { createHash } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
-import {
-	parseRunMode,
-	parseRunModeHint,
-} from "../../shared/workflow-runtime.js";
+import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
 import {
 	EVM_TOOL_PREFIX,
 	type EvmNetwork,
@@ -143,7 +140,6 @@ type ParsedIntentHints = {
 	amountToken?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
-	runMode?: WorkflowRunMode;
 };
 
 type WorkflowSessionRecord = {
@@ -466,7 +462,6 @@ function hasConfirmMainnetPhrase(text?: string): boolean {
 
 function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
-	const runMode = parseRunModeHint(text) as WorkflowRunMode | undefined;
 	const addresses = text.match(/0x[a-fA-F0-9]{40}/g) ?? [];
 	const tokenAddressMatch =
 		text.match(/\btoken(?:Address)?\s*[:= ]\s*(0x[a-fA-F0-9]{40})\b/i)?.[1] ??
@@ -516,7 +511,6 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	}
 
 	return {
-		runMode,
 		intentType: erc20Hint ? "evm.transfer.erc20" : undefined,
 		toAddress,
 		tokenAddress,
@@ -797,7 +791,13 @@ export function createEvmTransferWorkflowTools() {
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as WorkflowParams;
 				const parsedHints = parseIntentText(params.intentText);
-				const runMode = parseRunMode(params.runMode ?? parsedHints.runMode);
+				const runMode = resolveWorkflowRunMode(
+					params.runMode,
+					params.intentText,
+					{
+						allowCompose: false,
+					},
+				);
 				const priorSession =
 					runMode === "execute" ? readSession(params.runId) : null;
 				const runId = createRunId(

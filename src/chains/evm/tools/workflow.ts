@@ -1,10 +1,7 @@
 import { createHash } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
-import {
-	parseRunMode,
-	parseRunModeHint,
-} from "../../shared/workflow-runtime.js";
+import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
 import {
 	type Btc5mTradeGuardEvaluation,
 	evaluateBtc5mTradeGuards,
@@ -93,7 +90,6 @@ type WorkflowParams = {
 };
 
 type ParsedIntentHints = {
-	runMode?: WorkflowRunMode;
 	intentType?: WorkflowIntent["type"];
 	riskProfile?: PolymarketRiskProfile;
 	marketSlug?: string;
@@ -658,7 +654,6 @@ function resolveRequoteLimitPrice(params: {
 
 function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
-	const runMode = parseRunModeHint(text) as WorkflowRunMode | undefined;
 	const side = parseSideHint(text);
 	const riskProfile = parseRiskProfileHint(text);
 	const maxEntryPrice = parseMaxEntryPriceHint(text);
@@ -723,7 +718,6 @@ function parseIntentText(text?: string): ParsedIntentHints {
 
 	return {
 		riskProfile,
-		runMode,
 		intentType: isCancelIntent ? "evm.polymarket.btc5m.cancel" : undefined,
 		marketSlug: marketSlug?.trim(),
 		tokenId,
@@ -1424,7 +1418,13 @@ export function createEvmWorkflowTools() {
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as WorkflowParams;
 				const parsedHints = parseIntentText(params.intentText);
-				const runMode = parseRunMode(params.runMode ?? parsedHints.runMode);
+				const runMode = resolveWorkflowRunMode(
+					params.runMode,
+					params.intentText,
+					{
+						allowCompose: false,
+					},
+				);
 				const priorSession =
 					runMode === "execute" ? readSession(params.runId) : null;
 				const runId = createRunId(

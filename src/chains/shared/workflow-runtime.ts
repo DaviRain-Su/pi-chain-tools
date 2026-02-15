@@ -56,55 +56,86 @@ export function parseRunModeWithCompose(
 	return "analysis";
 }
 
-export function parseRunModeHint(
+export function parseRunModeHint<
+	TAllowCompose extends boolean | undefined = false,
+>(
 	text: string | undefined,
-	options?: Partial<WorkflowRunModeOptions>,
-): WorkflowRunMode | "compose" | undefined {
+	options?: Partial<WorkflowRunModeOptions> & { allowCompose?: TAllowCompose },
+): TAllowCompose extends true
+	? WorkflowRunModeWithCompose | undefined
+	: WorkflowRunMode | undefined {
 	const parsedOptions = {
 		...DEFAULT_WORKFLOW_RUN_MODE_OPTIONS,
 		...options,
 	};
-	if (!text?.trim()) return undefined;
+	if (!text?.trim()) {
+		return undefined as TAllowCompose extends true
+			? WorkflowRunModeWithCompose | undefined
+			: WorkflowRunMode | undefined;
+	}
 
 	const hasExecute = HAS_EXECUTE_HINT.test(text);
 	const hasSimulate = HAS_SIMULATE_HINT.test(text);
 	const hasAnalysis = HAS_ANALYSIS_HINT.test(text);
+	let mode: WorkflowRunMode | WorkflowRunModeWithCompose | undefined;
 	if (parsedOptions.allowCompose && /compose|编排|组装|构建/.test(text)) {
-		return "compose";
-	}
-
-	if (hasSimulate && !hasExecute) return "simulate";
-	if (hasAnalysis && !hasExecute && !hasSimulate) return "analysis";
-	if (hasExecute && !hasSimulate && !hasAnalysis) return "execute";
-	if (hasSimulate && hasExecute) {
+		mode = "compose";
+	} else if (hasSimulate && !hasExecute) {
+		mode = "simulate";
+	} else if (hasAnalysis && !hasExecute && !hasSimulate) {
+		mode = "analysis";
+	} else if (hasExecute && !hasSimulate && !hasAnalysis) {
+		mode = "execute";
+	} else if (hasSimulate && hasExecute) {
 		if (
 			/(先模拟|先仿真|先dry\s*run|先试跑|先试一下|先预演|先演练)/i.test(text)
 		) {
-			return "simulate";
+			mode = "simulate";
+		} else {
+			mode = "execute";
 		}
-		return "execute";
+	} else if (hasAnalysis && hasExecute) {
+		if (/(先分析|先看一下|先检查)/i.test(text)) {
+			mode = "analysis";
+		} else {
+			mode = "execute";
+		}
+	} else if (hasExecute) {
+		mode = "execute";
+	} else if (hasSimulate) {
+		mode = "simulate";
+	} else if (hasAnalysis) {
+		mode = "analysis";
 	}
-	if (hasAnalysis && hasExecute) {
-		if (/(先分析|先看一下|先检查)/i.test(text)) return "analysis";
-		return "execute";
-	}
-	if (hasExecute) return "execute";
-	if (hasSimulate) return "simulate";
-	if (hasAnalysis) return "analysis";
-	return undefined;
+	return mode as TAllowCompose extends true
+		? WorkflowRunModeWithCompose | undefined
+		: WorkflowRunMode | undefined;
 }
 
-export function resolveWorkflowRunMode(
+export function resolveWorkflowRunMode<
+	TAllowCompose extends boolean | undefined = false,
+>(
 	paramsRunMode: string | undefined,
 	intentText: string | undefined,
-	options?: Partial<WorkflowRunModeOptions> & {
-		allowCompose?: boolean;
-	},
-): WorkflowRunModeWithCompose {
-	const hint = parseRunModeHint(intentText, options);
-	return paramsRunMode != null
-		? parseRunModeWithCompose(paramsRunMode, options)
-		: hint != null
-			? parseRunModeWithCompose(hint, options)
-			: "analysis";
+	options?: Partial<WorkflowRunModeOptions> & { allowCompose?: TAllowCompose },
+): TAllowCompose extends true ? WorkflowRunModeWithCompose : WorkflowRunMode {
+	const resolvedOptions = {
+		...DEFAULT_WORKFLOW_RUN_MODE_OPTIONS,
+		...options,
+	};
+	const allowCompose = resolvedOptions.allowCompose;
+	const hint = parseRunModeHint<TAllowCompose>(intentText, options);
+	const parseMode = (
+		value: string | undefined,
+	): WorkflowRunMode | WorkflowRunModeWithCompose =>
+		allowCompose
+			? parseRunModeWithCompose(value, resolvedOptions)
+			: parseRunMode(value, resolvedOptions);
+
+	const selectedMode = paramsRunMode != null ? paramsRunMode : hint;
+	return (
+		selectedMode != null ? parseMode(selectedMode) : "analysis"
+	) as TAllowCompose extends true
+		? WorkflowRunModeWithCompose
+		: WorkflowRunMode;
 }
