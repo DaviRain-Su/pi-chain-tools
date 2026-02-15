@@ -19,15 +19,29 @@ export function kaspaNetworkSchema() {
 			Type.Literal("testnet"),
 			Type.Literal("testnet10"),
 			Type.Literal("testnet11"),
+			Type.Literal("kaspa-mainnet"),
+			Type.Literal("kaspa-testnet10"),
+			Type.Literal("kaspa-testnet11"),
+			Type.Literal("kaspatest"),
 		]),
 	);
 }
 
 export function parseKaspaNetwork(value?: string): KaspaNetwork {
-	if (value === "mainnet") return "mainnet";
-	if (value === "testnet10" || value === "tn10") return "testnet10";
-	if (value === "testnet11" || value === "tn11") return "testnet11";
-	if (value === "testnet") return "testnet";
+	const normalized = value?.trim().toLowerCase();
+	if (!normalized || normalized === "testnet") return "testnet";
+	if (normalized === "mainnet" || normalized === "kaspa-mainnet") return "mainnet";
+	if (
+		normalized === "testnet10" ||
+		normalized === "tn10" ||
+		normalized === "kaspa-testnet10" ||
+		normalized === "kaspatest"
+	) {
+		return "testnet10";
+	}
+	if (normalized === "testnet11" || normalized === "tn11" || normalized === "kaspa-testnet11") {
+		return "testnet11";
+	}
 	return "mainnet";
 }
 
