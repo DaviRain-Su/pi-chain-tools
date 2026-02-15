@@ -83,6 +83,17 @@ describe("package.json script contracts", () => {
 		expect(scripts?.ci).toContain("npm test");
 	});
 
+	it("keeps CI schema validation as single-step command", () => {
+		expect(ciWorkflow).toContain(
+			"- name: Validate OpenClaw BTC5m schema artifacts",
+		);
+		expect(ciWorkflow).toContain("run: npm run schema:ci-check");
+		expect(ciWorkflow).not.toMatch(
+			/npm run schema:check-files:json[\s\S]{0,32}npm run schema:validate/,
+		);
+		expect(ciWorkflow.match(/npm run schema:ci-check/g) ?? []).toHaveLength(1);
+	});
+
 	it.each(docAndWorkflowReferences)(
 		"keeps reference aligned in $target",
 		({ content, expected }) => {
