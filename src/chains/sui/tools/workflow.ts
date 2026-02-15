@@ -523,14 +523,16 @@ function parseTokenPairFromText(text: string): {
 	left: string;
 	right: string;
 } | null {
-	const slashMatch = text.match(
-		new RegExp(
-			`\\b(${TOKEN_NAME_PATTERN})\\s*\\/\\s*(${TOKEN_NAME_PATTERN})\\b`,
-			"i",
-		),
-	);
-	if (slashMatch?.[1] && slashMatch?.[2]) {
-		return { left: slashMatch[1].trim(), right: slashMatch[2].trim() };
+	const pairPatterns: Array<string> = [
+		`\\b(${TOKEN_NAME_PATTERN})\\s*\\/\\s*(${TOKEN_NAME_PATTERN})\\b`,
+		`\\b(${TOKEN_NAME_PATTERN})\\s*\\|\\s*(${TOKEN_NAME_PATTERN})\\b`,
+		`\\b(${TOKEN_NAME_PATTERN})\\s*[\\-–—]\\s*(${TOKEN_NAME_PATTERN})\\b`,
+	];
+	for (const pattern of pairPatterns) {
+		const pairMatch = text.match(new RegExp(pattern, "i"));
+		if (pairMatch?.[1] && pairMatch?.[2]) {
+			return { left: pairMatch[1].trim(), right: pairMatch[2].trim() };
+		}
 	}
 
 	const arrowMatch = text.match(
@@ -1144,15 +1146,15 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		) ?? null;
 	const amountAMatch =
 		text.match(
-			/(?:amountA|tokenA|a金额|a_amount|amount a|a amount|币A|代币A)\s*[:= ]\s*(\d+)/i,
+			/(?:amountA|tokenA|a金额|a_amount|amount a|a amount|币A|代币A)\s*[:= ]\s*(\d+(?:\.\d+)?)/i,
 		) ??
-		text.match(/\ba\s*[:= ]\s*(\d+)\b/i) ??
+		text.match(/\ba\s*[:= ]\s*(\d+(?:\.\d+)?)\b/i) ??
 		null;
 	const amountBMatch =
 		text.match(
-			/(?:amountB|tokenB|b金额|b_amount|amount b|b amount|币B|代币B)\s*[:= ]\s*(\d+)/i,
+			/(?:amountB|tokenB|b金额|b_amount|amount b|b amount|币B|代币B)\s*[:= ]\s*(\d+(?:\.\d+)?)/i,
 		) ??
-		text.match(/\bb\s*[:= ]\s*(\d+)\b/i) ??
+		text.match(/\bb\s*[:= ]\s*(\d+(?:\.\d+)?)\b/i) ??
 		null;
 	const deltaLiquidityMatch =
 		text.match(
@@ -1172,7 +1174,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	};
 
 	if (
-		/(add liquidity|provide liquidity|open position|increase liquidity|增加流动性|添加流动性|加流动性|加池|做市|开仓|加仓)/i.test(
+		/(add liquidity|provide liquidity|open position|increase liquidity|增加流动性|添加流动性|加流动性|加池|做市|开仓|加仓|\blp\b|\bLP\b)/i.test(
 			lower,
 		)
 	) {
@@ -1197,7 +1199,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	}
 
 	if (
-		/(remove liquidity|withdraw liquidity|close position|decrease liquidity|移除流动性|减少流动性|撤池|减池|平仓|撤流动性|减仓)/i.test(
+		/(remove liquidity|withdraw liquidity|close position|decrease liquidity|移除流动性|减少流动性|撤池|减池|平仓|撤流动性|减仓|\brm liquidity\b|\brm lp\b|\blp remove\b|\blp withdraw\b|\b取消流动性\b|移除lp)/i.test(
 			lower,
 		)
 	) {

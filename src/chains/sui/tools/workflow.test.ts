@@ -877,6 +877,56 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("parses LP add intentText with lp shorthand and pipe pair", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5c-pipe", {
+			runId: "wf-sui-05c-pipe",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"lp pool: 0xabc position: 0xdef SUI|USDC tick: -5 to 5 amountA: 10 amountB: 20",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				poolId: "0xabc",
+				positionId: "0xdef",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				tickLower: -5,
+				tickUpper: 5,
+				amountA: "10",
+				amountB: "20",
+			},
+		});
+	});
+
+	it("parses LP add intentText with decimal a/b amounts and dash pair", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5c-decimal", {
+			runId: "wf-sui-05c-decimal",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"添加流动性 pool: 0xabc position: 0xdef SUI-USDC tick: -5 to 5 a: 1.5 b: 2.25",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				poolId: "0xabc",
+				positionId: "0xdef",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				amountA: "1.5",
+				amountB: "2.25",
+			},
+		});
+	});
+
 	it("resolves LP add symbol pair via farms token index", async () => {
 		cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockImplementation(
 			async ({ symbol }) => {
