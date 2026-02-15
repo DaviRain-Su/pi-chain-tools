@@ -1,9 +1,15 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const packageJsonPath = path.resolve("package.json");
 const scripts = JSON.parse(readFileSync(packageJsonPath, "utf8")).scripts;
+
+const schemaValidatorScript = path.resolve(
+	"scripts",
+	"validate-openclaw-schemas.mjs",
+);
 
 const ciWorkflowPath = path.resolve(".github", "workflows", "ci.yml");
 const ciWorkflow = readFileSync(ciWorkflowPath, "utf8");
@@ -83,4 +89,20 @@ describe("package.json script contracts", () => {
 			expect(content).toContain(expected);
 		},
 	);
+
+	it("documents helper entrypoints in CLI usage output", () => {
+		const result = spawnSync(
+			process.execPath,
+			[schemaValidatorScript, "--help"],
+			{
+				encoding: "utf8",
+			},
+		);
+		expect(result.status).toBe(0);
+		expect(result.stdout).toContain("npm script helpers:");
+		expect(result.stdout).toContain("schema:check-files");
+		expect(result.stdout).toContain("schema:check-files:json");
+		expect(result.stdout).toContain("schema:ci-check");
+		expect(result.stdout).toContain("schema:validate");
+	});
 });
