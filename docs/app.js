@@ -29,6 +29,31 @@ bindCopy("demo-check-copy", "demo-check");
 bindCopy("demo-test-copy", "demo-test");
 bindCopy("demo-security-copy", "demo-security");
 
+const STEP_HIGHLIGHT_CLASS = "step-highlight";
+const STEP_HIGHLIGHT_DURATION_MS = 2200;
+
+function scrollAndHighlight(targetSelector) {
+	const section = document.querySelector(targetSelector);
+	if (!section) return;
+	section.scrollIntoView({ behavior: "smooth", block: "start" });
+	section.classList.remove(STEP_HIGHLIGHT_CLASS);
+	void section.offsetHeight;
+	section.classList.add(STEP_HIGHLIGHT_CLASS);
+	setTimeout(() => {
+		section.classList.remove(STEP_HIGHLIGHT_CLASS);
+	}, STEP_HIGHLIGHT_DURATION_MS);
+}
+
+const stepButtons = Array.from(document.querySelectorAll("[data-step-target]"));
+
+for (const button of stepButtons) {
+	button.addEventListener("click", () => {
+		const targetSelector = button.getAttribute("data-step-target");
+		if (!targetSelector) return;
+		scrollAndHighlight(targetSelector);
+	});
+}
+
 const revealItems = Array.from(document.querySelectorAll(".reveal"));
 
 if (revealItems.length > 0) {
@@ -44,8 +69,10 @@ if (revealItems.length > 0) {
 		},
 	);
 
-	revealItems.forEach((item, index) => {
+	let index = 0;
+	for (const item of revealItems) {
 		item.style.transitionDelay = `${Math.min(index * 50, 250)}ms`;
+		index += 1;
 		observer.observe(item);
-	});
+	}
 }

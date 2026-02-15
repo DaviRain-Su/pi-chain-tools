@@ -39,9 +39,8 @@
 					<a class="btn btn-ghost" href="#install">Quick Install</a>
 					<a
 						class="btn btn-ghost"
-						href="#hackathon"
-					>Hackathon Track</a
-					>
+						href="#hackathon">Hackathon Track</a>
+					<a class="btn btn-ghost" href="#demo">Demo Flow</a>
 				</div>
 			</header>
 
@@ -134,7 +133,7 @@
 				</p>
 			</section>
 
-			<section class="panel reveal">
+			<section class="panel reveal" id="quality-loop">
 				<h2>AI/CI Quality Loop</h2>
 				<p>
 					For reliable agent usage, all schema and runtime contracts are validated
@@ -161,7 +160,7 @@
 				</div>
 			</section>
 
-			<section class="panel reveal">
+			<section class="panel reveal" id="nl-examples">
 				<h2>Natural Language Examples</h2>
 				<div class="example-grid">
 					<article class="example-card">
@@ -185,6 +184,23 @@
 
 			<section class="panel reveal" id="demo">
 				<h2>Demo One-Click Commands</h2>
+				<div class="step-nav">
+					<p>Demo 流程（点击即可跳转并高亮对应区域）：</p>
+					<div class="step-buttons">
+						<button type="button" class="step-button" data-step-target="#install">
+							Step 1 安装与钱包
+						</button>
+						<button type="button" class="step-button" data-step-target="#quality-loop">
+							Step 2 质量与合约校验
+						</button>
+						<button type="button" class="step-button" data-step-target="#nl-examples">
+							Step 3 意图示例展示
+						</button>
+						<button type="button" class="step-button" data-step-target="#hackathon">
+							Step 4 赛道定位说明
+						</button>
+					</div>
+				</div>
 				<p>演示前建议先执行以下命令（可一键复制到终端）：</p>
 				<div class="command-grid">
 					<div class="command-block">

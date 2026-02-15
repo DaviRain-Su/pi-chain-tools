@@ -168,6 +168,7 @@ h3 {
 	box-shadow: var(--shadow);
 	margin-top: 0.95rem;
 	padding: 1.15rem;
+	scroll-margin-top: 88px;
 }
 
 .panel ol {
@@ -207,6 +208,44 @@ h3 {
 	font-family: "IBM Plex Mono", "Menlo", "Monaco", monospace;
 	font-size: 0.78rem;
 	padding: 0.45rem 0.7rem;
+}
+
+.step-nav {
+	margin: 0 0 0.85rem;
+}
+
+.step-nav p {
+	color: var(--muted);
+	margin: 0 0 0.45rem;
+}
+
+.step-buttons {
+	display: grid;
+	gap: 0.55rem;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.step-button {
+	background: #f6efe5;
+	border: 1px solid #c9ad91;
+	border-radius: 0.65rem;
+	color: #193039;
+	cursor: pointer;
+	font-family: "IBM Plex Mono", "Menlo", "Monaco", monospace;
+	font-size: 0.8rem;
+	padding: 0.55rem 0.7rem;
+	text-align: left;
+	transition: all 180ms ease;
+}
+
+.step-button:hover {
+	background: #ffeddc;
+	transform: translateY(-1px);
+}
+
+.step-highlight {
+	box-shadow: 0 0 0 3px rgba(208, 91, 47, 0.32);
+	transform: translateY(-2px);
 }
 
 .note {
@@ -275,6 +314,10 @@ h3 {
 	}
 
 	.example-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.step-buttons {
 		grid-template-columns: 1fr;
 	}
 }
