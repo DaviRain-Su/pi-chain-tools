@@ -40,6 +40,7 @@
 - `kaspa_getMempool`：提交前查询 mempool 状态。
 - `kaspa_readState`：提交前读取链上状态。
 - `kaspa_rpc`：通用可配置 RPC 预检入口。
+- `kaspa_getAddressHistoryStats`：地址历史聚合指标（最近页内收支净变动/通过率）。
 
 其中 `read` 与 `execute` 工具均注册在同一条链工具集，方便 OpenClaw 的分组发现与能力路由。
 

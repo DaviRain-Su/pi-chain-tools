@@ -109,6 +109,28 @@ export type KaspaAddressTransactionsResult = {
 	data: KaspaAddressTransactionsResponse;
 };
 
+type KaspaAddressHistoryStats = {
+	sampleLimit?: number;
+	totalTransactions: number;
+	acceptedTransactions: number;
+	pendingTransactions: number;
+	netAmountSent: number;
+	netAmountReceived: number;
+	netBalanceDelta: number;
+	hasMore: boolean;
+	countHint?: number;
+	latestTransactionId?: string;
+	latestBlockTime?: number;
+};
+
+export type KaspaAddressHistoryStatsResult = {
+	address: string;
+	network: string;
+	apiBaseUrl: string;
+	stats: KaspaAddressHistoryStats;
+	transactions: KaspaTransactionSummary[];
+};
+
 export type KaspaTransactionAcceptanceResult = {
 	transactionIds: string[];
 	network: string;
@@ -380,6 +402,83 @@ export async function fetchKaspaTransactionAcceptance(params: {
 	};
 }
 
+function parseKaspaAmount(value: unknown): number {
+	if (typeof value === "number") {
+		if (Number.isFinite(value)) {
+			return value;
+		}
+		return 0;
+	}
+	if (typeof value === "string") {
+		const normalized = value.trim();
+		if (!normalized) return 0;
+		const parsed = Number.parseFloat(normalized);
+		return Number.isFinite(parsed) ? parsed : 0;
+	}
+	return 0;
+}
+
+export async function fetchKaspaAddressHistoryStats(params: {
+	address: string;
+	limit?: number;
+	startingAfter?: string;
+	endingBefore?: string;
+	network?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+	strictAddressCheck?: boolean;
+}): Promise<KaspaAddressHistoryStatsResult> {
+	const network = parseKaspaNetwork(params.network);
+	const address = normalizeKaspaAddress(
+		params.address,
+		network,
+		params.strictAddressCheck === true,
+	);
+	const result = await fetchKaspaAddressTransactions({
+		address,
+		limit: params.limit,
+		startingAfter: params.startingAfter,
+		endingBefore: params.endingBefore,
+		acceptedOnly: undefined,
+		includePayload: false,
+		network,
+		apiBaseUrl: params.apiBaseUrl,
+		apiKey: params.apiKey,
+	});
+	const transactions = result.data.transactions ?? [];
+	const normalizedLimit = parseKaspaLimit(params.limit);
+	let acceptedTransactions = 0;
+	let netAmountSent = 0;
+	let netAmountReceived = 0;
+	for (const transaction of transactions) {
+		if (transaction.isAccepted) {
+			acceptedTransactions += 1;
+		}
+		netAmountSent += parseKaspaAmount(transaction.amountSent);
+		netAmountReceived += parseKaspaAmount(transaction.amountReceived);
+	}
+	const latest = transactions[0];
+	return {
+		network,
+		address,
+		apiBaseUrl: getKaspaApiBaseUrl(params.apiBaseUrl, network),
+		stats: {
+			sampleLimit: normalizedLimit,
+			totalTransactions: transactions.length,
+			acceptedTransactions,
+			pendingTransactions: transactions.length - acceptedTransactions,
+			netAmountSent,
+			netAmountReceived,
+			netBalanceDelta: netAmountReceived - netAmountSent,
+			hasMore: Boolean(result.data.metadata?.hasMore),
+			countHint: result.data.metadata?.count,
+			latestTransactionId: latest?.transactionId,
+			latestBlockTime: latest?.blockTime,
+		},
+		transactions,
+	};
+}
+
 export async function fetchKaspaAddressBalance(params: {
 	address: string;
 	network?: string;
@@ -594,6 +693,25 @@ export function summarizeKaspaTransactionAcceptanceResult(
 	return `Kaspa transaction acceptance network=${result.network} ids=[${ids}] data=${summarizeKaspaResponse(result.data)}`;
 }
 
+export function summarizeKaspaAddressHistoryStatsResult(
+	result: KaspaAddressHistoryStatsResult,
+): string {
+	return [
+		`Kaspa address history stats`,
+		`network=${result.network}`,
+		`address=${result.address}`,
+		`sampleLimit=${result.stats.sampleLimit ?? "n/a"}`,
+		`sampleCount=${result.stats.totalTransactions}`,
+		`accepted=${result.stats.acceptedTransactions}`,
+		`pending=${result.stats.pendingTransactions}`,
+		`sent=${result.stats.netAmountSent}`,
+		`received=${result.stats.netAmountReceived}`,
+		`delta=${result.stats.netBalanceDelta}`,
+		`hasMore=${result.stats.hasMore}`,
+		`latest=${result.stats.latestTransactionId ?? "none"}`,
+	].join(" | ");
+}
+
 export function summarizeKaspaAddressBalanceResult(
 	result: KaspaAddressBalanceResult,
 ): string {
@@ -681,6 +799,50 @@ export function createKaspaReadTools() {
 						apiBaseUrl: result.apiBaseUrl,
 						transactions: result.data.transactions,
 						metadata: result.data.metadata,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${KASPA_TOOL_PREFIX}getAddressHistoryStats`,
+			label: "Kaspa Address History Stats",
+			description:
+				"Aggregate recent address history metrics from the latest transactions page.",
+			parameters: Type.Object({
+				address: Type.String({ minLength: 8 }),
+				limit: Type.Optional(Type.Number()),
+				startingAfter: Type.Optional(Type.String()),
+				endingBefore: Type.Optional(Type.String()),
+				network: kaspaNetworkSchema(),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				strictAddressCheck: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, params) {
+				const result = await fetchKaspaAddressHistoryStats({
+					address: params.address,
+					limit: params.limit,
+					startingAfter: params.startingAfter,
+					endingBefore: params.endingBefore,
+					network: params.network,
+					apiBaseUrl: params.apiBaseUrl,
+					apiKey: params.apiKey,
+					strictAddressCheck: params.strictAddressCheck,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeKaspaAddressHistoryStatsResult(result),
+						},
+					],
+					details: {
+						schema: "kaspa.address.history-stats.v1",
+						network: result.network,
+						address: result.address,
+						apiBaseUrl: result.apiBaseUrl,
+						stats: result.stats,
+						transactions: result.transactions,
 					},
 				};
 			},

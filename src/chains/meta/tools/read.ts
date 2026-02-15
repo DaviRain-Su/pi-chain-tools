@@ -217,6 +217,7 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 			"Kaspa transaction submission for merchant/payment and interactive game flows",
 			"Kaspa wallet balance, UTXO set, token info, and block lookup",
 			"Kaspa preflight fee/mempool/read-state checks for safer submission",
+			"Kaspa address history aggregation metrics for settlement workflows",
 		],
 		signer: {
 			autoSources: [],
@@ -293,6 +294,24 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 					requiresConfirmToken: true,
 					defaultRunMode: "analysis",
 					riskLevel: "medium",
+				},
+			},
+			{
+				tool: "kaspa_getAddressHistoryStats",
+				description:
+					"Aggregate recent address history metrics from the latest transaction page.",
+				intentTypes: ["kaspa.address.history-stats"],
+				nlExamples: [
+					"看这个地址最近交易的通过率和净额汇总",
+					"查下该地址最近几笔交易的 pending 数量",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
 				},
 			},
 			{
