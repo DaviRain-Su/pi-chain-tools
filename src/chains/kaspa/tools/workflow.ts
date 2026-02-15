@@ -706,9 +706,10 @@ async function runKaspaWalletQuickWorkflow(
 	params: KaspaWalletQuickParams,
 ): Promise<KaspaTransferQuickWorkflowResult> {
 	const parsedIntent = parseKaspaWalletIntentText(params.intentText);
-	const resolvedNetwork = resolveKaspaWalletNetworkAlias(
-		params.network || parsedIntent.network,
-	);
+	const requestNetwork = params.network || parsedIntent.network;
+	const resolvedNetwork = requestNetwork
+		? resolveKaspaWalletNetworkAlias(requestNetwork)
+		: "testnet10";
 	const explicitPath =
 		params.privateKeyFile?.trim() || params.privateKeyPath?.trim();
 	const pathFromIntent = parsedIntent.privateKeyFile?.trim();
@@ -716,7 +717,7 @@ async function runKaspaWalletQuickWorkflow(
 	const resolvedPrivateKeyFile =
 		privateKeyFile || KASPA_WALLET_QUICK_DEFAULT_PATH_BY_NETWORK[resolvedNetwork];
 
-	const requestNetworks = params.network || parsedIntent.network;
+	const requestNetworks = requestNetwork;
 	const networks =
 		requestNetworks
 			? [resolveKaspaWalletNetworkAlias(requestNetworks)]
