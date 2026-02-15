@@ -213,6 +213,8 @@ export type {
 	KaspaApiQueryValue,
 } from "./chains/kaspa/runtime.js";
 export { createKaspaComposeTools } from "./chains/kaspa/tools/compose.js";
+export { createKaspaSignTools } from "./chains/kaspa/tools/sign.js";
 export { createKaspaReadTools } from "./chains/kaspa/tools/read.js";
 export { createKaspaExecuteTools } from "./chains/kaspa/tools/execute.js";
+export { createKaspaWorkflowTools } from "./chains/kaspa/tools/workflow.js";
 export { createKaspaToolset } from "./chains/kaspa/toolset.js";

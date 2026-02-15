@@ -14,6 +14,8 @@
   - `skip*` 预检开关与 `kaspa_checkSubmitReadiness`。
 - ✅ `compose` 交易组装闭环（新增）：
   - `kaspa_buildTransferTransaction`
+  - `kaspa_signTransferTransaction`
+  - `w3rt_run_kaspa_workflow_v0`
   - 支持 utxo 输入组装 + 输出拼装 + fee 估算 + change 处理 + 变更金额吸收
   - 产物包含 `request.rawTransaction` 与 `requestHash`（可直接喂给 `kaspa_submitTransaction` 的 `request` 入口）。
 
@@ -27,17 +29,17 @@
    - ✅ 当前已支持：调用侧可显式传入 utxos 列表，工具完成本地选择与组装。
    - ⚠️ 差距：尚未封装 `getUtxos` 拉取 + 缓存 + 会话状态管理的 context 实体（`kaspa_read` 侧可单独查询）。
 
-2. **Transaction 组装（`Generator`）
+2. **Transaction 组装（`Generator`）**
    - ✅ 当前已支持：`kaspa_buildTransferTransaction` 生成可签名交易骨架。
    - ⚠️ 差距：未完全复刻官方 `Generator` 的流水线（如版本化策略切换、ScriptBuilder、跨脚本类型的输出兼容）。
 
-3. **待签名载体（`PendingTransaction`）
+3. **待签名载体（`PendingTransaction`）**
    - ✅ 当前已支持：返回 `tx`（unsigned skeleton）和 `request.rawTransaction`。
    - ⚠️ 差距：未输出可直接映射到官方钱包 SDK 的签名上下文（未内置签名/序列化器、签名哈希提取、DER/Schnorr 细节）。
 
 4. **签名与广播流（本地签名入口）**
-   - ✅ 当前：通过 `request.rawTransaction` 产物支持外部签名工具接管。
-   - ⚠️ 差距：尚未内置私钥/签名服务（`kaspa-sdk` `Account`/`Wallet`）签名步骤。
+   - ✅ 当前：`request.rawTransaction` 与 `kaspa_signTransferTransaction` 支持签名附加/覆盖并输出可执行请求。
+   - ✅ 已补齐：新增 `kaspa_signTransferTransactionWithWallet`，可挂接可选官方签名后端（`@kaspa/wallet`、`kaspa-wasm32-sdk`）或自定义 provider；输出仍为可提交 `request`。
 
 5. **执行回执（`GeneratorSummary` / receipt）**
    - ✅ 当前：`kaspa_submitTransaction` 返回统一 receipt；compose 阶段返回 `requestHash`。
@@ -45,14 +47,14 @@
 
 ## 下一阶段建议清单（按优先级）
 
-1. **高优先：接入官方签名 SDK**（本地或插件签名）
-   - 在 compose 返回结构上新增：签名输入摘要、签名哈希/待签名摘要、签名后的 `rawTransaction` 组合示例。
+1. **高优先：提升官方签名对齐度**（本地或插件签名）
+   - 当前新增 `kaspa_signTransferTransactionWithWallet` 已提供官方/插件签名入口；下一步细化签名输入摘要与官方签名上下文字段映射（hash 派生、消息摘要、签名元数据）。
 2. **中优先：增强 UtxoContext 工具**
    - 提供 `fetchUtxos` + 自动排序策略（FIFO / 优先费率）+ 规则化策略参数。
 3. **中优先：fee 与 change 模型对齐**
    - 补充主流网络参数（按网络/环境）驱动的 fee 估算与动态重估策略。
 4. **低优先：Generator/ PendingTransaction 的官方字段映射层**
-   - 输出可读性增强（`summary`/`inputs`/`outputs`/`fees` 分解字段）便于上层工作流持久化。 
+   - 输出可读性增强（`summary`/`inputs`/`outputs`/`fees` 分解字段）便于上层工作流持久化。
 
 ## 与当前提交语义的兼容保证（必须保持）
 
