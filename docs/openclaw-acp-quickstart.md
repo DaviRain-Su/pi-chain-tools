@@ -1203,11 +1203,11 @@ npm run schema:validate -- --json
 
 # 列出内置校验文件（含路径/存在性）
 npm run schema:validate -- --list
-# 返回示例（文本）：每条含文件名、路径、是否缺失及大小
+# 返回示例（文本）：每条含文件名、路径、状态(found/missing/not-a-file)及大小
 # 使用 JSON：
 npm run schema:validate -- --list --json
 
-# 列表严格校验（列表里任一文件缺失则退出 1）
+# 列表严格校验（列表里任一文件缺失或不是文件则退出 1）
 npm run schema:validate -- --list-strict
 npm run schema:validate -- --list-strict --json
 # 返回示例（失败）：{ "status": "failed", "errors": [...] }

@@ -301,32 +301,32 @@ async function getSchemaFileList() {
 
 async function printListOutput() {
 	const list = await getSchemaFileList();
-	const existing = list.filter((item) => item.exists);
-	const missing = list.filter((item) => !item.exists);
+	const valid = list.filter((item) => item.exists && item.isFile);
+	const invalid = list.filter((item) => !item.exists || !item.isFile);
 
 	const payload = {
-		status: isListStrict && missing.length > 0 ? "failed" : "list",
+		status: isListStrict && invalid.length > 0 ? "failed" : "list",
 		summary: {
 			totalFiles: list.length,
-			existingFiles: existing.length,
-			missingFiles: missing.length,
-			allExist: missing.length === 0,
+			existingFiles: valid.length,
+			missingFiles: invalid.length,
+			allExist: invalid.length === 0,
 		},
 		files: list,
 	};
 
 	if (isJsonOutput) {
-		if (missing.length > 0 && isListStrict) {
+		if (invalid.length > 0 && isListStrict) {
 			console.log(
 				JSON.stringify(
 					{
 						...payload,
-						errors: missing.map((item) =>
+						errors: invalid.map((item) =>
 							createError(
 								item.fileName,
 								"missing_file",
-								`missing schema file: ${item.fileName}`,
-								`Expected at: ${item.filePath}`,
+								`invalid schema file: ${item.fileName}`,
+								`Expected file at: ${item.filePath}`,
 							),
 						),
 					},
@@ -343,24 +343,42 @@ async function printListOutput() {
 
 	console.log("Configured schema files:");
 	for (const item of list) {
-		console.log(`- ${item.fileName} ${item.exists ? "(found)" : "(missing)"}`);
+		const fileState = item.exists
+			? item.isFile
+				? "(found)"
+				: "(not-a-file)"
+			: "(missing)";
+		console.log(`- ${item.fileName} ${fileState}`);
 		console.log(`  path: ${item.filePath}`);
 		console.log(`  size: ${item.exists ? `${item.sizeBytes} bytes` : "n/a"}`);
 	}
-	console.log(`Summary: ${existing.length}/${list.length} files exist.`);
+	console.log(`Summary: ${valid.length}/${list.length} files exist.`);
 
-	if (isListStrict && missing.length > 0) {
+	if (isListStrict && invalid.length > 0) {
 		printCompact(
-			missing.map((item) =>
+			invalid.map((item) =>
 				createError(
 					item.fileName,
 					"missing_file",
-					`missing schema file: ${item.fileName}`,
-					`Expected at: ${item.filePath}`,
+					`invalid schema file: ${item.fileName}`,
+					`Expected file at: ${item.filePath}`,
 				),
 			),
 		);
 		return false;
+	}
+
+	if (isStrict && invalid.length > 0) {
+		printStrict(
+			invalid.map((item) =>
+				createError(
+					item.fileName,
+					"missing_file",
+					`invalid schema file: ${item.fileName}`,
+					`Expected file at: ${item.filePath}`,
+				),
+			),
+		);
 	}
 
 	return true;

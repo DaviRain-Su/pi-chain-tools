@@ -31,6 +31,10 @@ function runValidator(cwd: string, args: string[]) {
 	});
 }
 
+function getSchemaDir(workspace: string) {
+	return path.join(workspace, "docs", "schemas");
+}
+
 describe("validate-openclaw-schemas CLI list modes", () => {
 	const workspaces: string[] = [];
 
@@ -87,5 +91,49 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		expect(payload.summary.existingFiles).toBe(1);
 		expect(payload.summary.missingFiles).toBe(REQUIRED_FILES.length - 1);
 		expect(payload.files).toHaveLength(REQUIRED_FILES.length);
+	});
+
+	it("fails --list-strict if a configured file path exists but is directory", () => {
+		const workspace = createWorkspace([
+			"openclaw-btc5m-workflow.schema.json",
+			"openclaw-btc5m-runtime-state.schema.json",
+		]);
+		workspaces.push(workspace);
+		const schemaDir = getSchemaDir(workspace);
+		const invalidPath = path.join(
+			schemaDir,
+			"openclaw-btc5m-retry-policy.schema.json",
+		);
+		mkdirSync(invalidPath, { recursive: true });
+
+		const result = runValidator(workspace, ["--list-strict", "--json"]);
+		expect(result.status).toBe(1);
+		const payload = JSON.parse(result.stdout);
+		expect(payload.status).toBe("failed");
+		expect(payload.summary.missingFiles).toBe(1);
+		expect(payload.errors[0]).toMatchObject({
+			code: "missing_file",
+			file: "openclaw-btc5m-retry-policy.schema.json",
+		});
+	});
+
+	it("exposes usage with --help", () => {
+		const workspace = createWorkspace(REQUIRED_FILES);
+		workspaces.push(workspace);
+
+		const result = runValidator(workspace, ["--help"]);
+		expect(result.status).toBe(0);
+		expect(result.stdout).toContain("Usage:");
+		expect(result.stdout).toContain("--list-strict");
+	});
+
+	it("reports unknown options and exits non-zero", () => {
+		const workspace = createWorkspace(REQUIRED_FILES);
+		workspaces.push(workspace);
+
+		const result = runValidator(workspace, ["--unknown-flag"]);
+		expect(result.status).toBe(1);
+		expect(result.stderr).toContain("Unknown options");
+		expect(result.stdout + result.stderr).toContain("Usage:");
 	});
 });
