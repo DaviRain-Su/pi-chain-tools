@@ -471,7 +471,7 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 
 		expect(result.content[0]?.text).toContain(
-			"execute requires fromPrivateKey or signed payload",
+			"execute requires fromPrivateKey / SUI_PRIVATE_KEY / local keystore or signed payload",
 		);
 		expect(result.details).toMatchObject({
 			artifacts: {

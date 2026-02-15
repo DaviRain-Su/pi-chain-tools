@@ -19,6 +19,7 @@ import {
 	getSuiClient,
 	getSuiExplorerTransactionUrl,
 	getSuiRpcEndpoint,
+	getSuiSignerLookupPaths,
 	parsePositiveBigInt,
 	parseSuiNetwork,
 	resolveSuiKeypair,
@@ -358,6 +359,14 @@ type WorkflowSimulationSignerContext = {
 	canSign: boolean;
 	signerSource: "fromPrivateKey" | "walletAddress";
 };
+type SuiWorkflowSignerSource =
+	| "fromPrivateKey"
+	| "SUI_PRIVATE_KEY"
+	| "localKeystore";
+type SuiWorkflowExecutionSigner = {
+	signer: Awaited<ReturnType<typeof resolveSuiKeypair>>;
+	signerSource: SuiWorkflowSignerSource;
+};
 
 type CetusClmmSdkLike = {
 	getPositionList?(
@@ -438,29 +447,23 @@ function resolveWorkflowSimulationSigner(
 	fromPrivateKey?: string,
 ): WorkflowSimulationSignerContext {
 	if (fromPrivateKey?.trim()) {
-		const signer = resolveSuiKeypair(fromPrivateKey);
+		const signer = resolveSuiWorkflowExecutionSigner(fromPrivateKey);
 		return {
-			sender: signer.toSuiAddress(),
+			sender: signer.signer.toSuiAddress(),
 			canSign: true,
 			signerSource: "fromPrivateKey",
 		};
 	}
 
 	const sender = resolveSuiOwnerAddress();
-	let canSign = false;
+	let canSign: boolean;
 	try {
-		const signer = resolveSuiKeypair();
-		const signerAddress = normalizeSuiAddressForCompare(signer.toSuiAddress());
+		const signer = resolveSuiWorkflowExecutionSigner();
+		const signerAddress = normalizeSuiAddressForCompare(
+			signer.signer.toSuiAddress(),
+		);
 		const senderAddress = normalizeSuiAddressForCompare(sender);
 		canSign = signerAddress === senderAddress;
-		if (!canSign) {
-			return {
-				sender,
-				canSign: false,
-				signerSource: "walletAddress",
-			};
-		}
-		canSign = true;
 	} catch {
 		canSign = false;
 	}
@@ -2349,6 +2352,66 @@ function resolveRequestType(waitForLocalExecution?: boolean) {
 		: "WaitForLocalExecution";
 }
 
+function formatSignerHintMessage(): string {
+	const paths = getSuiSignerLookupPaths();
+	return `Checked keystore=${paths.keystorePath}; activeAddress=${
+		paths.activeAddress ?? "<not configured>"
+	}; clientConfig=${paths.clientConfigPath}.`;
+}
+
+function formatError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function resolveSuiWorkflowExecutionSigner(
+	fromPrivateKey?: string,
+): SuiWorkflowExecutionSigner {
+	const explicitPrivateKey = fromPrivateKey?.trim();
+	if (explicitPrivateKey) {
+		try {
+			return {
+				signer: resolveSuiKeypair(explicitPrivateKey),
+				signerSource: "fromPrivateKey",
+			};
+		} catch (error) {
+			throw new Error(
+				`fromPrivateKey is invalid or unsupported for execute: ${formatError(
+					error,
+				)}. Provide a valid suiprivkey (ED25519) or use SUI_PRIVATE_KEY/local keystore.`,
+			);
+		}
+	}
+
+	const envPrivateKey = process.env.SUI_PRIVATE_KEY?.trim();
+	if (envPrivateKey) {
+		try {
+			return {
+				signer: resolveSuiKeypair(envPrivateKey),
+				signerSource: "SUI_PRIVATE_KEY",
+			};
+		} catch (error) {
+			throw new Error(
+				`SUI_PRIVATE_KEY is configured but invalid for execute: ${formatError(
+					error,
+				)}. Set a valid ED25519 suiprivkey in SUI_PRIVATE_KEY or omit it to use local keystore.`,
+			);
+		}
+	}
+
+	try {
+		return {
+			signer: resolveSuiKeypair(),
+			signerSource: "localKeystore",
+		};
+	} catch (error) {
+		throw new Error(
+			`No local signer available for execute: ${formatError(
+				error,
+			)}. ${formatSignerHintMessage()} Provide fromPrivateKey (suiprivkey) or place a valid ED25519 key in local keystore.`,
+		);
+	}
+}
+
 type SignedSubmission = {
 	signedTransactionBytesBase64: string;
 	signedSignatures: string[];
@@ -2463,64 +2526,78 @@ async function executeSimulatedTransactionBlock(params: {
 	fromPrivateKey?: string;
 	waitForLocalExecution?: boolean;
 }): Promise<Record<string, unknown>> {
-	let signer: Awaited<ReturnType<typeof resolveSuiKeypair>> | null = null;
 	try {
-		signer = resolveSuiKeypair(params.fromPrivateKey);
-	} catch (error) {
-		throw new Error(
-			`No local signer available for simulated tx execute${params.expectedSignerAddress ? ` (expected=${params.expectedSignerAddress})` : ""}. Provide fromPrivateKey (suiprivkey) or signed payload (signedTransactionBytesBase64 + signedSignatures) from the simulate step.`,
+		const resolvedSigner = resolveSuiWorkflowExecutionSigner(
+			params.fromPrivateKey,
 		);
-	}
+		const signer = resolvedSigner.signer;
+		const signerAddress = signer.toSuiAddress();
+		if (params.expectedSignerAddress?.trim()) {
+			const normalizedExpected = normalizeSuiAddressForCompare(
+				params.expectedSignerAddress,
+			);
+			const normalizedSigner = normalizeSuiAddressForCompare(signerAddress);
+			if (normalizedExpected !== normalizedSigner) {
+				throw new Error(
+					`Local signer address mismatch for simulated tx execute. expected=${params.expectedSignerAddress} actual=${signerAddress}. Use the same signer in fromPrivateKey as the simulated sender or provide signedTransactionBytesBase64 + signedSignatures from simulate.`,
+				);
+			}
+		}
 
-	if (!signer) {
-		throw new Error(
-			`No local signer available for simulated tx execute${params.expectedSignerAddress ? ` (expected=${params.expectedSignerAddress})` : ""}.`,
-		);
-	}
-	const signerAddress = signer.toSuiAddress();
-	if (params.expectedSignerAddress?.trim()) {
-		const normalizedExpected = normalizeSuiAddressForCompare(
-			params.expectedSignerAddress,
-		);
-		const normalizedSigner = normalizeSuiAddressForCompare(signerAddress);
-		if (normalizedExpected !== normalizedSigner) {
+		const requestType = resolveRequestType(params.waitForLocalExecution);
+		const client = getSuiClient(params.network, params.rpcUrl);
+		const response = await client.signAndExecuteTransaction({
+			signer,
+			transaction: params.transaction,
+			options: {
+				showEffects: true,
+				showEvents: true,
+				showObjectChanges: true,
+				showBalanceChanges: true,
+			},
+			requestType,
+		});
+		const status = response.effects?.status?.status ?? "unknown";
+		const error =
+			response.effects?.status?.error ?? response.errors?.[0] ?? null;
+		if (status === "failure") {
 			throw new Error(
-				`Local signer address mismatch for simulated tx execute. expected=${params.expectedSignerAddress} actual=${signerAddress}`,
+				`Sui simulated tx execute failed: ${error ?? "unknown error"} (digest=${response.digest})`,
 			);
 		}
-	}
-	const requestType = resolveRequestType(params.waitForLocalExecution);
-	const client = getSuiClient(params.network, params.rpcUrl);
-	const response = await client.signAndExecuteTransaction({
-		signer,
-		transaction: params.transaction,
-		options: {
-			showEffects: true,
-			showEvents: true,
-			showObjectChanges: true,
-			showBalanceChanges: true,
-		},
-		requestType,
-	});
-	const status = response.effects?.status?.status ?? "unknown";
-	const error = response.effects?.status?.error ?? response.errors?.[0] ?? null;
-	if (status === "failure") {
+		return {
+			digest: response.digest,
+			status,
+			error,
+			confirmedLocalExecution: response.confirmedLocalExecution ?? null,
+			network: params.network,
+			rpcUrl: getSuiRpcEndpoint(params.network, params.rpcUrl),
+			requestType,
+			executeVia: "simulated_tx_local_signer",
+			signerAddress,
+			explorer: getSuiExplorerTransactionUrl(response.digest, params.network),
+		};
+	} catch (error) {
+		if (
+			error instanceof Error &&
+			error.message.startsWith(
+				"Local signer address mismatch for simulated tx execute",
+			)
+		) {
+			throw error;
+		}
+		if (
+			error instanceof Error &&
+			error.message.startsWith(
+				"fromPrivateKey is invalid or unsupported for execute",
+			)
+		) {
+			throw error;
+		}
 		throw new Error(
-			`Sui simulated tx execute failed: ${error ?? "unknown error"} (digest=${response.digest})`,
+			`No local signer available for simulated tx execute${params.expectedSignerAddress ? ` (expected=${params.expectedSignerAddress})` : ""}. ${error instanceof Error ? error.message : String(error)} Provide fromPrivateKey (suiprivkey), signed payload (signedTransactionBytesBase64 + signedSignatures), or configure SUI_PRIVATE_KEY/local keystore.`,
 		);
 	}
-	return {
-		digest: response.digest,
-		status,
-		error,
-		confirmedLocalExecution: response.confirmedLocalExecution ?? null,
-		network: params.network,
-		rpcUrl: getSuiRpcEndpoint(params.network, params.rpcUrl),
-		requestType,
-		executeVia: "simulated_tx_local_signer",
-		signerAddress,
-		explorer: getSuiExplorerTransactionUrl(response.digest, params.network),
-	};
 }
 
 function parseSlippageDecimal(slippageBps?: number): number {
@@ -2759,7 +2836,7 @@ function formatSimulationSummary(params: {
 			: "";
 	const localSignerHint = params.canExecuteWithLocalSigner
 		? "execute can proceed with local signer"
-		: "execute requires fromPrivateKey or signed payload";
+		: "execute requires fromPrivateKey / SUI_PRIVATE_KEY / local keystore or signed payload";
 	const localSignerHintSuffix = ` (${localSignerHint})`;
 	if (params.unsignedPayload.unsignedTransactionBytesBase64) {
 		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported${localSignerHintSuffix}${riskSuffix}`;
