@@ -291,6 +291,25 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 				},
 			},
 			{
+				tool: "w3rt_run_kaspa_send_v0",
+				description:
+					"Fastest way to run a Kaspa transfer: one intent sentence is enough, with optional analysis/simulation/execute.",
+				intentTypes: ["kaspa.transaction.submit", "kaspa.transaction.send.natural"],
+				nlExamples: [
+					"从 kaspa:... 转 kaspa:... 0.01",
+					"从 kaspa:... 转 0.01 给 kaspa:...，先模拟",
+					"kaspa_send: runMode=execute 从 ... 到 ... 0.01 KAS",
+				],
+				execution: {
+					executable: true,
+					requiresSigner: false,
+					requiresMainnetConfirmation: true,
+					requiresConfirmToken: true,
+					defaultRunMode: "analysis",
+					riskLevel: "medium",
+				},
+			},
+			{
 				tool: "kaspa_checkSubmitReadiness",
 				description:
 					"Run fee/mempool/state preflight checks before execution (dry-run-like safety review).",

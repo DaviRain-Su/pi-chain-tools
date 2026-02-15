@@ -38,6 +38,8 @@
 - `kaspa_signTransferTransaction`：新增签名承接工具，支持在请求对象/原始交易基础上附加或覆盖签名，返回可执行 `request`、`requestHash`，并补充签名上下文元数据（输入指纹/消息摘要/签名上下文预览/覆盖策略）。
 - `kaspa_signTransferTransactionWithWallet`：新增钱包签名承接工具，支持可选官方签名后端（`@kaspa/wallet` / `kaspa-wasm32-sdk` / 自定义 provider module）进行签名生成，再自动拼接为可提交请求。
 - `w3rt_run_kaspa_workflow_v0`：新增 Kaspa 工作流，支持 `analysis -> simulate -> execute` 三段闭环（可直接承接前置 preflight 与主网确认门禁）。
+- `w3rt_run_kaspa_send_v0`：自然语言最少参数支付入口（一句话或 from/to/amount）。
+- `w3rt_run_kaspa_transfer_v0`：带完整参数的高级一站式 transfer 入口，可复用同一套签名/预检/执行链路。
 - `kaspa_getAddressBalance`：查询地址余额快照。
 - `kaspa_getAddressUtxos`：查询地址 UTXO 集合（含分页）。
 - `kaspa_getToken`：查询 token 元数据。
@@ -160,6 +162,27 @@
 - 输入：`runMode=analysis` 或 `runMode=simulate`，使用 compose 参数/或 `request` + `runId`
 - 输入 `runMode=execute` 时带上 `confirmToken`
 - 输出：`artifacts.analysis/simulate/execute` 与统一 summary，支持演示脚本闭环。
+
+#### Step D：自然语言最小参数演示（推荐比赛现场）
+
+- 调用 `w3rt_run_kaspa_send_v0`，只提供一句话
+  - `intentText="从 kaspa:from... 转给 kaspa:to... 0.01"`
+  - `runMode=analysis`
+  - `network=testnet11`
+- 拿到 `confirmToken` 后直接执行同一个请求：`runMode=execute`
+- 用同一工具开启 acceptance 轮询观察结果
+  - `pollAcceptance=true`
+  - `acceptancePollIntervalMs=2000`
+  - `acceptancePollTimeoutMs=30000`
+- 观察返回字段
+  - `acceptanceChecked`
+  - `acceptanceCheckedAttempts`
+  - `acceptanceStatus`
+
+#### Step E：自然语言与参数式对比
+
+- `w3rt_run_kaspa_send_v0`：`intentText` 模式（最少参数，演示用）
+- `w3rt_run_kaspa_transfer_v0`：参数式模式（可传 `fromAddress`/`toAddress`/`amount`/`request`/签名参数）
 
 #### Step A'：只做预检（推荐用于演示前置风控）
 
