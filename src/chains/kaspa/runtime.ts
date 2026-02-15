@@ -31,12 +31,16 @@ export function parseKaspaNetwork(value?: string): KaspaNetwork {
 	return "mainnet";
 }
 
-function resolveKaspaNetworkAlias(network: KaspaNetwork): Exclude<KaspaNetwork, "testnet"> {
+function resolveKaspaNetworkAlias(
+	network: KaspaNetwork,
+): Exclude<KaspaNetwork, "testnet"> {
 	if (network === "testnet") return "testnet10";
 	return network;
 }
 
-function getKaspaNetworkDefaultBaseUrl(network: Exclude<KaspaNetwork, "testnet">): string {
+function getKaspaNetworkDefaultBaseUrl(
+	network: Exclude<KaspaNetwork, "testnet">,
+): string {
 	if (network === "mainnet") return KASPA_DEFAULT_BASE_URL_MAINNET;
 	if (network === "testnet10") return KASPA_DEFAULT_BASE_URL_TESTNET10;
 	return KASPA_DEFAULT_BASE_URL_TESTNET11;
@@ -52,11 +56,11 @@ export function getKaspaApiBaseUrl(
 		resolvedNetwork === "mainnet"
 			? process.env.KASPA_API_MAINNET_URL?.trim()
 			: resolvedNetwork === "testnet10"
-				? (process.env.KASPA_API_TESTNET10_URL?.trim() ||
-					process.env.KASPA_API_TESTNET_URL?.trim())
-				: (process.env.KASPA_API_TESTNET11_URL?.trim() ||
+				? process.env.KASPA_API_TESTNET10_URL?.trim() ||
+					process.env.KASPA_API_TESTNET_URL?.trim()
+				: process.env.KASPA_API_TESTNET11_URL?.trim() ||
 					process.env.KASPA_API_TESTNET10_URL?.trim() ||
-					process.env.KASPA_API_TESTNET_URL?.trim());
+					process.env.KASPA_API_TESTNET_URL?.trim();
 	if (networkVar) return networkVar;
 	const env = process.env.KASPA_API_BASE_URL?.trim();
 	if (env) return env;
@@ -103,14 +107,20 @@ export function normalizeKaspaAddress(
 ): string {
 	const normalized = value.trim().toLowerCase();
 	if (!KASPA_ADDRESS_BASE_REGEX.test(normalized)) {
-		throw new Error("address must be a valid Kaspa address (starting with kaspa:). ");
+		throw new Error(
+			"address must be a valid Kaspa address (starting with kaspa:). ",
+		);
 	}
 	if (strict) {
 		const [networkPrefix = "", addressPayload = ""] = normalized.split(":", 2);
 		const resolvedNetwork = network
 			? resolveKaspaNetworkAlias(parseKaspaNetwork(network))
 			: "mainnet";
-		if (!KASPA_ADDRESS_PREFIXES_BY_NETWORK[resolvedNetwork].includes(networkPrefix)) {
+		if (
+			!KASPA_ADDRESS_PREFIXES_BY_NETWORK[resolvedNetwork].includes(
+				networkPrefix,
+			)
+		) {
 			throw new Error(
 				`Kaspa address prefix does not match expected network (${resolvedNetwork})`,
 			);
@@ -121,8 +131,7 @@ export function normalizeKaspaAddress(
 		if (
 			addressPayload.length <
 				KASPA_ADDRESS_LEN_MIN_BY_NETWORK[resolvedNetwork] ||
-			addressPayload.length >
-				KASPA_ADDRESS_LEN_MAX_BY_NETWORK[resolvedNetwork]
+			addressPayload.length > KASPA_ADDRESS_LEN_MAX_BY_NETWORK[resolvedNetwork]
 		) {
 			throw new Error("Kaspa address payload length is out of expected bounds");
 		}
@@ -145,7 +154,9 @@ type KaspaApiJsonRequestParams<TBody = undefined> = {
 	timeoutMs?: number;
 };
 
-function normalizeApiQuery(params: Record<string, KaspaApiQueryValue | undefined>) {
+function normalizeApiQuery(
+	params: Record<string, KaspaApiQueryValue | undefined>,
+) {
 	const result: Record<string, string> = {};
 	for (const [key, rawValue] of Object.entries(params)) {
 		if (rawValue === undefined) continue;
@@ -160,7 +171,8 @@ export async function kaspaApiJsonRequest<T, TBody = undefined>(
 	const base = params.baseUrl.trim().replace(/\/$/, "");
 	const path = params.path.startsWith("/") ? params.path : `/${params.path}`;
 	const query = normalizeApiQuery(params.query ?? {});
-	const requestBody = params.body === undefined ? undefined : JSON.stringify(params.body);
+	const requestBody =
+		params.body === undefined ? undefined : JSON.stringify(params.body);
 	const method = (params.method ?? "GET").toUpperCase() as KaspaApiHttpMethod;
 	const headers: Record<string, string> = {
 		accept: "application/json",
@@ -267,14 +279,17 @@ export function parseKaspaPositiveInteger(
 		}
 		return parsed;
 	}
-	throw new Error(
-		`${field} must be an integer${allowZero ? " or zero" : ""}`,
-	);
+	throw new Error(`${field} must be an integer${allowZero ? " or zero" : ""}`);
 }
 
 export function parseKaspaLimit(value: unknown): number | undefined {
 	if (value == null) return undefined;
-	if (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 100) {
+	if (
+		typeof value === "number" &&
+		Number.isInteger(value) &&
+		value >= 1 &&
+		value <= 100
+	) {
 		return value;
 	}
 	if (typeof value === "string") {

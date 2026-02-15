@@ -29,7 +29,8 @@ function mockFetchJson({
 	fetchMock.mockResolvedValueOnce({
 		ok: status >= 200 && status < 300,
 		status,
-		statusText: statusText ?? (status >= 200 && status < 300 ? "OK" : "Bad Request"),
+		statusText:
+			statusText ?? (status >= 200 && status < 300 ? "OK" : "Bad Request"),
 		text: vi.fn().mockResolvedValue(JSON.stringify(body)),
 	} as unknown as Response);
 }
@@ -90,7 +91,9 @@ describe("kaspa read tools", () => {
 
 		expect(result.content[0]?.text).toContain("Kaspa transactions");
 		const calledUrl = new URL(fetchMock.mock.calls[0]?.[0]?.toString() ?? "");
-		expect(calledUrl.pathname).toBe("/v1/addresses/kaspa%3Aabc123/transactions");
+		expect(calledUrl.pathname).toBe(
+			"/v1/addresses/kaspa%3Aabc123/transactions",
+		);
 		expect(calledUrl.searchParams.get("limit")).toBe("10");
 		expect(calledUrl.searchParams.get("starting_after")).toBe("cursor-a");
 		expect(calledUrl.searchParams.get("accepted_only")).toBe("true");
@@ -144,7 +147,9 @@ describe("kaspa read tools", () => {
 		});
 		expect(result.content[0]?.text).toContain("Kaspa transaction acceptance");
 		expect(fetchMock).toHaveBeenCalledTimes(1);
-		const calledBody = JSON.parse((fetchMock.mock.calls[0]?.[1]?.body as string) ?? "{}");
+		const calledBody = JSON.parse(
+			(fetchMock.mock.calls[0]?.[1]?.body as string) ?? "{}",
+		);
 		expect(calledBody).toMatchObject({
 			transactionIds: ["tx-001", "tx-002"],
 		});
@@ -220,8 +225,12 @@ describe("kaspa read tools", () => {
 		});
 		const calledUrl = new URL(fetchMock.mock.calls[0]?.[0]?.toString() ?? "");
 		expect(calledUrl.pathname).toContain("/transactions/mass");
-		const calledBody = JSON.parse((fetchMock.mock.calls[0]?.[1]?.body as string) ?? "{}");
-		expect(calledBody).toMatchObject({ transaction: { version: 0, inputs: [], outputs: [] } });
+		const calledBody = JSON.parse(
+			(fetchMock.mock.calls[0]?.[1]?.body as string) ?? "{}",
+		);
+		expect(calledBody).toMatchObject({
+			transaction: { version: 0, inputs: [], outputs: [] },
+		});
 	});
 
 	it("enforces strict address checks for testnet prefix when requested", async () => {
@@ -240,7 +249,9 @@ describe("kaspa read tools", () => {
 		const tool = getTool("kaspa_getTransactionAcceptance");
 		await expect(
 			tool.execute("kaspa-get-acceptance-empty", {}),
-		).rejects.toThrow("At least one transactionId or transactionIds is required");
+		).rejects.toThrow(
+			"At least one transactionId or transactionIds is required",
+		);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });

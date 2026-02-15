@@ -34,6 +34,7 @@
 - `kaspa_submitTransaction`：支持 `runMode=analysis` + `runMode=execute` 双阶段提交；主网执行需要 `confirmMainnet=true` 与 `confirmToken`。
 - `kaspa_submitTransaction`：analysis 阶段增加预检开关（`skipFeePreflight` / `skipMempoolPreflight` / `skipReadStatePreflight`）和风险摘要（`riskLevel`/`readiness`）；
 - `kaspa_submitTransaction`：execute 阶段返回标准化 `receipt`（含 `preflightRiskLevel` / `preflightReadiness` / `broadcastStatus`）。
+- `kaspa_buildTransferTransaction`：新增 `compose` 组建模组，支持本地签名前的 UTXO 选择、输出拼装、手续费估算、找零策略与签名 payload 产出。
 - `kaspa_getAddressBalance`：查询地址余额快照。
 - `kaspa_getAddressUtxos`：查询地址 UTXO 集合（含分页）。
 - `kaspa_getToken`：查询 token 元数据。
@@ -45,7 +46,7 @@
 - `kaspa_getAddressHistoryStats`：地址历史聚合指标（最近页内收支净变动/通过率）。
 - `kaspa_checkSubmitReadiness`：提交前纯预检入口（fee/mempool/read-state），输出 `riskLevel/readiness/preflight`，无主网执行副作用。
 
-其中 `read` 与 `execute` 工具均注册在同一条链工具集，方便 OpenClaw 的分组发现与能力路由。
+其中 `read`、`compose`、`execute` 工具均注册在同一条链工具集，形成可供 OpenClaw 分组发现的完整“查询+组装+签名提交”链路。
 
 ## 5. 技术实现要点
 
@@ -66,13 +67,19 @@
   - analysis 返回 `preflight` + `requestHash` + `confirmToken`（20 分钟内有效）
   - 主网提交必须 `confirmMainnet=true`
   - 新增 `kaspa_checkSubmitReadiness` 作为独立无副作用预检工具（fee/mempool/read-state）
+- 组装/签名前处理：
+  - `src/chains/kaspa/tools/compose.ts`
+  - `kaspa_buildTransferTransaction`：支持 `utxos` 明细输入、输出数组/单收款人、手续费/找零策略、`requestHash` 生成与 `request.rawTransaction` 输出
+  - 产物可直接作为 `kaspa_submitTransaction` 的 `request` 输入进行二段式（analysis/execute）提交验证链路
 - 官方能力扩展：
   - 已确认 Kaspa 有官方 JS/TS 官方路线（Rusty Kaspa WASM 与钱包框架）可支持本地签名/交易构建能力
   - 官方方向示例：`kaspa-wasm32-sdk`、`@kaspa/wallet`
-- 当前提交策略：先以“可交易编排交付”为主，交易签名流程仍由外部签名体提供 rawTransaction，后续可接入官方 SDK 打通内置签名流程
+  - 已补齐 compose/execute 工具分离结构，当前仍由外部签名器完成签名环节（compose 仅做交易拼装）
+  - 当前提交策略：保持 `analysis/execute` 风险-确认模型不变，compose 只负责签名前准备
 - 注册与 OpenClaw 能力：
-  - `src/chains/kaspa/toolset.ts`：新增 `groups: [{name: "read"}, {name: "execute"}]`
+  - `src/chains/kaspa/toolset.ts`：新增 `groups: [{name: "read"}, {name: "compose"}, {name: "execute"}]`
   - `src/chains/meta/tools/read.ts`：把 Kaspa 的执行能力加入能力清单（`execution.executable=true`）
+  - `docs/kaspa-official-gap-notes.md`：官方能力对齐清单（含当前缺口与下一步计划）
 
 ## 6. 与 OpenClaw 的集成关系
 
@@ -106,16 +113,22 @@
 
 ### 示例 4：提交交易
 
+#### Step 0：本地签名前构建（compose）
+
+- 调用 `kaspa_buildTransferTransaction`
+- 输入：`fromAddress`, `toAddress/outputs`, `amount`, `utxos`, `feeRate`, `changeAddress`
+- 输出：`request.rawTransaction`（可签名 payload）、`request.metadata.requestHash`（用于与后续提交体一致性核验）
+
 #### Step A：analysis
 
 - 调用 `kaspa_submitTransaction`
-- 输入：`rawTransaction=<hex/base64>`, `runMode=analysis`, `network=mainnet`, `confirmMainnet=true`, 可选 `feeEndpoint/mempoolEndpoint/readStateEndpoint`
+- 输入：`request=<compose返回.request>`, `runMode=analysis`, `network=mainnet`, `confirmMainnet=true`, 可选 `feeEndpoint/mempoolEndpoint/readStateEndpoint`
 - 输出：`preflight` 明细、`riskLevel`、`readiness`、`requestHash` 与 `confirmToken`
 
 #### Step B：execute
 
 - 调用 `kaspa_submitTransaction`
-- 输入：`rawTransaction=<hex/base64>`, `runMode=execute`, `network=mainnet`, `confirmMainnet=true`, `confirmToken=<analysis返回>`
+- 输入：`request=<compose返回.request>` 或 `rawTransaction=<hex/base64>`, `runMode=execute`, `network=mainnet`, `confirmMainnet=true`, `confirmToken=<analysis返回>`
 - 输出：提交回执（含 `txId`、`network`、`requestHash`、`preflightRiskLevel`、`preflightReadiness`、`broadcastStatus`）
 
 #### Step A'：只做预检（推荐用于演示前置风控）
@@ -129,13 +142,16 @@
 - 代码清单（本次提交）：
   - `src/chains/kaspa/runtime.ts`
   - `src/chains/kaspa/tools/read.ts`
+  - `src/chains/kaspa/tools/compose.ts`
   - `src/chains/kaspa/tools/execute.ts`
   - `src/chains/kaspa/toolset.ts`
   - `src/chains/meta/tools/read.ts`
   - `src/index.ts`
+  - `docs/kaspa-official-gap-notes.md`
   - `docs/kaspa-hackathon-entry.md`
 
 ### 后续可再加一版（冲刺高分）
 
-- 下一步可增加 Kaspa 交易构建与签名内置能力（当前仍依赖外部签名体），并补齐 `execute` 风险报告中的 `broadcast` 链路状态。
+- 下一步可补齐官方签名能力内置链路（当前 compose 仅负责交易构建，签名仍由外部签名体完成）。
+- 补齐 `execute` 结果对接官方交易摘要/Generator 风格字段（fee 成本分解、签名上下文快照）。
 - 增加 OpenClaw 专属工作流模板（payment-intent/merchant-settlement），支持自然语言“一键分析 -> 执行”展示链路闭环。

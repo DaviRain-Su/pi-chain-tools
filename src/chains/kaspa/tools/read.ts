@@ -1,18 +1,18 @@
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
+	KASPA_TOOL_PREFIX,
+	type KaspaApiQueryValue,
+	getKaspaApiBaseUrl,
+	getKaspaApiKey,
 	kaspaApiJsonGet,
 	kaspaApiJsonPost,
-	KaspaApiQueryValue,
-	KASPA_TOOL_PREFIX,
 	kaspaNetworkSchema,
 	normalizeKaspaAddress,
 	parseKaspaBoolean,
 	parseKaspaLimit,
 	parseKaspaNetwork,
 	parseKaspaPositiveInteger,
-	getKaspaApiBaseUrl,
-	getKaspaApiKey,
 } from "../runtime.js";
 
 type KaspaAddressTagResponse = {
@@ -410,7 +410,11 @@ export async function fetchKaspaTransactionOutput(params: {
 }): Promise<KaspaTransactionOutputResult> {
 	const network = parseKaspaNetwork(params.network);
 	const transactionId = normalizeKaspaId(params.transactionId, "transactionId");
-	const outputIndex = parseKaspaPositiveInteger(params.outputIndex, "outputIndex", true);
+	const outputIndex = parseKaspaPositiveInteger(
+		params.outputIndex,
+		"outputIndex",
+		true,
+	);
 	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
 	const apiKey = getKaspaApiKey(params.apiKey);
 	const data = await kaspaApiJsonGet<KaspaTransactionOutputResponse>({
@@ -774,7 +778,10 @@ export async function fetchKaspaTransactionMass(params: {
 	const network = parseKaspaNetwork(params.network);
 	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
 	const apiKey = getKaspaApiKey(params.apiKey);
-	const data = await kaspaApiJsonPost<Record<string, unknown>, KaspaTransactionMassResponse>({
+	const data = await kaspaApiJsonPost<
+		Record<string, unknown>,
+		KaspaTransactionMassResponse
+	>({
 		baseUrl: apiBaseUrl,
 		path: "/transactions/mass",
 		body: { transaction: params.transaction },
@@ -838,11 +845,9 @@ export async function fetchKaspaRpcRead(params: {
 
 export function summarizeKaspaTagResult(result: KaspaTagResult): string {
 	const tag = result.data.tag;
-	const labelText = tag.labels?.length
-		? tag.labels.join(", ")
-		: "no labels";
+	const labelText = tag.labels?.length ? tag.labels.join(", ") : "no labels";
 	return [
-		`Kaspa address tag`,
+		"Kaspa address tag",
 		`network=${result.network}`,
 		`address=${result.address}`,
 		`name=${tag.name ?? "(unknown)"}`,
@@ -887,7 +892,7 @@ export function summarizeKaspaAddressHistoryStatsResult(
 	result: KaspaAddressHistoryStatsResult,
 ): string {
 	return [
-		`Kaspa address history stats`,
+		"Kaspa address history stats",
 		`network=${result.network}`,
 		`address=${result.address}`,
 		`sampleLimit=${result.stats.sampleLimit ?? "n/a"}`,
@@ -1178,7 +1183,8 @@ export function createKaspaReadToolsLegacy() {
 		defineTool({
 			name: `${KASPA_TOOL_PREFIX}getAddressBalance`,
 			label: "Kaspa Address Balance",
-			description: "Query Kaspa address balance summary for quick wallet checks.",
+			description:
+				"Query Kaspa address balance summary for quick wallet checks.",
 			parameters: Type.Object({
 				address: Type.String({ minLength: 8 }),
 				network: kaspaNetworkSchema(),
@@ -1208,7 +1214,8 @@ export function createKaspaReadToolsLegacy() {
 		defineTool({
 			name: `${KASPA_TOOL_PREFIX}getAddressUtxos`,
 			label: "Kaspa Address UTXOs",
-			description: "Query Kaspa address UTXO set with optional pagination filters.",
+			description:
+				"Query Kaspa address UTXO set with optional pagination filters.",
 			parameters: Type.Object({
 				address: Type.String({ minLength: 8 }),
 				limit: Type.Optional(Type.Number()),
@@ -1636,9 +1643,14 @@ export function createKaspaReadToolsLegacy() {
 				"Call a configurable Kaspa RPC/read endpoint for custom fee/mempool/state checks.",
 			parameters: Type.Object({
 				rpcPath: Type.String({ minLength: 1 }),
-				rpcMethod: Type.Optional(Type.Union([Type.Literal("GET"), Type.Literal("POST")])),
+				rpcMethod: Type.Optional(
+					Type.Union([Type.Literal("GET"), Type.Literal("POST")]),
+				),
 				query: Type.Optional(
-					Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean()])),
+					Type.Record(
+						Type.String(),
+						Type.Union([Type.String(), Type.Number(), Type.Boolean()]),
+					),
 				),
 				body: Type.Optional(Type.Unknown()),
 				network: kaspaNetworkSchema(),
@@ -1651,7 +1663,9 @@ export function createKaspaReadToolsLegacy() {
 					rpcPath: params.rpcPath,
 					rpcMethod: method,
 					query:
-						method === "GET" ? (params.query as Record<string, unknown> | undefined) : undefined,
+						method === "GET"
+							? (params.query as Record<string, unknown> | undefined)
+							: undefined,
 					body: method === "POST" ? params.body : undefined,
 					network: params.network,
 					apiBaseUrl: params.apiBaseUrl,
@@ -1676,8 +1690,8 @@ export function createKaspaReadToolsLegacy() {
 					},
 				};
 			},
-			}),
-		];
+		}),
+	];
 }
 
 export function createKaspaReadTools() {

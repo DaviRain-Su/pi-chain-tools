@@ -1,7 +1,7 @@
 import type { ToolRegistrar } from "../core/types.js";
 import evmExtension from "./evm-extension.js";
-import metaExtension from "./meta-extension.js";
 import kaspaExtension from "./kaspa-extension.js";
+import metaExtension from "./meta-extension.js";
 import nearExtension from "./near-extension.js";
 import solanaWorkflowExtension from "./solana-workflow-extension.js";
 import suiExtension from "./sui-extension.js";

@@ -208,7 +208,11 @@ export {
 	parseKaspaNetwork,
 	kaspaApiJsonGet,
 } from "./chains/kaspa/runtime.js";
-export type { KaspaNetwork, KaspaApiQueryValue } from "./chains/kaspa/runtime.js";
+export type {
+	KaspaNetwork,
+	KaspaApiQueryValue,
+} from "./chains/kaspa/runtime.js";
+export { createKaspaComposeTools } from "./chains/kaspa/tools/compose.js";
 export { createKaspaReadTools } from "./chains/kaspa/tools/read.js";
 export { createKaspaExecuteTools } from "./chains/kaspa/tools/execute.js";
 export { createKaspaToolset } from "./chains/kaspa/toolset.js";

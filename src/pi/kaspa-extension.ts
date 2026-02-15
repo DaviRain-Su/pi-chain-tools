@@ -14,4 +14,3 @@ export default function kaspaExtension(pi: ToolRegistrar): void {
 	globalState[KASPA_EXTENSION_REGISTERED] = true;
 	registerChainToolsets(pi, [createKaspaToolset()]);
 }
-

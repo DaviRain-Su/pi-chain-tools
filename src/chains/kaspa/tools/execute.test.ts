@@ -29,7 +29,8 @@ function mockFetchJson({
 	fetchMock.mockResolvedValueOnce({
 		ok: status >= 200 && status < 300,
 		status,
-		statusText: statusText ?? (status >= 200 && status < 300 ? "OK" : "Bad Request"),
+		statusText:
+			statusText ?? (status >= 200 && status < 300 ? "OK" : "Bad Request"),
 		text: vi.fn().mockResolvedValue(JSON.stringify(body)),
 	} as unknown as Response);
 }
@@ -49,7 +50,8 @@ async function getAnalysisConfirmToken(
 		runMode: "analysis",
 		...input,
 	});
-	const token = (result.details as { confirmToken?: string } | undefined)?.confirmToken;
+	const token = (result.details as { confirmToken?: string } | undefined)
+		?.confirmToken;
 	if (!token) {
 		throw new Error("analysis confirmToken missing");
 	}
@@ -97,7 +99,9 @@ describe("kaspa execute tools", () => {
 
 	it("submits pre-signed transaction to testnet", async () => {
 		const tool = getTool("kaspa_submitTransaction");
-		const token = await getAnalysisConfirmToken(tool, { rawTransaction: "00abccddee" });
+		const token = await getAnalysisConfirmToken(tool, {
+			rawTransaction: "00abccddee",
+		});
 		fetchMock.mockReset();
 		mockFetchJson({
 			status: 200,
@@ -127,7 +131,9 @@ describe("kaspa execute tools", () => {
 		});
 		const calledUrl = new URL(fetchMock.mock.calls[0]?.[0]?.toString() ?? "");
 		expect(calledUrl.pathname).toBe("/transactions");
-		const calledBody = JSON.parse((fetchMock.mock.calls[0]?.[1]?.body as string) ?? "{}");
+		const calledBody = JSON.parse(
+			(fetchMock.mock.calls[0]?.[1]?.body as string) ?? "{}",
+		);
 		expect(calledBody).toMatchObject({ transaction: "00abccddee" });
 	});
 
@@ -147,13 +153,21 @@ describe("kaspa execute tools", () => {
 			network: "testnet",
 			confirmToken: expect.any(String),
 		});
-		expect(result.details?.preflight?.readiness).toBe("ready");
-		expect(result.details?.preflight?.riskLevel).toBe("low");
+		const details = result.details as {
+			preflight?: {
+				readiness: string;
+				riskLevel: string;
+			};
+		};
+		expect(details.preflight?.readiness).toBe("ready");
+		expect(details.preflight?.riskLevel).toBe("low");
 	});
 
 	it("merges request body and preserves rawTransaction as transaction", async () => {
 		const tool = getTool("kaspa_submitTransaction");
-		const token = await getAnalysisConfirmToken(tool, { rawTransaction: "raw-1" });
+		const token = await getAnalysisConfirmToken(tool, {
+			rawTransaction: "raw-1",
+		});
 		fetchMock.mockReset();
 		mockFetchJson({
 			status: 200,
@@ -167,7 +181,9 @@ describe("kaspa execute tools", () => {
 			confirmToken: token,
 		});
 
-		const calledBody = JSON.parse((fetchMock.mock.calls[0]?.[1]?.body as string) ?? "{}");
+		const calledBody = JSON.parse(
+			(fetchMock.mock.calls[0]?.[1]?.body as string) ?? "{}",
+		);
 		expect(calledBody).toMatchObject({
 			payload: { key: "value" },
 			transaction: "raw-1",
@@ -191,7 +207,9 @@ describe("kaspa execute tools", () => {
 			confirmToken: token,
 		});
 
-		const calledBody = JSON.parse((fetchMock.mock.calls[0]?.[1]?.body as string) ?? "{}");
+		const calledBody = JSON.parse(
+			(fetchMock.mock.calls[0]?.[1]?.body as string) ?? "{}",
+		);
 		expect(calledBody).toMatchObject({
 			extra: true,
 			transaction: "should-be-mapped",
@@ -200,7 +218,9 @@ describe("kaspa execute tools", () => {
 
 	it("reports broadcast status accepted-without-id when txid absent but accepted response received", async () => {
 		const tool = getTool("kaspa_submitTransaction");
-		const token = await getAnalysisConfirmToken(tool, { rawTransaction: "00abccddee" });
+		const token = await getAnalysisConfirmToken(tool, {
+			rawTransaction: "00abccddee",
+		});
 		fetchMock.mockReset();
 		mockFetchJson({
 			status: 200,
@@ -226,7 +246,9 @@ describe("kaspa execute tools", () => {
 
 	it("optionally checks acceptance after successful submit when txid present", async () => {
 		const tool = getTool("kaspa_submitTransaction");
-		const token = await getAnalysisConfirmToken(tool, { rawTransaction: "00abccddee" });
+		const token = await getAnalysisConfirmToken(tool, {
+			rawTransaction: "00abccddee",
+		});
 		fetchMock.mockReset();
 		mockFetchJson({
 			status: 200,
@@ -255,7 +277,9 @@ describe("kaspa execute tools", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		const acceptUrl = new URL(fetchMock.mock.calls[1]?.[0]?.toString() ?? "");
 		expect(acceptUrl.pathname).toBe("/v1/transaction/acceptance-data");
-		const calledBody = JSON.parse((fetchMock.mock.calls[1]?.[1]?.body as string) ?? "{}");
+		const calledBody = JSON.parse(
+			(fetchMock.mock.calls[1]?.[1]?.body as string) ?? "{}",
+		);
 		expect(calledBody).toMatchObject({ transactionIds: ["tx-submitted-002"] });
 		expect(result.content[0]?.text).toContain("acceptanceChecked=true");
 		expect(result.details).toMatchObject({
@@ -263,7 +287,9 @@ describe("kaspa execute tools", () => {
 			network: "testnet",
 			acceptanceChecked: true,
 			acceptancePath: "/v1/transaction/acceptance-data",
-			acceptance: { accepted: [{ transactionId: "tx-submitted-002", accepted: true }] },
+			acceptance: {
+				accepted: [{ transactionId: "tx-submitted-002", accepted: true }],
+			},
 		});
 	});
 
@@ -328,7 +354,9 @@ describe("kaspa execute tools", () => {
 				runMode: "execute",
 				confirmToken: "invalid",
 			}),
-		).rejects.toThrow("At least one of rawTransaction or request is required for Kaspa submit");
+		).rejects.toThrow(
+			"At least one of rawTransaction or request is required for Kaspa submit",
+		);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });

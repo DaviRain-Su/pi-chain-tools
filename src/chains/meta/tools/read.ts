@@ -8,8 +8,8 @@ import {
 	setEvmTransferPolicy,
 } from "../../evm/policy.js";
 import { createEvmToolset } from "../../evm/toolset.js";
-import { createNearToolset } from "../../near/toolset.js";
 import { createKaspaToolset } from "../../kaspa/toolset.js";
+import { createNearToolset } from "../../near/toolset.js";
 import { createSolanaWorkflowToolset } from "../../solana/workflow-toolset.js";
 import { createSuiToolset } from "../../sui/toolset.js";
 
@@ -226,7 +226,7 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 		workflows: [
 			{
 				tool: "kaspa_getTransaction",
-			description:
+				description:
 					"Read Kaspa transaction details by id for settlement verification or analytics.",
 				intentTypes: ["kaspa.transaction.get"],
 				nlExamples: [
@@ -247,10 +247,7 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 				description:
 					"Read one Kaspa transaction output by output index for real-time proofs and UTXO tracing.",
 				intentTypes: ["kaspa.transaction.output"],
-				nlExamples: [
-					"查这笔交易第 0 个输出",
-					"读取 Kaspa tx 的某个 output",
-				],
+				nlExamples: ["查这笔交易第 0 个输出", "读取 Kaspa tx 的某个 output"],
 				execution: {
 					executable: false,
 					requiresSigner: false,
@@ -265,10 +262,7 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 				description:
 					"Read Kaspa transaction acceptance metadata for a given tx id set.",
 				intentTypes: ["kaspa.transaction.acceptance"],
-				nlExamples: [
-					"查一组 tx 的确认状态",
-					"查询这笔交易是否已被接受",
-				],
+				nlExamples: ["查一组 tx 的确认状态", "查询这笔交易是否已被接受"],
 				execution: {
 					executable: false,
 					requiresSigner: false,
@@ -354,10 +348,7 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 				tool: "kaspa_getAddressUtxos",
 				description: "Read Kaspa UTXO list for wallet input selection.",
 				intentTypes: ["kaspa.address.utxos"],
-				nlExamples: [
-					"查这个地址的 UTXO 列表",
-					"查询可花费的 kaspa 输出",
-				],
+				nlExamples: ["查这个地址的 UTXO 列表", "查询可花费的 kaspa 输出"],
 				execution: {
 					executable: false,
 					requiresSigner: false,
@@ -442,10 +433,7 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 				tool: "kaspa_readState",
 				description: "Read chain state in analysis mode before execute flow.",
 				intentTypes: ["kaspa.rpc.read-state"],
-				nlExamples: [
-					"交易前读一次链上状态快照",
-					"执行前检查状态是否变化",
-				],
+				nlExamples: ["交易前读一次链上状态快照", "执行前检查状态是否变化"],
 				execution: {
 					executable: false,
 					requiresSigner: false,
@@ -475,7 +463,8 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 			},
 			{
 				tool: "kaspa_getAddressTag",
-				description: "Read Kaspa address tag metadata for enriched analysis and monitoring.",
+				description:
+					"Read Kaspa address tag metadata for enriched analysis and monitoring.",
 				intentTypes: ["kaspa.address.tag"],
 				nlExamples: [
 					"查一下 kaspa 地址的标签信息",

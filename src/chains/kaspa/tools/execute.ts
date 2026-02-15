@@ -1,13 +1,13 @@
-import { Type } from "@sinclair/typebox";
 import { createHash, randomBytes } from "node:crypto";
+import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
-	assertKaspaMainnetExecution,
-	kaspaApiJsonGet,
-	kaspaApiJsonPost,
 	KASPA_TOOL_PREFIX,
+	assertKaspaMainnetExecution,
 	getKaspaApiBaseUrl,
 	getKaspaApiKey,
+	kaspaApiJsonGet,
+	kaspaApiJsonPost,
 	kaspaNetworkSchema,
 	parseKaspaNetwork,
 } from "../runtime.js";
@@ -132,16 +132,14 @@ function resolveKaspaTransactionSubmissionRequest(
 	if (!requestBody && normalizedRawTransaction === undefined) {
 		return undefined;
 	}
-	const body: Record<string, unknown> = requestBody
-		? { ...requestBody }
-		: {};
+	const body: Record<string, unknown> = requestBody ? { ...requestBody } : {};
 	if (rawTransaction?.trim()) {
 		body.transaction = normalizedRawTransaction;
 	} else if (!("transaction" in body) && "rawTransaction" in body) {
 		body.transaction = body.rawTransaction;
 	}
 	if ("rawTransaction" in body) {
-		delete body.rawTransaction;
+		body.rawTransaction = undefined;
 	}
 	if (!("transaction" in body)) {
 		return undefined;
@@ -269,25 +267,25 @@ function normalizeKaspaSubmitPreflightRiskAndReadiness(payload: {
 	preflightAllOk: boolean;
 	preflightReadiness?: KaspaSubmitPreflightReadiness;
 	preflightRiskLevel?: KaspaSubmitPreflightRisk;
-}): { readiness: KaspaSubmitPreflightReadiness; riskLevel: KaspaSubmitPreflightRisk } {
-	const riskLevel = [
-		"low",
-		"medium",
-		"high",
-	].includes(payload.preflightRiskLevel ?? "") ? payload.preflightRiskLevel : undefined;
+}): {
+	readiness: KaspaSubmitPreflightReadiness;
+	riskLevel: KaspaSubmitPreflightRisk;
+} {
+	const riskLevel = ["low", "medium", "high"].includes(
+		payload.preflightRiskLevel ?? "",
+	)
+		? payload.preflightRiskLevel
+		: undefined;
 	const readiness =
-		payload.preflightReadiness === "ready" || payload.preflightReadiness === "needs-review"
+		payload.preflightReadiness === "ready" ||
+		payload.preflightReadiness === "needs-review"
 			? payload.preflightReadiness
 			: payload.preflightAllOk
 				? "ready"
 				: "needs-review";
 	return {
 		readiness,
-		riskLevel:
-			riskLevel ??
-			(payload.preflightAllOk
-				? "low"
-				: "medium"),
+		riskLevel: riskLevel ?? (payload.preflightAllOk ? "low" : "medium"),
 	};
 }
 
@@ -327,7 +325,10 @@ function resolveKaspaSubmitBroadcastStatus(
 	return "accepted-without-id";
 }
 
-function normalizeKaspaSubmitEndpoint(path: string, method: "GET" | "POST"): string {
+function normalizeKaspaSubmitEndpoint(
+	path: string,
+	method: "GET" | "POST",
+): string {
 	const trimmed = path.trim();
 	if (!trimmed) {
 		throw new Error("rpcPath is required for preflight checks.");
@@ -390,7 +391,9 @@ function summarizeKaspaPrecheckReadiness(
 	return preflight.allOk ? preflight.readiness : "needs-review";
 }
 
-function summarizeKaspaPrechecks(preflight?: KaspaSubmitPrecheckResult): string {
+function summarizeKaspaPrechecks(
+	preflight?: KaspaSubmitPrecheckResult,
+): string {
 	if (!preflight) {
 		return "preflight=not-run";
 	}
@@ -399,12 +402,12 @@ function summarizeKaspaPrechecks(preflight?: KaspaSubmitPrecheckResult): string 
 	if (!preflight.reports.length) {
 		return `preflight=${preflightReadiness} risk=${preflight.riskLevel || "medium"} `;
 	}
-	return `${preflightReadiness} risk=${preflight.riskLevel || "medium"} ` + preflight.reports
+	return `${preflightReadiness} risk=${preflight.riskLevel || "medium"} ${preflight.reports
 		.map((report) => {
 			const tail = report.error ? `: ${report.error}` : "";
 			return `${report.label}=${report.status}${tail}`;
 		})
-		.join(" | ");
+		.join(" | ")}`;
 }
 
 function resolveKaspaSubmitPreflightRisk(
@@ -431,6 +434,12 @@ async function runKaspaSubmitPreflightChecks(
 			mempool: null,
 			readState: null,
 		},
+	};
+	type KaspaSubmitPreflightCheckDefinition = {
+		key: keyof typeof checks.checks;
+		label: string;
+		method: "GET";
+		path: string;
 	};
 	const preflightChecks = [
 		!params.skipFeePreflight && {
@@ -461,8 +470,7 @@ async function runKaspaSubmitPreflightChecks(
 			),
 		},
 	].filter(
-		(check): check is { key: keyof typeof checks.checks; label: string; method: "GET" | "POST"; path: string } =>
-			check !== false,
+		(check): check is KaspaSubmitPreflightCheckDefinition => check !== false,
 	);
 
 	for (const check of preflightChecks) {
@@ -473,13 +481,13 @@ async function runKaspaSubmitPreflightChecks(
 							baseUrl: params.apiBaseUrl,
 							path: check.path,
 							apiKey: params.apiKey,
-					  })
+						})
 					: await kaspaApiJsonPost<unknown, unknown>({
 							baseUrl: params.apiBaseUrl,
 							path: check.path,
 							body: params.body,
 							apiKey: params.apiKey,
-					  });
+						});
 			checks.checks[check.key] = data;
 			checks.reports.push({
 				label: check.label,
@@ -498,8 +506,13 @@ async function runKaspaSubmitPreflightChecks(
 			});
 		}
 	}
-	checks.riskLevel = resolveKaspaSubmitPreflightRisk(checks.allOk, checks.reports);
-	const hasWarnings = checks.reports.some((report) => report.status === "warning");
+	checks.riskLevel = resolveKaspaSubmitPreflightRisk(
+		checks.allOk,
+		checks.reports,
+	);
+	const hasWarnings = checks.reports.some(
+		(report) => report.status === "warning",
+	);
 	checks.readiness = checks.allOk && !hasWarnings ? "ready" : "needs-review";
 
 	return checks;
@@ -620,7 +633,8 @@ export async function submitKaspaTransaction(params: {
 	skipMempoolPreflight?: boolean;
 	skipReadStatePreflight?: boolean;
 }): Promise<KaspaSubmitTransactionResult> {
-	const runMode: KaspaSubmitRunMode = params.runMode === "analysis" ? "analysis" : "execute";
+	const runMode: KaspaSubmitRunMode =
+		params.runMode === "analysis" ? "analysis" : "execute";
 	if (runMode === "analysis") {
 		const readiness = await checkKaspaSubmitReadiness({
 			rawTransaction: params.rawTransaction,
@@ -637,7 +651,11 @@ export async function submitKaspaTransaction(params: {
 		});
 		const network = readiness.network;
 		const confirmToken = readiness.preflight.allOk
-			? makeKaspaSubmitConfirmToken(network, readiness.body, readiness.preflight)
+			? makeKaspaSubmitConfirmToken(
+					network,
+					readiness.body,
+					readiness.preflight,
+				)
 			: undefined;
 		return {
 			network,
@@ -686,7 +704,8 @@ export async function submitKaspaTransaction(params: {
 					acceptanceEndpoint: params.acceptanceEndpoint,
 				})
 			: null;
-	const parsedTokenRisk = normalizeKaspaSubmitPreflightRiskAndReadiness(parsedToken);
+	const parsedTokenRisk =
+		normalizeKaspaSubmitPreflightRiskAndReadiness(parsedToken);
 	const receiptTemplate = makeKaspaSubmitReceiptTemplate({
 		network,
 		apiBaseUrl,
@@ -745,7 +764,10 @@ export function createKaspaExecuteTools() {
 				"Submit a pre-signed Kaspa transaction to API. Use runMode=analysis for preflight and confirmToken output.",
 			parameters: Type.Object({
 				rawTransaction: Type.Optional(
-					Type.String({ minLength: 1, description: "Raw signed transaction payload" }),
+					Type.String({
+						minLength: 1,
+						description: "Raw signed transaction payload",
+					}),
 				),
 				request: Type.Optional(
 					Type.Unknown({
@@ -768,7 +790,9 @@ export function createKaspaExecuteTools() {
 				readStateEndpoint: Type.Optional(Type.String()),
 				checkAcceptance: Type.Optional(Type.Boolean()),
 				acceptanceEndpoint: Type.Optional(
-					Type.String({ description: "Optional acceptance endpoint override." }),
+					Type.String({
+						description: "Optional acceptance endpoint override.",
+					}),
 				),
 				skipFeePreflight: Type.Optional(Type.Boolean()),
 				skipMempoolPreflight: Type.Optional(Type.Boolean()),
@@ -801,7 +825,9 @@ export function createKaspaExecuteTools() {
 						},
 					};
 				}
-				const txId = result.data ? extractKaspaSubmitTransactionId(result.data) : null;
+				const txId = result.data
+					? extractKaspaSubmitTransactionId(result.data)
+					: null;
 				const acceptanceLine =
 					result.acceptanceChecked === true
 						? ` acceptanceChecked=true path=${result.acceptancePath ?? "unknown"}`
@@ -841,7 +867,10 @@ export function createKaspaExecuteTools() {
 				"Run Kaspa preflight checks (fee/mempool/read-state) for a submit payload before execution.",
 			parameters: Type.Object({
 				rawTransaction: Type.Optional(
-					Type.String({ minLength: 1, description: "Raw signed transaction payload" }),
+					Type.String({
+						minLength: 1,
+						description: "Raw signed transaction payload",
+					}),
 				),
 				request: Type.Optional(
 					Type.Unknown({
