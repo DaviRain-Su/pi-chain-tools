@@ -71,40 +71,109 @@ Inspect effective mapping in agent:
 
 ## 4) First workflows
 
-### Polymarket BTC 5m
+### Polymarket BTC 5m (trade + optional stale-requote)
+
+For production-safe usage, run workflows in **analysis -> simulate -> execute** with a fixed `runId`.
+
+1) Optional preflight reads to choose a market:
+
+- `evm_polymarketGetBtc5mMarkets` (find active BTC 5m markets)
+- `evm_polymarketGetBtc5mAdvice` (AI-style side/confidence)
+- `evm_polymarketGetOrderbook` (validate orderbook and spread)
+- `evm_polymarketBuildBtc5mOrder` (unsigned intent preview, no signer required)
+
+2) Trade analysis:
+
+```json
+{
+  "runMode": "analysis",
+  "runId": "wf-btc5m-01",
+  "network": "polygon",
+  "intentType": "evm.polymarket.btc5m.trade",
+  "stakeUsd": 20,
+  "maxSpreadBps": 120,
+  "minDepthUsd": 100,
+  "minConfidence": 0.6,
+  "useAiAssist": true,
+  "requoteStaleOrders": true,
+  "requotePriceStrategy": "aggressive",
+  "requoteFallbackMode": "retry_aggressive",
+  "maxFillRatio": 0.4,
+  "maxAgeMinutes": 30,
+  "requoteMaxAttempts": 5,
+  "requoteMaxPriceDriftBps": 50
+}
+```
+
+3) Simulate (same `runId`):
+
+```json
+{
+  "runMode": "simulate",
+  "runId": "wf-btc5m-01",
+  "network": "polygon"
+}
+```
+
+4) Execute (same `runId`, using confirm token from analysis/simulate details):
+
+- response detail returns `confirmToken` (for example `EVM-...`) once analysis/simulate run succeeds
+
+```json
+{
+  "runMode": "execute",
+  "runId": "wf-btc5m-01",
+  "network": "polygon",
+  "confirmMainnet": true,
+  "confirmToken": "EVM-..."
+}
+```
+
+> On `polygon`, `confirmMainnet=true` is required for actual execute. OpenClaw can pass `confirmToken` via tool parameters or in free-form `intentText` like `确认码 EVM-...`.
+
+### Polymarket BTC 5m cancel workflow
+
+Use cancel intent to clear stale/open orders without manually selecting token pair again:
 
 - analysis:
 
 ```json
 {
   "runMode": "analysis",
+  "runId": "wf-btc5m-cancel-01",
   "network": "polygon",
-  "intentType": "evm.polymarket.btc5m.trade",
-  "stakeUsd": 20
+  "intentType": "evm.polymarket.btc5m.cancel",
+  "marketSlug": "btc-5m-xxxx",
+  "maxFillRatio": 0.2,
+  "maxAgeMinutes": 15
 }
 ```
 
-- simulate (same `runId`):
+- simulate/execute:
 
 ```json
 {
   "runMode": "simulate",
-  "network": "polygon",
-  "runId": "wf-btc5m-01"
+  "runId": "wf-btc5m-cancel-01",
+  "network": "polygon"
 }
 ```
-
-- execute:
 
 ```json
 {
   "runMode": "execute",
+  "runId": "wf-btc5m-cancel-01",
   "network": "polygon",
-  "runId": "wf-btc5m-01",
   "confirmMainnet": true,
   "confirmToken": "EVM-..."
 }
 ```
+
+If you already have order IDs, you can replace `marketSlug` with:
+
+- `orderId`: single id string
+- `orderIds`: list of order IDs
+- `cancelAll: true`: cancel all BTC5m open BTC orders in scope
 
 ### Transfer workflow
 
@@ -139,5 +208,8 @@ Inspect effective mapping in agent:
 ## 5) Natural-language prompts
 
 - `帮我分析 BTC 5m，建议买涨还是买跌`
-- `把 0.001 MATIC 转到 0x...，先模拟`
+- `用 20 美元先分析 BTC5m 下单，spread<1.2%，深度要求 100 美元，最小置信 0.6`
+- `先把刚才的 BTC5m 分析和模拟跑一遍`
 - `继续执行刚才这笔，确认主网执行`
+- `继续执行，确认码 EVM-...`
+- `把超时 30 分钟且未成交率<40%的 BTC5m 挂单全部撤掉，再确认主网执行`
