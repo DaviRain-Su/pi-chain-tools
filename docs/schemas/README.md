@@ -17,6 +17,12 @@
 npm run schema:validate
 ```
 
+以及文件清单**严格**校验（便于“文件缺失/缺失目录”提前拦截）：
+
+```bash
+npm run schema:check-files
+```
+
 脚本会检查：
 
 - JSON 可解析
@@ -59,6 +65,11 @@ npm run schema:validate -- --list --json
 
 # 列文件严格校验（任一 schema 缺失或不是文件 -> 失败并返回 status failed）
 npm run schema:validate -- --list-strict --json
+
+# 文件清单入口（推荐用于 CI 与机器消费）
+npm run schema:check-files
+# 成功示例：{ "status": "list", "summary": { ... } }
+# 失败示例：{ "status": "failed", "errors": [ { "code": "missing_file", "file": "..." } ] }
 
 # 查看参数说明
 npm run schema:validate -- --help

@@ -1175,6 +1175,25 @@ npm run schema:validate
   run: npm run schema:validate
 ```
 
+- 如果 manifest 步骤报错（step 1 失败），可快速摘出错误码：
+
+```bash
+# 保存 JSON 输出用于快速定位
+npm run schema:check-files | tee /tmp/openclaw-schema-manifest.json
+node - <<'NODE'
+const fs = require('fs');
+const payload = JSON.parse(fs.readFileSync('/tmp/openclaw-schema-manifest.json', 'utf8'));
+if (payload.status !== 'list') {
+  console.error('manifest fail', payload.status);
+  for (const e of payload.errors || []) {
+    console.error(`- ${e.code}: ${e.file} -> ${e.message}`);
+  }
+  process.exit(1);
+}
+console.log('manifest ok', payload.summary);
+NODE
+```
+
 - 三份 schema 说明见：`docs/schemas/README.md`
 
 #### 11.6 失败排障速查（`schema:validate`）
