@@ -220,8 +220,12 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 			"Kaspa address history aggregation metrics for settlement workflows",
 		],
 		signer: {
-			autoSources: [],
-			envKeys: [],
+			autoSources: [
+				"KASPA_PRIVATE_KEY",
+				"KASPA_PRIVATE_KEY_PATH",
+				"kaspa-wallet (official backend)",
+			],
+			envKeys: ["KASPA_PRIVATE_KEY", "KASPA_PRIVATE_KEY_PATH"],
 		},
 		workflows: [
 			{
@@ -283,9 +287,9 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 				],
 				execution: {
 					executable: true,
-					requiresSigner: false,
+					requiresSigner: true,
 					requiresMainnetConfirmation: true,
-					requiresConfirmToken: true,
+					requiresConfirmToken: false,
 					defaultRunMode: "analysis",
 					riskLevel: "medium",
 				},

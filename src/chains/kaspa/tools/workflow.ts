@@ -112,6 +112,10 @@ type KaspaTransferQuickMinimalParams = {
 	acceptancePollTimeoutMs?: number;
 	acceptanceEndpoint?: string;
 	privateKey?: string;
+	privateKeyEnv?: string;
+	privateKeyFile?: string;
+	privateKeyPath?: string;
+	privateKeyPathEnv?: string;
 };
 
 function normalizeKaspaTransferQuickMinimalInput(
@@ -151,7 +155,7 @@ type KaspaTransferQuickWorkflowResult = {
 	details: Record<string, unknown>;
 };
 
-const KASPA_TRANSFER_QUICK_DEFAULT_NETWORK = "testnet11";
+const KASPA_TRANSFER_QUICK_DEFAULT_NETWORK = "testnet10";
 const KASPA_TRANSFER_QUICK_ADDRESS_REGEX = /\bkaspa[a-z]*:[a-z0-9]+\b/gi;
 const KASPA_TRANSFER_QUICK_AMOUNT_REGEX =
 	/(?:\b(?:转|转账|send|to|转给)\b)\s*([0-9]+(?:\.[0-9]{1,8})?)/i;
@@ -167,7 +171,7 @@ function parseKaspaTransferIntentNetwork(input: string): string | undefined {
 		return "testnet10";
 	}
 	if (/\b(?:testnet|测试网|测试链)\b/i.test(input)) {
-		return "testnet11";
+		return "testnet10";
 	}
 	return undefined;
 }
@@ -1048,6 +1052,30 @@ function extractTxIdFromSubmitResult(data: unknown): string | null {
 					),
 					acceptanceEndpoint: Type.Optional(Type.String()),
 					privateKey: Type.Optional(Type.String()),
+					privateKeyEnv: Type.Optional(
+						Type.String({
+							description:
+								"Optional env var name for private key fallback (default: KASPA_PRIVATE_KEY).",
+						}),
+					),
+					privateKeyFile: Type.Optional(
+						Type.String({
+							description:
+								"Optional local file path containing private key content.",
+						}),
+					),
+					privateKeyPath: Type.Optional(
+						Type.String({
+							description:
+								"Alias for local file path containing private key content.",
+						}),
+					),
+					privateKeyPathEnv: Type.Optional(
+						Type.String({
+							description:
+								"Optional env var name for private key file path fallback (default: KASPA_PRIVATE_KEY_PATH).",
+						}),
+					),
 				}),
 				Type.String({ description: "Natural language intent sentence." }),
 			]),
@@ -1070,6 +1098,10 @@ function extractTxIdFromSubmitResult(data: unknown): string | null {
 					acceptancePollTimeoutMs: params.acceptancePollTimeoutMs,
 					acceptanceEndpoint: params.acceptanceEndpoint,
 					privateKey: params.privateKey,
+					privateKeyEnv: params.privateKeyEnv,
+					privateKeyFile: params.privateKeyFile,
+					privateKeyPath: params.privateKeyPath,
+					privateKeyPathEnv: params.privateKeyPathEnv,
 				});
 			},
 		}),
