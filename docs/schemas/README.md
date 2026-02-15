@@ -36,7 +36,23 @@ npm run schema:check-files
 
 ```yaml
 - name: Validate OpenClaw BTC5m schema file manifest
-  run: npm run schema:check-files
+  id: validate-openclaw-schema-manifest
+  run: |
+    set -euo pipefail
+    manifest_json="$(npm run -s schema:check-files)"
+    echo "$manifest_json" > /tmp/openclaw-schema-manifest.json
+    node - <<'NODE'
+    const fs = require('fs');
+    const payload = JSON.parse(fs.readFileSync('/tmp/openclaw-schema-manifest.json', 'utf8'));
+    if (payload.status !== 'list') {
+      console.error('schema manifest failed');
+      for (const e of payload.errors || []) {
+        console.error(` - ${e.code}: ${e.file} -> ${e.message}`);
+      }
+      process.exit(1);
+    }
+    console.log(`schema manifest ok: ${payload.summary.existingFiles}/${payload.summary.totalFiles}`);
+    NODE
 
 - name: Validate OpenClaw BTC5m schema content
   run: npm run schema:validate

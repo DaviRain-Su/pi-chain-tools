@@ -1242,7 +1242,25 @@ npm run schema:check-files
 # 推荐的 CI 片段（可直接复用）
 # 验证文件清单（manifest）与内容（schema 结构）
 # - name: Validate OpenClaw BTC5m schema manifest
-#   run: npm run schema:check-files
+#   id: validate-openclaw-schema-manifest
+#   run: |
+#     set -euo pipefail
+#     manifest_json="$(npm run -s schema:check-files)"
+#     echo "$manifest_json" > /tmp/openclaw-schema-manifest.json
+#     node - <<'NODE'
+#     const fs = require('fs');
+#     const payload = JSON.parse(fs.readFileSync('/tmp/openclaw-schema-manifest.json', 'utf8'));
+#     if (payload.status !== 'list') {
+#       console.error('openclaw schema manifest failed');
+#       if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+#         for (const e of payload.errors) {
+#           console.error(` - ${e.code}: ${e.file || e.detail || 'schema'} -> ${e.message}`);
+#         }
+#       }
+#       process.exit(1);
+#     }
+#     console.log(`openclaw schema manifest ok: ${payload.summary.existingFiles}/${payload.summary.totalFiles}`);
+#     NODE
 # - name: Validate OpenClaw BTC5m schema content
 #   run: npm run schema:validate
 
