@@ -34,12 +34,16 @@ function printUsage() {
 			"  --strict       print grouped diagnostics + fix guidance. In list mode, also enforces list-strict\n" +
 			"  --json         print machine-readable JSON result\n" +
 			"  --list         list configured schema files (resolved paths + existence)\n" +
-			"  --list-strict  when listing, fail if any configured schema file is missing\n" +
+			"  --list-strict  when listing, fail if any configured schema file is missing or not a file\n" +
 			"  --help,-h      show this message\n\n" +
 			"Files:\n" +
 			"  openclaw-btc5m-workflow.schema.json\n" +
 			"  openclaw-btc5m-runtime-state.schema.json\n" +
-			"  openclaw-btc5m-retry-policy.schema.json\n",
+			"  openclaw-btc5m-retry-policy.schema.json\n\n" +
+			"npm script helpers:\n" +
+			"  npm run schema:check-files         # list schema file manifest (strict, human-readable)\n" +
+			"  npm run schema:check-files:json    # list schema file manifest (strict, JSON)\n" +
+			"  npm run schema:validate            # full schema content validation\n",
 	);
 }
 

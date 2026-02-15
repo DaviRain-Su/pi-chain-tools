@@ -153,6 +153,8 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		expect(result.status).toBe(0);
 		expect(result.stdout).toContain("Usage:");
 		expect(result.stdout).toContain("--list-strict");
+		expect(result.stdout).toContain("npm script helpers:");
+		expect(result.stdout).toContain("schema:check-files:json");
 	});
 
 	it("reports unknown options and exits non-zero", () => {
