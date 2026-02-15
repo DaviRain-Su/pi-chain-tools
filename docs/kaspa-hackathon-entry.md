@@ -126,7 +126,7 @@
 
 - 调用 `kaspa_signTransferTransaction`
 - 输入：`request=<compose返回.request>`, `signatures=[<sig1>, <sig2>]`，或 `signature=<sig>`
-- 输出：`request`（含签名数组）与 `signatureEncoding`，以及 `requestHash`/`unsignedRequestHash`，并返回 `signingContext`（`hashInput.fingerprint`、`hashInput.messageDigest`、`hashInput.payloadPreview`、签名编码、是否覆盖签名）。
+- 输出：`request`（含签名数组）与 `signatureEncoding`，以及 `requestHash`/`unsignedRequestHash`，并返回 `signingContext`（`hashInput.fingerprint`、`hashInput.messageDigest`、`hashInput.signaturePayload`、`hashInput.payloadPreview`、`metadata.providerApiShape`、`metadata.providerResultShape`、签名编码、是否覆盖签名）。
 
 #### Step A：analysis
 

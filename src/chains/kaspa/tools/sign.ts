@@ -27,12 +27,14 @@ type KaspaSigningContext = {
 		network?: string;
 		inputShape: string;
 		payloadPreview?: string;
+		signaturePayload?: string;
 		schema: "kaspa-signing-input.v1";
 	};
 	metadata: {
 		provider?: KaspaSignerProvider;
 		providerModule?: string;
 		providerApiShape?: string;
+		providerResultShape?: string;
 		replaceExistingSignatures: boolean;
 	};
 };
@@ -58,7 +60,11 @@ interface KaspaWalletSignerInput {
 	hash: string;
 }
 
-type KaspaWalletSigner = (input: KaspaWalletSignerInput) => Promise<string[]>;
+type KaspaWalletSigner = (input: KaspaWalletSignerInput) => Promise<{
+	signatures: string[];
+	resultShape?: string;
+	resultPreview?: string;
+}>;
 type KaspaWalletSignerBinding = {
 	signer: KaspaWalletSigner;
 	signerApiShape: string;
@@ -143,6 +149,29 @@ function buildSigningInputPreview(payload: unknown): string {
 	return serialized.length > KASPA_SIGNING_PREVIEW_MAX_LENGTH
 		? `${serialized.slice(0, KASPA_SIGNING_PREVIEW_MAX_LENGTH)}...`
 		: serialized;
+}
+
+function describeKaspaValueShape(value: unknown): string {
+	if (value === undefined) return "undefined";
+	if (value === null) return "null";
+	if (typeof value === "string") return "string";
+	if (typeof value === "number") return "number";
+	if (typeof value === "boolean") return "boolean";
+	if (Array.isArray(value)) {
+		return `array(len=${value.length})`;
+	}
+	if (typeof value === "object") {
+		const keys = Object.keys(value as Record<string, unknown>);
+		if (keys.length === 0) {
+			return "object(empty)";
+		}
+		return `object(${keys.join(",")})`;
+	}
+	return typeof value;
+}
+
+function buildKaspaSigningPayload(payload: unknown): string {
+	return stableKaspaJson(payload);
 }
 
 function resolveKaspaTransactionSubmissionRequest(
@@ -336,6 +365,7 @@ function signKaspaSubmitTransaction(params: {
 			network,
 			inputShape: "transaction-without-signatures",
 			payloadPreview: buildSigningInputPreview(signingInput.payload),
+			signaturePayload: buildKaspaSigningPayload(signingInput.payload),
 			schema: "kaspa-signing-input.v1",
 		},
 		metadata: {
@@ -393,7 +423,7 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 		typeof body.rawTransaction === "string"
 			? body.rawTransaction
 			: JSON.stringify(transaction);
-	const signatures = await signer({
+	const signerResult = await signer({
 		privateKey: params.privateKey,
 		request: body,
 		transaction,
@@ -402,12 +432,12 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 		signatureEncoding: normalizedEncoding,
 		hash: signingHash,
 	});
-	if (signatures.length === 0) {
+	if (signerResult.signatures.length === 0) {
 		throw new Error("Unable to produce any signature from wallet backend");
 	}
 	const finalSignatures = params.replaceExistingSignatures
-		? signatures
-		: [...cloneSignatures(transaction.signatures), ...signatures];
+		? signerResult.signatures
+		: [...cloneSignatures(transaction.signatures), ...signerResult.signatures];
 	const source = `kaspa-wallet:${resolvedProvider}`;
 	const signerResolutionModule = signerResolution.backend?.moduleName;
 	const signingContext: KaspaSigningContext = {
@@ -419,12 +449,14 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 			network,
 			inputShape: "transaction-without-signatures",
 			payloadPreview: buildSigningInputPreview(signingInput.payload),
+			signaturePayload: buildKaspaSigningPayload(signingInput.payload),
 			schema: "kaspa-signing-input.v1",
 		},
 		metadata: {
 			provider: resolvedProvider,
 			providerModule: signerResolutionModule,
 			providerApiShape: signerResolution.backend.providerApiShape,
+			providerResultShape: signerResult.resultShape,
 			replaceExistingSignatures: Boolean(params.replaceExistingSignatures),
 		},
 	};
@@ -621,7 +653,11 @@ function makeFunctionKaspaSigner(
 ): KaspaWalletSignerBinding {
 	const signer: KaspaWalletSigner = async function signWithFunction(
 		input: KaspaWalletSignerInput,
-	): Promise<string[]> {
+	): Promise<{
+		signatures: string[];
+		resultShape?: string;
+		resultPreview?: string;
+	}> {
 		const payload = {
 			transaction: input.transaction,
 			rawTransaction: input.rawTransaction,
@@ -653,8 +689,13 @@ function makeFunctionKaspaSigner(
 		for (const args of attempts) {
 			try {
 				const raw = await Promise.resolve(fn(...args));
-				const sigs = extractSignaturesFromValue(raw);
-				if (sigs.length > 0) return sigs;
+				const extracted = extractSignaturesFromValueWithShape(raw);
+				if (extracted.signatures.length > 0)
+					return {
+						signatures: extracted.signatures,
+						resultShape: extracted.resultShape,
+						resultPreview: extracted.resultPreview,
+					};
 			} catch (error) {
 				lastError = error instanceof Error ? error : new Error(String(error));
 			}
@@ -714,8 +755,15 @@ function createSignerFromFactory(
 	signMethods: string[],
 ): KaspaWalletSignerBinding | null {
 	if (typeof factory !== "function") return null;
+	let resolvedSignShape = `constructor:${factoryName}(${signMethods[0] || "sign"})`;
 	return {
-		signer: async (input: KaspaWalletSignerInput): Promise<string[]> => {
+		signer: async (
+			input: KaspaWalletSignerInput,
+		): Promise<{
+			signatures: string[];
+			resultShape?: string;
+			resultPreview?: string;
+		}> => {
 			let instance: unknown;
 			const initAttemptList: unknown[][] = [
 				[input.privateKey],
@@ -746,6 +794,7 @@ function createSignerFromFactory(
 				if (typeof method === "function") {
 					directSign = method as KaspaSignMethod;
 					directSignName = name;
+					resolvedSignShape = `constructor:${factoryName}().${name}(payload)`;
 					break;
 				}
 			}
@@ -773,9 +822,13 @@ function createSignerFromFactory(
 					const result = await Promise.resolve(
 						directSign.call(instance, ...args),
 					);
-					const signatures = extractSignaturesFromValue(result);
-					if (signatures.length > 0) {
-						return signatures;
+					const extracted = extractSignaturesFromValueWithShape(result);
+					if (extracted.signatures.length > 0) {
+						return {
+							signatures: extracted.signatures,
+							resultShape: extracted.resultShape,
+							resultPreview: extracted.resultPreview,
+						};
 					}
 				} catch (error) {
 					lastError = error instanceof Error ? error : new Error(String(error));
@@ -785,7 +838,7 @@ function createSignerFromFactory(
 				`Kaspa wallet class signer (${factoryName}) failed to emit signatures${lastError ? `: ${lastError.message}` : ""}`,
 			);
 		},
-		signerApiShape: `constructor:${factoryName}(${signMethods[0] || "sign"})`,
+		signerApiShape: resolvedSignShape,
 	};
 }
 
@@ -870,6 +923,18 @@ function extractSignaturesFromValue(value: unknown): string[] {
 		}
 	}
 	return [...unique];
+}
+
+function extractSignaturesFromValueWithShape(value: unknown): {
+	signatures: string[];
+	resultShape: string;
+	resultPreview: string;
+} {
+	return {
+		signatures: extractSignaturesFromValue(value),
+		resultShape: describeKaspaValueShape(value),
+		resultPreview: buildSigningInputPreview(value),
+	};
 }
 
 function raiseError(): never {

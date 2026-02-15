@@ -99,6 +99,7 @@ describe("kaspa sign tools", () => {
 					messageDigest: string;
 					signatureEncoding: string;
 					payloadPreview?: string;
+					signaturePayload?: string;
 				};
 				metadata: { replaceExistingSignatures: boolean };
 			};
@@ -122,6 +123,7 @@ describe("kaspa sign tools", () => {
 			details.signingContext?.hashInput?.fingerprint,
 		);
 		expect(details.signingContext?.hashInput?.payloadPreview).toContain("{");
+		expect(details.signingContext?.hashInput?.signaturePayload).toContain('"');
 		expect(details.signingContext?.hashInput?.signatureEncoding).toBe("hex");
 	});
 
@@ -176,10 +178,12 @@ describe("kaspa sign tools", () => {
 					signatureEncoding: string;
 					network?: string;
 					payloadPreview?: string;
+					signaturePayload?: string;
 				};
 				metadata: {
 					provider?: string;
 					providerApiShape?: string;
+					providerResultShape?: string;
 					replaceExistingSignatures?: boolean;
 				};
 			};
@@ -197,8 +201,12 @@ describe("kaspa sign tools", () => {
 			details.signingContext?.hashInput?.fingerprint,
 		);
 		expect(details.signingContext?.hashInput?.payloadPreview).toContain("{");
+		expect(details.signingContext?.hashInput?.signaturePayload).toContain("{");
 		expect(details.signingContext?.metadata?.providerApiShape).toContain(
 			"function:signKaspaTransaction",
+		);
+		expect(details.signingContext?.metadata?.providerResultShape).toBe(
+			"string",
 		);
 		expect(details.signingContext?.hashInput?.signatureEncoding).toBe("hex");
 		const signedRaw = JSON.parse(details.rawTransaction) as {
