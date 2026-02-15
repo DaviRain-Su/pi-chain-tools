@@ -86,6 +86,7 @@ const cetusV2Mocks = vi.hoisted(() => ({
 	buildCetusFarmsUnstakeTransaction: vi.fn(),
 	buildCetusFarmsHarvestTransaction: vi.fn(),
 	findCetusFarmsPoolsByTokenPair: vi.fn(),
+	formatCetusFarmsPairError: vi.fn(() => "formatCetusFarmsPairError"),
 }));
 
 vi.mock("../runtime.js", async () => {
@@ -222,6 +223,7 @@ vi.mock("../cetus-v2.js", () => ({
 	buildCetusFarmsHarvestTransaction:
 		cetusV2Mocks.buildCetusFarmsHarvestTransaction,
 	findCetusFarmsPoolsByTokenPair: cetusV2Mocks.findCetusFarmsPoolsByTokenPair,
+	formatCetusFarmsPairError: cetusV2Mocks.formatCetusFarmsPairError,
 }));
 
 import { createSuiWorkflowTools } from "./workflow.js";
@@ -243,6 +245,10 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
 	cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockResolvedValue([]);
+	cetusV2Mocks.formatCetusFarmsPairError.mockImplementation(
+		({ coinTypeA, coinTypeB }) =>
+			`${coinTypeA}/${coinTypeB} maps to multiple pools, Please provide poolId.`,
+	);
 	runtimeMocks.getSuiClient.mockReturnValue({
 		devInspectTransactionBlock: vi.fn().mockResolvedValue({
 			effects: {
@@ -954,6 +960,35 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("parses LP add intentText without positionId and applies default full-range ticks", async () => {
+		const tool = getTool();
+		const poolId =
+			"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+		const result = await tool.execute("wf5c-default-ticks", {
+			runId: "wf-sui-05c-default-ticks",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"添加流动性 pool: " +
+				poolId +
+				" SUI/USDC amountA: 10 amountB: 20",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				poolId,
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				tickLower: -443636,
+				tickUpper: 443636,
+				amountA: "10",
+				amountB: "20",
+			},
+		});
+	});
+
 	it("parses LP add intentText with lp shorthand and pipe pair", async () => {
 		const tool = getTool();
 		const result = await tool.execute("wf5c-pipe", {
@@ -1302,6 +1337,84 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("auto-resolves LP add poolId from token pair when no positionId is provided", async () => {
+		const tool = getTool();
+		const resolvedPoolId =
+			"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+		cetusV2Mocks.findCetusFarmsPoolsByTokenPair.mockResolvedValue([
+			{
+				poolId:
+					"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+				clmmPoolId: resolvedPoolId,
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				pairSymbol: "SUI/USDC",
+			},
+		]);
+		cetusMocks.getPositionList.mockResolvedValue([]);
+
+		const result = await tool.execute("wf5c-auto-pair-farms", {
+			runId: "wf-sui-05c-auto-pair-farms",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "添加流动性 SUI/USDC amountA: 10 amountB: 20",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				poolId: resolvedPoolId,
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+			},
+		});
+		expect(cetusV2Mocks.findCetusFarmsPoolsByTokenPair).toHaveBeenCalledWith(
+			expect.objectContaining({
+				network: "mainnet",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+			}),
+		);
+	});
+
+	it("asks for poolId when LP add pair maps to multiple CLMM pools", async () => {
+		const tool = getTool();
+		const owner =
+			"0x1111111111111111111111111111111111111111111111111111111111111111";
+		runtimeMocks.resolveSuiOwnerAddress.mockReturnValue(owner);
+		cetusMocks.getPositionList.mockResolvedValue([]);
+		cetusV2Mocks.findCetusFarmsPoolsByTokenPair.mockResolvedValue([
+			{
+				poolId:
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				clmmPoolId:
+					"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				pairSymbol: "SUI/USDC",
+			},
+			{
+				poolId:
+					"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+				clmmPoolId:
+					"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				coinTypeA: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				coinTypeB: "0x2::sui::SUI",
+				pairSymbol: "USDC/SUI",
+			},
+		]);
+
+		await expect(
+			tool.execute("wf5c-auto-pair-farms-multi", {
+				runId: "wf-sui-05c-auto-pair-farms-multi",
+				runMode: "analysis",
+				network: "mainnet",
+				intentText: "添加lp SUI/USDC amountA: 10 amountB: 20",
+			}),
+		).rejects.toThrow(/provide poolId/i);
+	});
+
 	it("asks for positionId when LP add pair maps to multiple positions", async () => {
 		const tool = getTool();
 		const owner =
@@ -1396,6 +1509,53 @@ describe("w3rt_run_sui_workflow_v0", () => {
 					status: "success",
 					poolId,
 					positionId,
+					amountA: "1500",
+					amountB: "2500",
+				},
+			},
+		});
+	});
+
+	it("simulates LP add for new position (is_open=true) when positionId is omitted", async () => {
+		const tool = getTool();
+		const poolId =
+			"0x1111111111111111111111111111111111111111111111111111111111111111";
+		const result = await tool.execute("wf6-open", {
+			runId: "wf-sui-06-open",
+			runMode: "simulate",
+			intentType: "sui.lp.cetus.add",
+			network: "mainnet",
+			poolId,
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x2::usdc::USDC",
+			tickLower: -120,
+			tickUpper: 120,
+			amountA: "1500",
+			amountB: "2500",
+		});
+
+		expect(cetusMocks.createAddLiquidityFixTokenPayload).toHaveBeenCalledWith({
+			pool_id: poolId,
+			pos_id: "",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x2::usdc::USDC",
+			tick_lower: -120,
+			tick_upper: 120,
+			amount_a: "1500",
+			amount_b: "2500",
+			slippage: 0.01,
+			fix_amount_a: true,
+			is_open: true,
+			collect_fee: false,
+			rewarder_coin_types: [],
+		});
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			artifacts: {
+				simulate: {
+					status: "success",
+					poolId,
+					positionId: "",
 					amountA: "1500",
 					amountB: "2500",
 				},

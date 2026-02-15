@@ -529,6 +529,57 @@ describe("sui_cetusAddLiquidity", () => {
 			positionId: "0xpos",
 		});
 	});
+
+	it("opens a new LP position when positionId is omitted", async () => {
+		runtimeMocks.parseSuiNetwork.mockReturnValue("mainnet");
+		const tx = { tx: "add-liquidity-open-tx" };
+		cetusMocks.createAddLiquidityFixTokenPayload.mockResolvedValue(tx);
+		const signAndExecuteTransaction = vi.fn().mockResolvedValue({
+			digest: "0xlpadd-open",
+			confirmedLocalExecution: true,
+			effects: {
+				status: {
+					status: "success",
+				},
+			},
+		});
+		runtimeMocks.getSuiClient.mockReturnValue({ signAndExecuteTransaction });
+
+		const tool = getTool("sui_cetusAddLiquidity");
+		const result = await tool.execute("l2-open", {
+			poolId: "0xpool2",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x...::usdc::USDC",
+			tickLower: -100,
+			tickUpper: 100,
+			amountA: "1000",
+			amountB: "2000",
+			network: "mainnet",
+			confirmMainnet: true,
+		});
+
+		expect(cetusMocks.createAddLiquidityFixTokenPayload).toHaveBeenCalledWith({
+			pool_id: "0xpool2",
+			pos_id: "",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x...::usdc::USDC",
+			tick_lower: -100,
+			tick_upper: 100,
+			amount_a: "1000",
+			amount_b: "2000",
+			slippage: 0.01,
+			fix_amount_a: true,
+			is_open: true,
+			collect_fee: false,
+			rewarder_coin_types: [],
+		});
+		expect(result.details).toMatchObject({
+			digest: "0xlpadd-open",
+			status: "success",
+			poolId: "0xpool2",
+			positionId: "",
+		});
+	});
 });
 
 describe("sui_cetusRemoveLiquidity", () => {

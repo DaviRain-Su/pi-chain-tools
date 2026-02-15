@@ -64,7 +64,7 @@ type BuildSwapCetusParams = {
 type BuildCetusAddLiquidityParams = {
 	fromAddress: string;
 	poolId: string;
-	positionId: string;
+	positionId?: string;
 	coinTypeA: string;
 	coinTypeB: string;
 	tickLower: number;
@@ -609,7 +609,9 @@ export function createSuiComposeTools() {
 					description: "Sender Sui address (transaction sender)",
 				}),
 				poolId: Type.String({ description: "Cetus pool object id" }),
-				positionId: Type.String({ description: "Cetus position object id" }),
+				positionId: Type.Optional(
+					Type.String({ description: "Cetus position object id" }),
+				),
 				coinTypeA: Type.String({ description: "Pool coinTypeA" }),
 				coinTypeB: Type.String({ description: "Pool coinTypeB" }),
 				tickLower: Type.Number({ description: "Position lower tick index" }),
@@ -645,6 +647,8 @@ export function createSuiComposeTools() {
 				const cetusNetwork = resolveCetusNetwork(network);
 				const fromAddress = normalizeAtPath(params.fromAddress);
 				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
+				const positionId = params.positionId?.trim() ?? "";
+				const isOpenPosition = !positionId;
 				const initCetusSDK = await getInitCetusSDK();
 				const sdk = initCetusSDK({
 					network: cetusNetwork,
@@ -653,7 +657,7 @@ export function createSuiComposeTools() {
 				});
 				const tx = await sdk.Position.createAddLiquidityFixTokenPayload({
 					pool_id: params.poolId.trim(),
-					pos_id: params.positionId.trim(),
+					pos_id: positionId,
 					coinTypeA: params.coinTypeA.trim(),
 					coinTypeB: params.coinTypeB.trim(),
 					tick_lower: params.tickLower,
@@ -662,7 +666,7 @@ export function createSuiComposeTools() {
 					amount_b: params.amountB.trim(),
 					slippage: parseSlippageDecimal(params.slippageBps),
 					fix_amount_a: params.fixAmountA !== false,
-					is_open: false,
+					is_open: isOpenPosition,
 					collect_fee: params.collectFee === true,
 					rewarder_coin_types: params.rewarderCoinTypes ?? [],
 				});
@@ -672,7 +676,7 @@ export function createSuiComposeTools() {
 					content: [
 						{
 							type: "text",
-							text: `Built Cetus add-liquidity transaction: pool=${params.poolId.trim()} position=${params.positionId.trim()}`,
+							text: `Built Cetus add-liquidity transaction: pool=${params.poolId.trim()} position=${positionId || "new"}`,
 						},
 					],
 					details: {
@@ -681,7 +685,7 @@ export function createSuiComposeTools() {
 						rpcUrl,
 						fromAddress,
 						poolId: params.poolId.trim(),
-						positionId: params.positionId.trim(),
+						positionId,
 						coinTypeA: params.coinTypeA.trim(),
 						coinTypeB: params.coinTypeB.trim(),
 						tickLower: params.tickLower,

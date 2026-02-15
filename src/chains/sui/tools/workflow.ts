@@ -8,6 +8,7 @@ import {
 	buildCetusFarmsHarvestTransaction,
 	buildCetusFarmsStakeTransaction,
 	buildCetusFarmsUnstakeTransaction,
+	formatCetusFarmsPairError,
 	findCetusFarmsPoolsByTokenPair,
 	resolveCetusTokenTypesBySymbol,
 	resolveCetusV2Network,
@@ -67,7 +68,7 @@ type SwapCetusIntent = {
 type CetusAddLiquidityIntent = {
 	type: "sui.lp.cetus.add";
 	poolId: string;
-	positionId: string;
+	positionId?: string;
 	coinTypeA: string;
 	coinTypeB: string;
 	tickLower: number;
@@ -518,6 +519,8 @@ const KNOWN_SUI_TOKEN_BY_ALIAS = new Map<string, KnownSuiToken>(
 const KNOWN_SUI_TOKEN_BY_COIN_TYPE = new Map<string, KnownSuiToken>(
 	KNOWN_SUI_TOKENS.map((token) => [token.coinType, token] as const),
 );
+const DEFAULT_CETUS_TICK_LOWER = -443636;
+const DEFAULT_CETUS_TICK_UPPER = 443636;
 
 const TOKEN_NAME_PATTERN = "[A-Za-z][A-Za-z0-9_]{1,15}";
 
@@ -1132,6 +1135,39 @@ function formatCandidateListForError(
 		})
 		.slice(0, 6)
 		.join("; ");
+}
+
+async function resolveLpClmmPoolByPair(params: {
+	network: SuiNetwork;
+	coinTypeA: string;
+	coinTypeB: string;
+	rpcUrl?: string;
+}): Promise<string | undefined> {
+	const { network, coinTypeA, coinTypeB, rpcUrl } = params;
+	const poolCandidates = await findCetusFarmsPoolsByTokenPair({
+		network: resolveCetusV2Network(network),
+		rpcUrl,
+		coinTypeA,
+		coinTypeB,
+	});
+
+	if (poolCandidates.length === 1) {
+		return poolCandidates[0].clmmPoolId || poolCandidates[0].poolId;
+	}
+	if (poolCandidates.length > 1) {
+		const formattedCandidates = poolCandidates.map((candidate) => ({
+			poolId: candidate.clmmPoolId || candidate.poolId,
+			pairSymbol: candidate.pairSymbol,
+		}));
+		throw new Error(
+			formatCetusFarmsPairError({
+				coinTypeA,
+				coinTypeB,
+				pools: formattedCandidates,
+			}),
+		);
+	}
+	return undefined;
 }
 
 async function resolveLpPositionByPair(params: {
@@ -1783,6 +1819,15 @@ function inferIntentType(params: WorkflowParams, parsed: ParsedIntentHints) {
 	if (parsed.intentType) return parsed.intentType;
 	if (
 		params.poolId &&
+		params.amountA &&
+		params.amountB &&
+		params.coinTypeA &&
+		params.coinTypeB
+	) {
+		return "sui.lp.cetus.add";
+	}
+	if (
+		params.poolId &&
 		params.positionId &&
 		params.deltaLiquidity &&
 		params.minAmountA &&
@@ -1792,7 +1837,6 @@ function inferIntentType(params: WorkflowParams, parsed: ParsedIntentHints) {
 	}
 	if (
 		params.poolId &&
-		params.positionId &&
 		params.amountA &&
 		params.amountB &&
 		params.tickLower != null &&
@@ -1871,8 +1915,10 @@ async function normalizeIntent(
 			params.coinTypeB || parsed.coinTypeB,
 			parsedNetwork,
 		);
-		const tickLower = params.tickLower ?? parsed.tickLower;
-		const tickUpper = params.tickUpper ?? parsed.tickUpper;
+		let tickLower = params.tickLower ?? parsed.tickLower;
+		let tickUpper = params.tickUpper ?? parsed.tickUpper;
+		tickLower = tickLower ?? DEFAULT_CETUS_TICK_LOWER;
+		tickUpper = tickUpper ?? DEFAULT_CETUS_TICK_UPPER;
 		const rpcUrl = params.rpcUrl;
 		const [amountARaw, amountBRaw] = await Promise.all([
 			normalizeLpAmountToRaw({
@@ -1917,35 +1963,37 @@ async function normalizeIntent(
 				throw new Error(
 					`Multiple LP positions found for ${coinTypeA}/${coinTypeB} in owner wallet. Please provide positionId. candidates=${candidateList}`,
 				);
-			} else if (!poolId) {
-				throw new Error(
-					"No matching LP position found for this coin pair. Specify positionId (preferred) or add poolId+positionId before execution.",
-				);
+			}
+		}
+		if (!poolId && coinTypeA && coinTypeB) {
+			const resolvedPoolId = await resolveLpClmmPoolByPair({
+				network,
+				rpcUrl,
+				coinTypeA,
+				coinTypeB,
+			});
+			if (resolvedPoolId) {
+				poolId = resolvedPoolId;
 			}
 		}
 		if (!poolId) {
 			throw new Error(
 				positionId
 					? "poolId is required for sui.lp.cetus.add and could not be auto-resolved from positionId. Tip: provide poolId explicitly or verify positionId belongs to a Cetus position object."
-					: "poolId is required for sui.lp.cetus.add. Tip: first query Cetus pools and choose a poolId.",
-			);
-		}
-		if (!positionId) {
-			throw new Error(
-				"positionId is required for sui.lp.cetus.add. Tip: LP add currently targets an existing positionId.",
+					: "poolId is required for sui.lp.cetus.add. Tip: provide poolId to create a new LP position.",
 			);
 		}
 		if (!coinTypeA)
 			throw new Error("coinTypeA is required for sui.lp.cetus.add");
 		if (!coinTypeB)
 			throw new Error("coinTypeB is required for sui.lp.cetus.add");
-		if (tickLower == null || tickUpper == null) {
-			throw new Error(
-				"tickLower and tickUpper are required for sui.lp.cetus.add",
-			);
-		}
 		if (!amountARaw || !amountBRaw) {
 			throw new Error("amountA and amountB are required for sui.lp.cetus.add");
+		}
+		if (tickLower > tickUpper) {
+			const tmp = tickLower;
+			tickLower = tickUpper;
+			tickUpper = tmp;
 		}
 		return {
 			type: "sui.lp.cetus.add",
@@ -2779,6 +2827,8 @@ async function buildSimulation(
 		const cetusNetwork = resolveCetusNetwork(network);
 		const rpcUrl = getSuiRpcEndpoint(network);
 		const initCetusSDK = await getInitCetusSDK();
+		const positionId = intent.positionId?.trim() ?? "";
+		const isOpenPosition = !positionId;
 		const sdk = initCetusSDK({
 			network: cetusNetwork,
 			fullNodeUrl: rpcUrl,
@@ -2786,7 +2836,7 @@ async function buildSimulation(
 		});
 		const tx = await sdk.Position.createAddLiquidityFixTokenPayload({
 			pool_id: intent.poolId,
-			pos_id: intent.positionId,
+			pos_id: positionId,
 			coinTypeA: intent.coinTypeA,
 			coinTypeB: intent.coinTypeB,
 			tick_lower: intent.tickLower,
@@ -2795,7 +2845,7 @@ async function buildSimulation(
 			amount_b: intent.amountB,
 			slippage: parseSlippageDecimal(intent.slippageBps),
 			fix_amount_a: intent.fixAmountA,
-			is_open: false,
+			is_open: isOpenPosition,
 			collect_fee: intent.collectFee,
 			rewarder_coin_types: intent.rewarderCoinTypes,
 		});
@@ -2803,7 +2853,7 @@ async function buildSimulation(
 			tx: tx as unknown as Transaction,
 			artifacts: {
 				poolId: intent.poolId,
-				positionId: intent.positionId,
+				positionId,
 				amountA: intent.amountA,
 				amountB: intent.amountB,
 				tickLower: intent.tickLower,

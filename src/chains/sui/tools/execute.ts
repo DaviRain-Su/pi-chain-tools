@@ -72,7 +72,7 @@ type SuiSwapCetusParams = {
 
 type SuiCetusAddLiquidityParams = {
 	poolId: string;
-	positionId: string;
+	positionId?: string;
 	fromPrivateKey?: string;
 	coinTypeA: string;
 	coinTypeB: string;
@@ -774,7 +774,9 @@ export function createSuiExecuteTools() {
 				"Add liquidity to an existing Cetus CLMM position using official Cetus SDK",
 			parameters: Type.Object({
 				poolId: Type.String({ description: "Cetus pool object id" }),
-				positionId: Type.String({ description: "Cetus position object id" }),
+				positionId: Type.Optional(
+					Type.String({ description: "Cetus position object id" }),
+				),
 				coinTypeA: Type.String({ description: "Pool coinTypeA" }),
 				coinTypeB: Type.String({ description: "Pool coinTypeB" }),
 				tickLower: Type.Number({ description: "Position lower tick index" }),
@@ -824,6 +826,8 @@ export function createSuiExecuteTools() {
 				const fromAddress = signer.toSuiAddress();
 				const rpcUrl = getSuiRpcEndpoint(network, params.rpcUrl);
 				const initCetusSDK = await getInitCetusSDK();
+				const positionId = params.positionId?.trim() ?? "";
+				const isOpenPosition = !positionId;
 				const sdk = initCetusSDK({
 					network: cetusNetwork,
 					fullNodeUrl: rpcUrl,
@@ -831,7 +835,7 @@ export function createSuiExecuteTools() {
 				});
 				const tx = (await sdk.Position.createAddLiquidityFixTokenPayload({
 					pool_id: params.poolId.trim(),
-					pos_id: params.positionId.trim(),
+					pos_id: positionId,
 					coinTypeA: params.coinTypeA.trim(),
 					coinTypeB: params.coinTypeB.trim(),
 					tick_lower: params.tickLower,
@@ -840,7 +844,7 @@ export function createSuiExecuteTools() {
 					amount_b: params.amountB.trim(),
 					slippage: parseSlippageDecimal(params.slippageBps),
 					fix_amount_a: params.fixAmountA !== false,
-					is_open: false,
+					is_open: isOpenPosition,
 					collect_fee: params.collectFee === true,
 					rewarder_coin_types: params.rewarderCoinTypes ?? [],
 				})) as Transaction;
@@ -882,7 +886,7 @@ export function createSuiExecuteTools() {
 						rpcUrl,
 						cetusNetwork,
 						poolId: params.poolId.trim(),
-						positionId: params.positionId.trim(),
+						positionId,
 						coinTypeA: params.coinTypeA.trim(),
 						coinTypeB: params.coinTypeB.trim(),
 						tickLower: params.tickLower,

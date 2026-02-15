@@ -356,6 +356,46 @@ describe("sui compose tools", () => {
 		});
 	});
 
+	it("builds Cetus add-liquidity payload for new LP position", async () => {
+		const tool = getTool("sui_buildCetusAddLiquidityTransaction");
+		const result = await tool.execute("sui-compose-5-open", {
+			fromAddress:
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+			poolId:
+				"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x2::usdc::USDC",
+			tickLower: -100,
+			tickUpper: 100,
+			amountA: "1000",
+			amountB: "2000",
+			network: "mainnet",
+		});
+
+		expect(cetusMocks.createAddLiquidityFixTokenPayload).toHaveBeenCalledWith({
+			pool_id:
+				"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			pos_id: "",
+			coinTypeA: "0x2::sui::SUI",
+			coinTypeB: "0x2::usdc::USDC",
+			tick_lower: -100,
+			tick_upper: 100,
+			amount_a: "1000",
+			amount_b: "2000",
+			slippage: 0.01,
+			fix_amount_a: true,
+			is_open: true,
+			collect_fee: false,
+			rewarder_coin_types: [],
+		});
+		expect(result.details).toMatchObject({
+			poolId:
+				"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			positionId: "",
+			serializedTransaction: "serialized-cetus-add",
+		});
+	});
+
 	it("builds Cetus remove-liquidity transaction payload", async () => {
 		const tool = getTool("sui_buildCetusRemoveLiquidityTransaction");
 		const result = await tool.execute("sui-compose-6", {
