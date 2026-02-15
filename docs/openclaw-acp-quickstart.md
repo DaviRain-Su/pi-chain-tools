@@ -1154,6 +1154,23 @@ if (!validRetry) {
 }
 ```
 
+#### 11.5 CI 约束建议（防回归，开箱即用）
+
+建议把 schema 校验加入仓库 CI，避免后续改动破坏可验证产物：
+
+- 已在 `npm run check` 增加 `npm run schema:validate`
+- 本地快速校验：
+
+```bash
+npm run schema:validate
+```
+
+- 若你需要仅校验 OpenClaw JSON Schema（不影响业务测试），可在流水线单独建 step：
+
+```bash
+npm run schema:validate
+```
+
 ### 12) 状态读取速查（执行器实现更稳）
 
 | 节点 | 读 | 写 |
