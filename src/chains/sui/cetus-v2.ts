@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import type { Transaction } from "@mysten/sui/transactions";
-import { type SuiNetwork, getSuiRpcEndpoint } from "./runtime.js";
+import { normalizeStructTag, parseStructTag } from "@mysten/sui/utils";
+import { type SuiNetwork, getSuiClient, getSuiRpcEndpoint } from "./runtime.js";
 
 export type CetusV2Network = "mainnet" | "testnet";
 
@@ -14,6 +15,14 @@ type FarmsPoolLike = {
 	id: string;
 	clmm_pool_id: string;
 	rewarders?: unknown[];
+};
+
+type CetusFarmsPoolPair = {
+	poolId: string;
+	clmmPoolId: string;
+	coinTypeA: string;
+	coinTypeB: string;
+	pairSymbol: string;
 };
 
 type FarmsPositionLike = {
@@ -247,6 +256,224 @@ function normalizeDataPage<T>(input: unknown): {
 		nextCursor:
 			typeof payload?.next_cursor === "string" ? payload.next_cursor : null,
 	};
+}
+
+function isObjectWithStringType(value: unknown): value is { type?: string } {
+	if (!value || typeof value !== "object") return false;
+	return typeof (value as { type?: unknown }).type === "string";
+}
+
+function getPairCoinTypesFromType(typeText: string): {
+	coinTypeA: string;
+	coinTypeB: string;
+} | null {
+	let parsedType = typeText.trim();
+	if (!parsedType.includes("::Pool<")) return null;
+	if (!parsedType.includes(">")) parsedType = `${parsedType}>`;
+	try {
+		const parsed = parseStructTag(parsedType);
+		if (parsed.name !== "Pool") return null;
+		if (parsed.typeParams.length < 2) return null;
+		const rawA = parsed.typeParams[0];
+		const rawB = parsed.typeParams[1];
+		const coinTypeA =
+			typeof rawA === "string"
+				? rawA
+				: typeof rawA === "object"
+					? normalizeStructTag(rawA)
+					: null;
+		const coinTypeB =
+			typeof rawB === "string"
+				? rawB
+				: typeof rawB === "object"
+					? normalizeStructTag(rawB)
+					: null;
+		if (!coinTypeA || !coinTypeB) return null;
+		return { coinTypeA, coinTypeB };
+	} catch {
+		return null;
+	}
+}
+
+function normalizeAddress(value: string): string {
+	return value.trim().toLowerCase();
+}
+
+function normalizePairKey(coinTypeA: string, coinTypeB: string): string {
+	return `${normalizeAddress(coinTypeA)}|${normalizeAddress(coinTypeB)}`;
+}
+
+function getCoinSymbolFallback(coinType: string): string {
+	const segments = coinType.split("::").map((entry) => entry.trim());
+	return segments[segments.length - 1] || coinType;
+}
+
+async function resolveCetusFarmsPoolPairs(params: {
+	network: CetusV2Network;
+	rpcUrl?: string;
+	clmmPoolIds: string[];
+}): Promise<
+	Map<
+		string,
+		{
+			coinTypeA: string;
+			coinTypeB: string;
+			pairSymbol: string;
+		}
+	>
+> {
+	const resolvedPairs = new Map<
+		string,
+		{
+			coinTypeA: string;
+			coinTypeB: string;
+			pairSymbol: string;
+		}
+	>();
+	const uniquePoolIds = [...new Set(params.clmmPoolIds)];
+	if (uniquePoolIds.length === 0) {
+		return resolvedPairs;
+	}
+
+	const client = getSuiClient(params.network, params.rpcUrl);
+	const clientAny = client as {
+		multiGetObjects?: (params: {
+			ids: string[];
+			options?: { showType?: boolean };
+		}) => Promise<unknown[]>;
+		getCoinMetadata?: (params: {
+			coinType: string;
+		}) => Promise<{ symbol?: string } | null>;
+	};
+	if (typeof clientAny.multiGetObjects !== "function") return resolvedPairs;
+
+	const poolObjects = await clientAny.multiGetObjects({
+		ids: uniquePoolIds,
+		options: { showType: true },
+	});
+	const types = new Map<string, { coinTypeA: string; coinTypeB: string }>();
+	const coinTypes = new Set<string>();
+	for (const [index, poolId] of uniquePoolIds.entries()) {
+		const entry = poolObjects[index];
+		const candidateType = isObjectWithStringType(
+			(entry as { data?: { type?: string } })?.data,
+		)
+			? (entry as { data?: { type?: string } }).data?.type
+			: undefined;
+		const parsed = candidateType
+			? getPairCoinTypesFromType(candidateType)
+			: null;
+		if (!parsed) continue;
+		types.set(poolId, parsed);
+		coinTypes.add(parsed.coinTypeA);
+		coinTypes.add(parsed.coinTypeB);
+	}
+	if (types.size === 0) return resolvedPairs;
+
+	const symbolByCoinType = new Map<string, string>();
+	for (const coinType of coinTypes) {
+		symbolByCoinType.set(coinType, getCoinSymbolFallback(coinType));
+	}
+	if (typeof clientAny.getCoinMetadata === "function") {
+		await Promise.all(
+			[...coinTypes].map(async (coinType) => {
+				try {
+					const metadata = await clientAny.getCoinMetadata?.({
+						coinType,
+					});
+					if (metadata?.symbol) {
+						symbolByCoinType.set(coinType, metadata.symbol.trim());
+					}
+				} catch {
+					// ignore; keep fallback symbol
+				}
+			}),
+		);
+	}
+
+	for (const [poolId, pair] of types.entries()) {
+		const symbolA = symbolByCoinType.get(pair.coinTypeA) ?? pair.coinTypeA;
+		const symbolB = symbolByCoinType.get(pair.coinTypeB) ?? pair.coinTypeB;
+		resolvedPairs.set(poolId, {
+			coinTypeA: pair.coinTypeA,
+			coinTypeB: pair.coinTypeB,
+			pairSymbol: `${symbolA}/${symbolB}`,
+		});
+	}
+
+	return resolvedPairs;
+}
+
+function formatCetusFarmsPairList(
+	pools: Array<{
+		poolId: string;
+		clmmPoolId: string;
+		coinTypeA: string;
+		coinTypeB: string;
+		pairSymbol: string;
+	}>,
+): string {
+	return pools.map((pool) => `${pool.poolId} (${pool.pairSymbol})`).join(", ");
+}
+
+export async function findCetusFarmsPoolsByTokenPair(params: {
+	network: CetusV2Network;
+	rpcUrl?: string;
+	coinTypeA: string;
+	coinTypeB: string;
+	limit?: number;
+}): Promise<CetusFarmsPoolPair[]> {
+	const requestedPair = {
+		forward: normalizePairKey(params.coinTypeA, params.coinTypeB),
+		reverse: normalizePairKey(params.coinTypeB, params.coinTypeA),
+	};
+	const { pools } = await getCetusFarmsPools({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+	});
+	const clmmPoolIds = pools
+		.map((entry) => entry.clmm_pool_id)
+		.filter((value) => typeof value === "string" && value.length > 0);
+	const pairByClmmPoolId = await resolveCetusFarmsPoolPairs({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		clmmPoolIds,
+	});
+
+	const requested = new Set([requestedPair.forward, requestedPair.reverse]);
+	const poolMatches = pools
+		.map((pool) => {
+			const pair = pairByClmmPoolId.get(pool.clmm_pool_id);
+			if (!pair) return null;
+			const poolKey = normalizePairKey(pair.coinTypeA, pair.coinTypeB);
+			if (!requested.has(poolKey)) return null;
+			return {
+				poolId: pool.id,
+				clmmPoolId: pool.clmm_pool_id,
+				coinTypeA: pair.coinTypeA,
+				coinTypeB: pair.coinTypeB,
+				pairSymbol: pair.pairSymbol,
+			};
+		})
+		.filter((entry): entry is CetusFarmsPoolPair => Boolean(entry));
+	if (typeof params.limit === "number") {
+		const safeLimit = Math.max(1, Math.min(200, Math.floor(params.limit)));
+		return poolMatches.slice(0, safeLimit);
+	}
+	return poolMatches;
+}
+
+export function formatCetusFarmsPoolPairError(params: {
+	coinTypeA: string;
+	coinTypeB: string;
+	pools: CetusFarmsPoolPair[];
+}): string {
+	if (params.pools.length === 0) {
+		return `No farms pools found for pair ${params.coinTypeA}/${params.coinTypeB}.`;
+	}
+	const pairSymbol = `${params.coinTypeA}/${params.coinTypeB}`;
+	const choices = formatCetusFarmsPairList(params.pools);
+	return `${pairSymbol} maps to multiple pools: ${choices}. Please provide poolId.`;
 }
 
 export async function getCetusFarmsPools(params: {

@@ -84,6 +84,7 @@ const cetusV2Mocks = vi.hoisted(() => ({
 	buildCetusFarmsStakeTransaction: vi.fn(),
 	buildCetusFarmsUnstakeTransaction: vi.fn(),
 	buildCetusFarmsHarvestTransaction: vi.fn(),
+	findCetusFarmsPoolsByTokenPair: vi.fn(),
 }));
 
 vi.mock("../runtime.js", async () => {
@@ -218,6 +219,7 @@ vi.mock("../cetus-v2.js", () => ({
 		cetusV2Mocks.buildCetusFarmsUnstakeTransaction,
 	buildCetusFarmsHarvestTransaction:
 		cetusV2Mocks.buildCetusFarmsHarvestTransaction,
+	findCetusFarmsPoolsByTokenPair: cetusV2Mocks.findCetusFarmsPoolsByTokenPair,
 }));
 
 import { createSuiWorkflowTools } from "./workflow.js";
@@ -341,6 +343,7 @@ beforeEach(() => {
 	cetusV2Mocks.buildCetusFarmsHarvestTransaction.mockResolvedValue({
 		setSender: vi.fn(),
 	});
+	cetusV2Mocks.findCetusFarmsPoolsByTokenPair.mockResolvedValue([]);
 });
 
 describe("w3rt_run_sui_workflow_v0", () => {
@@ -1387,6 +1390,89 @@ describe("w3rt_run_sui_cetus_farms_workflow_v0", () => {
 				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
 			},
 		});
+	});
+
+	it("auto-resolves farms poolId from token pair when omitted", async () => {
+		const tool = getTool("w3rt_run_sui_cetus_farms_workflow_v0");
+		const resolvedPoolId =
+			"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+		const clmmPositionId =
+			"0x1111111111111111111111111111111111111111111111111111111111111111";
+		const clmmPoolId =
+			"0x2222222222222222222222222222222222222222222222222222222222222222";
+		cetusV2Mocks.findCetusFarmsPoolsByTokenPair.mockResolvedValue([
+			{
+				poolId: resolvedPoolId,
+				clmmPoolId:
+					"0x3333333333333333333333333333333333333333333333333333333333333333",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: "0x2::usdc::USDC",
+				pairSymbol: "SUI/USDC",
+			},
+		]);
+
+		const result = await tool.execute("cetus-farms-wf-pair", {
+			runId: "wf-sui-cetus-farms-pair",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: `stake farm position: ${clmmPositionId} clmmPoolId: ${clmmPoolId} SUI/USDC`,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.cetus.farms.stake",
+			intent: {
+				type: "sui.cetus.farms.stake",
+				poolId: resolvedPoolId,
+				clmmPositionId,
+				clmmPoolId,
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+			},
+		});
+		expect(cetusV2Mocks.findCetusFarmsPoolsByTokenPair).toHaveBeenCalledWith(
+			expect.objectContaining({
+				network: "mainnet",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+			}),
+		);
+	});
+
+	it("asks for poolId when multiple farms pools match token pair", async () => {
+		const tool = getTool("w3rt_run_sui_cetus_farms_workflow_v0");
+		const clmmPositionId =
+			"0x1111111111111111111111111111111111111111111111111111111111111111";
+		const clmmPoolId =
+			"0x2222222222222222222222222222222222222222222222222222222222222222";
+		cetusV2Mocks.findCetusFarmsPoolsByTokenPair.mockResolvedValue([
+			{
+				poolId:
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				clmmPoolId:
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: "0x2::usdc::USDC",
+				pairSymbol: "SUI/USDC",
+			},
+			{
+				poolId:
+					"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				clmmPoolId:
+					"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: "0x2::usdc::USDC",
+				pairSymbol: "SUI/USDC",
+			},
+		]);
+
+		await expect(
+			tool.execute("cetus-farms-wf-pair-multi", {
+				runId: "wf-sui-cetus-farms-pair-multi",
+				runMode: "analysis",
+				network: "mainnet",
+				intentText: `stake farm position: ${clmmPositionId} clmmPoolId: ${clmmPoolId} SUI/USDC`,
+			}),
+		).rejects.toThrow(/provide poolId/i);
 	});
 
 	it("simulates farms unstake and returns artifacts", async () => {

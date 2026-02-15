@@ -8,6 +8,7 @@ import {
 	buildCetusFarmsHarvestTransaction,
 	buildCetusFarmsStakeTransaction,
 	buildCetusFarmsUnstakeTransaction,
+	findCetusFarmsPoolsByTokenPair,
 	resolveCetusV2Network,
 } from "../cetus-v2.js";
 import {
@@ -271,6 +272,8 @@ type ParsedCetusFarmsIntentHints = {
 	coinTypeA?: string;
 	coinTypeB?: string;
 	positionNftId?: string;
+	pairSymbolA?: string;
+	pairSymbolB?: string;
 };
 
 type SuiDefiWorkflowParams = {
@@ -508,6 +511,48 @@ const KNOWN_SUI_TOKEN_BY_ALIAS = new Map<string, KnownSuiToken>(
 const KNOWN_SUI_TOKEN_BY_COIN_TYPE = new Map<string, KnownSuiToken>(
 	KNOWN_SUI_TOKENS.map((token) => [token.coinType, token] as const),
 );
+
+function parseTokenPairFromText(text: string): {
+	left: string;
+	right: string;
+} | null {
+	const match = text.match(
+		/\b([A-Za-z][A-Za-z0-9_]{1,15})\s*\/\s*([A-Za-z][A-Za-z0-9_]{1,15})\b/i,
+	);
+	if (!match?.[1] || !match?.[2]) {
+		return null;
+	}
+	return { left: match[1].trim(), right: match[2].trim() };
+}
+
+function normalizePairSymbolHints(params: {
+	coinTypeA?: string;
+	coinTypeB?: string;
+}): [string | undefined, string | undefined] {
+	return [
+		params.coinTypeA?.trim()
+			? normalizeCoinTypeOrSymbol(params.coinTypeA.trim())
+			: undefined,
+		params.coinTypeB?.trim()
+			? normalizeCoinTypeOrSymbol(params.coinTypeB.trim())
+			: undefined,
+	];
+}
+
+function formatCetusPoolCandidates(
+	candidates: Array<{
+		poolId: string;
+		clmmPoolId: string;
+		pairSymbol: string;
+	}>,
+): string {
+	return candidates
+		.map(
+			(entry, index) =>
+				`${index + 1}) ${entry.pairSymbol} poolId=${entry.poolId}`,
+		)
+		.join("; ");
+}
 
 function decimalUiAmountToRaw(
 	amountUi: string,
@@ -880,7 +925,8 @@ async function resolveLpPositionByPair(params: {
 	);
 	const targetPairKey = `${coinLower}|${coinUpper}`;
 	const reversePairKey = `${coinUpper}|${coinLower}`;
-	const poolIds = params.poolId && [params.poolId];
+	const normalizedPoolId = params.poolId?.trim();
+	const poolIds = normalizedPoolId ? [normalizedPoolId] : undefined;
 	const raw = await sdk.getPositionList(targetOwner, poolIds);
 	const candidates = extractCetusPositionCandidates(raw);
 	const byPoolId = poolIds
@@ -1020,6 +1066,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	const objectIdMatches = [...text.matchAll(/0x[a-fA-F0-9]{1,64}(?!::)/g)].map(
 		(entry) => entry[0],
 	);
+	const pair = parseTokenPairFromText(text);
 	const coinTypeCandidates = collectCoinTypeCandidates(text);
 	const suiAmountMatch = text.match(/(\d+(?:\.\d+)?)\s*sui\b/i);
 	const integerMatch = text.match(/\b\d+\b/);
@@ -1073,13 +1120,19 @@ function parseIntentText(text?: string): ParsedIntentHints {
 			lower,
 		)
 	) {
+		const [pairA, pairB] = pair
+			? normalizePairSymbolHints({
+					coinTypeA: pair.left,
+					coinTypeB: pair.right,
+				})
+			: [undefined, undefined];
 		return {
 			...controlHints,
 			intentType: "sui.lp.cetus.add",
 			poolId: poolAndPositionIds.poolId,
 			positionId: poolAndPositionIds.positionId,
-			coinTypeA: coinTypeCandidates[0],
-			coinTypeB: coinTypeCandidates[1],
+			coinTypeA: pairA || coinTypeCandidates[0],
+			coinTypeB: pairB || coinTypeCandidates[1],
 			tickLower: parseInteger(tickRangeMatch?.[1]),
 			tickUpper: parseInteger(tickRangeMatch?.[2]),
 			amountA: amountAMatch?.[1],
@@ -1092,13 +1145,19 @@ function parseIntentText(text?: string): ParsedIntentHints {
 			lower,
 		)
 	) {
+		const [pairA, pairB] = pair
+			? normalizePairSymbolHints({
+					coinTypeA: pair.left,
+					coinTypeB: pair.right,
+				})
+			: [undefined, undefined];
 		return {
 			...controlHints,
 			intentType: "sui.lp.cetus.remove",
 			poolId: poolAndPositionIds.poolId,
 			positionId: poolAndPositionIds.positionId,
-			coinTypeA: coinTypeCandidates[0],
-			coinTypeB: coinTypeCandidates[1],
+			coinTypeA: pairA || coinTypeCandidates[0],
+			coinTypeB: pairB || coinTypeCandidates[1],
 			deltaLiquidity: deltaLiquidityMatch?.[1] || integerMatch?.[0],
 			minAmountA: minAmountAMatch?.[1],
 			minAmountB: minAmountBMatch?.[1],
@@ -1108,11 +1167,17 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	if (/(swap|兑换|换币|交易对|换成|换为|兑换成)/i.test(lower)) {
 		const inputCoinType = coinTypeCandidates[0];
 		const outputCoinType = coinTypeCandidates[1];
+		const [resolvedInput, resolvedOutput] = pair
+			? normalizePairSymbolHints({
+					coinTypeA: pair.left,
+					coinTypeB: pair.right,
+				})
+			: [undefined, undefined];
 		return {
 			...controlHints,
 			intentType: "sui.swap.cetus",
-			inputCoinType,
-			outputCoinType,
+			inputCoinType: resolvedInput || inputCoinType,
+			outputCoinType: resolvedOutput || outputCoinType,
 			amountRaw: parseSwapAmountRawFromText({
 				text,
 				inputCoinType,
@@ -1254,11 +1319,18 @@ function parseCetusFarmsIntentText(text?: string): ParsedCetusFarmsIntentHints {
 	const objectIdMatches = [...text.matchAll(/0x[a-fA-F0-9]{1,64}(?!::)/g)].map(
 		(entry) => entry[0],
 	);
+	const pair = parseTokenPairFromText(text);
+	const [pairByTextA, pairByTextB] = pair
+		? normalizePairSymbolHints({
+				coinTypeA: pair.left,
+				coinTypeB: pair.right,
+			})
+		: [undefined, undefined];
 	const coinTypeCandidates = collectCoinTypeCandidates(text);
 
 	const poolLabelMatch =
 		text.match(
-			/(?:pool|poolId|farm pool|farms pool|farm|池子)\s*[:= ]\s*(0x[a-fA-F0-9]{1,64})/i,
+			/(?:\bfarm pool\b|\bfarms pool\b|\bpoolId\b|\bfarm\b|\b池子\b|\bpool\b)\s*[:= ]\s*(0x[a-fA-F0-9]{1,64})/i,
 		) ?? null;
 	const clmmPositionLabelMatch =
 		text.match(
@@ -1301,13 +1373,18 @@ function parseCetusFarmsIntentText(text?: string): ParsedCetusFarmsIntentHints {
 			lower,
 		)
 	) {
+		const poolIdFallback =
+			poolLabelMatch?.[1] ||
+			(!clmmPoolLabelMatch ? objectIdMatches[0] : undefined);
 		return {
 			intentType: "sui.cetus.farms.stake",
-			poolId: poolLabelMatch?.[1] || objectIdMatches[0],
+			poolId: poolIdFallback,
 			clmmPositionId: clmmPositionLabelMatch?.[1] || objectIdMatches[1],
 			clmmPoolId: clmmPoolLabelMatch?.[1] || objectIdMatches[2],
-			coinTypeA: coinTypeCandidates[0],
-			coinTypeB: coinTypeCandidates[1],
+			coinTypeA: pairByTextA || coinTypeCandidates[0],
+			coinTypeB: pairByTextB || coinTypeCandidates[1],
+			pairSymbolA: pair?.left,
+			pairSymbolB: pair?.right,
 		};
 	}
 
@@ -1334,12 +1411,45 @@ function inferCetusFarmsIntentType(
 	);
 }
 
-function normalizeCetusFarmsIntent(
+async function normalizeCetusFarmsIntent(
 	params: CetusFarmsWorkflowParams,
-): CetusFarmsWorkflowIntent {
+): Promise<CetusFarmsWorkflowIntent> {
 	const parsed = parseCetusFarmsIntentText(params.intentText);
 	const intentType = inferCetusFarmsIntentType(params, parsed);
-	const poolId = params.poolId?.trim() || parsed.poolId;
+	let poolId = params.poolId?.trim() || parsed.poolId;
+
+	const resolvedPair = normalizePairSymbolHints({
+		coinTypeA: parsed.pairSymbolA || params.coinTypeA,
+		coinTypeB: parsed.pairSymbolB || params.coinTypeB,
+	});
+	const resolvedCoinTypeA =
+		normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) ||
+		parsed.coinTypeA ||
+		resolvedPair[0];
+	const resolvedCoinTypeB =
+		normalizeCoinTypeOrSymbol(params.coinTypeB?.trim()) ||
+		parsed.coinTypeB ||
+		resolvedPair[1];
+
+	if (!poolId && intentType === "sui.cetus.farms.stake") {
+		if (resolvedCoinTypeA && resolvedCoinTypeB) {
+			const poolCandidates = await findCetusFarmsPoolsByTokenPair({
+				network: resolveCetusV2Network(parseSuiNetwork(params.network)),
+				rpcUrl: params.rpcUrl?.trim(),
+				coinTypeA: resolvedCoinTypeA,
+				coinTypeB: resolvedCoinTypeB,
+			});
+			if (poolCandidates.length === 1) {
+				poolId = poolCandidates[0].poolId;
+			} else if (poolCandidates.length > 1) {
+				throw new Error(
+					`Multiple farms pools found for ${resolvedCoinTypeA}/${resolvedCoinTypeB}. ${formatCetusPoolCandidates(
+						poolCandidates,
+					)} Please provide poolId.`,
+				);
+			}
+		}
+	}
 	if (!poolId) {
 		throw new Error("poolId is required for Cetus farms workflow.");
 	}
@@ -1349,9 +1459,9 @@ function normalizeCetusFarmsIntent(
 			params.clmmPositionId?.trim() || parsed.clmmPositionId;
 		const clmmPoolId = params.clmmPoolId?.trim() || parsed.clmmPoolId;
 		const coinTypeA =
-			normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) || parsed.coinTypeA;
+			resolvedCoinTypeA || normalizeCoinTypeOrSymbol(params.coinTypeA?.trim());
 		const coinTypeB =
-			normalizeCoinTypeOrSymbol(params.coinTypeB?.trim()) || parsed.coinTypeB;
+			resolvedCoinTypeB || normalizeCoinTypeOrSymbol(params.coinTypeB?.trim());
 		if (!clmmPositionId) {
 			throw new Error(
 				"clmmPositionId is required for intentType=sui.cetus.farms.stake",
@@ -3572,7 +3682,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					!hasCetusFarmsIntentInput(params) &&
 					priorSession?.intent
 						? (priorSession.intent as CetusFarmsWorkflowIntent)
-						: normalizeCetusFarmsIntent(params);
+						: await normalizeCetusFarmsIntent(params);
 				const needsMainnetConfirmation = network === "mainnet";
 				const confirmToken = createConfirmToken(runId, network, intent);
 				const hasSessionConfirmation =
