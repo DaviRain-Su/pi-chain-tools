@@ -586,6 +586,300 @@ Use this state object as the minimum payload between nodes:
 - `simulateStatus` should be checked again before execute if operator has modified inputs.
 - Store `orderId` and `orderStatus` after execute for audit/retry suppression logic.
 
+### 9) 可直接复制的 OpenClaw 全链路 JSON（含预检+下单+撤单+结清）
+
+> 说明：以下是一个可执行的“生产级可复制”草稿（按你的 OpenClaw 编排 DSL 语法微调即可），把 `ticketId`、`runId` 等替换为实际工单上下文字段。
+
+```json
+{
+  "version": "1.0",
+  "workflow": {
+    "id": "btc5m-orchestrator-v1",
+    "description": "Preflight -> BTC5m trade -> optional settle(cancel stale) -> optional cancel workflow",
+    "startAt": "preflight_markets",
+    "input": {
+      "runId": "wf-btc5m-{{ticket.id}}",
+      "network": "polygon",
+      "intentType": "evm.polymarket.btc5m.trade",
+      "stakeUsd": 20,
+      "side": "up",
+      "maxSpreadBps": 120,
+      "minDepthUsd": 100,
+      "maxStakeUsd": 300,
+      "minConfidence": 0.6,
+      "marketSlug": "",
+      "settleAfterTrade": true,
+      "settleMaxAgeMinutes": 30,
+      "settleMaxFillRatio": 0.4,
+      "cancelOnDemand": false
+    },
+    "states": {
+      "preflight_markets": {
+        "type": "tool",
+        "tool": "evm_polymarketGetBtc5mMarkets",
+        "params": { "network": "{{state.input.network}}", "limit": 5 },
+        "onSuccess": { "to": "preflight_advice" },
+        "onFailure": { "to": "alarm", "error": "market_list_failed" }
+      },
+      "preflight_advice": {
+        "type": "tool",
+        "tool": "evm_polymarketGetBtc5mAdvice",
+        "params": { "network": "{{state.input.network}}" },
+        "onSuccess": {
+          "to": "route_intent",
+          "assign": {
+            "adviceSide": "{{result.details.advice?.side}}",
+            "adviceConfidence": "{{result.details.confidence}}"
+          }
+        },
+        "onFailure": { "to": "alarm", "error": "advice_failed" }
+      },
+      "route_intent": {
+        "type": "condition",
+        "expression": "state.input.intentType === 'evm.polymarket.btc5m.cancel' || state.input.cancelOnDemand === true",
+        "onTrue": { "to": "cancel_analysis" },
+        "onFalse": { "to": "trade_analysis" }
+      },
+      "trade_analysis": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": {
+          "runMode": "analysis",
+          "runId": "{{state.input.runId}}",
+          "network": "{{state.input.network}}",
+          "intentType": "evm.polymarket.btc5m.trade",
+          "side": "{{state.input.side || state.adviceSide}}",
+          "stakeUsd": "{{state.input.stakeUsd}}",
+          "maxSpreadBps": "{{state.input.maxSpreadBps}}",
+          "minDepthUsd": "{{state.input.minDepthUsd}}",
+          "maxStakeUsd": "{{state.input.maxStakeUsd}}",
+          "minConfidence": "{{state.input.minConfidence}}",
+          "marketSlug": "{{state.input.marketSlug}}",
+          "useAiAssist": true,
+          "requoteStaleOrders": true,
+          "requoteFallbackMode": "retry_aggressive",
+          "requoteMaxAttempts": 5,
+          "maxFillRatio": "{{state.input.maxFillRatio || 0.4}}",
+          "maxAgeMinutes": "{{state.input.maxAgeMinutes || 30}}"
+        },
+        "onSuccess": {
+          "to": "trade_simulate",
+          "assign": {
+            "confirmToken": "{{result.details.confirmToken}}",
+            "analysisStatus": "{{result.details.artifacts.analysis.summary.status}}",
+            "analysisGuardPassed": "{{result.details.artifacts.analysis.guardEvaluation.passed}}"
+          }
+        },
+        "onFailure": { "to": "alarm", "error": "trade_analysis_failed" }
+      },
+      "trade_simulate": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": {
+          "runMode": "simulate",
+          "runId": "{{state.input.runId}}",
+          "network": "{{state.input.network}}"
+        },
+        "onSuccess": {
+          "to": "trade_execute_guard",
+          "assign": {
+            "simulateStatus": "{{result.details.artifacts.simulate.summary.status}}",
+            "staleRequoteStatus": "{{result.details.artifacts.simulate.staleRequote.status}}"
+          }
+        },
+        "onFailure": { "to": "alarm", "error": "trade_simulate_failed" }
+      },
+      "trade_execute_guard": {
+        "type": "condition",
+        "expression": "Boolean(state.confirmToken) && state.analysisStatus === 'ready' && state.simulateStatus === 'ready' && state.analysisGuardPassed === true",
+        "onTrue": { "to": "trade_execute" },
+        "onFalse": { "to": "alarm", "error": "trade_guard_blocked" }
+      },
+      "trade_execute": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": {
+          "runMode": "execute",
+          "runId": "{{state.input.runId}}",
+          "network": "{{state.input.network}}",
+          "confirmMainnet": true,
+          "confirmToken": "{{state.confirmToken}}"
+        },
+        "onSuccess": {
+          "to": "poll_order_status",
+          "assign": {
+            "orderId": "{{result.details.artifacts.execute.orderId}}",
+            "orderStatus": "{{result.details.artifacts.execute.orderStatus}}",
+            "executeSummary": "{{result.details.artifacts.execute.summary}}"
+          }
+        },
+        "onFailure": { "to": "alarm", "error": "trade_execute_failed" }
+      },
+      "poll_order_status": {
+        "type": "tool",
+        "tool": "evm_polymarketGetOrderStatus",
+        "params": {
+          "network": "{{state.input.network}}",
+          "orderId": "{{state.orderId}}",
+          "includeTrades": true,
+          "maxTrades": 20
+        },
+        "onSuccess": {
+          "to": "trade_settle_gate",
+          "assign": {
+            "postOrderState": "{{result.details.orderState}}",
+            "postFillRatio": "{{result.details.size ? result.details.fillAmount / result.details.size : null}}"
+          }
+        },
+        "onFailure": { "to": "alarm", "error": "order_status_failed" }
+      },
+      "trade_settle_gate": {
+        "type": "condition",
+        "expression": "state.input.settleAfterTrade === true",
+        "onTrue": { "to": "settle_cancel_analysis" },
+        "onFalse": { "to": "done" }
+      },
+      "settle_cancel_analysis": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": {
+          "runMode": "analysis",
+          "runId": "{{state.input.runId}}-settle",
+          "network": "{{state.input.network}}",
+          "intentType": "evm.polymarket.btc5m.cancel",
+          "maxFillRatio": "{{state.input.settleMaxFillRatio}}",
+          "maxAgeMinutes": "{{state.input.settleMaxAgeMinutes}}"
+        },
+        "onSuccess": { "to": "settle_cancel_simulate", "assign": { "settleConfirmToken": "{{result.details.confirmToken}}" } },
+        "onFailure": { "to": "alarm", "error": "settle_analysis_failed" }
+      },
+      "settle_cancel_simulate": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": { "runMode": "simulate", "runId": "{{state.input.runId}}-settle", "network": "{{state.input.network}}" },
+        "onSuccess": { "to": "settle_cancel_execute" },
+        "onFailure": { "to": "alarm", "error": "settle_simulate_failed" }
+      },
+      "settle_cancel_execute": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": {
+          "runMode": "execute",
+          "runId": "{{state.input.runId}}-settle",
+          "network": "{{state.input.network}}",
+          "confirmMainnet": true,
+          "confirmToken": "{{state.settleConfirmToken}}"
+        },
+        "onSuccess": { "to": "done" },
+        "onFailure": { "to": "alarm", "error": "settle_execute_failed" }
+      },
+      "cancel_analysis": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": {
+          "runMode": "analysis",
+          "runId": "{{state.input.runId}}-cancel",
+          "network": "{{state.input.network}}",
+          "intentType": "evm.polymarket.btc5m.cancel",
+          "cancelAll": true,
+          "maxFillRatio": "{{state.input.maxFillRatio || 0.2}}",
+          "maxAgeMinutes": "{{state.input.maxAgeMinutes || 30}}"
+        },
+        "onSuccess": {
+          "to": "cancel_simulate",
+          "assign": {
+            "cancelConfirmToken": "{{result.details.confirmToken}}"
+          }
+        },
+        "onFailure": { "to": "alarm", "error": "cancel_analysis_failed" }
+      },
+      "cancel_simulate": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": {
+          "runMode": "simulate",
+          "runId": "{{state.input.runId}}-cancel",
+          "network": "{{state.input.network}}"
+        },
+        "onSuccess": { "to": "cancel_execute" },
+        "onFailure": { "to": "alarm", "error": "cancel_simulate_failed" }
+      },
+      "cancel_execute": {
+        "type": "tool",
+        "tool": "w3rt_run_evm_polymarket_workflow_v0",
+        "params": {
+          "runMode": "execute",
+          "runId": "{{state.input.runId}}-cancel",
+          "network": "{{state.input.network}}",
+          "confirmMainnet": true,
+          "confirmToken": "{{state.cancelConfirmToken}}"
+        },
+        "onSuccess": { "to": "done" },
+        "onFailure": { "to": "alarm", "error": "cancel_execute_failed" }
+      },
+      "alarm": {
+        "type": "manual",
+        "message": "ALERT - action halted by policy/manual review",
+        "needOperator": true
+      },
+      "done": {
+        "type": "terminal",
+        "result": "complete"
+      }
+    }
+  }
+}
+```
+
+说明：
+
+- `cancelOnDemand=true` 时，直接走撤单分支。
+- `settleAfterTrade=true` 时，trade 成功后会按 `maxAgeMinutes` / `maxFillRatio` 做一次结清清场（可选）。
+- `poll_order_status` 中 `postFillRatio` 可用于你自定义 `filled/partial` 决策（例如：
+  - 当 `fill<0.2` 且剩余 > 一段时间，触发另一个 `evm_polymarketCancelOrder`。
+）
+
+### 10) 失败恢复白名单（可直接贴到 OpenClaw 重试策略）
+
+#### 白名单（建议允许自动重试）
+
+| 失败类型 | 命中规则（error contains） | 重试次数 | 推荐动作 |
+|---|---|---:|---|
+| 上游网络抖动 | `timeout`, `ECONNRESET`, `ETIMEDOUT`, `ENOTFOUND`, `fetch`, `network` | 3 | 指数退避（1s/2s/4s）重试 `analysis/simulate/execute` |
+| 节点限流/临时不可用 | `429`, `502`, `503`, `504`, `service unavailable`, `temporarily` | 2~3 | 重试 `simulate/execute`，并拉长间隔到 10~20s |
+| 签名路径抖动 | `nonce too low`, `replacement transaction underpriced` | 1~2 | 先等待一个区块再重试 `execute`（有手续费问题请转人工） |
+
+#### 黑名单（不建议自动重试，直接告警/人工）
+
+| 失败类型 | 示例错误 | 处理 |
+|---|---|---|
+| 资金安全停摆 | `no_liquidity`, `price_too_high`, `guard_blocked` | 进入 `ALERT`，不自动重试。需人工确认是否放宽风险参数后重新分析。 |
+| 主网确认缺失 | `Mainnet execute blocked`, `Invalid confirmToken` | 需人工确认 `confirmMainnet=true` + 正确 `confirmToken` |
+| 签名/密钥缺失 | `No Polymarket private key`, `funder`, `POLYMARKET_PRIVATE_KEY` | 需补齐凭证后重试 |
+| 环境限制 | `geoblock`, `region blocked`, `country` | 先确认执行环境 IP/region 后再手工恢复 |
+| 入参不合法 | `market slug is required`, `orderId cannot be empty`, `Cannot resolve tokenId`, `Invalid order size`, `bestAsk exceeds` | 按错误修复参数后再发起新 run（一般不重试） |
+| 交易受阻（可重复触发） | `requires maxEntryPrice` / `orderbook missing` / `spread is too wide` | 不自动重试，需更新策略参数后回到 `analysis` |
+| 依赖问题 | `createauthedclobclient`, `CLOB client method` | 检查本地依赖/运行环境，修复后再试 |
+
+#### 推荐的 OpenClaw 失败路由（可直接实现）
+
+```json
+{
+  "retryPolicy": {
+    "retryableErrorRegex": [
+      "timeout|ETIMEDOUT|ECONNRESET|ENOTFOUND|429|5\\d\\d|temporarily",
+      "fetch failed|service unavailable|temporarily unavailable"
+    ],
+    "nonRetryableErrorRegex": [
+      "no_liquidity|price_too_high|guard_blocked|Mainnet execute blocked|Invalid confirmToken|No Polymarket private key|geoblock|Unable to resolve tokenId|No market price available|max entry price|Invalid order size"
+    ],
+    "retry": { "maxAttempts": 2, "backoffMs": [1000, 2000, 4000] },
+    "cooldownBeforeRetrySec": 2,
+    "humanReviewState": "alarm"
+  }
+}
+```
+
 ### 状态读取速查（执行器实现更稳）
 
 | 节点 | 读 | 写 |
