@@ -213,13 +213,86 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 		highlights: [
 			"Kaspa address tag lookup for identity/annotation enrichment",
 			"Kaspa address transaction history (including pagination)",
-			"Read-only Kaspa chain indexing inputs for real-time workflows",
+			"Kaspa transaction lookup, output lookup, and acceptance-data lookup",
+			"Kaspa transaction submission for merchant/payment and interactive game flows",
 		],
 		signer: {
 			autoSources: [],
 			envKeys: [],
 		},
 		workflows: [
+			{
+				tool: "kaspa_getTransaction",
+			description:
+					"Read Kaspa transaction details by id for settlement verification or analytics.",
+				intentTypes: ["kaspa.transaction.get"],
+				nlExamples: [
+					"根据 tx id 查一笔 Kaspa 交易明细",
+					"查询某笔 Kaspa 交易的完整链上详情",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
+				tool: "kaspa_getTransactionOutput",
+				description:
+					"Read one Kaspa transaction output by output index for real-time proofs and UTXO tracing.",
+				intentTypes: ["kaspa.transaction.output"],
+				nlExamples: [
+					"查这笔交易第 0 个输出",
+					"读取 Kaspa tx 的某个 output",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
+				tool: "kaspa_getTransactionAcceptance",
+				description:
+					"Read Kaspa transaction acceptance metadata for a given tx id set.",
+				intentTypes: ["kaspa.transaction.acceptance"],
+				nlExamples: [
+					"查一组 tx 的确认状态",
+					"查询这笔交易是否已被接受",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
+				tool: "kaspa_submitTransaction",
+				description:
+					"Submit a pre-signed Kaspa transaction (raw tx string or full API payload). Mainnet requires confirmMainnet=true.",
+				intentTypes: ["kaspa.transaction.submit"],
+				nlExamples: [
+					"提交一笔已经签名好的 Kaspa 交易",
+					"主网执行 Kaspa 提交交易（确认后）",
+				],
+				execution: {
+					executable: true,
+					requiresSigner: false,
+					requiresMainnetConfirmation: true,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "medium",
+				},
+			},
 			{
 				tool: "kaspa_getAddressTag",
 				description: "Read Kaspa address tag metadata for enriched analysis and monitoring.",

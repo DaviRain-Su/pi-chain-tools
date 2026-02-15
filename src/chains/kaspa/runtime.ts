@@ -6,6 +6,8 @@ export const KASPA_TOOL_PREFIX = "kaspa_";
 
 const KASPA_API_TIMEOUT_MS = 15_000;
 
+type KaspaApiHttpMethod = "GET" | "POST" | "PUT";
+
 export function kaspaNetworkSchema() {
 	return Type.Optional(Type.Union([Type.Literal("mainnet"), Type.Literal("testnet")]));
 }
@@ -38,6 +40,16 @@ export function normalizeKaspaAddress(value: string): string {
 
 export type KaspaApiQueryValue = string | number | boolean;
 
+type KaspaApiJsonRequestParams<TBody = undefined> = {
+	baseUrl: string;
+	path: string;
+	query?: Record<string, KaspaApiQueryValue | undefined>;
+	method?: KaspaApiHttpMethod;
+	body?: TBody;
+	apiKey?: string;
+	timeoutMs?: number;
+};
+
 function normalizeApiQuery(params: Record<string, KaspaApiQueryValue | undefined>) {
 	const result: Record<string, string> = {};
 	for (const [key, rawValue] of Object.entries(params)) {
@@ -47,13 +59,9 @@ function normalizeApiQuery(params: Record<string, KaspaApiQueryValue | undefined
 	return result;
 }
 
-export async function kaspaApiJsonGet<T>(params: {
-	baseUrl: string;
-	path: string;
-	query?: Record<string, KaspaApiQueryValue | undefined>;
-	apiKey?: string;
-	timeoutMs?: number;
-}): Promise<T> {
+export async function kaspaApiJsonRequest<T, TBody = undefined>(
+	params: KaspaApiJsonRequestParams<TBody>,
+): Promise<T> {
 	const base = params.baseUrl.trim().replace(/\/$/, "");
 	const path = params.path.startsWith("/") ? params.path : `/${params.path}`;
 	const url = new URL(`${base}${path}`);
@@ -61,6 +69,7 @@ export async function kaspaApiJsonGet<T>(params: {
 	for (const [key, rawValue] of Object.entries(query)) {
 		url.searchParams.set(key, rawValue);
 	}
+	const method = (params.method ?? "GET").toUpperCase() as KaspaApiHttpMethod;
 
 	const controller = new AbortController();
 	const timeout = setTimeout(
@@ -74,8 +83,14 @@ export async function kaspaApiJsonGet<T>(params: {
 		if (params.apiKey?.trim()) {
 			headers["x-api-key"] = params.apiKey.trim();
 		}
+
+		const requestBody = params.body === undefined ? undefined : JSON.stringify(params.body);
+		if (requestBody !== undefined) {
+			headers["content-type"] = "application/json";
+		}
 		const response = await fetch(url, {
-			method: "GET",
+			method,
+			body: requestBody,
 			headers,
 			signal: controller.signal,
 		});
@@ -94,6 +109,68 @@ export async function kaspaApiJsonGet<T>(params: {
 	} finally {
 		clearTimeout(timeout);
 	}
+}
+
+export async function kaspaApiJsonGet<T>(
+	params: Omit<KaspaApiJsonRequestParams, "method" | "body">,
+): Promise<T> {
+	return kaspaApiJsonRequest<T>({
+		...params,
+		method: "GET",
+	});
+}
+
+export async function kaspaApiJsonPost<TBody, T>(
+	params: Omit<KaspaApiJsonRequestParams<TBody>, "method">,
+): Promise<T> {
+	return kaspaApiJsonRequest<T, TBody>({
+		...params,
+		method: "POST",
+	});
+}
+
+export function assertKaspaMainnetExecution(
+	network: KaspaNetwork,
+	confirmMainnet?: boolean,
+): void {
+	if (network === "mainnet" && confirmMainnet !== true) {
+		throw new Error(
+			"Mainnet Kaspa execution is blocked. Re-run with confirmMainnet=true.",
+		);
+	}
+}
+
+export function parseKaspaPositiveInteger(
+	value: unknown,
+	field: string,
+	allowZero = false,
+): number {
+	if (typeof value === "number") {
+		if (!Number.isInteger(value)) {
+			throw new Error(`${field} must be an integer`);
+		}
+		if (allowZero ? value < 0 : value <= 0) {
+			throw new Error(`${field} must be ${allowZero ? ">= 0" : "> 0"}`);
+		}
+		return value;
+	}
+	if (typeof value === "string") {
+		const normalized = value.trim();
+		if (!normalized) {
+			throw new Error(`${field} is required`);
+		}
+		const parsed = Number.parseInt(normalized, 10);
+		if (!Number.isInteger(parsed)) {
+			throw new Error(`${field} must be an integer`);
+		}
+		if (allowZero ? parsed < 0 : parsed <= 0) {
+			throw new Error(`${field} must be ${allowZero ? ">= 0" : "> 0"}`);
+		}
+		return parsed;
+	}
+	throw new Error(
+		`${field} must be an integer${allowZero ? " or zero" : ""}`,
+	);
 }
 
 export function parseKaspaLimit(value: unknown): number | undefined {
