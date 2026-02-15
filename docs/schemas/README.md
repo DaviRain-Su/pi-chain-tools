@@ -23,6 +23,7 @@ npm run schema:validate
 npm run schema:check-files         # 人类可读输出（严格清单检查，失败即退出 1）
 npm run schema:check-files:json    # JSON 输出（推荐用于 CI 机器消费，严格清单检查）
 npm run schema:ci-check            # 一步到位：清单 + 全量 schema 内容校验
+npm run schema:audit              # 一步到位：清单 + 严格诊断（适配 AI/自动化）
 ```
 
 脚本会检查：
@@ -40,6 +41,8 @@ npm run schema:ci-check            # 一步到位：清单 + 全量 schema 内�
 - name: Validate OpenClaw BTC5m schema artifacts
   id: validate-openclaw-schema-artifacts
   run: npm run schema:ci-check
+  # 或 CI/AI 直接取用结构化诊断：
+  # run: npm run schema:audit
 
 # 细分步骤（可选）
 - name: Validate OpenClaw BTC5m schema file manifest

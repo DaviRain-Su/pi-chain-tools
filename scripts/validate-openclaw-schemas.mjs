@@ -44,6 +44,7 @@ function printUsage() {
 			"  npm run schema:check-files         # list schema file manifest (strict, human-readable)\n" +
 			"  npm run schema:check-files:json    # list schema file manifest (strict, JSON)\n" +
 			"  npm run schema:ci-check           # manifest + full validation in one step\n" +
+			"  npm run schema:audit              # CI-friendly audit (manifest + strict JSON diagnostics)\n" +
 			"  npm run schema:validate            # full schema content validation\n",
 	);
 }

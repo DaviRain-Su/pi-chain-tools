@@ -30,6 +30,7 @@
 		"schema:check-files": "node scripts/validate-openclaw-schemas.mjs --list-strict",
 		"schema:check-files:json": "node scripts/validate-openclaw-schemas.mjs --list-strict --json",
 		"schema:ci-check": "npm run schema:check-files:json && npm run schema:validate",
+		"schema:audit": "npm run schema:check-files:json && npm run schema:validate -- --strict --json",
 		"security:check": "node scripts/security-audit.mjs",
 		"test": "vitest run",
 		"ci": "npm run check && npm run security:check && npm test"

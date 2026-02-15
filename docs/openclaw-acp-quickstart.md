@@ -1237,6 +1237,7 @@ npm run schema:validate -- --list --strict --json
 npm run schema:check-files         # 人类可读版本（严格清单检查，失败即退出 1）
 npm run schema:check-files:json    # 机器可读 JSON 版本（严格清单检查，失败即退出 1）
 npm run schema:ci-check             # 一步到位：先清单检查，再做全文校验
+npm run schema:audit               # 一步到位：清单 + 严格诊断（适合 AI/自动化）
 
 # 推荐的 CI 片段（可直接复用）
 # 一步到位（推荐，适合标准流水线）
@@ -1267,6 +1268,9 @@ npm run schema:ci-check             # 一步到位：先清单检查，再做全
 #     NODE
 # - name: Validate OpenClaw BTC5m schema content
 #   run: npm run schema:validate
+
+# AI/自动化优先建议（结构化失败码）
+#   run: npm run schema:audit
 
 # 查看参数说明
 npm run schema:validate -- --help

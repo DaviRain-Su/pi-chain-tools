@@ -27,6 +27,12 @@ const schemaScriptContracts = [
 		expected: "npm run schema:check-files:json && npm run schema:validate",
 	},
 	{
+		script: "schema:audit",
+		assertion: "exact",
+		expected:
+			"npm run schema:check-files:json && npm run schema:validate -- --strict --json",
+	},
+	{
 		script: "schema:check-files:json",
 		assertion: "contains",
 		expected: "--list-strict --json",
@@ -50,6 +56,11 @@ const docAndWorkflowReferences = [
 		expected: "schema:ci-check",
 	},
 	{
+		target: "quickstart docs",
+		content: quickstartDoc,
+		expected: "schema:audit",
+	},
+	{
 		target: "schemas docs",
 		content: schemasDoc,
 		expected: "schema:ci-check",
@@ -58,6 +69,11 @@ const docAndWorkflowReferences = [
 		target: "schemas docs",
 		content: schemasDoc,
 		expected: "schema:check-files:json",
+	},
+	{
+		target: "schemas docs",
+		content: schemasDoc,
+		expected: "schema:audit",
 	},
 ] as const;
 
@@ -114,6 +130,7 @@ describe("package.json script contracts", () => {
 		expect(result.stdout).toContain("schema:check-files");
 		expect(result.stdout).toContain("schema:check-files:json");
 		expect(result.stdout).toContain("schema:ci-check");
+		expect(result.stdout).toContain("schema:audit");
 		expect(result.stdout).toContain("schema:validate");
 	});
 });
