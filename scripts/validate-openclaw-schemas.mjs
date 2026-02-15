@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
 const schemaDir = path.join(process.cwd(), "docs", "schemas");
@@ -25,7 +25,7 @@ function printUsage() {
 			"Options:\n" +
 			"  --strict    print grouped diagnostics + fix guidance\n" +
 			"  --json      print machine-readable JSON result\n" +
-			"  --list      list configured schema files (with resolved paths)\n" +
+			"  --list      list configured schema files (resolved paths + existence)\n" +
 			"  --help,-h   show this message\n\n" +
 			"Files:\n" +
 			"  openclaw-btc5m-workflow.schema.json\n" +
@@ -263,22 +263,45 @@ function printJsonOutput(errors) {
 	);
 }
 
-function getSchemaFileList() {
-	return schemaFiles.map((fileName) => {
-		return {
-			fileName,
-			filePath: path.join(schemaDir, fileName),
-		};
-	});
+async function getSchemaFileList() {
+	const items = await Promise.all(
+		schemaFiles.map(async (fileName) => {
+			const filePath = path.join(schemaDir, fileName);
+			try {
+				const schemaStat = await stat(filePath);
+				return {
+					fileName,
+					filePath,
+					exists: true,
+					isFile: schemaStat.isFile(),
+					sizeBytes: schemaStat.size,
+				};
+			} catch {
+				return {
+					fileName,
+					filePath,
+					exists: false,
+					isFile: false,
+					sizeBytes: 0,
+				};
+			}
+		}),
+	);
+	return items;
 }
 
-function printListOutput() {
-	const list = getSchemaFileList();
+async function printListOutput() {
+	const list = await getSchemaFileList();
+	const existing = list.filter((item) => item.exists);
 	if (isJsonOutput) {
 		console.log(
 			JSON.stringify(
 				{
 					status: "list",
+					summary: {
+						totalFiles: list.length,
+						existingFiles: existing.length,
+					},
 					files: list,
 				},
 				null,
@@ -290,9 +313,11 @@ function printListOutput() {
 
 	console.log("Configured schema files:");
 	for (const item of list) {
-		console.log(`- ${item.fileName}`);
+		console.log(`- ${item.fileName} ${item.exists ? "(found)" : "(missing)"}`);
 		console.log(`  path: ${item.filePath}`);
+		console.log(`  size: ${item.exists ? `${item.sizeBytes} bytes` : "n/a"}`);
 	}
+	console.log(`Summary: ${existing.length}/${list.length} files exist.`);
 }
 
 async function main() {
@@ -308,7 +333,7 @@ async function main() {
 	}
 
 	if (isListRequested) {
-		printListOutput();
+		await printListOutput();
 		return;
 	}
 

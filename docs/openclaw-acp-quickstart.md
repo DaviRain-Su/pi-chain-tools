@@ -1201,8 +1201,11 @@ npm run schema:validate -- --json
 # 成功返回示例：{ "status": "ok", "files": [...] }
 # 失败返回示例：{ "status": "failed", "errors": [...] }
 
-# 列出内置校验文件（含路径）
+# 列出内置校验文件（含路径/存在性）
 npm run schema:validate -- --list
+# 返回示例（文本）：每条含文件名、路径、是否缺失及大小
+# 使用 JSON：
+npm run schema:validate -- --list --json
 
 # 查看参数说明
 npm run schema:validate -- --help

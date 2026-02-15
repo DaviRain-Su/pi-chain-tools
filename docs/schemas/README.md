@@ -51,7 +51,7 @@ npm run schema:validate -- --strict
 # 失败返回：{ "status": "failed", "errors": [...] }
 npm run schema:validate -- --json
 
-# 列文件（机器可读）
+# 列文件（机器可读，含存在性与字节数）
 npm run schema:validate -- --list --json
 
 # 查看参数说明
