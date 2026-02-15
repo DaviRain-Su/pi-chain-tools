@@ -5,6 +5,10 @@ import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
 import { kaspaNetworkSchema, parseKaspaNetwork } from "../runtime.js";
 import { createKaspaComposeTools } from "./compose.js";
 import { submitKaspaTransaction } from "./execute.js";
+import {
+	fetchKaspaAddressBalance,
+	summarizeKaspaAddressBalanceResult,
+} from "./read.js";
 import { signKaspaSubmitRequestWithWallet } from "./sign.js";
 
 type KaspaWorkflowRunMode = "analysis" | "simulate" | "execute";
@@ -118,6 +122,21 @@ type KaspaTransferQuickMinimalParams = {
 	privateKeyPathEnv?: string;
 };
 
+type KaspaBalanceQuickParams = {
+	intentText?: string;
+	text?: string;
+	address?: string;
+	network?: string;
+	strictAddressCheck?: boolean;
+	apiBaseUrl?: string;
+	apiKey?: string;
+};
+
+type KaspaBalanceQuickIntent = {
+	address?: string;
+	network?: string;
+};
+
 function normalizeKaspaTransferQuickMinimalInput(
 	rawParams: unknown,
 ): KaspaTransferQuickMinimalParams {
@@ -150,6 +169,32 @@ function normalizeKaspaTransferQuickMinimalInput(
 	};
 }
 
+function normalizeKaspaBalanceQuickInput(
+	rawParams: unknown,
+): KaspaBalanceQuickParams {
+	if (typeof rawParams === "string") {
+		const trimmed = rawParams.trim();
+		return trimmed ? { intentText: trimmed } : {};
+	}
+	if (
+		!rawParams ||
+		typeof rawParams !== "object" ||
+		Array.isArray(rawParams)
+	) {
+		throw new Error(
+			"w3rt_read_kaspa_balance_v0 requires a natural language intent string or an object payload.",
+		);
+	}
+	const params = rawParams as KaspaBalanceQuickParams;
+	const inlineText = typeof params.intentText === "string" ? params.intentText.trim() : "";
+	const fallbackText = typeof params.text === "string" ? params.text.trim() : "";
+	const normalizedIntent = inlineText || fallbackText;
+	return {
+		...params,
+		intentText: normalizedIntent || params.intentText,
+	};
+}
+
 type KaspaTransferQuickWorkflowResult = {
 	content: Array<{ type: string; text: string }>;
 	details: Record<string, unknown>;
@@ -161,6 +206,22 @@ const KASPA_TRANSFER_QUICK_AMOUNT_REGEX =
 	/(?:\b(?:转|转账|send|to|转给)\b)\s*([0-9]+(?:\.[0-9]{1,8})?)/i;
 
 function parseKaspaTransferIntentNetwork(input: string): string | undefined {
+	if (/\b(?:mainnet|main\s+net|主网|主链|正式网)\b/i.test(input)) {
+		return "mainnet";
+	}
+	if (/\b(?:testnet11|tn11|测试网11|测试链11)\b/i.test(input)) {
+		return "testnet11";
+	}
+	if (/\b(?:testnet10|tn10|测试网10|测试链10)\b/i.test(input)) {
+		return "testnet10";
+	}
+	if (/\b(?:testnet|测试网|测试链)\b/i.test(input)) {
+		return "testnet10";
+	}
+	return undefined;
+}
+
+function parseKaspaBalanceIntentNetwork(input: string): string | undefined {
 	if (/\b(?:mainnet|main\s+net|主网|主链|正式网)\b/i.test(input)) {
 		return "mainnet";
 	}
@@ -198,6 +259,23 @@ function parseKaspaTransferIntentText(
 			toMatch?.[1]?.toLowerCase() ?? (addresses[1] || undefined),
 		amount: amountMatch?.[1] ?? undefined,
 		network: network,
+	};
+}
+
+function parseKaspaBalanceIntentText(
+	intentText: string | undefined,
+): KaspaBalanceQuickIntent {
+	if (!intentText?.trim()) {
+		return {};
+	}
+	const input = intentText.trim();
+	const address = (() => {
+		const match = input.match(KASPA_TRANSFER_QUICK_ADDRESS_REGEX);
+		return match?.[0]?.toLowerCase();
+	})();
+	return {
+		address,
+		network: parseKaspaBalanceIntentNetwork(input),
 	};
 }
 
@@ -482,6 +560,48 @@ async function runKaspaTransferQuickWorkflow(
 				acceptanceTimedOut: executeResult.acceptanceTimedOut,
 				acceptancePath: executeResult.acceptancePath,
 			},
+		},
+	};
+}
+
+async function runKaspaBalanceQuickWorkflow(
+	params: KaspaBalanceQuickParams,
+): Promise<KaspaTransferQuickWorkflowResult> {
+	const parsedIntent = parseKaspaBalanceIntentText(params.intentText);
+	const network = parseKaspaNetwork(
+		params.network || parsedIntent.network || KASPA_TRANSFER_QUICK_DEFAULT_NETWORK,
+	);
+	const address = params.address?.trim() || parsedIntent.address;
+	if (!address) {
+		throw new Error(
+			"Kaspa balance requires an address in intentText or explicit address.",
+		);
+	}
+	const result = await fetchKaspaAddressBalance({
+		address,
+		network,
+		apiBaseUrl: params.apiBaseUrl,
+		apiKey: params.apiKey,
+		strictAddressCheck: params.strictAddressCheck,
+	});
+	return {
+		content: [
+			{
+				type: "text",
+				text: summarizeKaspaAddressBalanceResult(result),
+			},
+		],
+		details: {
+			schema: "kaspa.address.balance.v1",
+			network,
+			address,
+			intent: {
+				address,
+				intentText: params.intentText,
+				runMode: "analysis",
+			},
+			apiBaseUrl: result.apiBaseUrl,
+			data: result.data,
 		},
 	};
 }
@@ -1012,73 +1132,70 @@ function extractTxIdFromSubmitResult(data: unknown): string | null {
 			label: "Kaspa Send (natural)",
 			description:
 				"Minimal Kaspa transfer for natural language: `intentText` + optional runMode.",
-			parameters: Type.Union([
-				Type.Object({
-					runMode: Type.Optional(
-						Type.Union([
-							Type.Literal("analysis"),
-							Type.Literal("simulate"),
-							Type.Literal("execute"),
-						]),
-					),
-					intentText: Type.Optional(Type.String()),
-					text: Type.Optional(Type.String()),
-					network: kaspaNetworkSchema(),
-					fromAddress: Type.Optional(Type.String()),
-					toAddress: Type.Optional(Type.String()),
-					amount: Type.Optional(Type.Union([Type.String(), Type.Number()])),
-					requestMemo: Type.Optional(Type.String()),
-					apiBaseUrl: Type.Optional(Type.String()),
-					apiKey: Type.Optional(Type.String()),
-					confirmMainnet: Type.Optional(Type.Boolean()),
-					checkAcceptance: Type.Optional(Type.Boolean()),
-					pollAcceptance: Type.Optional(
-						Type.Boolean({
-							description:
-								"Poll acceptance endpoint until non-pending state or timeout.",
-						}),
-					),
-					acceptancePollIntervalMs: Type.Optional(
-						Type.Integer({
-							minimum: 250,
-							description: "Acceptance poll interval in ms.",
-						}),
-					),
-					acceptancePollTimeoutMs: Type.Optional(
-						Type.Integer({
-							minimum: 1000,
-							description: "Acceptance polling timeout in ms.",
-						}),
-					),
-					acceptanceEndpoint: Type.Optional(Type.String()),
-					privateKey: Type.Optional(Type.String()),
-					privateKeyEnv: Type.Optional(
-						Type.String({
-							description:
-								"Optional env var name for private key fallback (default: KASPA_PRIVATE_KEY).",
-						}),
-					),
-					privateKeyFile: Type.Optional(
-						Type.String({
-							description:
-								"Optional local file path containing private key content.",
-						}),
-					),
-					privateKeyPath: Type.Optional(
-						Type.String({
-							description:
-								"Alias for local file path containing private key content.",
-						}),
-					),
-					privateKeyPathEnv: Type.Optional(
-						Type.String({
-							description:
-								"Optional env var name for private key file path fallback (default: KASPA_PRIVATE_KEY_PATH).",
-						}),
-					),
-				}),
-				Type.String({ description: "Natural language intent sentence." }),
-			]),
+			parameters: Type.Object({
+				runMode: Type.Optional(
+					Type.Union([
+						Type.Literal("analysis"),
+						Type.Literal("simulate"),
+						Type.Literal("execute"),
+					]),
+				),
+				intentText: Type.Optional(Type.String()),
+				text: Type.Optional(Type.String()),
+				network: kaspaNetworkSchema(),
+				fromAddress: Type.Optional(Type.String()),
+				toAddress: Type.Optional(Type.String()),
+				amount: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				requestMemo: Type.Optional(Type.String()),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+				checkAcceptance: Type.Optional(Type.Boolean()),
+				pollAcceptance: Type.Optional(
+					Type.Boolean({
+						description:
+							"Poll acceptance endpoint until non-pending state or timeout.",
+					}),
+				),
+				acceptancePollIntervalMs: Type.Optional(
+					Type.Integer({
+						minimum: 250,
+						description: "Acceptance poll interval in ms.",
+					}),
+				),
+				acceptancePollTimeoutMs: Type.Optional(
+					Type.Integer({
+						minimum: 1000,
+						description: "Acceptance polling timeout in ms.",
+					}),
+				),
+				acceptanceEndpoint: Type.Optional(Type.String()),
+				privateKey: Type.Optional(Type.String()),
+				privateKeyEnv: Type.Optional(
+					Type.String({
+						description:
+							"Optional env var name for private key fallback (default: KASPA_PRIVATE_KEY).",
+					}),
+				),
+				privateKeyFile: Type.Optional(
+					Type.String({
+						description:
+							"Optional local file path containing private key content.",
+					}),
+				),
+				privateKeyPath: Type.Optional(
+					Type.String({
+						description:
+							"Alias for local file path containing private key content.",
+					}),
+				),
+				privateKeyPathEnv: Type.Optional(
+					Type.String({
+						description:
+							"Optional env var name for private key file path fallback (default: KASPA_PRIVATE_KEY_PATH).",
+					}),
+				),
+			}),
 			async execute(_toolCallId, rawParams) {
 				const params = normalizeKaspaTransferQuickMinimalInput(rawParams);
 				return runKaspaTransferQuickWorkflow({
@@ -1103,6 +1220,25 @@ function extractTxIdFromSubmitResult(data: unknown): string | null {
 					privateKeyPath: params.privateKeyPath,
 					privateKeyPathEnv: params.privateKeyPathEnv,
 				});
+			},
+		}),
+		defineTool({
+			name: "w3rt_read_kaspa_balance_v0",
+			label: "Kaspa Balance (natural)",
+			description:
+				"Natural language Kaspa balance query without JSON schema fields.",
+			parameters: Type.Object({
+				intentText: Type.Optional(Type.String()),
+				text: Type.Optional(Type.String()),
+				address: Type.Optional(Type.String()),
+				network: kaspaNetworkSchema(),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				strictAddressCheck: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = normalizeKaspaBalanceQuickInput(rawParams);
+				return runKaspaBalanceQuickWorkflow(params);
 			},
 		}),
 		defineTool({
