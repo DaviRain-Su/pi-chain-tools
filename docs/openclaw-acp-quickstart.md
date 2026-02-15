@@ -1105,7 +1105,56 @@ if (!validState) {
 }
 ```
 
-### 状态读取速查（执行器实现更稳）
+#### 11.4 可直接加载的 Schema 文件（可贴入 OpenClaw validator）
+
+仓库内已提供可直接加载的三份 schema，建议与上文规则一起挂接到 OpenClaw 或编排服务：
+
+- `docs/schemas/openclaw-btc5m-workflow.schema.json`
+- `docs/schemas/openclaw-btc5m-runtime-state.schema.json`
+- `docs/schemas/openclaw-btc5m-retry-policy.schema.json`
+
+示例（Node/TS，读取文件后先校验再执行）：
+
+```ts
+import { readFileSync } from "node:fs";
+import Ajv from "ajv";
+
+const ajv = new Ajv({ allErrors: true });
+
+const workflowSchema = JSON.parse(
+  readFileSync("docs/schemas/openclaw-btc5m-workflow.schema.json", "utf8"),
+);
+const runtimeSchema = JSON.parse(
+  readFileSync("docs/schemas/openclaw-btc5m-runtime-state.schema.json", "utf8"),
+);
+const retrySchema = JSON.parse(
+  readFileSync("docs/schemas/openclaw-btc5m-retry-policy.schema.json", "utf8"),
+);
+
+ajv.addSchema(workflowSchema);
+ajv.addSchema(runtimeSchema);
+ajv.addSchema(retrySchema);
+
+const validWorkflow = ajv.validate(workflowSchema, workflowDoc);
+if (!validWorkflow) {
+  throw new Error(`workflow schema invalid: ${ajv.errorsText(ajv.errors)}`);
+}
+
+const validState = ajv.validate(runtimeSchema, state);
+if (!validState) {
+  throw new Error(`state schema invalid: ${ajv.errorsText(ajv.errors)}`);
+}
+
+const validRetry = ajv.validate(
+  retrySchema,
+  { retryPolicy: retryPolicy },
+);
+if (!validRetry) {
+  throw new Error(`retry policy schema invalid: ${ajv.errorsText(ajv.errors)}`);
+}
+```
+
+### 12) 状态读取速查（执行器实现更稳）
 
 | 节点 | 读 | 写 |
 |---|---|---|
