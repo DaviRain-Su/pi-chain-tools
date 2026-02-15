@@ -4,7 +4,7 @@ export type KaspaNetwork = "mainnet" | "testnet";
 
 export const KASPA_TOOL_PREFIX = "kaspa_";
 
-const KASPA_DEFAULT_BASE_URL = "https://api.kas.fyi";
+const KASPA_DEFAULT_BASE_URL = "https://api.kaspa.org";
 
 const KASPA_API_TIMEOUT_MS = 15_000;
 
@@ -34,6 +34,9 @@ export function getKaspaApiBaseUrl(
 	return KASPA_DEFAULT_BASE_URL;
 }
 
+const KASPA_ADDRESS_BASE_REGEX = /^kaspa:[a-z0-9]+$/i;
+const KASPA_ADDRESS_STRICT_REGEX = /^kaspa:[a-z0-9]{61,63}$/i;
+
 export function getKaspaApiKey(overrideApiKey?: string): string | undefined {
 	const explicit = overrideApiKey?.trim();
 	if (explicit) return explicit;
@@ -45,13 +48,15 @@ export function normalizeKaspaAddress(
 	network?: KaspaNetwork,
 	strict = false,
 ): string {
-	const normalized = value.trim();
-	if (!/^kaspa:[a-z0-9]+$/i.test(normalized)) {
+	const normalized = value.trim().toLowerCase();
+	if (!KASPA_ADDRESS_BASE_REGEX.test(normalized)) {
 		throw new Error("address must be a valid Kaspa address (starting with kaspa:). ");
 	}
 	if (strict) {
-		if (normalized.length < 12) {
-			throw new Error("Kaspa address appears too short");
+		if (!KASPA_ADDRESS_STRICT_REGEX.test(normalized)) {
+			throw new Error(
+				"Kaspa address must match base format (kaspa:[a-z0-9]{61,63})",
+			);
 		}
 		if (!/^[a-z0-9]+$/i.test(normalized.slice(6))) {
 			throw new Error("Kaspa address payload must be base32-like");
@@ -95,30 +100,28 @@ export async function kaspaApiJsonRequest<T, TBody = undefined>(
 ): Promise<T> {
 	const base = params.baseUrl.trim().replace(/\/$/, "");
 	const path = params.path.startsWith("/") ? params.path : `/${params.path}`;
-	const url = new URL(`${base}${path}`);
 	const query = normalizeApiQuery(params.query ?? {});
+	const requestBody = params.body === undefined ? undefined : JSON.stringify(params.body);
+	const method = (params.method ?? "GET").toUpperCase() as KaspaApiHttpMethod;
+	const headers: Record<string, string> = {
+		accept: "application/json",
+	};
+	if (requestBody !== undefined) {
+		headers["content-type"] = "application/json";
+	}
+	if (params.apiKey?.trim()) {
+		headers["x-api-key"] = params.apiKey.trim();
+	}
+	const url = new URL(`${base}${path}`);
 	for (const [key, rawValue] of Object.entries(query)) {
 		url.searchParams.set(key, rawValue);
 	}
-	const method = (params.method ?? "GET").toUpperCase() as KaspaApiHttpMethod;
-
 	const controller = new AbortController();
 	const timeout = setTimeout(
 		() => controller.abort(),
 		params.timeoutMs ?? KASPA_API_TIMEOUT_MS,
 	);
 	try {
-		const headers: Record<string, string> = {
-			accept: "application/json",
-		};
-		if (params.apiKey?.trim()) {
-			headers["x-api-key"] = params.apiKey.trim();
-		}
-
-		const requestBody = params.body === undefined ? undefined : JSON.stringify(params.body);
-		if (requestBody !== undefined) {
-			headers["content-type"] = "application/json";
-		}
 		const response = await fetch(url, {
 			method,
 			body: requestBody,
@@ -137,6 +140,12 @@ export async function kaspaApiJsonRequest<T, TBody = undefined>(
 			const details = error instanceof Error ? error.message : String(error);
 			throw new Error(`Invalid JSON response from Kaspa API: ${details}`);
 		}
+	} catch (error) {
+		if (error instanceof Error && error.name === "AbortError") {
+			throw error;
+		}
+		const details = error instanceof Error ? error.message : String(error);
+		throw new Error(`Kaspa API request failed: ${details}`);
 	} finally {
 		clearTimeout(timeout);
 	}

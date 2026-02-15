@@ -59,6 +59,18 @@ type KaspaTokenResponse = unknown;
 
 type KaspaBlockResponse = unknown;
 
+type KaspaNetworkInfoResponse = unknown;
+
+type KaspaCoinSupplyResponse = unknown;
+
+type KaspaFeeEstimateResponse = unknown;
+
+type KaspaMempoolInfoResponse = unknown;
+
+type KaspaReadStateResponse = unknown;
+
+type KaspaTransactionMassResponse = unknown;
+
 type KaspaRpcResponse = unknown;
 
 type KaspaRpcMethod = "GET" | "POST";
@@ -78,6 +90,7 @@ export type KaspaWorkflowInputs = {
 	network?: string;
 	apiBaseUrl?: string;
 	apiKey?: string;
+	strictAddressCheck?: boolean;
 };
 
 export type KaspaTagResult = {
@@ -177,6 +190,45 @@ export type KaspaRpcResult = {
 	data: KaspaRpcResponse;
 };
 
+export type KaspaNetworkInfoResult = {
+	network: string;
+	apiBaseUrl: string;
+	data: KaspaNetworkInfoResponse;
+};
+
+export type KaspaCoinSupplyResult = {
+	network: string;
+	apiBaseUrl: string;
+	totalSupply?: string;
+	circulatingSupply?: string;
+	data: KaspaCoinSupplyResponse;
+};
+
+export type KaspaFeeEstimateResult = {
+	network: string;
+	apiBaseUrl: string;
+	data: KaspaFeeEstimateResponse;
+};
+
+export type KaspaMempoolInfoResult = {
+	network: string;
+	apiBaseUrl: string;
+	data: KaspaMempoolInfoResponse;
+};
+
+export type KaspaReadStateResult = {
+	network: string;
+	apiBaseUrl: string;
+	data: KaspaReadStateResponse;
+};
+
+export type KaspaTransactionMassResult = {
+	network: string;
+	apiBaseUrl: string;
+	data: KaspaTransactionMassResponse;
+	transaction: unknown;
+};
+
 function normalizeKaspaId(value: string, field: string): string {
 	const normalized = value.trim();
 	if (!normalized) {
@@ -262,7 +314,11 @@ export async function fetchKaspaAddressTag(
 	params: KaspaWorkflowInputs,
 ): Promise<KaspaTagResult> {
 	const network = parseKaspaNetwork(params.network);
-	const address = normalizeKaspaAddress(params.address);
+	const address = normalizeKaspaAddress(
+		params.address,
+		network,
+		params.strictAddressCheck === true,
+	);
 	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
 	const apiKey = getKaspaApiKey(params.apiKey);
 	const path = `/v1/addresses/${encodeURIComponent(address)}/tag`;
@@ -284,6 +340,7 @@ export async function fetchKaspaAddressTransactions(params: {
 	network?: string;
 	apiBaseUrl?: string;
 	apiKey?: string;
+	strictAddressCheck?: boolean;
 	limit?: number;
 	startingAfter?: string;
 	endingBefore?: string;
@@ -291,7 +348,11 @@ export async function fetchKaspaAddressTransactions(params: {
 	includePayload?: boolean;
 }): Promise<KaspaAddressTransactionsResult> {
 	const network = parseKaspaNetwork(params.network);
-	const address = normalizeKaspaAddress(params.address);
+	const address = normalizeKaspaAddress(
+		params.address,
+		network,
+		params.strictAddressCheck === true,
+	);
 	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
 	const apiKey = getKaspaApiKey(params.apiKey);
 	const normalizedLimit = parseKaspaLimit(params.limit);
@@ -598,6 +659,135 @@ export async function fetchKaspaBlock(params: {
 	};
 }
 
+export async function fetchKaspaNetworkInfo(params: {
+	network?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+}): Promise<KaspaNetworkInfoResult> {
+	const network = parseKaspaNetwork(params.network);
+	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
+	const apiKey = getKaspaApiKey(params.apiKey);
+	const data = await kaspaApiJsonGet<KaspaNetworkInfoResponse>({
+		baseUrl: apiBaseUrl,
+		path: "/info/blockdag",
+		apiKey,
+	});
+	return {
+		network,
+		apiBaseUrl,
+		data,
+	};
+}
+
+export async function fetchKaspaCoinSupply(params: {
+	network?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+	includeInBillion?: boolean;
+}): Promise<KaspaCoinSupplyResult> {
+	const network = parseKaspaNetwork(params.network);
+	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
+	const apiKey = getKaspaApiKey(params.apiKey);
+	const data = await kaspaApiJsonGet<KaspaCoinSupplyResponse>({
+		baseUrl: apiBaseUrl,
+		path: "/info/coinsupply",
+		query: params.includeInBillion
+			? {
+					in_billion: true,
+				}
+			: undefined,
+		apiKey,
+	});
+	return {
+		network,
+		apiBaseUrl,
+		data,
+	};
+}
+
+export async function fetchKaspaFeeEstimate(params: {
+	network?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+}): Promise<KaspaFeeEstimateResult> {
+	const network = parseKaspaNetwork(params.network);
+	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
+	const apiKey = getKaspaApiKey(params.apiKey);
+	const data = await kaspaApiJsonGet<KaspaFeeEstimateResponse>({
+		baseUrl: apiBaseUrl,
+		path: "/info/fee-estimate",
+		apiKey,
+	});
+	return {
+		network,
+		apiBaseUrl,
+		data,
+	};
+}
+
+export async function fetchKaspaMempoolInfo(params: {
+	network?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+}): Promise<KaspaMempoolInfoResult> {
+	const network = parseKaspaNetwork(params.network);
+	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
+	const apiKey = getKaspaApiKey(params.apiKey);
+	const data = await kaspaApiJsonGet<KaspaMempoolInfoResponse>({
+		baseUrl: apiBaseUrl,
+		path: "/info/kaspad",
+		apiKey,
+	});
+	return {
+		network,
+		apiBaseUrl,
+		data,
+	};
+}
+
+export async function fetchKaspaReadState(params: {
+	network?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+}): Promise<KaspaReadStateResult> {
+	const network = parseKaspaNetwork(params.network);
+	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
+	const apiKey = getKaspaApiKey(params.apiKey);
+	const data = await kaspaApiJsonGet<KaspaReadStateResponse>({
+		baseUrl: apiBaseUrl,
+		path: "/info/blockdag",
+		apiKey,
+	});
+	return {
+		network,
+		apiBaseUrl,
+		data,
+	};
+}
+
+export async function fetchKaspaTransactionMass(params: {
+	transaction: Record<string, unknown>;
+	network?: string;
+	apiBaseUrl?: string;
+	apiKey?: string;
+}): Promise<KaspaTransactionMassResult> {
+	const network = parseKaspaNetwork(params.network);
+	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
+	const apiKey = getKaspaApiKey(params.apiKey);
+	const data = await kaspaApiJsonPost<Record<string, unknown>, KaspaTransactionMassResponse>({
+		baseUrl: apiBaseUrl,
+		path: "/transactions/mass",
+		body: { transaction: params.transaction },
+		apiKey,
+	});
+	return {
+		network,
+		apiBaseUrl,
+		transaction: params.transaction,
+		data,
+	};
+}
+
 export async function fetchKaspaRpcRead(params: {
 	rpcPath: string;
 	rpcMethod?: KaspaRpcMethod;
@@ -732,11 +922,55 @@ export function summarizeKaspaBlockResult(result: KaspaBlockResult): string {
 	return `Kaspa block info network=${result.network} blockId=${result.blockId} data=${summarizeKaspaResponse(result.data)}`;
 }
 
+export function summarizeKaspaNetworkInfoResult(
+	result: KaspaNetworkInfoResult,
+): string {
+	return `Kaspa network info network=${result.network} data=${summarizeKaspaResponse(result.data)}`;
+}
+
+export function summarizeKaspaCoinSupplyResult(
+	result: KaspaCoinSupplyResult,
+): string {
+	const total =
+		"totalSupply" in (result.data as Record<string, unknown>)
+			? `${(result.data as Record<string, unknown>).totalSupply}`
+			: "n/a";
+	const circulating =
+		"circulatingSupply" in (result.data as Record<string, unknown>)
+			? `${(result.data as Record<string, unknown>).circulatingSupply}`
+			: "n/a";
+	return `Kaspa coin supply network=${result.network} totalSupply=${total} circulating=${circulating} data=${summarizeKaspaResponse(result.data)}`;
+}
+
+export function summarizeKaspaFeeEstimateResult(
+	result: KaspaFeeEstimateResult,
+): string {
+	return `Kaspa fee estimate network=${result.network} data=${summarizeKaspaResponse(result.data)}`;
+}
+
+export function summarizeKaspaMempoolInfoResult(
+	result: KaspaMempoolInfoResult,
+): string {
+	return `Kaspa mempool info network=${result.network} data=${summarizeKaspaResponse(result.data)}`;
+}
+
+export function summarizeKaspaReadStateResult(
+	result: KaspaReadStateResult,
+): string {
+	return `Kaspa read state network=${result.network} data=${summarizeKaspaResponse(result.data)}`;
+}
+
+export function summarizeKaspaTransactionMassResult(
+	result: KaspaTransactionMassResult,
+): string {
+	return `Kaspa transaction mass network=${result.network} hasTx=${Boolean(result.transaction)} data=${summarizeKaspaResponse(result.data)}`;
+}
+
 export function summarizeKaspaRpcResult(result: KaspaRpcResult): string {
 	return `Kaspa RPC read network=${result.network} method=${result.rpcMethod} path=${result.rpcPath} data=${summarizeKaspaResponse(result.data)}`;
 }
 
-export function createKaspaReadTools() {
+export function createKaspaReadToolsLegacy() {
 	return [
 		defineTool({
 			name: `${KASPA_TOOL_PREFIX}getAddressTag`,
@@ -747,6 +981,7 @@ export function createKaspaReadTools() {
 				network: kaspaNetworkSchema(),
 				apiBaseUrl: Type.Optional(Type.String()),
 				apiKey: Type.Optional(Type.String()),
+				strictAddressCheck: Type.Optional(Type.Boolean()),
 			}),
 			async execute(_toolCallId, params) {
 				const result = await fetchKaspaAddressTag(params);
@@ -777,6 +1012,7 @@ export function createKaspaReadTools() {
 				network: kaspaNetworkSchema(),
 				apiBaseUrl: Type.Optional(Type.String()),
 				apiKey: Type.Optional(Type.String()),
+				strictAddressCheck: Type.Optional(Type.Boolean()),
 				limit: Type.Optional(Type.Number()),
 				startingAfter: Type.Optional(Type.String()),
 				endingBefore: Type.Optional(Type.String()),
@@ -1065,20 +1301,14 @@ export function createKaspaReadTools() {
 			name: `${KASPA_TOOL_PREFIX}getFeeEstimate`,
 			label: "Kaspa Fee Estimate",
 			description:
-				"Call Kaspa RPC fee-estimate endpoint for pre-submit fee planning.",
+				"Get fee estimate from Kaspa node for pre-submission planning.",
 			parameters: Type.Object({
-				request: Type.Optional(Type.Unknown()),
-				rpcPath: Type.Optional(Type.String()),
 				network: kaspaNetworkSchema(),
 				apiBaseUrl: Type.Optional(Type.String()),
 				apiKey: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, params) {
-				const rpcPath = params.rpcPath?.trim() || "get-fee-estimate";
-				const result = await fetchKaspaRpcRead({
-					rpcPath,
-					rpcMethod: "POST",
-					body: params.request,
+				const result = await fetchKaspaFeeEstimate({
 					network: params.network,
 					apiBaseUrl: params.apiBaseUrl,
 					apiKey: params.apiKey,
@@ -1087,15 +1317,113 @@ export function createKaspaReadTools() {
 					content: [
 						{
 							type: "text",
-							text: summarizeKaspaRpcResult(result),
+							text: summarizeKaspaFeeEstimateResult(result),
 						},
 					],
 					details: {
-						schema: "kaspa.rpc.fee-estimate.v1",
+						schema: "kaspa.fee.estimate.v1",
 						network: result.network,
-						rpcPath: result.rpcPath,
-						rpcMethod: result.rpcMethod,
 						apiBaseUrl: result.apiBaseUrl,
+						data: result.data,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${KASPA_TOOL_PREFIX}getNetworkInfo`,
+			label: "Kaspa Network Info",
+			description: "Read Kaspa network health/state summary.",
+			parameters: Type.Object({
+				network: kaspaNetworkSchema(),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const result = await fetchKaspaNetworkInfo({
+					network: params.network,
+					apiBaseUrl: params.apiBaseUrl,
+					apiKey: params.apiKey,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeKaspaNetworkInfoResult(result),
+						},
+					],
+					details: {
+						schema: "kaspa.network.info.v1",
+						network: result.network,
+						apiBaseUrl: result.apiBaseUrl,
+						data: result.data,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${KASPA_TOOL_PREFIX}getCoinSupply`,
+			label: "Kaspa Coin Supply",
+			description: "Read circulating/total Kaspa token supply information.",
+			parameters: Type.Object({
+				includeInBillion: Type.Optional(Type.Boolean()),
+				network: kaspaNetworkSchema(),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const result = await fetchKaspaCoinSupply({
+					network: params.network,
+					apiBaseUrl: params.apiBaseUrl,
+					apiKey: params.apiKey,
+					includeInBillion: params.includeInBillion,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeKaspaCoinSupplyResult(result),
+						},
+					],
+					details: {
+						schema: "kaspa.coin.supply.v1",
+						network: result.network,
+						apiBaseUrl: result.apiBaseUrl,
+						data: result.data,
+						totalSupply: result.totalSupply,
+						circulatingSupply: result.circulatingSupply,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${KASPA_TOOL_PREFIX}getTransactionMass`,
+			label: "Kaspa Transaction Mass",
+			description: "Estimate transaction mass from raw transaction payload.",
+			parameters: Type.Object({
+				transaction: Type.Record(Type.String(), Type.Unknown()),
+				network: kaspaNetworkSchema(),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const result = await fetchKaspaTransactionMass({
+					transaction: params.transaction as Record<string, unknown>,
+					network: params.network,
+					apiBaseUrl: params.apiBaseUrl,
+					apiKey: params.apiKey,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeKaspaTransactionMassResult(result),
+						},
+					],
+					details: {
+						schema: "kaspa.transaction.mass.v1",
+						network: result.network,
+						apiBaseUrl: result.apiBaseUrl,
+						transaction: result.transaction,
 						data: result.data,
 					},
 				};
@@ -1105,26 +1433,14 @@ export function createKaspaReadTools() {
 			name: `${KASPA_TOOL_PREFIX}getMempool`,
 			label: "Kaspa Mempool",
 			description:
-				"Call Kaspa mempool RPC/read endpoint before submit/confirm.",
+				"Read Kaspa mempool-facing runtime details for pre-submit checks.",
 			parameters: Type.Object({
-				rpcPath: Type.Optional(Type.String()),
-				rpcMethod: Type.Optional(Type.Union([Type.Literal("GET"), Type.Literal("POST")])),
-				query: Type.Optional(Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean()]))),
-				body: Type.Optional(Type.Unknown()),
 				network: kaspaNetworkSchema(),
 				apiBaseUrl: Type.Optional(Type.String()),
 				apiKey: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, params) {
-				const rpcPath = params.rpcPath?.trim() || "get-mempool-entries";
-				const method = params.rpcMethod === "GET" ? "GET" : "POST";
-				const result = await fetchKaspaRpcRead({
-					rpcPath,
-					rpcMethod: method,
-					query:
-						(method === "GET" ? (params.query as Record<string, unknown> | undefined) : undefined),
-					body:
-						(method === "POST" ? (params.body ?? {}) : undefined),
+				const result = await fetchKaspaMempoolInfo({
 					network: params.network,
 					apiBaseUrl: params.apiBaseUrl,
 					apiKey: params.apiKey,
@@ -1133,16 +1449,13 @@ export function createKaspaReadTools() {
 					content: [
 						{
 							type: "text",
-							text: summarizeKaspaRpcResult(result),
+							text: summarizeKaspaMempoolInfoResult(result),
 						},
 					],
 					details: {
-						schema: "kaspa.rpc.mempool.v1",
+						schema: "kaspa.mempool.info.v1",
 						network: result.network,
-						rpcPath: result.rpcPath,
-						rpcMethod: result.rpcMethod,
 						apiBaseUrl: result.apiBaseUrl,
-						query: result.query,
 						data: result.data,
 					},
 				};
@@ -1151,24 +1464,15 @@ export function createKaspaReadTools() {
 		defineTool({
 			name: `${KASPA_TOOL_PREFIX}readState`,
 			label: "Kaspa Read State",
-			description: "Read Kaspa state by RPC endpoint for transaction preflight.",
+			description:
+				"Read Kaspa chain state snapshot for pre-submit safety checks.",
 			parameters: Type.Object({
-				rpcPath: Type.Optional(Type.String()),
-				query: Type.Optional(
-					Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean()])),
-				),
-				body: Type.Optional(Type.Unknown()),
 				network: kaspaNetworkSchema(),
 				apiBaseUrl: Type.Optional(Type.String()),
 				apiKey: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, params) {
-				const rpcPath = params.rpcPath?.trim() || "read-state";
-				const result = await fetchKaspaRpcRead({
-					rpcPath,
-					rpcMethod: "POST",
-					query: params.query,
-					body: params.body,
+				const result = await fetchKaspaReadState({
 					network: params.network,
 					apiBaseUrl: params.apiBaseUrl,
 					apiKey: params.apiKey,
@@ -1177,16 +1481,149 @@ export function createKaspaReadTools() {
 					content: [
 						{
 							type: "text",
-							text: summarizeKaspaRpcResult(result),
+							text: summarizeKaspaReadStateResult(result),
 						},
 					],
 					details: {
-						schema: "kaspa.rpc.read-state.v1",
+						schema: "kaspa.chain.state.v1",
 						network: result.network,
-						rpcPath: result.rpcPath,
-						rpcMethod: result.rpcMethod,
 						apiBaseUrl: result.apiBaseUrl,
-						query: result.query,
+						data: result.data,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${KASPA_TOOL_PREFIX}getAddressHistoryStats`,
+			label: "Kaspa Address History Stats",
+			description:
+				"Aggregate recent address history metrics from the latest transactions page.",
+			parameters: Type.Object({
+				address: Type.String({ minLength: 8 }),
+				limit: Type.Optional(Type.Number()),
+				startingAfter: Type.Optional(Type.String()),
+				endingBefore: Type.Optional(Type.String()),
+				network: kaspaNetworkSchema(),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				strictAddressCheck: Type.Optional(Type.Boolean()),
+			}),
+			async execute(_toolCallId, params) {
+				const result = await fetchKaspaAddressHistoryStats({
+					address: params.address,
+					limit: params.limit,
+					startingAfter: params.startingAfter,
+					endingBefore: params.endingBefore,
+					network: params.network,
+					apiBaseUrl: params.apiBaseUrl,
+					apiKey: params.apiKey,
+					strictAddressCheck: params.strictAddressCheck,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeKaspaAddressHistoryStatsResult(result),
+						},
+					],
+					details: {
+						schema: "kaspa.address.history-stats.v1",
+						network: result.network,
+						address: result.address,
+						apiBaseUrl: result.apiBaseUrl,
+						stats: result.stats,
+						transactions: result.transactions,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${KASPA_TOOL_PREFIX}getTransaction`,
+			label: "Kaspa Transaction",
+			description: "Get Kaspa transaction details by transaction id.",
+			parameters: Type.Object({
+				transactionId: Type.String({ minLength: 8 }),
+				network: kaspaNetworkSchema(),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const result = await fetchKaspaTransaction(params);
+				return {
+					content: [
+						{ type: "text", text: summarizeKaspaTransactionResult(result) },
+					],
+					details: {
+						schema: "kaspa.transaction.v1",
+						network: result.network,
+						transactionId: result.transactionId,
+						apiBaseUrl: result.apiBaseUrl,
+						data: result.data,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${KASPA_TOOL_PREFIX}getTransactionOutput`,
+			label: "Kaspa Transaction Output",
+			description:
+				"Get one transaction output by transaction id and output index.",
+			parameters: Type.Object({
+				transactionId: Type.String({ minLength: 8 }),
+				outputIndex: Type.Integer({ minimum: 0 }),
+				network: kaspaNetworkSchema(),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const result = await fetchKaspaTransactionOutput(params);
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeKaspaTransactionOutputResult(result),
+						},
+					],
+					details: {
+						schema: "kaspa.transaction.output.v1",
+						network: result.network,
+						transactionId: result.transactionId,
+						outputIndex: result.outputIndex,
+						apiBaseUrl: result.apiBaseUrl,
+						data: result.data,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${KASPA_TOOL_PREFIX}getTransactionAcceptance`,
+			label: "Kaspa Transaction Acceptance",
+			description:
+				"Get Kaspa transaction acceptance details for one or more transaction ids.",
+			parameters: Type.Object({
+				transactionId: Type.Optional(Type.String({ minLength: 1 })),
+				transactionIds: Type.Optional(
+					Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+				),
+				payload: Type.Optional(Type.Unknown()),
+				network: kaspaNetworkSchema(),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const result = await fetchKaspaTransactionAcceptance(params);
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeKaspaTransactionAcceptanceResult(result),
+						},
+					],
+					details: {
+						schema: "kaspa.transaction.acceptance.v1",
+						network: result.network,
+						transactionIds: result.transactionIds,
+						apiBaseUrl: result.apiBaseUrl,
 						data: result.data,
 					},
 				};
@@ -1239,6 +1676,17 @@ export function createKaspaReadTools() {
 					},
 				};
 			},
-		}),
-	];
+			}),
+		];
+}
+
+export function createKaspaReadTools() {
+	const tools = createKaspaReadToolsLegacy();
+	const deduped = new Map<string, (typeof tools)[number]>();
+	for (const tool of tools) {
+		if (!deduped.has(tool.name)) {
+			deduped.set(tool.name, tool);
+		}
+	}
+	return [...deduped.values()];
 }

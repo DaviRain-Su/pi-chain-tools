@@ -3,11 +3,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { defineTool } from "../../../core/types.js";
 import {
 	assertKaspaMainnetExecution,
+	kaspaApiJsonGet,
 	kaspaApiJsonPost,
 	KASPA_TOOL_PREFIX,
-	kaspaNetworkSchema,
 	getKaspaApiBaseUrl,
 	getKaspaApiKey,
+	kaspaNetworkSchema,
 	parseKaspaNetwork,
 } from "../runtime.js";
 
@@ -15,9 +16,10 @@ type KaspaSubmitTransactionResponse = unknown;
 
 const KASPA_SUBMIT_TOKEN_PREFIX = "kaspa-submit:v1:";
 const KASPA_SUBMIT_CONFIRM_TTL_MS = 20 * 60 * 1000;
-const KASPA_DEFAULT_FEES_ENDPOINT = "get-fee-estimate";
-const KASPA_DEFAULT_MEMPOOL_ENDPOINT = "get-mempool-entries";
-const KASPA_DEFAULT_READ_STATE_ENDPOINT = "read-state";
+const KASPA_SUBMIT_PATH = "/transactions";
+const KASPA_DEFAULT_FEES_ENDPOINT = "info/fee-estimate";
+const KASPA_DEFAULT_MEMPOOL_ENDPOINT = "info/kaspad";
+const KASPA_DEFAULT_READ_STATE_ENDPOINT = "info/blockdag";
 
 type KaspaSubmitRunMode = "analysis" | "execute";
 
@@ -44,6 +46,8 @@ type KaspaSubmitConfirmTokenPayload = {
 	bodyHash: string;
 	issuedAt: number;
 	nonce: string;
+	preflightAllOk: boolean;
+	preflightSummary: string;
 };
 
 export type KaspaSubmitTransactionResult = {
@@ -72,30 +76,53 @@ function summarizeKaspaSubmitResponse(data: unknown): string {
 	}
 }
 
+function parseKaspaTransactionPayload(value?: string): unknown | undefined {
+	if (!value) return undefined;
+	const trimmed = value.trim();
+	if (!trimmed) return undefined;
+	try {
+		return JSON.parse(trimmed);
+	} catch {
+		return trimmed;
+	}
+}
+
 function resolveKaspaTransactionSubmissionRequest(
 	rawTransaction?: string,
 	request?: unknown,
 ) {
-	if (request !== undefined) {
-		if (!rawTransaction) {
-			return request;
-		}
-		if (
-			request !== null &&
-			typeof request === "object" &&
-			!Array.isArray(request)
-		) {
-			return {
-				...(request as Record<string, unknown>),
-				rawTransaction,
-			};
-		}
-		return { rawTransaction, request };
-	}
-	if (!rawTransaction) {
+	const requestBody =
+		request === undefined
+			? undefined
+			: (() => {
+					if (
+						request == null ||
+						typeof request !== "object" ||
+						Array.isArray(request)
+					) {
+						throw new Error("request must be an object");
+					}
+					return request as Record<string, unknown>;
+				})();
+	const normalizedRawTransaction = parseKaspaTransactionPayload(rawTransaction);
+	if (!requestBody && normalizedRawTransaction === undefined) {
 		return undefined;
 	}
-	return { rawTransaction };
+	const body: Record<string, unknown> = requestBody
+		? { ...requestBody }
+		: {};
+	if (rawTransaction?.trim()) {
+		body.transaction = normalizedRawTransaction;
+	} else if (!("transaction" in body) && "rawTransaction" in body) {
+		body.transaction = body.rawTransaction;
+	}
+	if ("rawTransaction" in body) {
+		delete body.rawTransaction;
+	}
+	if (!("transaction" in body)) {
+		return undefined;
+	}
+	return body;
 }
 
 function stableKaspaJson(value: unknown): string {
@@ -112,7 +139,9 @@ function stableKaspaJson(value: unknown): string {
 		.sort()
 		.map(
 			(key) =>
-				`${JSON.stringify(key)}:${stableKaspaJson((value as Record<string, unknown>)[key])}`,
+				`${JSON.stringify(key)}:${stableKaspaJson(
+					(value as Record<string, unknown>)[key],
+				)}`,
 		)
 		.join(",");
 	return `{${sorted}}`;
@@ -123,19 +152,37 @@ function buildKaspaRequestFingerprint(payload: unknown): string {
 	return createHash("sha256").update(stableKaspaJson(payload)).digest("hex");
 }
 
+function buildKaspaSubmitBodyFingerprintInput(body: unknown): unknown {
+	if (!body || typeof body !== "object" || Array.isArray(body)) {
+		return body;
+	}
+	const record = body as Record<string, unknown>;
+	if ("transaction" in record) {
+		return { transaction: record.transaction };
+	}
+	return body;
+}
+
 function makeKaspaSubmitConfirmToken(
 	network: string,
 	body: unknown,
+	preflight: KaspaSubmitPrecheckResult,
 ): string {
 	const payload: KaspaSubmitConfirmTokenPayload = {
 		version: 1,
 		kind: "kaspa-submit",
 		network,
-		bodyHash: buildKaspaRequestFingerprint(body),
+		bodyHash: buildKaspaRequestFingerprint(
+			buildKaspaSubmitBodyFingerprintInput(body),
+		),
 		issuedAt: Date.now(),
 		nonce: randomBytes(8).toString("hex"),
+		preflightAllOk: preflight.allOk,
+		preflightSummary: summarizeKaspaPrechecks(preflight),
 	};
-	return `${KASPA_SUBMIT_TOKEN_PREFIX}${Buffer.from(JSON.stringify(payload)).toString("base64url")}`;
+	return `${KASPA_SUBMIT_TOKEN_PREFIX}${Buffer.from(
+		JSON.stringify(payload),
+	).toString("base64url")}`;
 }
 
 function parseKaspaSubmitConfirmToken(
@@ -151,6 +198,7 @@ function parseKaspaSubmitConfirmToken(
 		if (typeof parsed.network !== "string") return null;
 		if (typeof parsed.bodyHash !== "string") return null;
 		if (typeof parsed.issuedAt !== "number") return null;
+		if (typeof parsed.preflightAllOk !== "boolean") return null;
 		return parsed;
 	} catch {
 		return null;
@@ -161,7 +209,7 @@ function assertKaspaSubmitConfirmToken(
 	network: string,
 	body: unknown,
 	confirmToken?: string,
-) {
+): KaspaSubmitConfirmTokenPayload {
 	if (!confirmToken) {
 		throw new Error(
 			"Run kaspa_submitTransaction in runMode=analysis first to obtain confirmToken.",
@@ -179,15 +227,18 @@ function assertKaspaSubmitConfirmToken(
 	if (Date.now() - parsed.issuedAt > KASPA_SUBMIT_CONFIRM_TTL_MS) {
 		throw new Error("confirmToken has expired. Re-run analysis.");
 	}
-	const currentBodyHash = buildKaspaRequestFingerprint(body);
+	const currentBodyHash = buildKaspaRequestFingerprint(
+		buildKaspaSubmitBodyFingerprintInput(body),
+	);
 	if (parsed.bodyHash !== currentBodyHash) {
 		throw new Error(
 			"confirmToken no longer matches this request body. Re-run analysis.",
 		);
 	}
+	return parsed;
 }
 
-function normalizeKaspaSubmitEndpoint(path: string): string {
+function normalizeKaspaSubmitEndpoint(path: string, method: "GET" | "POST"): string {
 	const trimmed = path.trim();
 	if (!trimmed) {
 		throw new Error("rpcPath is required for preflight checks.");
@@ -200,9 +251,12 @@ function normalizeKaspaSubmitEndpoint(path: string): string {
 		return `/${normalized}`;
 	}
 	if (/^rpc\//i.test(normalized)) {
-		return `/v1/${normalized}`;
+		return method === "POST" ? `/v1/${normalized}` : `/${normalized}`;
 	}
-	return `/v1/rpc/${normalized}`;
+	if (method === "POST") {
+		return `/v1/rpc/${normalized}`;
+	}
+	return `/${normalized}`;
 }
 
 function makeKaspaSubmitReceiptTemplate(params: {
@@ -212,6 +266,7 @@ function makeKaspaSubmitReceiptTemplate(params: {
 	txId: string | null;
 	confirmToken: string;
 	preflightAllOk: boolean;
+	preflightSummary: string;
 }): Record<string, unknown> {
 	return {
 		network: params.network,
@@ -221,12 +276,11 @@ function makeKaspaSubmitReceiptTemplate(params: {
 		txId: params.txId,
 		confirmToken: params.confirmToken,
 		preflightReady: params.preflightAllOk,
+		preflightSummary: params.preflightSummary,
 	};
 }
 
-function summarizeKaspaPrechecks(
-	preflight?: KaspaSubmitPrecheckResult,
-): string {
+function summarizeKaspaPrechecks(preflight?: KaspaSubmitPrecheckResult): string {
 	if (!preflight) {
 		return "preflight=not-run";
 	}
@@ -263,38 +317,47 @@ async function runKaspaSubmitPreflightChecks(params: {
 		{
 			key: "feeEstimate" as const,
 			label: "feeEstimate",
+			method: "GET" as const,
 			path: normalizeKaspaSubmitEndpoint(
 				params.feeEndpoint || KASPA_DEFAULT_FEES_ENDPOINT,
+				"GET",
 			),
 		},
 		{
 			key: "mempool" as const,
 			label: "mempool",
+			method: "GET" as const,
 			path: normalizeKaspaSubmitEndpoint(
 				params.mempoolEndpoint || KASPA_DEFAULT_MEMPOOL_ENDPOINT,
+				"GET",
 			),
 		},
 		{
 			key: "readState" as const,
 			label: "readState",
+			method: "GET" as const,
 			path: normalizeKaspaSubmitEndpoint(
 				params.readStateEndpoint || KASPA_DEFAULT_READ_STATE_ENDPOINT,
+				"GET",
 			),
 		},
 	];
 
 	for (const check of preflightChecks) {
-		const requestBody =
-			typeof params.body === "object" && params.body !== null
-				? { ...params.body, source: "preflight" }
-				: { source: "preflight", request: params.body };
 		try {
-			const data = await kaspaApiJsonPost<unknown, unknown>({
-				baseUrl: params.apiBaseUrl,
-				path: check.path,
-				body: requestBody,
-				apiKey: params.apiKey,
-			});
+			const data =
+				check.method === "GET"
+					? await kaspaApiJsonGet<unknown>({
+							baseUrl: params.apiBaseUrl,
+							path: check.path,
+							apiKey: params.apiKey,
+					  })
+					: await kaspaApiJsonPost<unknown, unknown>({
+							baseUrl: params.apiBaseUrl,
+							path: check.path,
+							body: params.body,
+							apiKey: params.apiKey,
+					  });
 			checks.checks[check.key] = data;
 			checks.reports.push({
 				label: check.label,
@@ -367,7 +430,7 @@ export async function submitKaspaTransaction(params: {
 			readStateEndpoint: params.readStateEndpoint,
 		});
 		const confirmToken = preflight.allOk
-			? makeKaspaSubmitConfirmToken(network, body)
+			? makeKaspaSubmitConfirmToken(network, body, preflight)
 			: undefined;
 		return {
 			network,
@@ -381,17 +444,13 @@ export async function submitKaspaTransaction(params: {
 	}
 
 	assertKaspaMainnetExecution(network, params.confirmMainnet);
-	if (runMode === "execute") {
-		assertKaspaSubmitConfirmToken(network, body, params.confirmToken);
-	}
-
+	const parsedToken = assertKaspaSubmitConfirmToken(network, body, params.confirmToken);
 	const data = await kaspaApiJsonPost<unknown, KaspaSubmitTransactionResponse>({
 		baseUrl: apiBaseUrl,
-		path: "/v1/rpc/submit-transaction",
+		path: KASPA_SUBMIT_PATH,
 		body,
 		apiKey,
 	});
-	const preflightAllOk = Boolean(params.confirmToken);
 	const txId = extractKaspaSubmitTransactionId(data);
 	const receiptTemplate = makeKaspaSubmitReceiptTemplate({
 		network,
@@ -399,14 +458,32 @@ export async function submitKaspaTransaction(params: {
 		requestHash,
 		txId,
 		confirmToken: params.confirmToken ?? "none",
-		preflightAllOk,
+		preflightAllOk: parsedToken.preflightAllOk,
+		preflightSummary: parsedToken.preflightSummary,
 	});
+	const detailsPreflight: KaspaSubmitPrecheckResult = {
+		allOk: parsedToken.preflightAllOk,
+		reports: [
+			{
+				label: "analysis",
+				path: "confirmToken",
+				status: parsedToken.preflightAllOk ? "ok" : "warning",
+				data: parsedToken.preflightSummary,
+			},
+		],
+		checks: {
+			feeEstimate: null,
+			mempool: null,
+			readState: null,
+		},
+	};
 	return {
 		network,
 		apiBaseUrl,
 		body,
 		mode: "execute",
 		confirmToken: params.confirmToken,
+		preflight: detailsPreflight,
 		data,
 		requestHash,
 		receipt: receiptTemplate,
@@ -419,7 +496,7 @@ export function createKaspaExecuteTools() {
 			name: `${KASPA_TOOL_PREFIX}submitTransaction`,
 			label: "Kaspa Submit Transaction",
 			description:
-				"Submit a pre-signed Kaspa transaction to RPC. Use runMode=analysis for preflight and confirmToken output.",
+				"Submit a pre-signed Kaspa transaction to API. Use runMode=analysis for preflight and confirmToken output.",
 			parameters: Type.Object({
 				rawTransaction: Type.Optional(
 					Type.String({ minLength: 1, description: "Raw signed transaction payload" }),
@@ -427,7 +504,7 @@ export function createKaspaExecuteTools() {
 				request: Type.Optional(
 					Type.Unknown({
 						description:
-							"Full request body used by Kaspa submit endpoint. Keep rawTransaction empty when provided in this field.",
+							"Full request body used by Kaspa submit endpoint. Prefer { transaction, allowOrphan? }. Keep rawTransaction empty when provided in this field.",
 					}),
 				),
 				runMode: Type.Optional(
@@ -489,8 +566,10 @@ export function createKaspaExecuteTools() {
 						request: result.body,
 						requestHash: result.requestHash,
 						confirmToken: result.confirmToken,
+						preflight: result.preflight,
 						response: result.data,
 						receipt: result.receipt,
+						preflightSummary: summarizeKaspaPrechecks(result.preflight),
 					},
 				};
 			},
