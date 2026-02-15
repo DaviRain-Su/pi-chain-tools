@@ -47,6 +47,9 @@ type WorkflowParams = {
 	readStateEndpoint?: string;
 	checkAcceptance?: boolean;
 	acceptanceEndpoint?: string;
+	pollAcceptance?: boolean;
+	acceptancePollIntervalMs?: number;
+	acceptancePollTimeoutMs?: number;
 	skipFeePreflight?: boolean;
 	skipMempoolPreflight?: boolean;
 	skipReadStatePreflight?: boolean;
@@ -342,6 +345,24 @@ export function createKaspaWorkflowTools() {
 				mempoolEndpoint: Type.Optional(Type.String()),
 				readStateEndpoint: Type.Optional(Type.String()),
 				checkAcceptance: Type.Optional(Type.Boolean()),
+				pollAcceptance: Type.Optional(
+					Type.Boolean({
+						description:
+							"Poll acceptance endpoint until non-pending state or timeout.",
+					}),
+				),
+				acceptancePollIntervalMs: Type.Optional(
+					Type.Integer({
+						minimum: 250,
+						description: "Acceptance poll interval in ms.",
+					}),
+				),
+				acceptancePollTimeoutMs: Type.Optional(
+					Type.Integer({
+						minimum: 1000,
+						description: "Acceptance polling timeout in ms.",
+					}),
+				),
 				acceptanceEndpoint: Type.Optional(Type.String()),
 				skipFeePreflight: Type.Optional(Type.Boolean()),
 				skipMempoolPreflight: Type.Optional(Type.Boolean()),
@@ -380,6 +401,11 @@ export function createKaspaWorkflowTools() {
 						feeEndpoint: params.feeEndpoint,
 						mempoolEndpoint: params.mempoolEndpoint,
 						readStateEndpoint: params.readStateEndpoint,
+						checkAcceptance: params.checkAcceptance,
+						pollAcceptance: params.pollAcceptance,
+						acceptancePollIntervalMs: params.acceptancePollIntervalMs,
+						acceptancePollTimeoutMs: params.acceptancePollTimeoutMs,
+						acceptanceEndpoint: params.acceptanceEndpoint,
 						skipFeePreflight: params.skipFeePreflight,
 						skipMempoolPreflight: params.skipMempoolPreflight,
 						skipReadStatePreflight: params.skipReadStatePreflight,
@@ -467,6 +493,9 @@ export function createKaspaWorkflowTools() {
 					confirmToken: effectiveConfirmToken,
 					confirmMainnet: params.confirmMainnet,
 					checkAcceptance: params.checkAcceptance,
+					pollAcceptance: params.pollAcceptance,
+					acceptancePollIntervalMs: params.acceptancePollIntervalMs,
+					acceptancePollTimeoutMs: params.acceptancePollTimeoutMs,
 					acceptanceEndpoint: params.acceptanceEndpoint,
 					feeEndpoint: params.feeEndpoint,
 					mempoolEndpoint: params.mempoolEndpoint,

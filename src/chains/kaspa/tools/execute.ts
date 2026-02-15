@@ -22,11 +22,14 @@ const KASPA_DEFAULT_MEMPOOL_ENDPOINT = "info/kaspad";
 const KASPA_DEFAULT_READ_STATE_ENDPOINT = "info/blockdag";
 const KASPA_DEFAULT_ACCEPTANCE_ENDPOINT = "transaction/acceptance-data";
 const KASPA_SUBMIT_MEMPOOL_WARNING_THRESHOLD = 50000;
+const KASPA_DEFAULT_ACCEPTANCE_POLL_INTERVAL_MS = 2_000;
+const KASPA_DEFAULT_ACCEPTANCE_POLL_TIMEOUT_MS = 30_000;
 
 type KaspaSubmitRunMode = "analysis" | "execute";
 type KaspaSubmitPreflightCheckStatus = "ok" | "warning" | "failed";
 type KaspaSubmitPreflightRisk = "low" | "medium" | "high";
 type KaspaSubmitPreflightReadiness = "ready" | "needs-review";
+type KaspaAcceptanceStatus = "accepted" | "pending" | "rejected" | "unknown";
 
 type KaspaSubmitPrecheckResult = {
 	allOk: boolean;
@@ -85,6 +88,9 @@ export type KaspaSubmitTransactionResult = {
 	receipt?: Record<string, unknown>;
 	acceptance?: unknown;
 	acceptanceChecked?: boolean;
+	acceptanceStatus?: KaspaAcceptanceStatus;
+	acceptanceTimedOut?: boolean;
+	acceptanceCheckedAttempts?: number;
 	acceptancePath?: string;
 	preflightChecks?: string[];
 };
@@ -101,6 +107,13 @@ function summarizeKaspaSubmitResponse(data: unknown): string {
 	} catch {
 		return "(unserializable response)";
 	}
+}
+
+function parsedTokenSummaryChecks(checks: string[] | undefined): string {
+	if (!checks || checks.length === 0) {
+		return "preflightChecks=none";
+	}
+	return checks.join(" | ");
 }
 
 function parseKaspaTransactionPayload(value?: string): unknown | undefined {
@@ -556,6 +569,9 @@ function makeKaspaSubmitReceiptTemplate(params: {
 	acceptanceChecked?: boolean;
 	acceptancePath?: string;
 	acceptance?: unknown;
+	acceptanceStatus?: KaspaAcceptanceStatus;
+	acceptanceAttempts?: number;
+	acceptanceTimedOut?: boolean;
 }): Record<string, unknown> {
 	return {
 		kind: "kaspa-submit-receipt",
@@ -576,6 +592,9 @@ function makeKaspaSubmitReceiptTemplate(params: {
 		acceptanceChecked: Boolean(params.acceptanceChecked),
 		acceptancePath: params.acceptancePath,
 		acceptance: params.acceptance,
+		acceptanceStatus: params.acceptanceStatus,
+		acceptanceAttempts: params.acceptanceAttempts,
+		acceptanceTimedOut: Boolean(params.acceptanceTimedOut),
 	};
 }
 
@@ -789,6 +808,277 @@ function extractKaspaSubmitTransactionId(value: unknown): string | null {
 	return null;
 }
 
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+}
+
+function normalizeKaspaAcceptancePollingInterval(value?: number): number {
+	if (value == null) {
+		return KASPA_DEFAULT_ACCEPTANCE_POLL_INTERVAL_MS;
+	}
+	const normalized = Math.trunc(value);
+	if (!Number.isFinite(normalized) || normalized < 250) {
+		return KASPA_DEFAULT_ACCEPTANCE_POLL_INTERVAL_MS;
+	}
+	return normalized;
+}
+
+function normalizeKaspaAcceptancePollingTimeout(value?: number): number {
+	if (value == null) {
+		return KASPA_DEFAULT_ACCEPTANCE_POLL_TIMEOUT_MS;
+	}
+	const normalized = Math.trunc(value);
+	if (!Number.isFinite(normalized) || normalized < 1000) {
+		return KASPA_DEFAULT_ACCEPTANCE_POLL_TIMEOUT_MS;
+	}
+	return normalized;
+}
+
+function parseKaspaTransactionAcceptanceBoolean(value: unknown): boolean | null {
+	if (typeof value === "boolean") return value;
+	if (typeof value === "string") {
+		const normalized = value.trim().toLowerCase();
+		if (normalized === "true" || normalized === "1" || normalized === "yes") {
+			return true;
+		}
+		if (
+			normalized === "false" ||
+			normalized === "0" ||
+			normalized === "no"
+		) {
+			return false;
+		}
+	}
+	if (typeof value === "number") {
+		if (value === 1) return true;
+		if (value === 0) return false;
+	}
+	return null;
+}
+
+function parseKaspaTransactionAcceptanceId(
+	record: Record<string, unknown>,
+): string | null {
+	const keys = ["txId", "txid", "transactionId", "hash", "id"];
+	for (const key of keys) {
+		const value = record[key];
+		if (typeof value === "string") {
+			const trimmed = value.trim();
+			if (trimmed) return trimmed;
+		}
+	}
+	return null;
+}
+
+function parseKaspaAcceptanceNestedValue(
+	value: unknown,
+): { isAccepted: boolean | null; status: KaspaAcceptanceStatus } | null {
+	if (value == null) return null;
+	if (typeof value === "boolean") {
+		return {
+			isAccepted: value,
+			status: value ? "accepted" : "rejected",
+		};
+	}
+	if (typeof value === "string") {
+		const normalized = value.trim().toLowerCase();
+		if (normalized.includes("accept")) {
+			return { isAccepted: true, status: "accepted" };
+		}
+		if (normalized.includes("reject") || normalized.includes("fail")) {
+			return { isAccepted: false, status: "rejected" };
+		}
+	}
+	if (value && typeof value === "object" && !Array.isArray(value)) {
+		const record = value as Record<string, unknown>;
+		const parsed =
+			parseKaspaTransactionAcceptanceBoolean(record.accepted) ??
+			parseKaspaTransactionAcceptanceBoolean(record.isAccepted);
+		if (parsed !== null) {
+			return {
+				isAccepted: parsed,
+				status: parsed ? "accepted" : "rejected",
+			};
+		}
+	}
+	return null;
+}
+
+function parseKaspaAcceptanceStatusFromCollection(
+	candidate: unknown,
+	txId: string,
+	invert = false,
+): { isAccepted: boolean | null; status: KaspaAcceptanceStatus } | null {
+	if (!Array.isArray(candidate)) {
+		return null;
+	}
+	for (const entry of candidate) {
+		if (typeof entry === "string") {
+			if (entry === txId) {
+				if (invert) {
+					return { isAccepted: false, status: "rejected" };
+				}
+				return { isAccepted: true, status: "accepted" };
+			}
+			continue;
+		}
+		if (!entry || typeof entry !== "object") continue;
+		const record = entry as Record<string, unknown>;
+		const entryTxId = parseKaspaTransactionAcceptanceId(record);
+		if (!entryTxId || entryTxId !== txId) continue;
+		const fromNested = parseKaspaAcceptanceNestedValue(record);
+		if (fromNested) {
+			if (invert) {
+				const flipped = fromNested.isAccepted;
+				const normalized = flipped === null ? null : !flipped;
+				return {
+					isAccepted: normalized,
+					status:
+						normalized === null
+							? "unknown"
+							: normalized
+								? "accepted"
+								: "rejected",
+				};
+			}
+			return fromNested;
+		}
+	}
+	return null;
+}
+
+function parseKaspaAcceptanceStatusFromRecord(
+	record: Record<string, unknown>,
+	txId: string,
+): { isAccepted: boolean | null; status: KaspaAcceptanceStatus } {
+	const directAccepted = parseKaspaTransactionAcceptanceBoolean(record.accepted);
+	if (directAccepted !== null) {
+		return {
+			isAccepted: directAccepted,
+			status: directAccepted ? "accepted" : "rejected",
+		};
+	}
+	const statusValue = typeof record.status === "string" ? record.status.toLowerCase() : "";
+	if (statusValue.includes("accept")) {
+		return { isAccepted: true, status: "accepted" };
+	}
+	if (statusValue.includes("reject") || statusValue.includes("fail")) {
+		return { isAccepted: false, status: "rejected" };
+	}
+	const nested = record[txId];
+	if (nested !== undefined) {
+		const result = parseKaspaAcceptanceNestedValue(nested);
+		if (result) return result;
+	}
+	const collectionKeys = [
+		{ key: "acceptedTransactions", invert: false },
+		{ key: "acceptedTransactionIds", invert: false },
+		{ key: "rejectedTransactions", invert: true },
+		{ key: "rejectedTransactionIds", invert: true },
+		"transactions",
+		"results",
+	];
+	for (const key of collectionKeys) {
+		const parsed =
+			typeof key === "string"
+				? parseKaspaAcceptanceStatusFromCollection(record[key], txId)
+				: parseKaspaAcceptanceStatusFromCollection(
+						record[key.key],
+						txId,
+						key.invert,
+					);
+		if (parsed) return parsed;
+	}
+	if (record.transactionId === txId) {
+		const parsed = parseKaspaAcceptanceNestedValue(record);
+		if (parsed) return parsed;
+	}
+	if (typeof record.id === "string" && record.id === txId) {
+		const parsed = parseKaspaAcceptanceNestedValue(record);
+		if (parsed) return parsed;
+	}
+	return { isAccepted: null, status: "pending" };
+}
+
+function parseKaspaAcceptanceStatus(
+	txId: string,
+	data: unknown,
+): { isAccepted: boolean | null; status: KaspaAcceptanceStatus } {
+	if (!data || typeof data !== "object") {
+		return { isAccepted: null, status: "unknown" };
+	}
+	const record = data as Record<string, unknown>;
+	return parseKaspaAcceptanceStatusFromRecord(record, txId);
+}
+
+type KaspaSubmitAcceptanceLookupResult = {
+	path: string;
+	data: unknown;
+	isAccepted: boolean | null;
+	status: KaspaAcceptanceStatus;
+	attempts: number;
+	elapsedMs: number;
+	timedOut?: boolean;
+};
+
+async function pollKaspaSubmitAcceptanceLookup(params: {
+	apiBaseUrl: string;
+	apiKey?: string;
+	acceptanceEndpoint?: string;
+	txId: string;
+	pollIntervalMs?: number;
+	pollTimeoutMs?: number;
+}): Promise<KaspaSubmitAcceptanceLookupResult> {
+	const pollIntervalMs = normalizeKaspaAcceptancePollingInterval(
+		params.pollIntervalMs,
+	);
+	const pollTimeoutMs = normalizeKaspaAcceptancePollingTimeout(
+		params.pollTimeoutMs,
+	);
+	const start = Date.now();
+	const results: KaspaSubmitAcceptanceLookupResult[] = [];
+	while (true) {
+		const response = await runKaspaSubmitAcceptanceLookup({
+			apiBaseUrl: params.apiBaseUrl,
+			apiKey: params.apiKey,
+			acceptanceEndpoint: params.acceptanceEndpoint,
+			txId: params.txId,
+		});
+		const parsed = response
+			? {
+				...parseKaspaAcceptanceStatus(params.txId, response.data),
+				path: response.path,
+				data: response.data,
+			}
+			: {
+				isAccepted: null,
+				status: "unknown" as KaspaAcceptanceStatus,
+				path: "",
+				data: null,
+			};
+		const elapsedMs = Date.now() - start;
+		const item: KaspaSubmitAcceptanceLookupResult = {
+			...parsed,
+			attempts: results.length + 1,
+			elapsedMs,
+			timedOut: false,
+		};
+		results.push(item);
+		if (parsed.status !== "pending" && parsed.status !== "unknown") {
+			return item;
+		}
+		if (elapsedMs >= pollTimeoutMs) {
+			return {
+				...item,
+				timedOut: true,
+			};
+		}
+		await sleep(pollIntervalMs);
+	}
+}
+
 async function runKaspaSubmitAcceptanceLookup(params: {
 	apiBaseUrl: string;
 	apiKey?: string;
@@ -835,6 +1125,9 @@ export async function submitKaspaTransaction(params: {
 	readStateEndpoint?: string;
 	checkAcceptance?: boolean;
 	acceptanceEndpoint?: string;
+	pollAcceptance?: boolean;
+	acceptancePollIntervalMs?: number;
+	acceptancePollTimeoutMs?: number;
 	skipFeePreflight?: boolean;
 	skipMempoolPreflight?: boolean;
 	skipReadStatePreflight?: boolean;
@@ -907,12 +1200,32 @@ export async function submitKaspaTransaction(params: {
 	const broadcastStatus = resolveKaspaSubmitBroadcastStatus(txId, data);
 	const acceptanceResult =
 		params.checkAcceptance && txId
-			? await runKaspaSubmitAcceptanceLookup({
-					apiBaseUrl,
-					apiKey,
-					txId,
-					acceptanceEndpoint: params.acceptanceEndpoint,
-				})
+			? params.pollAcceptance
+				? await pollKaspaSubmitAcceptanceLookup({
+						apiBaseUrl,
+						apiKey,
+						acceptanceEndpoint: params.acceptanceEndpoint,
+						txId,
+						pollIntervalMs: params.acceptancePollIntervalMs,
+						pollTimeoutMs: params.acceptancePollTimeoutMs,
+					})
+				: await runKaspaSubmitAcceptanceLookup({
+						apiBaseUrl,
+						apiKey,
+						txId,
+						acceptanceEndpoint: params.acceptanceEndpoint,
+					}).then((result) =>
+						result
+							? {
+									path: result.path,
+									data: result.data,
+									...parseKaspaAcceptanceStatus(txId, result.data),
+									attempts: 1,
+									elapsedMs: 0,
+									timedOut: false,
+								}
+							: null,
+					)
 			: null;
 	const parsedTokenRisk =
 		normalizeKaspaSubmitPreflightRiskAndReadiness(parsedToken);
@@ -932,6 +1245,9 @@ export async function submitKaspaTransaction(params: {
 		acceptanceChecked: acceptanceResult !== null,
 		acceptancePath: acceptanceResult?.path,
 		acceptance: acceptanceResult?.data,
+		acceptanceStatus: acceptanceResult?.status,
+		acceptanceAttempts: acceptanceResult?.attempts,
+		acceptanceTimedOut: acceptanceResult?.timedOut,
 	});
 	const detailsPreflight: KaspaSubmitPrecheckResult = {
 		allOk: parsedToken.preflightAllOk,
@@ -965,6 +1281,9 @@ export async function submitKaspaTransaction(params: {
 		acceptance: acceptanceResult?.data,
 		acceptanceChecked: acceptanceResult !== null,
 		acceptancePath: acceptanceResult?.path,
+		acceptanceStatus: acceptanceResult?.status,
+		acceptanceTimedOut: acceptanceResult?.timedOut,
+		acceptanceCheckedAttempts: acceptanceResult?.attempts,
 	};
 }
 
@@ -1002,6 +1321,24 @@ export function createKaspaExecuteTools() {
 				mempoolEndpoint: Type.Optional(Type.String()),
 				readStateEndpoint: Type.Optional(Type.String()),
 				checkAcceptance: Type.Optional(Type.Boolean()),
+				pollAcceptance: Type.Optional(
+					Type.Boolean({
+						description:
+							"Poll acceptance endpoint until non-pending state or timeout.",
+					}),
+				),
+				acceptancePollIntervalMs: Type.Optional(
+					Type.Integer({
+						minimum: 250,
+						description: "Acceptance poll interval in ms.",
+					}),
+				),
+				acceptancePollTimeoutMs: Type.Optional(
+					Type.Integer({
+						minimum: 1000,
+						description: "Acceptance polling timeout in ms.",
+					}),
+				),
 				acceptanceEndpoint: Type.Optional(
 					Type.String({
 						description: "Optional acceptance endpoint override.",
@@ -1044,15 +1381,19 @@ export function createKaspaExecuteTools() {
 					: null;
 				const acceptanceLine =
 					result.acceptanceChecked === true
-						? ` acceptanceChecked=true path=${result.acceptancePath ?? "unknown"}`
+						? ` acceptanceChecked=true path=${result.acceptancePath ?? "unknown"} status=${result.acceptanceStatus ?? "unknown"}`
+						: "";
+				const acceptanceTimingLine =
+					result.acceptanceChecked === true
+						? ` attempts=${result.acceptanceCheckedAttempts ?? 0} timedOut=${result.acceptanceTimedOut ? "yes" : "no"}`
 						: "";
 					return {
 						content: [
 							{
 								type: "text",
 								text: txId
-									? `Kaspa transaction submitted. network=${result.network} txId=${txId} receipt=${summarizeKaspaSubmitResponse(result.data)}${acceptanceLine}`
-									: `Kaspa transaction submitted. network=${result.network} response=${summarizeKaspaSubmitResponse(result.data)}${acceptanceLine}`,
+									? `Kaspa transaction submitted. network=${result.network} txId=${txId} receipt=${summarizeKaspaSubmitResponse(result.data)}${acceptanceLine}${acceptanceTimingLine}`
+									: `Kaspa transaction submitted. network=${result.network} response=${summarizeKaspaSubmitResponse(result.data)}${acceptanceLine}${acceptanceTimingLine}`,
 							},
 						],
 						details: {
@@ -1069,7 +1410,10 @@ export function createKaspaExecuteTools() {
 							receipt: result.receipt,
 							acceptance: result.acceptance,
 							acceptanceChecked: result.acceptanceChecked,
+							acceptanceStatus: result.acceptanceStatus,
 							acceptancePath: result.acceptancePath,
+							acceptanceTimedOut: result.acceptanceTimedOut,
+							acceptanceCheckedAttempts: result.acceptanceCheckedAttempts,
 							preflightSummary: summarizeKaspaPrechecks(result.preflight),
 						},
 					};
