@@ -1002,6 +1002,46 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("parses LP remove intentText with at-least phrase", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5d-remove-at-least", {
+			runId: "wf-sui-05d-remove-at-least",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"移除流动性 pool: 0xabc position: 0xdef SUI/USDC tick: -5 to 5 deltaLiquidity: 1000 至少有 1.2 SUI 2.0 USDC",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.remove",
+			intent: {
+				type: "sui.lp.cetus.remove",
+				minAmountA: "1200000000",
+				minAmountB: "2000000",
+			},
+		});
+	});
+
+	it("parses LP remove intentText with no-less-than phrase", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5d-remove-no-less", {
+			runId: "wf-sui-05d-remove-no-less",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"remove liquidity pool: 0xabc position: 0xdef SUI/USDC tick: -5 to 5 deltaLiquidity: 1000 不少于 1.5 2",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.remove",
+			intent: {
+				type: "sui.lp.cetus.remove",
+				minAmountA: "1500000000",
+				minAmountB: "2",
+			},
+		});
+	});
+
 	it("rejects LP remove decimal min outputs when decimals are unknown", async () => {
 		const tool = getTool();
 		await expect(

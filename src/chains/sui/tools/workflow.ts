@@ -568,7 +568,7 @@ function parseMinOutputNarrativeAmounts(params: {
 	minAmountB?: string;
 } {
 	const minOutputMatch = params.text.match(
-		/(?:最少拿到|至少拿到|最小输出|最低输出)([^。！？!?;；,，]*)/i,
+		/(?:最少拿到|至少拿到|最小输出|最低输出|至少有|不少于|至少回收|最少回收|最少领取|至少领取|最低领取)([^。！？!?;；,，]*)/i,
 	);
 	if (!minOutputMatch) return {};
 
