@@ -585,6 +585,20 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("requires known output token when using minimum output phrase", async () => {
+		const tool = getTool();
+		await expect(
+			tool.execute("wf2o", {
+				runId: "wf-sui-02o",
+				runMode: "analysis",
+				network: "mainnet",
+				intentText: "把 SUI 换成 SUI，至少拿到 0.5 wal",
+			}),
+		).rejects.toThrow(
+			/swap minimum-output amount requires a known output token|token decimals unknown|amountRaw is required for sui.swap.cetus/i,
+		);
+	});
+
 	it("resolves unknown symbols in swap intentText via farms token index", async () => {
 		cetusV2Mocks.resolveCetusTokenTypesBySymbol.mockImplementation(
 			async ({ symbol }) => {

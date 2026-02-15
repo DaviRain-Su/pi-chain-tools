@@ -829,6 +829,7 @@ function parseSwapAmountRawFromText(params: {
 	text: string;
 	inputCoinType?: string;
 	outputCoinType?: string;
+	minOutputMode?: boolean;
 	fallbackAmountRaw?: string;
 }): string | undefined {
 	const explicitRaw =
@@ -858,6 +859,11 @@ function parseSwapAmountRawFromText(params: {
 			if (outputToken) {
 				return decimalUiAmountToRaw(amountUi, outputToken.decimals, "amountUi");
 			}
+		}
+		if (params.minOutputMode) {
+			throw new Error(
+				"swap minimum-output amount requires a known output token (for decimals) or amountRaw.",
+			);
 		}
 	}
 
@@ -1441,6 +1447,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 				text,
 				inputCoinType: inputForAmount,
 				outputCoinType: outputForAmount,
+				minOutputMode: swapMinOutputMode,
 				fallbackAmountRaw: integerMatch?.[0],
 			}),
 		};
