@@ -1420,6 +1420,9 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	const lpPairMatch = text.match(
 		/([a-z][a-z0-9._-]*)\s*\/\s*([a-z][a-z0-9._-]*)/i,
 	);
+	const lpDashPairMatch = text.match(
+		/([a-z][a-z0-9._-]*)\s*[-–—]+\s*([a-z][a-z0-9._-]*)/i,
+	);
 	const poolIdMatch = text.match(/(?:pool|池子|池)\s*[:：]?\s*(\d+)/i);
 	const poolCandidateIndexMatch =
 		text.match(
@@ -1647,6 +1650,12 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		hints.destinationAsset = hints.tokenOutId;
 	if (lpPairMatch?.[1]) hints.tokenAId = lpPairMatch[1];
 	if (lpPairMatch?.[2]) hints.tokenBId = lpPairMatch[2];
+	if (!hints.tokenAId && lpDashPairMatch?.[1]) {
+		hints.tokenAId = lpDashPairMatch[1];
+	}
+	if (!hints.tokenBId && lpDashPairMatch?.[2]) {
+		hints.tokenBId = lpDashPairMatch[2];
+	}
 	if (tokenAMatch?.[1]) hints.tokenAId = tokenAMatch[1];
 	if (tokenBMatch?.[1]) hints.tokenBId = tokenBMatch[1];
 	if (tokenIdMatch?.[1]) hints.tokenId = tokenIdMatch[1];

@@ -2425,6 +2425,28 @@ describe("w3rt_run_near_workflow_v0", () => {
 		});
 	});
 
+	it("parses natural-language ref lp add intent with dash-separated pair", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-9b-dash", {
+			runId: "wf-near-09b-dash",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"在 Ref 添加 LP，NEAR-USDC，amountA 0.01，amountB 1.2，先分析",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.lp.ref.add",
+			intent: {
+				type: "near.lp.ref.add",
+				tokenAId: "NEAR",
+				tokenBId: "USDC",
+				amountARaw: "10000000000000000000000",
+				amountBRaw: "1200000",
+			},
+		});
+	});
+
 	it("parses natural-language ref lp add intent with token amounts", async () => {
 		const tool = getTool();
 		const result = await tool.execute("near-wf-9c", {
