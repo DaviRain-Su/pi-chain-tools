@@ -21,6 +21,7 @@ const KASPA_DEFAULT_FEES_ENDPOINT = "info/fee-estimate";
 const KASPA_DEFAULT_MEMPOOL_ENDPOINT = "info/kaspad";
 const KASPA_DEFAULT_READ_STATE_ENDPOINT = "info/blockdag";
 const KASPA_DEFAULT_ACCEPTANCE_ENDPOINT = "transaction/acceptance-data";
+const KASPA_SUBMIT_MEMPOOL_WARNING_THRESHOLD = 50000;
 
 type KaspaSubmitRunMode = "analysis" | "execute";
 type KaspaSubmitPreflightCheckStatus = "ok" | "warning" | "failed";
@@ -67,6 +68,7 @@ type KaspaSubmitConfirmTokenPayload = {
 	nonce: string;
 	preflightAllOk: boolean;
 	preflightSummary: string;
+	preflightChecks?: string[];
 	preflightRiskLevel?: KaspaSubmitPreflightRisk;
 	preflightReadiness?: KaspaSubmitPreflightReadiness;
 };
@@ -84,6 +86,7 @@ export type KaspaSubmitTransactionResult = {
 	acceptance?: unknown;
 	acceptanceChecked?: boolean;
 	acceptancePath?: string;
+	preflightChecks?: string[];
 };
 
 function summarizeKaspaSubmitResponse(data: unknown): string {
@@ -109,6 +112,191 @@ function parseKaspaTransactionPayload(value?: string): unknown | undefined {
 	} catch {
 		return trimmed;
 	}
+}
+
+function parseKaspaReadableNumber(value: unknown): number | null {
+	if (value == null) return null;
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) return null;
+		return value;
+	}
+	if (typeof value === "bigint") {
+		return Number(value);
+	}
+	if (typeof value === "string") {
+		const normalized = value.trim();
+		if (!normalized) return null;
+		const parsed = Number.parseFloat(normalized);
+		return Number.isFinite(parsed) ? parsed : null;
+	}
+	return null;
+}
+
+function parseKaspaReadableBoolean(value: unknown): boolean | null {
+	if (value == null) return null;
+	if (typeof value === "boolean") return value;
+	if (typeof value === "string") {
+		const normalized = value.trim().toLowerCase();
+		if (normalized === "true") return true;
+		if (normalized === "false") return false;
+	}
+	return null;
+}
+
+function parseKaspaReadableString(value: unknown): string | null {
+	if (typeof value === "string") {
+		const normalized = value.trim();
+		return normalized ? normalized : null;
+	}
+	return null;
+}
+
+function pickKaspaPreflightNumericField(
+	record: Record<string, unknown>,
+	candidates: string[],
+): { key: string; value: number } | null {
+	for (const key of candidates) {
+		const parsed = parseKaspaReadableNumber(record[key]);
+		if (parsed != null) {
+			return { key, value: parsed };
+		}
+	}
+	return null;
+}
+
+function pickKaspaPreflightStringField(
+	record: Record<string, unknown>,
+	candidates: string[],
+): { key: string; value: string } | null {
+	for (const key of candidates) {
+		const parsed = parseKaspaReadableString(record[key]);
+		if (parsed != null) {
+			return { key, value: parsed };
+		}
+	}
+	return null;
+}
+
+function summarizeKaspaSubmitPreflightCheck(params: {
+	key: keyof KaspaSubmitPrecheckResult["checks"];
+	path: string;
+	data: unknown;
+}): {
+	label: string;
+	path: string;
+	status: KaspaSubmitPreflightCheckStatus;
+	error?: string;
+	data?: unknown;
+} {
+	if (!params.data || typeof params.data !== "object") {
+		return {
+			label: params.key,
+			path: params.path,
+			status: "warning",
+			error: "Response is not an object; cannot parse health signal.",
+			data: params.data,
+		};
+	}
+	const record = params.data as Record<string, unknown>;
+	if (params.key === "feeEstimate") {
+		const minFee = pickKaspaPreflightNumericField(record, [
+			"minFee",
+			"minimumFee",
+			"min_fee",
+			"minimum_fee",
+		]);
+		const maxFee = pickKaspaPreflightNumericField(record, [
+			"maxFee",
+			"maximumFee",
+			"max_fee",
+			"maximum_fee",
+		]);
+		const feeUnit = pickKaspaPreflightStringField(record, ["unit", "feeUnit", "fee_unit"]);
+		const summary = [
+			feeUnit ? `unit=${feeUnit.value}` : "unit=n/a",
+			minFee ? `min=${minFee.value}` : "min=n/a",
+			maxFee ? `max=${maxFee.value}` : "max=n/a",
+		].join(" ");
+		if (!minFee && !maxFee) {
+			return {
+				label: "feeEstimate",
+				path: params.path,
+				status: "warning",
+				error: "fee estimate response has no numeric minFee/maxFee hints.",
+				data: summary,
+			};
+		}
+		return {
+			label: "feeEstimate",
+			path: params.path,
+			status: "ok",
+			data: summary,
+		};
+	}
+	if (params.key === "mempool") {
+		const mempoolSize = pickKaspaPreflightNumericField(record, [
+			"mempoolSize",
+			"size",
+			"txCount",
+			"pendingTxs",
+			"pending_txs",
+		]);
+		const summary = mempoolSize
+			? `size=${mempoolSize.value}`
+			: "size=n/a";
+		if (mempoolSize && mempoolSize.value >= KASPA_SUBMIT_MEMPOOL_WARNING_THRESHOLD) {
+			return {
+				label: "mempool",
+				path: params.path,
+				status: "warning",
+				error: `mempool size is high (>= ${KASPA_SUBMIT_MEMPOOL_WARNING_THRESHOLD}).`,
+				data: summary,
+			};
+		}
+		return {
+			label: "mempool",
+			path: params.path,
+			status: "ok",
+			data: summary,
+		};
+	}
+	const chainState = pickKaspaPreflightStringField(record, [
+		"chainState",
+		"state",
+		"status",
+	]);
+	const synced = parseKaspaReadableBoolean(record.isSynced ?? record.synced ?? record.ready);
+	if (chainState?.value) {
+		const normalizedState = chainState.value.toLowerCase();
+		if (
+			normalizedState.includes("sync") &&
+			!normalizedState.includes("ready") &&
+			!normalizedState.includes("synced")
+		) {
+			return {
+				label: "readState",
+				path: params.path,
+				status: "warning",
+				error: `chain state is not fully ready: ${chainState.value}.`,
+				data: chainState.value,
+			};
+		}
+	}
+	if (synced === false) {
+		return {
+			label: "readState",
+			path: params.path,
+			status: "warning",
+			error: "chainState indicates node is not synced.",
+			data: chainState?.value ?? "synced=false",
+		};
+	}
+	return {
+		label: "readState",
+		path: params.path,
+		status: "ok",
+		data: summarizeKaspaSubmitResponse(record),
+	};
 }
 
 function resolveKaspaTransactionSubmissionRequest(
@@ -204,6 +392,10 @@ function makeKaspaSubmitConfirmToken(
 		preflightRiskLevel: preflight.riskLevel,
 		preflightReadiness: preflightReady,
 		preflightSummary: summarizeKaspaPrechecks(preflight),
+		preflightChecks: preflight.reports.map(
+			(report) =>
+				`${report.label}=${report.status}${report.error ? ` (${report.error})` : ""}`,
+		),
 	};
 	return `${KASPA_SUBMIT_TOKEN_PREFIX}${Buffer.from(
 		JSON.stringify(payload),
@@ -360,6 +552,7 @@ function makeKaspaSubmitReceiptTemplate(params: {
 	preflightSummary: string;
 	preflightRiskLevel: KaspaSubmitPreflightRisk;
 	preflightReadiness: KaspaSubmitPreflightReadiness;
+	preflightChecks?: string[];
 	acceptanceChecked?: boolean;
 	acceptancePath?: string;
 	acceptance?: unknown;
@@ -379,6 +572,7 @@ function makeKaspaSubmitReceiptTemplate(params: {
 		preflightSummary: params.preflightSummary,
 		preflightRiskLevel: params.preflightRiskLevel,
 		preflightReadiness: params.preflightReadiness,
+		preflightChecks: params.preflightChecks,
 		acceptanceChecked: Boolean(params.acceptanceChecked),
 		acceptancePath: params.acceptancePath,
 		acceptance: params.acceptance,
@@ -408,6 +602,15 @@ function summarizeKaspaPrechecks(
 			return `${report.label}=${report.status}${tail}`;
 		})
 		.join(" | ")}`;
+}
+
+function buildKaspaSubmitPreflightSummaryFromChecks(
+	checks: string[] | undefined,
+): string {
+	if (!checks || !checks.length) {
+		return "preflightChecks=none";
+	}
+	return checks.join(" | ");
 }
 
 function resolveKaspaSubmitPreflightRisk(
@@ -489,12 +692,15 @@ async function runKaspaSubmitPreflightChecks(
 							apiKey: params.apiKey,
 						});
 			checks.checks[check.key] = data;
-			checks.reports.push({
-				label: check.label,
+			const report = summarizeKaspaSubmitPreflightCheck({
+				key: check.key,
 				path: check.path,
-				status: "ok",
 				data,
 			});
+			checks.reports.push(report);
+			if (report.status !== "ok") {
+				checks.allOk = false;
+			}
 		} catch (error) {
 			checks.allOk = false;
 			const message = error instanceof Error ? error.message : `${error}`;
@@ -665,6 +871,10 @@ export async function submitKaspaTransaction(params: {
 			preflight: readiness.preflight,
 			confirmToken,
 			requestHash: readiness.requestHash,
+			preflightChecks: readiness.preflight.reports.map(
+				(report) =>
+					`${report.label}=${report.status}${report.error ? ` (${report.error})` : ""}`,
+			),
 		};
 	}
 
@@ -706,6 +916,7 @@ export async function submitKaspaTransaction(params: {
 			: null;
 	const parsedTokenRisk =
 		normalizeKaspaSubmitPreflightRiskAndReadiness(parsedToken);
+	const parsedTokenChecks = parsedToken.preflightChecks ?? [];
 	const receiptTemplate = makeKaspaSubmitReceiptTemplate({
 		network,
 		apiBaseUrl,
@@ -715,6 +926,7 @@ export async function submitKaspaTransaction(params: {
 		confirmToken: params.confirmToken ?? "none",
 		preflightAllOk: parsedToken.preflightAllOk,
 		preflightSummary: parsedToken.preflightSummary,
+		preflightChecks: parsedTokenChecks,
 		preflightRiskLevel: parsedTokenRisk.riskLevel,
 		preflightReadiness: parsedTokenRisk.readiness,
 		acceptanceChecked: acceptanceResult !== null,
@@ -730,7 +942,7 @@ export async function submitKaspaTransaction(params: {
 				label: "analysis",
 				path: "confirmToken",
 				status: parsedToken.preflightAllOk ? "ok" : "warning",
-				data: parsedToken.preflightSummary,
+				data: parsedTokenSummaryChecks(parsedTokenChecks),
 			},
 		],
 		checks: {
@@ -746,6 +958,7 @@ export async function submitKaspaTransaction(params: {
 		mode: "execute",
 		confirmToken: params.confirmToken,
 		preflight: detailsPreflight,
+		preflightChecks: parsedTokenChecks,
 		data,
 		requestHash,
 		receipt: receiptTemplate,
@@ -821,6 +1034,7 @@ export function createKaspaExecuteTools() {
 							requestHash: result.requestHash,
 							preflight: result.preflight,
 							confirmToken: result.confirmToken,
+							preflightChecks: result.preflightChecks,
 							preflightSummary: summarizeKaspaPrechecks(result.preflight),
 						},
 					};
@@ -832,32 +1046,33 @@ export function createKaspaExecuteTools() {
 					result.acceptanceChecked === true
 						? ` acceptanceChecked=true path=${result.acceptancePath ?? "unknown"}`
 						: "";
-				return {
-					content: [
-						{
-							type: "text",
-							text: txId
-								? `Kaspa transaction submitted. network=${result.network} txId=${txId} receipt=${summarizeKaspaSubmitResponse(result.data)}${acceptanceLine}`
-								: `Kaspa transaction submitted. network=${result.network} response=${summarizeKaspaSubmitResponse(result.data)}${acceptanceLine}`,
+					return {
+						content: [
+							{
+								type: "text",
+								text: txId
+									? `Kaspa transaction submitted. network=${result.network} txId=${txId} receipt=${summarizeKaspaSubmitResponse(result.data)}${acceptanceLine}`
+									: `Kaspa transaction submitted. network=${result.network} response=${summarizeKaspaSubmitResponse(result.data)}${acceptanceLine}`,
+							},
+						],
+						details: {
+							schema: "kaspa.transaction.submit.v1",
+							network: result.network,
+							apiBaseUrl: result.apiBaseUrl,
+							txId,
+							request: result.body,
+							requestHash: result.requestHash,
+							confirmToken: result.confirmToken,
+							preflight: result.preflight,
+							preflightChecks: result.preflightChecks,
+							response: result.data,
+							receipt: result.receipt,
+							acceptance: result.acceptance,
+							acceptanceChecked: result.acceptanceChecked,
+							acceptancePath: result.acceptancePath,
+							preflightSummary: summarizeKaspaPrechecks(result.preflight),
 						},
-					],
-					details: {
-						schema: "kaspa.transaction.submit.v1",
-						network: result.network,
-						apiBaseUrl: result.apiBaseUrl,
-						txId,
-						request: result.body,
-						requestHash: result.requestHash,
-						confirmToken: result.confirmToken,
-						preflight: result.preflight,
-						response: result.data,
-						receipt: result.receipt,
-						acceptance: result.acceptance,
-						acceptanceChecked: result.acceptanceChecked,
-						acceptancePath: result.acceptancePath,
-						preflightSummary: summarizeKaspaPrechecks(result.preflight),
-					},
-				};
+					};
 			},
 		}),
 		defineTool({
@@ -906,23 +1121,27 @@ export function createKaspaExecuteTools() {
 				});
 				const ready = result.preflight.readiness ?? "needs-review";
 				const risk = result.preflight.riskLevel ?? "medium";
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Kaspa submit readiness (${ready}, risk=${risk}) network=${result.network} requestHash=${result.requestHash ?? "n/a"} ${summarizeKaspaPrechecks(result.preflight)}`,
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Kaspa submit readiness (${ready}, risk=${risk}) network=${result.network} requestHash=${result.requestHash ?? "n/a"} ${summarizeKaspaPrechecks(result.preflight)}`,
+							},
+						],
+						details: {
+							schema: "kaspa.transaction.preflight.v1",
+							network: result.network,
+							apiBaseUrl: result.apiBaseUrl,
+							request: result.body,
+							requestHash: result.requestHash,
+							preflight: result.preflight,
+							preflightChecks: result.preflight.reports.map(
+								(report) =>
+									`${report.label}=${report.status}${report.error ? ` (${report.error})` : ""}`,
+							),
+							preflightSummary: summarizeKaspaPrechecks(result.preflight),
 						},
-					],
-					details: {
-						schema: "kaspa.transaction.preflight.v1",
-						network: result.network,
-						apiBaseUrl: result.apiBaseUrl,
-						request: result.body,
-						requestHash: result.requestHash,
-						preflight: result.preflight,
-						preflightSummary: summarizeKaspaPrechecks(result.preflight),
-					},
-				};
+					};
 			},
 		}),
 	];
