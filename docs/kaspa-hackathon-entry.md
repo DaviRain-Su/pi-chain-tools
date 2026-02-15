@@ -200,62 +200,22 @@
 - `standardized.fees`
 - 并且同步展开到顶层 `summary` / `inputs` / `outputs` / `fees`，便于直接展示。
 
-#### Step G：自然语言测试例子（可直接复制到调用面板）
+#### Step G：一句话自然语言测试（直接输入给 PI，不要 JSON）
 
-- `w3rt_run_kaspa_send_v0`（最少参数，测试网）
+- `w3rt_run_kaspa_send_v0`（先分析）
 
-```json
-{
-  "tool": "w3rt_run_kaspa_send_v0",
-  "params": {
-    "intentText": "从 kaspa:qxyz... 转给 kaspa:qabc... 0.01",
-    "network": "testnet11",
-    "runMode": "analysis"
-  }
-}
-```
+`先分析一下，测试网10（testnet10）从 kaspa:qxyz... 转给 kaspa:qabc... 0.01`
 
-- `w3rt_run_kaspa_send_v0`（执行，并带 acceptance polling）
+- `w3rt_run_kaspa_send_v0`（执行）
 
-```json
-{
-  "tool": "w3rt_run_kaspa_send_v0",
-  "params": {
-    "intentText": "从 kaspa:qxyz... 转给 kaspa:qabc... 0.01",
-    "network": "testnet11",
-    "runMode": "execute",
-    "checkAcceptance": true,
-    "pollAcceptance": true,
-    "acceptancePollIntervalMs": 2000,
-    "acceptancePollTimeoutMs": 30000
-  }
-}
-```
+`直接执行：从 kaspa:qxyz... 转给 kaspa:qabc... 0.01 测试网10`  
+（如要回执监听，可在参数面板再补 `pollAcceptance` 相关参数）
 
-- `kaspa_getTransaction`（标准化消费模板）
+- `kaspa_getTransaction` / `kaspa_getAddressUtxos` 目前仍建议用结构化参数调用
 
-```json
-{
-  "tool": "kaspa_getTransaction",
-  "params": {
-    "transactionId": "8f...",
-    "network": "testnet11"
-  }
-}
-```
+- `w3rt_read_kaspa_balance_v0`（一句话查余额）
 
-- `kaspa_getAddressUtxos`（标准化消费模板）
-
-```json
-{
-  "tool": "kaspa_getAddressUtxos",
-  "params": {
-    "address": "kaspa:qxyz...",
-    "network": "testnet11",
-    "limit": 20
-  }
-}
-```
+`查一下测试网10地址 kaspa:qxyz... 的余额`
 
 ## 8. 交付与后续建议
 

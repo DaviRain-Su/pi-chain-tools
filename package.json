@@ -19,10 +19,13 @@
 		"./pi/near-extension": "./src/pi/near-extension.ts"
 	},
 	"pi": {
-		"extensions": ["./src/pi/default-extension.ts"]
+		"extensions": [
+			"./src/pi/default-extension.ts"
+		]
 	},
 	"scripts": {
 		"postinstall": "node scripts/ensure-mysten-compat.mjs",
+		"kaspa:mnemonic:key": "node scripts/kaspa-derive-private-key.mjs",
 		"lint": "biome check --error-on-warnings .",
 		"typecheck": "tsc --noEmit",
 		"build": "npm run typecheck",
@@ -45,6 +48,7 @@
 		"@cetusprotocol/vaults-sdk": "^1.7.0",
 		"@ethersproject/wallet": "^5.8.0",
 		"@jup-ag/api": "^6.0.48",
+		"@kaspa/wallet": "^1.4.27",
 		"@mysten/bcs": "^1.9.2",
 		"@mysten/sui": "^1.45.2",
 		"@mysten/utils": "^0.2.0",
@@ -58,8 +62,8 @@
 	},
 	"peerDependencies": {
 		"@kamino-finance/klend-sdk": "^7.3.18",
-		"@raydium-io/raydium-sdk-v2": "^0.2.32-alpha",
-		"@meteora-ag/dlmm": "^1.9.3"
+		"@meteora-ag/dlmm": "^1.9.3",
+		"@raydium-io/raydium-sdk-v2": "^0.2.32-alpha"
 	},
 	"peerDependenciesMeta": {
 		"@kamino-finance/klend-sdk": {
