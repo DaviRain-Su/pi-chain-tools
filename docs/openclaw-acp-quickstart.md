@@ -880,6 +880,231 @@ Use this state object as the minimum payload between nodes:
 }
 ```
 
+### 11) 严格 JSON Schema（可直接用于生产编排校验）
+
+为了让 OpenClaw 编排引擎可直接做结构校验，建议将以下两个 Schema 内嵌到平台校验层：
+
+- `workflow`: 上一节可复制 JSON 的结构校验
+- `runtime_state`: 工单/执行上下文校验（跨节点传递）
+
+#### 11.1 Workflow Schema
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenClaw BTC5m Workflow",
+  "type": "object",
+  "required": ["version", "workflow"],
+  "properties": {
+    "version": { "const": "1.0" },
+    "workflow": {
+      "type": "object",
+      "required": ["id", "description", "startAt", "input", "states"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "startAt": { "type": "string", "minLength": 1 },
+        "input": { "$ref": "#/$defs/WorkflowInput" },
+        "states": {
+          "type": "object",
+          "minProperties": 1,
+          "patternProperties": {
+            "^[A-Za-z_][A-Za-z0-9_]*$": { "$ref": "#/$defs/State" }
+          },
+          "additionalProperties": false
+        },
+        "finalState": { "type": "string" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["finalState"]
+          },
+          "then": {
+            "properties": {
+              "states": {
+                "required": ["finalState"]
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "WorkflowInput": {
+      "type": "object",
+      "required": ["runId", "network", "intentType", "stakeUsd"],
+      "additionalProperties": false,
+      "properties": {
+        "runId": { "type": "string", "pattern": "^[A-Za-z0-9_\-]+$" },
+        "network": { "type": "string", "enum": ["base", "polygon", "arbitrum", "optimism", "bsc", "ethereum", "other"] },
+        "intentType": { "type": "string", "enum": ["evm.polymarket.btc5m.trade", "evm.polymarket.btc5m.cancel", "evm.transfer.native", "evm.transfer.erc20"] },
+        "side": { "type": "string", "enum": ["up", "down"] },
+        "stakeUsd": { "type": "number", "minimum": 0.01 },
+        "maxSpreadBps": { "type": "number", "minimum": 0.01 },
+        "minDepthUsd": { "type": "number", "minimum": 0.01 },
+        "maxStakeUsd": { "type": "number", "minimum": 0.01 },
+        "minConfidence": { "type": "number", "minimum": 0.01, "maximum": 0.99 },
+        "marketSlug": { "type": "string" },
+        "settleAfterTrade": { "type": "boolean" },
+        "settleMaxAgeMinutes": { "type": "number", "minimum": 0.1 },
+        "settleMaxFillRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "cancelOnDemand": { "type": "boolean" }
+      }
+    },
+    "State": {
+      "oneOf": [
+        { "$ref": "#/$defs/ToolState" },
+        { "$ref": "#/$defs/ConditionState" },
+        { "$ref": "#/$defs/ManualState" },
+        { "$ref": "#/$defs/TerminalState" }
+      ]
+    },
+    "ToolState": {
+      "type": "object",
+      "required": ["type", "tool", "params"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "tool" },
+        "tool": { "type": "string", "minLength": 1 },
+        "params": { "type": "object", "additionalProperties": true },
+        "onSuccess": { "$ref": "#/$defs/Transition" },
+        "onFailure": { "$ref": "#/$defs/Transition" },
+        "guard": { "type": "object", "additionalProperties": false }
+      }
+    },
+    "ConditionState": {
+      "type": "object",
+      "required": ["type", "expression", "onTrue", "onFalse"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "condition" },
+        "expression": { "type": "string", "minLength": 1 },
+        "onTrue": { "$ref": "#/$defs/TransitionState" },
+        "onFalse": { "$ref": "#/$defs/TransitionState" }
+      }
+    },
+    "ManualState": {
+      "type": "object",
+      "required": ["type", "needOperator"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "manual" },
+        "needOperator": { "const": true },
+        "message": { "type": "string" },
+        "notify": { "type": ["string", "null"] },
+        "onFailure": { "$ref": "#/$defs/Transition" },
+        "onSuccess": { "$ref": "#/$defs/Transition" },
+        "assign": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "TerminalState": {
+      "type": "object",
+      "required": ["type", "result"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "terminal" },
+        "result": { "type": "string", "minLength": 1 }
+      }
+    },
+    "Transition": {
+      "type": "object",
+      "required": ["to"],
+      "additionalProperties": false,
+      "properties": {
+        "to": { "type": "string", "minLength": 1 },
+        "error": { "type": "string" },
+        "if": { "type": "string" },
+        "assign": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "TransitionState": {
+      "type": "object",
+      "required": ["to"],
+      "additionalProperties": false,
+      "properties": {
+        "to": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
+```
+
+#### 11.2 Runtime Context Schema（用于 state 回传）
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BTC5m OpenClaw Runtime State",
+  "type": "object",
+  "required": ["runId", "network", "intentType", "phase", "confirmToken", "analysisStatus", "simulateStatus"],
+  "additionalProperties": false,
+  "properties": {
+    "runId": { "type": "string" },
+    "network": { "type": "string" },
+    "intentType": {
+      "type": "string",
+      "enum": ["evm.polymarket.btc5m.trade", "evm.polymarket.btc5m.cancel"]
+    },
+    "phase": { "type": "string", "enum": ["analysis", "simulate", "execute"] },
+    "confirmToken": { "type": ["string", "null"] },
+    "analysisStatus": { "type": "string", "enum": ["ready", "guard_blocked", "no_liquidity", "price_too_high"] },
+    "simulateStatus": { "type": "string", "enum": ["ready", "guard_blocked", "no_liquidity", "price_too_high", "disabled"] },
+    "guardEvaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "passed": { "type": "boolean" },
+        "issues": {
+          "type": "array",
+          "items": { "type": "object", "required": ["code", "message"], "properties": { "code": { "type": "string" }, "message": { "type": "string" } } }
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "spreadBps": { "type": ["number", "null"] },
+            "depthUsdAtLimit": { "type": ["number", "null"] },
+            "adviceConfidence": { "type": ["number", "null"] }
+          }
+        }
+      },
+      "required": ["passed", "issues", "metrics"]
+    },
+    "orderId": { "type": ["string", "null"] },
+    "orderStatus": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "lastError": { "type": ["string", "null"] },
+    "lastErrorAt": { "type": ["string", "null"], "format": "date-time" }
+  }
+}
+```
+
+#### 11.3 运行校验接入建议（最小实现）
+
+```ts
+// 简要示例：先 schema 校验，再交给执行器
+import Ajv from 'ajv';
+
+const ajv = new Ajv({ allErrors: true });
+const validWorkflow = ajv.validate(workflowSchema, doc);
+if (!validWorkflow) {
+  throw new Error(`workflow schema invalid: ${ajv.errorsText(ajv.errors)}`);
+}
+
+const validState = ajv.validate(runtimeStateSchema, state);
+if (!validState) {
+  throw new Error(`state schema invalid: ${ajv.errorsText(ajv.errors)}`);
+}
+```
+
 ### 状态读取速查（执行器实现更稳）
 
 | 节点 | 读 | 写 |
