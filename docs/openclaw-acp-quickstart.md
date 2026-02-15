@@ -412,8 +412,7 @@ Use this template in an OpenClaw system workflow or playbook engine:
       },
       "execute_guard": {
         "type": "condition",
-        "if": "{{state.executeAllowed}}",
-        "expression": "!(state.confirmToken && state.simulateStatus in ['guard_blocked','no_liquidity','price_too_high'])",
+        "expression": "Boolean(state.confirmToken) && !(state.simulateStatus in ['guard_blocked', 'no_liquidity', 'price_too_high'])",
         "onTrue": { "to": "execute" },
         "onFalse": { "to": "alarm" }
       },
@@ -526,3 +525,72 @@ Use this template in an OpenClaw system workflow or playbook engine:
 - 将模拟失败与防护失败归类为 `ALERT`；执行分支默认不自动重试。
 - `requoteStaleOrders=true` 时执行时间变长，建议给 `simulate/execute` 预留 60~120s 超时窗。
 - 可在成功 execute 后追加轮询 `evm_polymarketGetOrderStatus`，把 `orderStatus` 存档到工单上下文。
+
+### 8) Agent-friendly artifact contract (for OpenClaw runtime)
+
+Recommended context schema for each `runId`:
+
+```json
+{
+  "runId": "wf-btc5m-01",
+  "network": "polygon",
+  "intentType": "evm.polymarket.btc5m.trade",
+  "intent": {
+    "type": "evm.polymarket.btc5m.trade",
+    "side": "up",
+    "stakeUsd": 20,
+    "status": "ready"
+  },
+  "confirmToken": "EVM-...",
+  "confirmMainnet": true,
+  "phase": "analysis|simulate|execute",
+  "analysisStatus": "ready|guard_blocked|no_liquidity|price_too_high",
+  "simulateStatus": "ready|guard_blocked|no_liquidity|price_too_high",
+  "guardEvaluation": {
+    "passed": true,
+    "issues": [],
+    "metrics": {
+      "spreadBps": 38,
+      "depthUsdAtLimit": 120,
+      "adviceConfidence": 0.72
+    }
+  },
+  "order": {
+    "tokenId": "...",
+    "marketSlug": "btc-updown-5m-...",
+    "limitPrice": 0.5123,
+    "estimatedShares": 39.0438,
+    "orderId": "optional-after-execute"
+  },
+  "riskProfile": "balanced",
+  "requote": {
+    "enabled": true,
+    "status": "disabled|ready|throttled|max_attempts_reached|volatility_blocked",
+    "referencePrice": 0.5121,
+    "attemptsUsed": 1,
+    "maxAttempts": 5
+  },
+  "lastError": null,
+  "artifacts": {
+    "analysis": {},
+    "simulate": {},
+    "execute": {}
+  }
+}
+```
+
+Use this state object as the minimum payload between nodes:
+
+- `confirmToken` required for execute.
+- `guardEvaluation.passed === false` => no-op/notify (do not execute).
+- `simulateStatus` should be checked again before execute if operator has modified inputs.
+- Store `orderId` and `orderStatus` after execute for audit/retry suppression logic.
+
+### 状态读取速查（执行器实现更稳）
+
+| 节点 | 读 | 写 |
+|---|---|---|
+| `analysis` 成功 | `result.content[0].text`（通知/日志） | `confirmToken`, `analysisStatus`, `analyzeSummary` |
+| `simulate` 成功 | `result.details.artifacts.simulate` | `simulateStatus`, `simulateSummary`, `staleSummary` |
+| `execute` 成功 | `result.details.artifacts.execute.orderId` | `orderId`, `orderStatus`, `executeSummary` |
+| 失败 | `error.message` | `lastError`, `lastErrorAt` |
