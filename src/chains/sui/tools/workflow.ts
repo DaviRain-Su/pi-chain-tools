@@ -8,8 +8,8 @@ import {
 	buildCetusFarmsHarvestTransaction,
 	buildCetusFarmsStakeTransaction,
 	buildCetusFarmsUnstakeTransaction,
-	formatCetusFarmsPairError,
 	findCetusFarmsPoolsByTokenPair,
+	formatCetusFarmsPairError,
 	resolveCetusTokenTypesBySymbol,
 	resolveCetusV2Network,
 } from "../cetus-v2.js";
@@ -605,6 +605,53 @@ function parseTokenPairFromText(text: string): {
 	}
 
 	return null;
+}
+
+function parseSymbolAmountPairsFromText(params: {
+	text: string;
+	sideASymbol?: string;
+	sideBSymbol?: string;
+}): {
+	amountA?: string;
+	amountB?: string;
+} {
+	const result: { amountA?: string; amountB?: string } = {};
+	const sideA = params.sideASymbol?.trim().toUpperCase();
+	const sideB = params.sideBSymbol?.trim().toUpperCase();
+	const symbolAmountMatches = [
+		...params.text.matchAll(/(\d+(?:\.\d+)?)\s*([A-Za-z][A-Za-z0-9_]{1,15})/g),
+	];
+	const symbolMatchedAmounts: string[] = [];
+	for (const match of symbolAmountMatches) {
+		const amount = match[1];
+		const symbol = match[2]?.trim().toUpperCase();
+		if (!amount || !symbol) continue;
+		if (sideA && symbol === sideA && !result.amountA) {
+			result.amountA = amount;
+			continue;
+		}
+		if (sideB && symbol === sideB && !result.amountB) {
+			result.amountB = amount;
+			continue;
+		}
+		symbolMatchedAmounts.push(amount);
+	}
+
+	const plainAmounts = [...params.text.matchAll(/(\d+(?:\.\d+)?)/g)].map(
+		(match) => match[1],
+	);
+	const bareAmounts = plainAmounts.filter(
+		(amount) => !symbolMatchedAmounts.includes(amount),
+	);
+	const unassigned = [...symbolMatchedAmounts, ...bareAmounts];
+	if (!result.amountA && unassigned[0]) {
+		result.amountA = unassigned[0];
+	}
+	if (!result.amountB && unassigned[1]) {
+		result.amountB = unassigned[1];
+	}
+
+	return result;
 }
 
 function parseMinOutputNarrativeAmounts(params: {
@@ -1455,6 +1502,11 @@ function parseIntentText(text?: string): ParsedIntentHints {
 					coinTypeB: pair.right,
 				})
 			: [undefined, undefined];
+		const symbolAmountPairs = parseSymbolAmountPairsFromText({
+			text,
+			sideASymbol: pair?.left,
+			sideBSymbol: pair?.right,
+		});
 		return {
 			...controlHints,
 			intentType: "sui.lp.cetus.add",
@@ -1464,8 +1516,8 @@ function parseIntentText(text?: string): ParsedIntentHints {
 			coinTypeB: pairB || coinTypeCandidates[1],
 			tickLower: parseInteger(tickRangeMatch?.[1]),
 			tickUpper: parseInteger(tickRangeMatch?.[2]),
-			amountA: amountAMatch?.[1],
-			amountB: amountBMatch?.[1],
+			amountA: amountAMatch?.[1] ?? symbolAmountPairs.amountA,
+			amountB: amountBMatch?.[1] ?? symbolAmountPairs.amountB,
 		};
 	}
 
@@ -2411,9 +2463,7 @@ async function executeSimulatedTransactionBlock(params: {
 	fromPrivateKey?: string;
 	waitForLocalExecution?: boolean;
 }): Promise<Record<string, unknown>> {
-	let signer:
-		| Awaited<ReturnType<typeof resolveSuiKeypair>>
-		| null = null;
+	let signer: Awaited<ReturnType<typeof resolveSuiKeypair>> | null = null;
 	try {
 		signer = resolveSuiKeypair(params.fromPrivateKey);
 	} catch (error) {
@@ -4207,17 +4257,17 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					};
 				}
 
-	if (runMode === "simulate") {
-		const simulationSigner = resolveWorkflowSimulationSigner(
-			params.fromPrivateKey,
-		);
-		const sender = simulationSigner.sender;
-		const { tx, artifacts } = await buildCetusFarmsSimulation(
-			intent,
-			network,
-			sender,
-			params.rpcUrl,
-		);
+				if (runMode === "simulate") {
+					const simulationSigner = resolveWorkflowSimulationSigner(
+						params.fromPrivateKey,
+					);
+					const sender = simulationSigner.sender;
+					const { tx, artifacts } = await buildCetusFarmsSimulation(
+						intent,
+						network,
+						sender,
+						params.rpcUrl,
+					);
 					tx.setSender(sender);
 					const client = getSuiClient(network, params.rpcUrl);
 					const unsignedPayload = await exportUnsignedPayload(tx, client);

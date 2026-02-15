@@ -493,8 +493,8 @@ describe("w3rt_run_sui_workflow_v0", () => {
 				throw new Error("No local signer in test");
 			})
 			.mockImplementationOnce(() => {
-			throw new Error("No local signer in test");
-		});
+				throw new Error("No local signer in test");
+			});
 
 		const analysis = await tool.execute("sui-runmode-nokey-exec", {
 			runId: "wf-sui-runmode-nokey-02",
@@ -514,9 +514,7 @@ describe("w3rt_run_sui_workflow_v0", () => {
 				confirmMainnet: true,
 				confirmToken: token,
 			}),
-		).rejects.toThrow(
-			"No local signer available for simulated tx execute",
-		);
+		).rejects.toThrow("No local signer available for simulated tx execute");
 	});
 
 	it("simulates transaction and returns artifacts", async () => {
@@ -1026,6 +1024,56 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("parses LP add intentText with symbolic amounts (10 SUI 20 USDC)", async () => {
+		const tool = getTool();
+		const result = await tool.execute("wf5c-symbol", {
+			runId: "wf-sui-05c-symbol",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"添加流动性 pool: 0xabc position: 0xdef SUI/USDC tick: -5 to 5 10 SUI 20 USDC",
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				poolId: "0xabc",
+				positionId: "0xdef",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				tickLower: -5,
+				tickUpper: 5,
+				amountA: "10",
+				amountB: "20",
+			},
+		});
+	});
+
+	it("parses LP add intentText with natural language amounts and no explicit a/b fields", async () => {
+		const tool = getTool();
+		const poolId =
+			"0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+		const result = await tool.execute("wf5c-symbol-natural", {
+			runId: "wf-sui-05c-symbol-natural",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: `lp pool: ${poolId} SUI-USDC 10 SUI 20 USDC`,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				poolId,
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				amountA: "10",
+				amountB: "20",
+			},
+		});
+	});
+
 	it("parses LP add intentText without positionId and applies default full-range ticks", async () => {
 		const tool = getTool();
 		const poolId =
@@ -1034,10 +1082,7 @@ describe("w3rt_run_sui_workflow_v0", () => {
 			runId: "wf-sui-05c-default-ticks",
 			runMode: "analysis",
 			network: "mainnet",
-			intentText:
-				"添加流动性 pool: " +
-				poolId +
-				" SUI/USDC amountA: 10 amountB: 20",
+			intentText: `添加流动性 pool: ${poolId} SUI/USDC amountA: 10 amountB: 20`,
 		});
 
 		expect(result.details).toMatchObject({
