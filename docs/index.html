@@ -3,10 +3,10 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<title>Gradience | Pi DeFi Extension</title>
+		<title>Gradience | AI-native Cross-Chain Agent Runtime</title>
 		<meta
 			name="description"
-			content="Gradience is a Pi-native multi-chain DeFi extension for natural-language workflows across Sui and Solana."
+			content="Gradience is an AI-native multi-chain agent runtime with deterministic analysis/simulate/execute workflows, built for chain-native payment and settlement capabilities."
 		/>
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,10 +21,11 @@
 		<div class="bg-shape bg-shape-b"></div>
 		<div class="page">
 			<header class="hero reveal">
-				<p class="badge">Pi Extension • Sui + Solana</p>
+				<p class="badge">Pi Extension • Multi-chain AI Runtime</p>
 				<h1>Gradience</h1>
 				<p class="lead">
-					Natural-language DeFi operations with deterministic workflow safety.
+					AI-native payment, trading and settlement infrastructure with
+					deterministic workflow safety.
 				</p>
 				<div class="hero-actions">
 					<a
@@ -36,13 +37,18 @@
 						View GitHub
 					</a>
 					<a class="btn btn-ghost" href="#install">Quick Install</a>
+					<a
+						class="btn btn-ghost"
+						href="#hackathon"
+					>Hackathon Track</a
+					>
 				</div>
 			</header>
 
 			<section class="stat-grid reveal">
 				<article class="stat-card">
 					<p class="stat-label">Chains</p>
-					<p class="stat-value">2</p>
+					<p class="stat-value">Solana • Sui • NEAR • EVM</p>
 				</article>
 				<article class="stat-card">
 					<p class="stat-label">Workflow Pattern</p>
@@ -59,7 +65,7 @@
 				<ol>
 					<li>Install extension directly from GitHub source.</li>
 					<li>Reload Pi.</li>
-					<li>Query or execute using plain language.</li>
+					<li>Start with natural-language read/compose/execute intents.</li>
 				</ol>
 				<div class="command-block">
 					<code id="install-command"
@@ -75,10 +81,91 @@
 			</section>
 
 			<section class="panel reveal">
+				<h2>What Gradience Is</h2>
+				<ul class="checklist">
+					<li>
+						Agent-first toolset covering multi-chain <strong>read / compose / execute /
+						rpc</strong> groups.
+					</li>
+					<li>
+						Workflow model: <strong>analysis → simulate → execute</strong>, with
+						risk-aware prompts and deterministic outputs.
+					</li>
+					<li>
+						Cross-chain execution surface includes SOL/SPL, swaps, staking,
+						Polymarket BTC5m, NEAR DeFi/Intents, and CETUS-based Sui basics.
+					</li>
+					<li>
+						Designed for AI automation: natural language intent parsing,
+						guarded mainnet execution, structured summaries, and machine-readable
+						validation artifacts.
+					</li>
+				</ul>
+			</section>
+
+			<section class="panel reveal" id="hackathon">
+				<h2>Monad AI Hackathon (Track 1)</h2>
+				<p>
+					Gradience is positioned as <strong>Track 1：原生智能体支付与基础设施</strong> —
+					a foundational layer for AI-callable chain settlement, payment, and
+					transaction capabilities.
+				</p>
+				<ul class="checklist">
+					<li>Provides structured service discovery through toolset/intent registry.</li>
+					<li>Supports one-step quality checks for agent deployment via scripts.</li>
+					<li>Supports billing/settlement integration via execution artifacts and
+						runId-phase events.</li>
+				</ul>
+				<p>
+					Competition dossier and English/Chinese versions:
+					<a
+						href="https://github.com/DaviRain-Su/pi-chain-tools/blob/main/docs/monad-ai-hackathon.md"
+						target="_blank"
+						rel="noreferrer"
+					>monad-ai-hackathon.md</a
+					>
+					/ 
+					<a
+						href="https://github.com/DaviRain-Su/pi-chain-tools/blob/main/docs/monad-ai-hackathon.en.md"
+						target="_blank"
+						rel="noreferrer"
+					>monad-ai-hackathon.en.md</a
+					>
+				</p>
+			</section>
+
+			<section class="panel reveal">
+				<h2>AI/CI Quality Loop</h2>
+				<p>
+					For reliable agent usage, all schema and runtime contracts are validated
+					through CI-gated scripts:
+				</p>
+				<ul class="checklist">
+					<li>
+						<code>npm run schema:check-files</code> — strict file manifest (human)
+					</li>
+					<li>
+						<code>npm run schema:check-files:json</code> — strict manifest (JSON)
+					</li>
+					<li>
+						<code>npm run schema:ci-check</code> — one-step manifest + full check
+					</li>
+					<li>
+						<code>npm run schema:audit</code> — strict JSON diagnostics for
+						automation and AI workflows
+					</li>
+				</ul>
+				<div class="command-block">
+					<code id="audit-command">npm run schema:audit</code>
+					<button type="button" id="audit-copy">Copy</button>
+				</div>
+			</section>
+
+			<section class="panel reveal">
 				<h2>Natural Language Examples</h2>
 				<div class="example-grid">
 					<article class="example-card">
-						<h3>Balance / Portfolio</h3>
+						<h3>Solana / Sui / NEAR / EVM</h3>
 						<p>帮我查一下 Sui 主网本地钱包余额（包含USDC）</p>
 					</article>
 					<article class="example-card">
@@ -86,26 +173,23 @@
 						<p>把 0.01 SUI 换成 USDC，先模拟。</p>
 					</article>
 					<article class="example-card">
-						<h3>Mainnet Execute</h3>
-						<p>继续执行刚才这笔，确认主网执行。</p>
+						<h3>Polymarket BTC5m</h3>
+						<p>买 BTC 5分钟涨 20 USDC，保守，先模拟</p>
 					</article>
 					<article class="example-card">
-						<h3>Cetus Farms</h3>
-						<p>帮我查一下 Sui 主网 Cetus farms 的池子列表。</p>
+						<h3>Mainnet Execute</h3>
+						<p>继续执行刚才这笔，确认主网执行。</p>
 					</article>
 				</div>
 			</section>
 
 			<section class="panel reveal" id="demo">
-				<h2>Live Demo</h2>
-				<p>
-					Add your recorded demo URL here before submission:
-					<a href="#" id="demo-link">https://www.youtube.com/watch?v=URw2xC-b1IU</a>
-				</p>
+				<h2>Demo Checklist</h2>
 				<ul class="checklist">
-					<li>Show install from GitHub source</li>
-					<li>Show local wallet balance with non-SUI asset</li>
-					<li>Show analysis → simulate → execute safety flow</li>
+					<li>Show install from GitHub source.</li>
+					<li>Run <code>npm run schema:audit</code> before launch.</li>
+					<li>Run one cross-chain intent in analysis/simulate/execute flow.</li>
+					<li>Show structured execution summary + mainnet safety checks.</li>
 				</ul>
 			</section>
 

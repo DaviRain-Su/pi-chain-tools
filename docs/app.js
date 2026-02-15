@@ -1,24 +1,28 @@
-const copyButton = document.getElementById("copy-button");
-const commandElement = document.getElementById("install-command");
+function bindCopy(buttonId, commandId) {
+	const button = document.getElementById(buttonId);
+	const commandElement = document.getElementById(commandId);
+	if (!button || !commandElement) return;
 
-if (copyButton && commandElement) {
-	copyButton.addEventListener("click", async () => {
+	button.addEventListener("click", async () => {
 		const value = commandElement.textContent?.trim() ?? "";
 		if (!value) return;
 		try {
 			await navigator.clipboard.writeText(value);
-			copyButton.textContent = "Copied";
+			button.textContent = "Copied";
 			setTimeout(() => {
-				copyButton.textContent = "Copy";
+				button.textContent = "Copy";
 			}, 1400);
 		} catch {
-			copyButton.textContent = "Copy failed";
+			button.textContent = "Copy failed";
 			setTimeout(() => {
-				copyButton.textContent = "Copy";
+				button.textContent = "Copy";
 			}, 1400);
 		}
 	});
 }
+
+bindCopy("copy-button", "install-command");
+bindCopy("audit-copy", "audit-command");
 
 const revealItems = Array.from(document.querySelectorAll(".reveal"));
 

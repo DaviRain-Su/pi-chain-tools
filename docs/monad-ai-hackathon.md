@@ -2,6 +2,8 @@
 
 > 作品方向：**AI 可调用的跨链支付/交易/结算基础设施（多链智能体执行层）**
 
+> English Version: [docs/monad-ai-hackathon.en.md](./monad-ai-hackathon.en.md)
+
 ## 1. 赛道选择
 
 根据题目要求，我们将本项目定位为：
