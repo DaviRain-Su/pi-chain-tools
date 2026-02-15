@@ -4,6 +4,8 @@ export type KaspaNetwork = "mainnet" | "testnet";
 
 export const KASPA_TOOL_PREFIX = "kaspa_";
 
+const KASPA_DEFAULT_BASE_URL = "https://api.kas.fyi";
+
 const KASPA_API_TIMEOUT_MS = 15_000;
 
 type KaspaApiHttpMethod = "GET" | "POST" | "PUT";
@@ -17,11 +19,19 @@ export function parseKaspaNetwork(value?: string): KaspaNetwork {
 	return "mainnet";
 }
 
-export function getKaspaApiBaseUrl(overrideUrl?: string): string {
+export function getKaspaApiBaseUrl(
+	overrideUrl?: string,
+	network: KaspaNetwork = "mainnet",
+): string {
 	if (overrideUrl?.trim()) return overrideUrl.trim();
+	const networkVar =
+		network === "mainnet"
+			? process.env.KASPA_API_MAINNET_URL?.trim()
+			: process.env.KASPA_API_TESTNET_URL?.trim();
+	if (networkVar) return networkVar;
 	const env = process.env.KASPA_API_BASE_URL?.trim();
 	if (env) return env;
-	return "https://api.kas.fyi";
+	return KASPA_DEFAULT_BASE_URL;
 }
 
 export function getKaspaApiKey(overrideApiKey?: string): string | undefined {
@@ -30,10 +40,31 @@ export function getKaspaApiKey(overrideApiKey?: string): string | undefined {
 	return process.env.KASPA_API_KEY?.trim();
 }
 
-export function normalizeKaspaAddress(value: string): string {
+export function normalizeKaspaAddress(
+	value: string,
+	network?: KaspaNetwork,
+	strict = false,
+): string {
 	const normalized = value.trim();
 	if (!/^kaspa:[a-z0-9]+$/i.test(normalized)) {
 		throw new Error("address must be a valid Kaspa address (starting with kaspa:). ");
+	}
+	if (strict) {
+		if (normalized.length < 12) {
+			throw new Error("Kaspa address appears too short");
+		}
+		if (!/^[a-z0-9]+$/i.test(normalized.slice(6))) {
+			throw new Error("Kaspa address payload must be base32-like");
+		}
+		if (
+			network === "mainnet" &&
+			!/^(kaspa:q|kaspa:p)/i.test(normalized)
+		) {
+			throw new Error("Mainnet Kaspa address should start with kaspa:q or kaspa:p");
+		}
+		if (network === "testnet" && !/^kaspa:t/i.test(normalized)) {
+			throw new Error("Testnet Kaspa address should start with kaspa:t");
+		}
 	}
 	return normalized;
 }

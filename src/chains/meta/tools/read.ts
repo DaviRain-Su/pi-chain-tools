@@ -215,6 +215,8 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 			"Kaspa address transaction history (including pagination)",
 			"Kaspa transaction lookup, output lookup, and acceptance-data lookup",
 			"Kaspa transaction submission for merchant/payment and interactive game flows",
+			"Kaspa wallet balance, UTXO set, token info, and block lookup",
+			"Kaspa preflight fee/mempool/read-state checks for safer submission",
 		],
 		signer: {
 			autoSources: [],
@@ -288,9 +290,150 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 					executable: true,
 					requiresSigner: false,
 					requiresMainnetConfirmation: true,
-					requiresConfirmToken: false,
+					requiresConfirmToken: true,
 					defaultRunMode: "analysis",
 					riskLevel: "medium",
+				},
+			},
+			{
+				tool: "kaspa_getAddressBalance",
+				description:
+					"Read Kaspa address balance for quick settlement and wallet checks.",
+				intentTypes: ["kaspa.address.balance"],
+				nlExamples: [
+					"查一下某个 kaspa 地址余额",
+					"看这个钱包的余额是否足够支付",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
+				tool: "kaspa_getAddressUtxos",
+				description: "Read Kaspa UTXO list for wallet input selection.",
+				intentTypes: ["kaspa.address.utxos"],
+				nlExamples: [
+					"查这个地址的 UTXO 列表",
+					"查询可花费的 kaspa 输出",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
+				tool: "kaspa_getToken",
+				description:
+					"Read Kaspa token metadata by token id for token-aware routing.",
+				intentTypes: ["kaspa.token.info"],
+				nlExamples: [
+					"查询这条 kaspa token 的基本信息",
+					"拿到 token 元数据后再做后续展示",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
+				tool: "kaspa_getBlock",
+				description:
+					"Read Kaspa block detail by id/hash and optionally inspect tx list.",
+				intentTypes: ["kaspa.block.detail"],
+				nlExamples: [
+					"根据区块 id 查 Kaspa 区块详情",
+					"查看某个区块是否包含目标交易",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
+				tool: "kaspa_getFeeEstimate",
+				description:
+					"Call Kaspa fee-estimate endpoint in analysis mode before building submit payload.",
+				intentTypes: ["kaspa.rpc.fee.estimate"],
+				nlExamples: [
+					"先查下手续费预估再发交易",
+					"提交前先检查可接受的手续费范围",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
+				tool: "kaspa_getMempool",
+				description: "Inspect mempool state for pre-submit congestion signals.",
+				intentTypes: ["kaspa.rpc.mempool"],
+				nlExamples: [
+					"提交前检查当前 mempool 状态",
+					"看下是否有拥堵影响交易确认",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
+				tool: "kaspa_readState",
+				description: "Read chain state in analysis mode before execute flow.",
+				intentTypes: ["kaspa.rpc.read-state"],
+				nlExamples: [
+					"交易前读一次链上状态快照",
+					"执行前检查状态是否变化",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
+				},
+			},
+			{
+				tool: "kaspa_rpc",
+				description:
+					"Custom Kaspa RPC read tool for advanced preflight and monitoring checks.",
+				intentTypes: ["kaspa.rpc.read"],
+				nlExamples: [
+					"按自定义 read 路径查一次链上数据",
+					"拿自定义 RPC 输出做风控指标",
+				],
+				execution: {
+					executable: false,
+					requiresSigner: false,
+					requiresMainnetConfirmation: false,
+					requiresConfirmToken: false,
+					defaultRunMode: "analysis",
+					riskLevel: "low",
 				},
 			},
 			{

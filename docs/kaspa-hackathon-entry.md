@@ -14,7 +14,7 @@
 
 ### 核心赛道（建议）
 
-- **Payments & Commerce（支付与商业）**：支持交易提交与链上确认/接受度查询，适合支付、分账、商户验证场景。
+- **Payments & Commerce（支付与商业）**：支持预检（`fee/mempool/read-state`）+ 提交式交易链路，适合支付、分账、商户验证场景。
 - **Real-Time Data（实时数据）**：支持地址标签、地址交易、交易输出与接受度数据查询，支持事件驱动告警与实时风控。
 
 ### 可叠加赛道
@@ -31,7 +31,15 @@
 - `kaspa_getTransaction`：按交易 ID 查询交易详情。
 - `kaspa_getTransactionOutput`：按交易 ID + output index 查询单条输出。
 - `kaspa_getTransactionAcceptance`：按交易 ID/ID 集合查询 acceptance 相关数据。
-- `kaspa_submitTransaction`：提交签名交易到 Kaspa RPC（主网执行需要 `confirmMainnet=true`）。
+- `kaspa_submitTransaction`：支持 `runMode=analysis` + `runMode=execute` 双阶段提交；主网执行需要 `confirmMainnet=true` 与 `confirmToken`。
+- `kaspa_getAddressBalance`：查询地址余额快照。
+- `kaspa_getAddressUtxos`：查询地址 UTXO 集合（含分页）。
+- `kaspa_getToken`：查询 token 元数据。
+- `kaspa_getBlock`：查询区块详情。
+- `kaspa_getFeeEstimate`：提交前查询 fee 预估。
+- `kaspa_getMempool`：提交前查询 mempool 状态。
+- `kaspa_readState`：提交前读取链上状态。
+- `kaspa_rpc`：通用可配置 RPC 预检入口。
 
 其中 `read` 与 `execute` 工具均注册在同一条链工具集，方便 OpenClaw 的分组发现与能力路由。
 
@@ -50,6 +58,8 @@
 - 执行接口：
   - `src/chains/kaspa/tools/execute.ts`
   - 支持 `rawTransaction` 或 `request`（完整 JSON body）两种提交方式
+  - 支持 `runMode=analysis` 与 `runMode=execute`
+  - analysis 返回 `preflight` + `requestHash` + `confirmToken`（20 分钟内有效）
   - 主网提交必须 `confirmMainnet=true`
 - 注册与 OpenClaw 能力：
   - `src/chains/kaspa/toolset.ts`：新增 `groups: [{name: "read"}, {name: "execute"}]`
@@ -84,9 +94,17 @@
 
 ### 示例 4：提交交易
 
+#### Step A：analysis
+
 - 调用 `kaspa_submitTransaction`
-- 输入：`rawTransaction=<hex/base64>`, `network=mainnet`, `confirmMainnet=true`
-- 输出：提交结果与返回详情（网络、请求、txid）
+- 输入：`rawTransaction=<hex/base64>`, `runMode=analysis`, `network=mainnet`, `confirmMainnet=true`, 可选 `feeEndpoint/mempoolEndpoint/readStateEndpoint`
+- 输出：`preflight` 明细、`requestHash` 与 `confirmToken`
+
+#### Step B：execute
+
+- 调用 `kaspa_submitTransaction`
+- 输入：`rawTransaction=<hex/base64>`, `runMode=execute`, `network=mainnet`, `confirmMainnet=true`, `confirmToken=<analysis返回>`
+- 输出：提交回执（含 `txId`、`network`、`requestHash`、`preflightReady`）
 
 ## 8. 交付与后续建议
 
@@ -101,5 +119,5 @@
 
 ### 后续可再加一版（冲刺高分）
 
-- 补充 fee estimate、mempool/交易推送状态等支付体验。
-- 增加 OpenClaw 工作流模板（payment-intent）封装，支持自然语言一键分析->执行。
+- 下一步可增加 Kaspa 交易构建与签名内置能力（当前仍依赖外部签名体），并补齐 `execute` 风险报告中的 `broadcast` 链路状态。
+- 增加 OpenClaw 专属工作流模板（payment-intent/merchant-settlement），支持自然语言“一键分析 -> 执行”展示链路闭环。
