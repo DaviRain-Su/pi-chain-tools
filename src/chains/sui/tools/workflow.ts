@@ -353,6 +353,12 @@ const DEFAULT_SUI_SWAP_RISK_WARNING_SLIPPAGE_BPS = 300;
 const DEFAULT_SUI_SWAP_RISK_CRITICAL_SLIPPAGE_BPS = 1000;
 const SUI_OBJECT_ID_PATTERN = /^0x[a-fA-F0-9]{1,64}$/;
 
+type WorkflowSimulationSignerContext = {
+	sender: string;
+	canSign: boolean;
+	signerSource: "fromPrivateKey" | "walletAddress";
+};
+
 type CetusClmmSdkLike = {
 	getPositionList?(
 		accountAddress: string,
@@ -426,6 +432,44 @@ function workflowRunModeSchema() {
 			Type.Literal("execute"),
 		]),
 	);
+}
+
+function resolveWorkflowSimulationSigner(
+	fromPrivateKey?: string,
+): WorkflowSimulationSignerContext {
+	if (fromPrivateKey?.trim()) {
+		const signer = resolveSuiKeypair(fromPrivateKey);
+		return {
+			sender: signer.toSuiAddress(),
+			canSign: true,
+			signerSource: "fromPrivateKey",
+		};
+	}
+
+	const sender = resolveSuiOwnerAddress();
+	let canSign = false;
+	try {
+		const signer = resolveSuiKeypair();
+		const signerAddress = normalizeSuiAddressForCompare(signer.toSuiAddress());
+		const senderAddress = normalizeSuiAddressForCompare(sender);
+		canSign = signerAddress === senderAddress;
+		if (!canSign) {
+			return {
+				sender,
+				canSign: false,
+				signerSource: "walletAddress",
+			};
+		}
+		canSign = true;
+	} catch {
+		canSign = false;
+	}
+
+	return {
+		sender,
+		canSign,
+		signerSource: canSign ? "fromPrivateKey" : "walletAddress",
+	};
 }
 
 function createRunId(input?: string): string {
@@ -2367,7 +2411,22 @@ async function executeSimulatedTransactionBlock(params: {
 	fromPrivateKey?: string;
 	waitForLocalExecution?: boolean;
 }): Promise<Record<string, unknown>> {
-	const signer = resolveSuiKeypair(params.fromPrivateKey);
+	let signer:
+		| Awaited<ReturnType<typeof resolveSuiKeypair>>
+		| null = null;
+	try {
+		signer = resolveSuiKeypair(params.fromPrivateKey);
+	} catch (error) {
+		throw new Error(
+			`No local signer available for simulated tx execute${params.expectedSignerAddress ? ` (expected=${params.expectedSignerAddress})` : ""}. Provide fromPrivateKey (suiprivkey) or signed payload (signedTransactionBytesBase64 + signedSignatures) from the simulate step.`,
+		);
+	}
+
+	if (!signer) {
+		throw new Error(
+			`No local signer available for simulated tx execute${params.expectedSignerAddress ? ` (expected=${params.expectedSignerAddress})` : ""}.`,
+		);
+	}
 	const signerAddress = signer.toSuiAddress();
 	if (params.expectedSignerAddress?.trim()) {
 		const normalizedExpected = normalizeSuiAddressForCompare(
@@ -2634,6 +2693,7 @@ function formatSimulationSummary(params: {
 	intentType: string;
 	status: string;
 	signerAddress: string;
+	canExecuteWithLocalSigner?: boolean;
 	unsignedPayload: {
 		unsignedTransactionBytesBase64?: string;
 		unsignedPayloadError?: string;
@@ -2647,11 +2707,15 @@ function formatSimulationSummary(params: {
 		params.riskCheck && params.riskCheck.riskBand !== "safe"
 			? ` risk=${params.riskCheck.riskBand}${riskHint ? ` ${riskHint}` : ""}`
 			: "";
+	const localSignerHint = params.canExecuteWithLocalSigner
+		? "execute can proceed with local signer"
+		: "execute requires fromPrivateKey or signed payload";
+	const localSignerHintSuffix = ` (${localSignerHint})`;
 	if (params.unsignedPayload.unsignedTransactionBytesBase64) {
-		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported (execute can proceed with local signer)${riskSuffix}`;
+		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=exported${localSignerHintSuffix}${riskSuffix}`;
 	}
 	if (params.unsignedPayload.unsignedPayloadError) {
-		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=unavailable${riskSuffix}`;
+		return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress} unsignedPayload=unavailable${localSignerHintSuffix}${riskSuffix}`;
 	}
 	return `Workflow simulated: ${params.intentType} status=${params.status} signer=${params.signerAddress}${riskSuffix}`;
 }
@@ -2681,6 +2745,8 @@ function buildSuiSimulationSummaryLine(params: {
 	intentType: string;
 	status: string;
 	signerAddress: string;
+	canExecuteWithLocalSigner?: boolean;
+	signerSource?: "fromPrivateKey" | "walletAddress";
 	unsignedPayload: {
 		unsignedTransactionBytesBase64?: string;
 		unsignedPayloadError?: string;
@@ -2692,6 +2758,12 @@ function buildSuiSimulationSummaryLine(params: {
 		`simulate=${params.status}`,
 		`signer=${shortenSummaryValue(params.signerAddress)}`,
 	];
+	if (params.signerSource) {
+		parts.push(`signerSource=${params.signerSource}`);
+	}
+	if (params.canExecuteWithLocalSigner === false) {
+		parts.push("localSigner=unavailable");
+	}
 	if (params.riskCheck) {
 		parts.push(`risk=${params.riskCheck.riskBand}`);
 		parts.push(`riskLevel=${params.riskCheck.riskLevel}`);
@@ -3549,8 +3621,10 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 
 				if (runMode === "simulate") {
 					const simulateRiskCheck = assessSuiIntentRisk(intent, null);
-					const signer = resolveSuiKeypair(params.fromPrivateKey);
-					const sender = signer.toSuiAddress();
+					const simulationSigner = resolveWorkflowSimulationSigner(
+						params.fromPrivateKey,
+					);
+					const sender = simulationSigner.sender;
 					const { tx, artifacts } = await buildSimulation(
 						intent,
 						network,
@@ -3581,6 +3655,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						intentType: intent.type,
 						status,
 						signerAddress: sender,
+						signerSource: simulationSigner.signerSource,
+						canExecuteWithLocalSigner: simulationSigner.canSign,
 						unsignedPayload,
 						riskCheck: simulateRiskCheck,
 					});
@@ -3592,6 +3668,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									intentType: intent.type,
 									status,
 									signerAddress: sender,
+									canExecuteWithLocalSigner: simulationSigner.canSign,
 									unsignedPayload,
 									riskCheck: simulateRiskCheck,
 								}),
@@ -3608,6 +3685,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							artifacts: {
 								simulate: {
 									signerAddress: sender,
+									signerSource: simulationSigner.signerSource,
+									canExecuteWithLocalSigner: simulationSigner.canSign,
 									status,
 									error,
 									riskCheck: simulateRiskCheck,
@@ -3844,8 +3923,10 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 				}
 
 				if (runMode === "simulate") {
-					const signer = resolveSuiKeypair(params.fromPrivateKey);
-					const sender = signer.toSuiAddress();
+					const simulationSigner = resolveWorkflowSimulationSigner(
+						params.fromPrivateKey,
+					);
+					const sender = simulationSigner.sender;
 					const { tx, artifacts } = await buildStableLayerSimulation(
 						intent,
 						network,
@@ -3876,6 +3957,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						intentType: intent.type,
 						status,
 						signerAddress: sender,
+						signerSource: simulationSigner.signerSource,
+						canExecuteWithLocalSigner: simulationSigner.canSign,
 						unsignedPayload,
 					});
 					return {
@@ -3886,6 +3969,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									intentType: intent.type,
 									status,
 									signerAddress: sender,
+									canExecuteWithLocalSigner: simulationSigner.canSign,
 									unsignedPayload,
 								}),
 							},
@@ -3902,6 +3986,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							artifacts: {
 								simulate: {
 									signerAddress: sender,
+									signerSource: simulationSigner.signerSource,
+									canExecuteWithLocalSigner: simulationSigner.canSign,
 									status,
 									error,
 									...artifacts,
@@ -4121,15 +4207,17 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 					};
 				}
 
-				if (runMode === "simulate") {
-					const signer = resolveSuiKeypair(params.fromPrivateKey);
-					const sender = signer.toSuiAddress();
-					const { tx, artifacts } = await buildCetusFarmsSimulation(
-						intent,
-						network,
-						sender,
-						params.rpcUrl,
-					);
+	if (runMode === "simulate") {
+		const simulationSigner = resolveWorkflowSimulationSigner(
+			params.fromPrivateKey,
+		);
+		const sender = simulationSigner.sender;
+		const { tx, artifacts } = await buildCetusFarmsSimulation(
+			intent,
+			network,
+			sender,
+			params.rpcUrl,
+		);
 					tx.setSender(sender);
 					const client = getSuiClient(network, params.rpcUrl);
 					const unsignedPayload = await exportUnsignedPayload(tx, client);
@@ -4155,6 +4243,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 						intentType: intent.type,
 						status,
 						signerAddress: sender,
+						signerSource: simulationSigner.signerSource,
+						canExecuteWithLocalSigner: simulationSigner.canSign,
 						unsignedPayload,
 					});
 					return {
@@ -4165,6 +4255,7 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 									intentType: intent.type,
 									status,
 									signerAddress: sender,
+									canExecuteWithLocalSigner: simulationSigner.canSign,
 									unsignedPayload,
 								}),
 							},
@@ -4181,6 +4272,8 @@ export function createSuiWorkflowTools(): RegisteredTool[] {
 							artifacts: {
 								simulate: {
 									signerAddress: sender,
+									signerSource: simulationSigner.signerSource,
+									canExecuteWithLocalSigner: simulationSigner.canSign,
 									status,
 									error,
 									...artifacts,

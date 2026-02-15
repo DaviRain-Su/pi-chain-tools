@@ -29,13 +29,16 @@ function setOptionalEnv(name: string, value: string | undefined): void {
 function withTempSuiConfig(options: {
 	keystoreEntries: unknown[];
 	activeAddress?: string | null;
+	clientConfigContent?: string;
 }): string {
 	const dir = mkdtempSync(path.join(os.tmpdir(), "pi-chain-tools-sui-"));
 	tempDirs.push(dir);
 	const keystorePath = path.join(dir, "sui.keystore");
 	writeFileSync(keystorePath, JSON.stringify(options.keystoreEntries), "utf8");
 	const clientPath = path.join(dir, "client.yaml");
-	if (options.activeAddress) {
+	if (options.clientConfigContent) {
+		writeFileSync(clientPath, options.clientConfigContent, "utf8");
+	} else if (options.activeAddress) {
 		writeFileSync(
 			clientPath,
 			`active_env: mainnet\nactive_address: "${options.activeAddress}"\n`,
@@ -147,6 +150,24 @@ describe("resolveSuiKeypair", () => {
 		expect(resolved.toSuiAddress()).toBe(account.toSuiAddress());
 	});
 
+	it("parses nested keypair from keystore object", () => {
+		setOptionalEnv("SUI_PRIVATE_KEY", undefined);
+		const account = Ed25519Keypair.generate();
+		const configDir = withTempSuiConfig({
+			keystoreEntries: [
+				{
+					keypair: {
+						secretKey: account.getSecretKey(),
+					},
+				},
+			],
+		});
+		useTempSuiConfigDir(configDir);
+
+		const resolved = resolveSuiKeypair();
+		expect(resolved.toSuiAddress()).toBe(account.toSuiAddress());
+	});
+
 	it("falls back to the first valid keystore entry when active_address does not match", () => {
 		setOptionalEnv("SUI_PRIVATE_KEY", undefined);
 		const first = Ed25519Keypair.generate();
@@ -191,6 +212,31 @@ describe("resolveSuiOwnerAddress", () => {
 			"0x1111111111111111111111111111111111111111111111111111111111111111",
 		);
 	});
+
+	it.each([
+		[
+			"activeAddress",
+			'activeAddress: "0x2222222222222222222222222222222222222222222222222222222222222222"\n',
+			"0x2222222222222222222222222222222222222222222222222222222222222222",
+		],
+		[
+			"active-address",
+			'active-address: "0x3333333333333333333333333333333333333333333333333333333333333333"\n',
+			"0x3333333333333333333333333333333333333333333333333333333333333333",
+		],
+	])(
+		"uses %s from local client config when owner is omitted",
+		(_label, clientConfigContent, expectedAddress) => {
+			setOptionalEnv("SUI_PRIVATE_KEY", undefined);
+			const configDir = withTempSuiConfig({
+				keystoreEntries: [],
+				clientConfigContent,
+			});
+			useTempSuiConfigDir(configDir);
+
+			expect(resolveSuiOwnerAddress()).toBe(expectedAddress);
+		},
+	);
 
 	it("falls back to SUI_PRIVATE_KEY when active_address is unavailable", () => {
 		const env = Ed25519Keypair.generate();

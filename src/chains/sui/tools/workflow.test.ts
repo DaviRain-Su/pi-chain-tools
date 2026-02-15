@@ -453,6 +453,72 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		});
 	});
 
+	it("simulates with owner signer and marks execute needing signed payload/local key", async () => {
+		const tool = getTool();
+		const destination =
+			"0x6666666666666666666666666666666666666666666666666666666666666666";
+		runtimeMocks.resolveSuiKeypair.mockImplementationOnce(() => {
+			throw new Error("No local signer in test");
+		});
+
+		const result = await tool.execute("sui-runmode-nokey", {
+			runId: "wf-sui-runmode-nokey-01",
+			runMode: "simulate",
+			network: "mainnet",
+			intentType: "sui.transfer.sui",
+			toAddress: destination,
+			amountSui: 0.000001,
+		});
+
+		expect(result.content[0]?.text).toContain(
+			"execute requires fromPrivateKey or signed payload",
+		);
+		expect(result.details).toMatchObject({
+			artifacts: {
+				simulate: {
+					canExecuteWithLocalSigner: false,
+					signerSource: "walletAddress",
+					summaryLine: expect.stringContaining("localSigner=unavailable"),
+				},
+			},
+		});
+	});
+
+	it("requires local key or signed payload when reusing simulation without signer", async () => {
+		const tool = getTool();
+		const destination =
+			"0x7777777777777777777777777777777777777777777777777777777777777777";
+		runtimeMocks.resolveSuiKeypair
+			.mockImplementationOnce(() => {
+				throw new Error("No local signer in test");
+			})
+			.mockImplementationOnce(() => {
+			throw new Error("No local signer in test");
+		});
+
+		const analysis = await tool.execute("sui-runmode-nokey-exec", {
+			runId: "wf-sui-runmode-nokey-02",
+			runMode: "simulate",
+			network: "mainnet",
+			intentType: "sui.transfer.sui",
+			toAddress: destination,
+			amountSui: 0.000001,
+		});
+
+		const token = (analysis.details as { confirmToken: string }).confirmToken;
+		await expect(
+			tool.execute("sui-runmode-nokey-exec2", {
+				runMode: "execute",
+				runId: "wf-sui-runmode-nokey-02",
+				network: "mainnet",
+				confirmMainnet: true,
+				confirmToken: token,
+			}),
+		).rejects.toThrow(
+			"No local signer available for simulated tx execute",
+		);
+	});
+
 	it("simulates transaction and returns artifacts", async () => {
 		const tool = getTool();
 		const destination =
@@ -2073,6 +2139,37 @@ describe("w3rt_run_sui_cetus_farms_workflow_v0", () => {
 						phase: "simulate",
 						intentType: "sui.cetus.farms.unstake",
 					},
+				},
+			},
+		});
+	});
+
+	it("simulates farms unstake and marks signer requirement when local key unavailable", async () => {
+		const tool = getTool("w3rt_run_sui_cetus_farms_workflow_v0");
+		const poolId =
+			"0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+		const positionNftId =
+			"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+		runtimeMocks.resolveSuiKeypair.mockImplementationOnce(() => {
+			throw new Error("No local signer in test");
+		});
+
+		const result = await tool.execute("cetus-farms-wf-2b", {
+			runId: "wf-sui-cetus-farms-02b",
+			runMode: "simulate",
+			intentType: "sui.cetus.farms.unstake",
+			network: "mainnet",
+			poolId,
+			positionNftId,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "sui.cetus.farms.unstake",
+			artifacts: {
+				simulate: {
+					canExecuteWithLocalSigner: false,
+					signerSource: "walletAddress",
+					summaryLine: expect.stringContaining("localSigner=unavailable"),
 				},
 			},
 		});

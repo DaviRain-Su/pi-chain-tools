@@ -202,14 +202,67 @@ export function getSuiSignerLookupPaths(): {
 function parseActiveAddress(clientConfigPath: string): string | null {
 	try {
 		const content = readFileSync(clientConfigPath, "utf8");
-		const matched = content.match(
-			/^\s*active_address\s*:\s*["']?(0x[a-fA-F0-9]{1,64})["']?\s*$/m,
-		);
-		if (!matched?.[1]) return null;
-		return normalizeAddress(matched[1]);
+		const candidates = [
+			/\bactive[_-]address\b\s*:\s*["']?(0x[a-fA-F0-9]{1,64})["']?(?:\s|$)/m,
+			/\bactiveAddress\b\s*:\s*["']?(0x[a-fA-F0-9]{1,64})["']?(?:\s|$)/m,
+			/\bactive-address\b\s*:\s*["']?(0x[a-fA-F0-9]{1,64})["']?(?:\s|$)/m,
+		];
+		for (const pattern of candidates) {
+			const matched = content.match(pattern);
+			if (matched?.[1]) return normalizeAddress(matched[1]);
+		}
+		return null;
 	} catch {
 		return null;
 	}
+}
+
+function collectKeystoreStringValues(
+	entry: unknown,
+	depth = 0,
+	seen = new Set<object>(),
+): string[] {
+	if (typeof entry === "string") return [entry];
+	if (!entry || typeof entry !== "object" || Array.isArray(entry) || depth > 2) {
+		return [];
+	}
+
+	const obj = entry as Record<string, unknown>;
+	if (seen.has(obj)) return [];
+	seen.add(obj);
+
+	const keys = [
+		"secretKey",
+		"privateKey",
+		"private_key",
+		"privKey",
+		"priv_key",
+		"encodedPrivateKey",
+		"value",
+	];
+
+	const values = new Set<string>();
+	for (const key of keys) {
+		const value = obj[key];
+		if (typeof value === "string") {
+			values.add(value);
+		}
+	}
+
+	for (const nestedKey of ["keypair", "keyPair", "activeKey", "wallet"]) {
+		const nested = obj[nestedKey];
+		if (nested) {
+			for (const value of collectKeystoreStringValues(
+				nested,
+				depth + 1,
+				seen,
+			)) {
+				values.add(value);
+			}
+		}
+	}
+
+	return Array.from(values);
 }
 
 function parseEd25519FromKeyMaterial(
@@ -286,32 +339,20 @@ function resolveSuiKeypairFromLocalKeystore(): Ed25519Keypair | null {
 		let fallbackKeypair: Ed25519Keypair | null = null;
 		for (const entry of parsed) {
 			if (typeof entry === "object" && entry && !Array.isArray(entry)) {
-				const record = entry as Record<string, unknown>;
-				const values = [
-					record.secretKey,
-					record.privateKey,
-					record.private_key,
-					record.privKey,
-					record.priv_key,
-					record.encodedPrivateKey,
-					record.value,
-				];
-				for (const value of values) {
-					if (typeof value === "string") {
-						const keypair = parseEd25519FromStringLike(value);
-						if (keypair) {
-							if (!fallbackKeypair) fallbackKeypair = keypair;
-							if (activeAddress) {
-								const candidateAddress = normalizeAddress(
-									keypair.toSuiAddress(),
-								);
-								if (candidateAddress === activeAddress) {
-									return keypair;
-								}
-								continue;
+				for (const value of collectKeystoreStringValues(entry)) {
+					const keypair = parseEd25519FromStringLike(value);
+					if (keypair) {
+						if (!fallbackKeypair) fallbackKeypair = keypair;
+						if (activeAddress) {
+							const candidateAddress = normalizeAddress(
+								keypair.toSuiAddress(),
+							);
+							if (candidateAddress === activeAddress) {
+								return keypair;
 							}
-							break;
+							continue;
 						}
+						break;
 					}
 				}
 				continue;
@@ -346,8 +387,12 @@ export function resolveSuiOwnerAddress(owner?: string): string {
 
 	const envPrivateKey = process.env.SUI_PRIVATE_KEY?.trim();
 	if (envPrivateKey) {
-		const keypair = resolveSuiKeypair(envPrivateKey);
-		return normalizeAddress(keypair.toSuiAddress());
+		try {
+			const keypair = resolveSuiKeypair(envPrivateKey);
+			return normalizeAddress(keypair.toSuiAddress());
+		} catch {
+			// Ignore invalid env key; fallback to local keystore to avoid hard fail.
+		}
 	}
 
 	const fallbackKeypair = resolveSuiKeypairFromLocalKeystore();
