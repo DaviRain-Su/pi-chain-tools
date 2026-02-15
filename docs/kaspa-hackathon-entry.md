@@ -32,6 +32,8 @@
 - `kaspa_getTransactionOutput`：按交易 ID + output index 查询单条输出。
 - `kaspa_getTransactionAcceptance`：按交易 ID/ID 集合查询 acceptance 相关数据。
 - `kaspa_submitTransaction`：支持 `runMode=analysis` + `runMode=execute` 双阶段提交；主网执行需要 `confirmMainnet=true` 与 `confirmToken`。
+- `kaspa_submitTransaction`：analysis 阶段增加预检开关（`skipFeePreflight` / `skipMempoolPreflight` / `skipReadStatePreflight`）和风险摘要（`riskLevel`/`readiness`）；
+- `kaspa_submitTransaction`：execute 阶段返回标准化 `receipt`（含 `preflightRiskLevel` / `preflightReadiness` / `broadcastStatus`）。
 - `kaspa_getAddressBalance`：查询地址余额快照。
 - `kaspa_getAddressUtxos`：查询地址 UTXO 集合（含分页）。
 - `kaspa_getToken`：查询 token 元数据。
@@ -99,13 +101,13 @@
 
 - 调用 `kaspa_submitTransaction`
 - 输入：`rawTransaction=<hex/base64>`, `runMode=analysis`, `network=mainnet`, `confirmMainnet=true`, 可选 `feeEndpoint/mempoolEndpoint/readStateEndpoint`
-- 输出：`preflight` 明细、`requestHash` 与 `confirmToken`
+- 输出：`preflight` 明细、`riskLevel`、`readiness`、`requestHash` 与 `confirmToken`
 
 #### Step B：execute
 
 - 调用 `kaspa_submitTransaction`
 - 输入：`rawTransaction=<hex/base64>`, `runMode=execute`, `network=mainnet`, `confirmMainnet=true`, `confirmToken=<analysis返回>`
-- 输出：提交回执（含 `txId`、`network`、`requestHash`、`preflightReady`）
+- 输出：提交回执（含 `txId`、`network`、`requestHash`、`preflightRiskLevel`、`preflightReadiness`、`broadcastStatus`）
 
 ## 8. 交付与后续建议
 

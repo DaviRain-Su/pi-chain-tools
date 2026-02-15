@@ -117,11 +117,38 @@ describe("kaspa execute tools", () => {
 			schema: "kaspa.transaction.submit.v1",
 			network: "testnet",
 			txId: "tx-submitted-001",
+			receipt: {
+				kind: "kaspa-submit-receipt",
+				submitPath: "/transactions",
+				broadcastStatus: "submitted-without-id",
+				preflightRiskLevel: expect.any(String),
+				preflightReadiness: expect.any(String),
+			},
 		});
 		const calledUrl = new URL(fetchMock.mock.calls[0]?.[0]?.toString() ?? "");
 		expect(calledUrl.pathname).toBe("/transactions");
 		const calledBody = JSON.parse((fetchMock.mock.calls[0]?.[1]?.body as string) ?? "{}");
 		expect(calledBody).toMatchObject({ transaction: "00abccddee" });
+	});
+
+	it("supports skipping all preflight checks and still returns confirmToken", async () => {
+		const tool = getTool("kaspa_submitTransaction");
+		const result = await tool.execute("kaspa-submit-analysis-skip", {
+			network: "testnet",
+			runMode: "analysis",
+			rawTransaction: "00abccddee",
+			skipFeePreflight: true,
+			skipMempoolPreflight: true,
+			skipReadStatePreflight: true,
+		});
+		expect(fetchMock).toHaveBeenCalledTimes(0);
+		expect(result.details).toMatchObject({
+			schema: "kaspa.transaction.analysis.v1",
+			network: "testnet",
+			confirmToken: expect.any(String),
+		});
+		expect(result.details?.preflight?.readiness).toBe("ready");
+		expect(result.details?.preflight?.riskLevel).toBe("low");
 	});
 
 	it("merges request body and preserves rawTransaction as transaction", async () => {
