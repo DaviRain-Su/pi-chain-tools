@@ -1200,6 +1200,9 @@ npm run schema:validate -- --strict
 npm run schema:validate -- --json
 # 成功返回示例：{ "status": "ok", "files": [...] }
 # 失败返回示例：{ "status": "failed", "errors": [...] }
+
+# 查看参数说明
+npm run schema:validate -- --help
 ```
 
 - 若仅怀疑某一条 schema，可临时注释 `schemaFiles` 列表进行快速定位。

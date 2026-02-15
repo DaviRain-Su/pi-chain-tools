@@ -11,6 +11,26 @@ const schemaFiles = [
 const args = new Set(process.argv.slice(2));
 const isStrict = args.has("--strict");
 const isJsonOutput = args.has("--json");
+const isHelpRequested = args.has("--help") || args.has("-h");
+const allowedArgs = new Set(["--strict", "--json", "--help", "-h"]);
+const unknownArgs = process.argv
+	.slice(2)
+	.filter((arg) => !allowedArgs.has(arg));
+
+function printUsage() {
+	console.log(
+		"Usage: node scripts/validate-openclaw-schemas.mjs [--strict] [--json] [--help|-h]\n\n" +
+			"Validate OpenClaw BTC5m schema artifacts in docs/schemas.\n\n" +
+			"Options:\n" +
+			"  --strict    print grouped diagnostics + fix guidance\n" +
+			"  --json      print machine-readable JSON result\n" +
+			"  --help,-h   show this message\n\n" +
+			"Files:\n" +
+			"  openclaw-btc5m-workflow.schema.json\n" +
+			"  openclaw-btc5m-runtime-state.schema.json\n" +
+			"  openclaw-btc5m-retry-policy.schema.json\n",
+	);
+}
 
 const errorGuidance = {
 	schema_dir_missing: {
@@ -242,6 +262,17 @@ function printJsonOutput(errors) {
 }
 
 async function main() {
+	if (isHelpRequested) {
+		printUsage();
+		return;
+	}
+
+	if (unknownArgs.length > 0) {
+		console.error(`Unknown options: ${unknownArgs.join(", ")}`);
+		printUsage();
+		process.exit(1);
+	}
+
 	let hasDir = true;
 	try {
 		await readdir(schemaDir, { withFileTypes: true });

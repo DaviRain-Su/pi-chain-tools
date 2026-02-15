@@ -50,4 +50,7 @@ npm run schema:validate -- --strict
 # 成功返回：{ "status": "ok", "files": [...] }
 # 失败返回：{ "status": "failed", "errors": [...] }
 npm run schema:validate -- --json
+
+# 查看参数说明
+npm run schema:validate -- --help
 ```
