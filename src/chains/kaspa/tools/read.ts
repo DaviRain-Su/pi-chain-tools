@@ -24,6 +24,13 @@ type KaspaAddressTagResponse = {
 		type?: string;
 	};
 };
+type KaspaAddressTagRawResponse = {
+	address?: string;
+	name?: string;
+	link?: string;
+	labels?: unknown;
+	type?: string;
+};
 
 type KaspaTransactionSummary = {
 	transactionId: string;
@@ -304,14 +311,11 @@ function normalizeKaspaEndpoint(path: string, method: KaspaRpcMethod): string {
 		throw new Error("rpcPath must be a relative API path");
 	}
 	const normalized = trimmed.replace(/^\/+/, "");
-	if (/^v1\//i.test(normalized)) {
+	if (method === "POST" && /^v1\//i.test(normalized)) {
 		return `/${normalized}`;
 	}
-	if (/^rpc\//i.test(normalized)) {
-		return `/v1/${normalized}`;
-	}
-	if (method === "POST") {
-		return `/v1/rpc/${normalized}`;
+	if (method === "POST" && /^rpc\//i.test(normalized)) {
+		return `/${normalized}`;
 	}
 	return `/${normalized}`;
 }
@@ -607,6 +611,23 @@ function getKaspaFirstField(
 		}
 	}
 	return undefined;
+}
+
+function extractKaspaStringArray(
+	record: Record<string, unknown> | undefined,
+	key: string,
+): string[] | undefined {
+	if (!record) return undefined;
+	const value = record[key];
+	if (!Array.isArray(value)) return undefined;
+	const output: string[] = [];
+	for (const entry of value) {
+		if (typeof entry === "string") {
+			const normalized = entry.trim();
+			if (normalized) output.push(normalized);
+		}
+	}
+	return output.length ? output : undefined;
 }
 
 function parseKaspaReadAmountAtomic(value: unknown): bigint | undefined {
@@ -922,12 +943,24 @@ export async function fetchKaspaAddressTag(
 	);
 	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
 	const apiKey = getKaspaApiKey(params.apiKey);
-	const path = `/v1/addresses/${encodeURIComponent(address)}/tag`;
-	const data = await kaspaApiJsonGet<KaspaAddressTagResponse>({
+	const path = `/addresses/${encodeURIComponent(address)}/name`;
+	const rawData = await kaspaApiJsonGet<KaspaAddressTagRawResponse>({
 		baseUrl: apiBaseUrl,
 		path,
 		apiKey,
 	});
+	const rawRecord = asRecord(rawData);
+	const data: KaspaAddressTagResponse = {
+		tag: {
+			address:
+				getKaspaFirstString(rawRecord, ["address", "kaspaAddress"]) ??
+				address,
+			name: getKaspaFirstString(rawRecord, ["name", "label"]),
+			link: getKaspaFirstString(rawRecord, ["link"]),
+			labels: extractKaspaStringArray(rawRecord, "labels"),
+			type: getKaspaFirstString(rawRecord, ["type"]),
+		},
+	};
 	return {
 		network,
 		address,
@@ -961,7 +994,7 @@ export async function fetchKaspaAddressTransactions(params: {
 	const normalizedIncludePayload = parseKaspaBoolean(params.includePayload);
 	const data = await kaspaApiJsonGet<KaspaAddressTransactionsResponse>({
 		baseUrl: apiBaseUrl,
-		path: `/v1/addresses/${encodeURIComponent(address)}/transactions`,
+		path: `/addresses/${encodeURIComponent(address)}/full-transactions`,
 		query: {
 			limit: normalizedLimit,
 			starting_after: params.startingAfter,
@@ -991,7 +1024,7 @@ export async function fetchKaspaTransaction(params: {
 	const apiKey = getKaspaApiKey(params.apiKey);
 	const data = await kaspaApiJsonGet<KaspaTransactionResponse>({
 		baseUrl: apiBaseUrl,
-		path: `/v1/transactions/${encodeURIComponent(transactionId)}`,
+		path: `/transactions/${encodeURIComponent(transactionId)}`,
 		apiKey,
 	});
 	return {
@@ -1018,17 +1051,28 @@ export async function fetchKaspaTransactionOutput(params: {
 	);
 	const apiBaseUrl = getKaspaApiBaseUrl(params.apiBaseUrl, network);
 	const apiKey = getKaspaApiKey(params.apiKey);
-	const data = await kaspaApiJsonGet<KaspaTransactionOutputResponse>({
+	const data = await kaspaApiJsonGet<KaspaTransactionResponse>({
 		baseUrl: apiBaseUrl,
-		path: `/v1/transactions/outputs/${encodeURIComponent(transactionId)}/${outputIndex}`,
+		path: `/transactions/${encodeURIComponent(transactionId)}`,
+		query: {
+			outputs: true,
+			resolve_previous_outpoints: "no",
+		},
 		apiKey,
 	});
+	const outputs = extractKaspaPayloadArray(asRecord(data)?.outputs);
+	if (outputs.length <= outputIndex) {
+		throw new Error(
+			`outputIndex ${outputIndex} is out of range for transaction ${transactionId}`,
+		);
+	}
+	const outputData = asRecord(outputs[outputIndex]);
 	return {
 		network,
 		transactionId,
 		outputIndex,
 		apiBaseUrl,
-		data,
+		data: outputData,
 	};
 }
 
@@ -1056,7 +1100,7 @@ export async function fetchKaspaTransactionAcceptance(params: {
 		KaspaTransactionAcceptanceResponse
 	>({
 		baseUrl: apiBaseUrl,
-		path: "/v1/transaction/acceptance-data",
+		path: "/transactions/acceptance",
 		body,
 		apiKey,
 	});
@@ -1162,7 +1206,7 @@ export async function fetchKaspaAddressBalance(params: {
 	const apiKey = getKaspaApiKey(params.apiKey);
 	const data = await kaspaApiJsonGet<KaspaAddressBalanceResponse>({
 		baseUrl: apiBaseUrl,
-		path: `/v1/addresses/${encodeURIComponent(address)}/balance`,
+		path: `/addresses/${encodeURIComponent(address)}/balance`,
 		apiKey,
 	});
 	return {
@@ -1197,7 +1241,7 @@ export async function fetchKaspaAddressUtxos(params: {
 	const apiKey = getKaspaApiKey(params.apiKey);
 	const data = await kaspaApiJsonGet<KaspaAddressUtxosResponse>({
 		baseUrl: apiBaseUrl,
-		path: `/v1/addresses/${encodeURIComponent(address)}/utxos`,
+		path: `/addresses/${encodeURIComponent(address)}/utxos`,
 		query: {
 			limit: normalizedLimit,
 			offset: parsedOffset,
@@ -1288,7 +1332,7 @@ export async function fetchKaspaTokenInfo(params: {
 	const apiKey = getKaspaApiKey(params.apiKey);
 	const data = await kaspaApiJsonGet<KaspaTokenResponse>({
 		baseUrl: apiBaseUrl,
-		path: `/v1/tokens/${encodeURIComponent(tokenId)}`,
+		path: `/tokens/${encodeURIComponent(tokenId)}`,
 		apiKey,
 	});
 	return {
@@ -1313,7 +1357,7 @@ export async function fetchKaspaBlock(params: {
 	const includeTransactionsValue = params.includeTransactions === true;
 	const data = await kaspaApiJsonGet<KaspaBlockResponse>({
 		baseUrl: apiBaseUrl,
-		path: `/v1/blocks/${encodeURIComponent(blockId)}`,
+		path: `/blocks/${encodeURIComponent(blockId)}`,
 		query: normalizeKaspaQueryPayload({
 			include_transactions: includeTransactionsValue,
 		}),

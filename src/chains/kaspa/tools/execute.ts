@@ -20,7 +20,7 @@ const KASPA_SUBMIT_PATH = "/transactions";
 const KASPA_DEFAULT_FEES_ENDPOINT = "info/fee-estimate";
 const KASPA_DEFAULT_MEMPOOL_ENDPOINT = "info/kaspad";
 const KASPA_DEFAULT_READ_STATE_ENDPOINT = "info/blockdag";
-const KASPA_DEFAULT_ACCEPTANCE_ENDPOINT = "transaction/acceptance-data";
+const KASPA_DEFAULT_ACCEPTANCE_ENDPOINT = "transactions/acceptance";
 const KASPA_SUBMIT_MEMPOOL_WARNING_THRESHOLD = 50000;
 const KASPA_DEFAULT_ACCEPTANCE_POLL_INTERVAL_MS = 2_000;
 const KASPA_DEFAULT_ACCEPTANCE_POLL_TIMEOUT_MS = 30_000;
@@ -542,14 +542,11 @@ function normalizeKaspaSubmitEndpoint(
 		throw new Error("rpcPath must be a relative API path.");
 	}
 	const normalized = trimmed.replace(/^\/+/, "");
-	if (/^v1\//i.test(normalized)) {
+	if (method === "POST" && /^v1\//i.test(normalized)) {
 		return `/${normalized}`;
 	}
-	if (/^rpc\//i.test(normalized)) {
-		return method === "POST" ? `/v1/${normalized}` : `/${normalized}`;
-	}
-	if (method === "POST") {
-		return `/v1/rpc/${normalized}`;
+	if (method === "POST" && /^rpc\//i.test(normalized)) {
+		return `/${normalized}`;
 	}
 	return `/${normalized}`;
 }
@@ -1095,9 +1092,7 @@ async function runKaspaSubmitAcceptanceLookup(params: {
 		throw new Error("acceptanceEndpoint must be a relative API path");
 	}
 	const normalized = rawPath.replace(/^\/+/, "");
-	const path = normalized.startsWith("v1/")
-		? `/${normalized}`
-		: `/v1/${normalized}`;
+	const path = `/${normalized}`;
 	try {
 		const data = await kaspaApiJsonPost<{ transactionIds: string[] }, unknown>({
 			baseUrl: params.apiBaseUrl,
