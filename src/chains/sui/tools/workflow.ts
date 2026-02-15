@@ -158,6 +158,7 @@ type WorkflowParams = {
 	maxCoinObjectsToMerge?: number;
 	endpoint?: string;
 	apiKey?: string;
+	rpcUrl?: string;
 	confirmMainnet?: boolean;
 	confirmToken?: string;
 	confirmRisk?: boolean;
@@ -547,7 +548,7 @@ function parseTokenPairFromText(text: string): {
 
 	const pairWordMatch = text.match(
 		new RegExp(
-			`\\b(${TOKEN_NAME_PATTERN})\\s*(?:和|与)\\s*(${TOKEN_NAME_PATTERN})\\s*交易对\\b`,
+			`\\b(${TOKEN_NAME_PATTERN})\\s*(?:和|与|对)\\s*(${TOKEN_NAME_PATTERN})(?:\\s*交易对)?\\b`,
 			"i",
 		),
 	);
@@ -615,6 +616,92 @@ function resolveKnownSuiToken(input: string): KnownSuiToken | undefined {
 	const normalized = input.trim().toUpperCase();
 	if (!normalized) return undefined;
 	return KNOWN_SUI_TOKEN_BY_ALIAS.get(normalized);
+}
+
+function resolveKnownSuiTokenByCoinType(
+	coinType: string,
+): KnownSuiToken | undefined {
+	return KNOWN_SUI_TOKEN_BY_COIN_TYPE.get(coinType.trim());
+}
+
+function parseUiOrRawAmount(
+	amountText: string | undefined,
+): "raw" | "ui" | undefined {
+	if (!amountText) return undefined;
+	const normalized = amountText.trim();
+	if (!normalized) return undefined;
+	if (/^\d+$/.test(normalized)) return "raw";
+	if (/^\d+\.\d+$/.test(normalized)) return "ui";
+	return undefined;
+}
+
+const LP_AMOUNT_DECIMALS_BY_COIN_CACHE = new Map<string, number | null>();
+
+async function resolveCetusLPPoolTokenDecimals(
+	network: SuiNetwork,
+	rpcUrl: string | undefined,
+	coinType: string,
+): Promise<number | undefined> {
+	const known = resolveKnownSuiTokenByCoinType(coinType);
+	if (known) return known.decimals;
+
+	const cacheKey = `${network}:${coinType}`;
+	const cached = LP_AMOUNT_DECIMALS_BY_COIN_CACHE.get(cacheKey);
+	if (cached !== undefined) return cached || undefined;
+
+	const client = getSuiClient(network, rpcUrl);
+	try {
+		const metadata = await client.getCoinMetadata({
+			coinType,
+		});
+		if (metadata?.decimals == null) {
+			LP_AMOUNT_DECIMALS_BY_COIN_CACHE.set(cacheKey, null);
+			return undefined;
+		}
+		const decimals = Number(metadata.decimals);
+		if (!Number.isSafeInteger(decimals) || decimals < 0) {
+			LP_AMOUNT_DECIMALS_BY_COIN_CACHE.set(cacheKey, null);
+			return undefined;
+		}
+		LP_AMOUNT_DECIMALS_BY_COIN_CACHE.set(cacheKey, decimals);
+		return decimals;
+	} catch {
+		LP_AMOUNT_DECIMALS_BY_COIN_CACHE.set(cacheKey, null);
+		return undefined;
+	}
+}
+
+async function normalizeLpAmountToRaw(params: {
+	amount: string | undefined;
+	coinType: string | undefined;
+	network: SuiNetwork;
+	rpcUrl: string | undefined;
+	fieldName: string;
+}): Promise<string | undefined> {
+	if (!params.amount) return undefined;
+	const mode = parseUiOrRawAmount(params.amount);
+	if (!mode) {
+		throw new Error(
+			`${params.fieldName} must be a positive integer string or decimal string`,
+		);
+	}
+	if (!params.coinType) return params.amount.trim();
+
+	if (mode === "raw") {
+		return params.amount.trim();
+	}
+
+	const decimals = await resolveCetusLPPoolTokenDecimals(
+		params.network,
+		params.rpcUrl,
+		params.coinType,
+	);
+	if (decimals == null) {
+		throw new Error(
+			`${params.fieldName} uses decimal notation but decimals for ${params.coinType} are unknown. Provide integer raw amount instead.`,
+		);
+	}
+	return decimalUiAmountToRaw(params.amount.trim(), decimals, params.fieldName);
 }
 
 function isStructTag(value: string): boolean {
@@ -1666,8 +1753,23 @@ async function normalizeIntent(
 		);
 		const tickLower = params.tickLower ?? parsed.tickLower;
 		const tickUpper = params.tickUpper ?? parsed.tickUpper;
-		const amountA = params.amountA?.trim() || parsed.amountA;
-		const amountB = params.amountB?.trim() || parsed.amountB;
+		const rpcUrl = params.rpcUrl;
+		const [amountARaw, amountBRaw] = await Promise.all([
+			normalizeLpAmountToRaw({
+				amount: params.amountA?.trim() || parsed.amountA,
+				coinType: coinTypeA,
+				network: parsedNetwork,
+				rpcUrl,
+				fieldName: "amountA",
+			}),
+			normalizeLpAmountToRaw({
+				amount: params.amountB?.trim() || parsed.amountB,
+				coinType: coinTypeB,
+				network: parsedNetwork,
+				rpcUrl,
+				fieldName: "amountB",
+			}),
+		]);
 		if (!poolId && positionId) {
 			poolId = await resolvePoolIdByPositionId(network, positionId);
 		}
@@ -1722,7 +1824,7 @@ async function normalizeIntent(
 				"tickLower and tickUpper are required for sui.lp.cetus.add",
 			);
 		}
-		if (!amountA || !amountB) {
+		if (!amountARaw || !amountBRaw) {
 			throw new Error("amountA and amountB are required for sui.lp.cetus.add");
 		}
 		return {
@@ -1733,8 +1835,8 @@ async function normalizeIntent(
 			coinTypeB,
 			tickLower,
 			tickUpper,
-			amountA,
-			amountB,
+			amountA: amountARaw,
+			amountB: amountBRaw,
 			fixAmountA: params.fixAmountA !== false,
 			slippageBps: params.slippageBps ?? 100,
 			collectFee: params.collectFee === true,

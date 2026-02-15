@@ -921,10 +921,25 @@ describe("w3rt_run_sui_workflow_v0", () => {
 				positionId: "0xdef",
 				coinTypeA: "0x2::sui::SUI",
 				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
-				amountA: "1.5",
-				amountB: "2.25",
+				amountA: "1500000000",
+				amountB: "2250000",
 			},
 		});
+	});
+
+	it("rejects decimal LP amounts when decimals are unknown", async () => {
+		const tool = getTool();
+		await expect(
+			tool.execute("wf5c-decimal-unknown", {
+				runId: "wf-sui-05c-decimal-unknown",
+				runMode: "analysis",
+				network: "mainnet",
+				intentText:
+					"添加流动性 pool: 0xabc position: 0xdef 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa::tok::AAA 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb::tok::BBB tick: -5 to 5 a: 1.5 b: 2.25",
+			}),
+		).rejects.toThrow(
+			/amountA uses decimal notation but decimals for .* are unknown. Provide integer raw amount instead./,
+		);
 	});
 
 	it("resolves LP add symbol pair via farms token index", async () => {
