@@ -11,19 +11,21 @@ const schemaFiles = [
 const args = new Set(process.argv.slice(2));
 const isStrict = args.has("--strict");
 const isJsonOutput = args.has("--json");
+const isListRequested = args.has("--list");
 const isHelpRequested = args.has("--help") || args.has("-h");
-const allowedArgs = new Set(["--strict", "--json", "--help", "-h"]);
+const allowedArgs = new Set(["--strict", "--json", "--list", "--help", "-h"]);
 const unknownArgs = process.argv
 	.slice(2)
 	.filter((arg) => !allowedArgs.has(arg));
 
 function printUsage() {
 	console.log(
-		"Usage: node scripts/validate-openclaw-schemas.mjs [--strict] [--json] [--help|-h]\n\n" +
+		"Usage: node scripts/validate-openclaw-schemas.mjs [--strict] [--json] [--list] [--help|-h]\n\n" +
 			"Validate OpenClaw BTC5m schema artifacts in docs/schemas.\n\n" +
 			"Options:\n" +
 			"  --strict    print grouped diagnostics + fix guidance\n" +
 			"  --json      print machine-readable JSON result\n" +
+			"  --list      list configured schema files (with resolved paths)\n" +
 			"  --help,-h   show this message\n\n" +
 			"Files:\n" +
 			"  openclaw-btc5m-workflow.schema.json\n" +
@@ -261,6 +263,38 @@ function printJsonOutput(errors) {
 	);
 }
 
+function getSchemaFileList() {
+	return schemaFiles.map((fileName) => {
+		return {
+			fileName,
+			filePath: path.join(schemaDir, fileName),
+		};
+	});
+}
+
+function printListOutput() {
+	const list = getSchemaFileList();
+	if (isJsonOutput) {
+		console.log(
+			JSON.stringify(
+				{
+					status: "list",
+					files: list,
+				},
+				null,
+				2,
+			),
+		);
+		return;
+	}
+
+	console.log("Configured schema files:");
+	for (const item of list) {
+		console.log(`- ${item.fileName}`);
+		console.log(`  path: ${item.filePath}`);
+	}
+}
+
 async function main() {
 	if (isHelpRequested) {
 		printUsage();
@@ -271,6 +305,11 @@ async function main() {
 		console.error(`Unknown options: ${unknownArgs.join(", ")}`);
 		printUsage();
 		process.exit(1);
+	}
+
+	if (isListRequested) {
+		printListOutput();
+		return;
 	}
 
 	let hasDir = true;
