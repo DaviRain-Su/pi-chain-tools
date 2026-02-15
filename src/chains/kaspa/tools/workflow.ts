@@ -28,6 +28,9 @@ type WorkflowParams = {
 	amount?: string | number;
 	outputs?: unknown[];
 	utxos?: unknown[];
+	utxoSelectionStrategy?: "fifo" | "feeRate" | "feerate";
+	utxoLimit?: number;
+	strictAddressCheck?: boolean;
 	feeRate?: string | number;
 	dustLimit?: string | number;
 	changeAddress?: string;
@@ -48,11 +51,11 @@ type WorkflowParams = {
 	skipMempoolPreflight?: boolean;
 	skipReadStatePreflight?: boolean;
 };
-
 const KASPA_WORKFLOW_SESSIONS = new Map<string, KaspaWorkflowSession>();
 let latestKaspaWorkflowSession: KaspaWorkflowSession | null = null;
 
-const KASPA_COMPOSE_TOOL = createKaspaComposeTools().find(
+const KASPA_COMPOSE_TOOLS = createKaspaComposeTools();
+const KASPA_COMPOSE_TOOL = KASPA_COMPOSE_TOOLS.find(
 	(tool) => tool.name === "kaspa_buildTransferTransaction",
 );
 if (!KASPA_COMPOSE_TOOL) {
@@ -60,6 +63,9 @@ if (!KASPA_COMPOSE_TOOL) {
 		"kaspa_buildTransferTransaction tool is required for workflow compose path",
 	);
 }
+const KASPA_BUILD_FROM_ADDRESS_TOOL = KASPA_COMPOSE_TOOLS.find(
+	(tool) => tool.name === "kaspa_buildTransferTransactionFromAddress",
+);
 
 function createKaspaWorkflowRunId(): string {
 	return `wf-kaspa-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
@@ -148,6 +154,19 @@ function hasComposeInputs(params: WorkflowParams): boolean {
 	return Array.isArray(params.outputs) && params.outputs.length > 0;
 }
 
+function hasAddressComposeInputs(params: WorkflowParams): boolean {
+	if (!params.fromAddress?.trim()) {
+		return false;
+	}
+	if (Array.isArray(params.utxos) && params.utxos.length > 0) {
+		return false;
+	}
+	if (params.toAddress?.trim()) {
+		return true;
+	}
+	return Array.isArray(params.outputs) && params.outputs.length > 0;
+}
+
 async function resolveWorkflowSubmitRequest(
 	params: WorkflowParams,
 	priorSession: KaspaWorkflowSession | null,
@@ -186,6 +205,49 @@ async function resolveWorkflowSubmitRequest(
 		) {
 			throw new Error(
 				"Kaspa compose step failed to produce request in workflow",
+			);
+		}
+		return resolveKaspaTransactionPayload(
+			undefined,
+			composeDetails.request as unknown,
+		);
+	}
+	if (hasAddressComposeInputs(params)) {
+		const composeTool = KASPA_BUILD_FROM_ADDRESS_TOOL;
+		if (!composeTool) {
+			throw new Error(
+				"kaspa_buildTransferTransactionFromAddress tool unavailable",
+			);
+		}
+		const composeResult = await composeTool.execute(
+			"kaspa-workflow-compose-from-address",
+			{
+				network: params.network,
+				fromAddress: params.fromAddress,
+				toAddress: params.toAddress,
+				amount: params.amount,
+				outputs: params.outputs,
+				utxoSelectionStrategy: params.utxoSelectionStrategy,
+				utxoLimit: params.utxoLimit,
+				feeRate: params.feeRate,
+				dustLimit: params.dustLimit,
+				changeAddress: params.changeAddress,
+				lockTime: params.lockTime,
+				requestMemo: params.requestMemo,
+				apiBaseUrl: params.apiBaseUrl,
+				apiKey: params.apiKey,
+				strictAddressCheck: params.strictAddressCheck,
+			},
+		);
+		const composeDetails = composeResult.details as
+			| { request?: Record<string, unknown> }
+			| undefined;
+		if (
+			!composeDetails?.request ||
+			typeof composeDetails.request !== "object"
+		) {
+			throw new Error(
+				"Kaspa compose-from-address step failed to produce request in workflow",
 			);
 		}
 		return resolveKaspaTransactionPayload(
@@ -256,6 +318,15 @@ export function createKaspaWorkflowTools() {
 				amount: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				outputs: Type.Optional(Type.Array(Type.Unknown())),
 				utxos: Type.Optional(Type.Array(Type.Unknown())),
+				utxoSelectionStrategy: Type.Optional(
+					Type.Union([
+						Type.Literal("fifo"),
+						Type.Literal("feeRate"),
+						Type.Literal("feerate"),
+					]),
+				),
+				utxoLimit: Type.Optional(Type.Integer({ minimum: 1 })),
+				strictAddressCheck: Type.Optional(Type.Boolean()),
 				feeRate: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				dustLimit: Type.Optional(Type.Union([Type.String(), Type.Number()])),
 				changeAddress: Type.Optional(Type.String()),

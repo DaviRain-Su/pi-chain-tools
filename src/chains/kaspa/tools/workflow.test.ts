@@ -100,6 +100,48 @@ describe("kaspa workflow tools", () => {
 		expectPreflightCallCount(3);
 	});
 
+	it("runs analysis with auto-resolved UTXOs when utxos are omitted", async () => {
+		const tool = getTool("w3rt_run_kaspa_workflow_v0");
+		mockFetchJson({
+			status: 200,
+			body: {
+				utxos: [
+					{
+						txId: "txid-utxo-1",
+						index: 0,
+						amount: "2",
+					},
+				],
+			},
+		});
+		mockKaspaPreflight();
+		const result = await tool.execute("kaspa-wf-analysis-auto", {
+			runMode: "analysis",
+			runId: "wf-compose-analysis-auto",
+			network: "testnet10",
+			fromAddress: sampleAddressA,
+			toAddress: sampleAddressB,
+			amount: "1",
+			utxoSelectionStrategy: "fifo",
+			utxoLimit: 1,
+		});
+		const details = result.details as {
+			runMode: "analysis";
+			request?: Record<string, unknown>;
+			artifacts: { analysis?: { requestHash?: string } };
+		};
+		expect(details.runMode).toBe("analysis");
+		expect(details.request).toBeDefined();
+		expect(details.artifacts?.analysis?.requestHash).toHaveLength(64);
+		expectPreflightCallCount(4);
+		const calledUtxoUrl = new URL(
+			fetchMock.mock.calls[0]?.[0]?.toString() ?? "",
+		);
+		expect(calledUtxoUrl.pathname).toContain("/v1/addresses/");
+		expect(calledUtxoUrl.pathname).toContain("/utxos");
+		expect(calledUtxoUrl.searchParams.get("limit")).toBe("1");
+	});
+
 	it("runs simulate with rawTransaction payload", async () => {
 		const tool = getTool("w3rt_run_kaspa_workflow_v0");
 		mockKaspaPreflight();

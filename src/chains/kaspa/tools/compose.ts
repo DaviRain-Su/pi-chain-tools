@@ -9,7 +9,9 @@ import {
 	kaspaNetworkSchema,
 	normalizeKaspaAddress,
 	parseKaspaNetwork,
+	parseKaspaPositiveInteger,
 } from "../runtime.js";
+import { fetchKaspaAddressUtxos } from "./read.js";
 
 type KaspaComposeInput = {
 	network?: string;
@@ -18,6 +20,24 @@ type KaspaComposeInput = {
 	amount?: string | number;
 	outputs?: unknown;
 	utxos: unknown[];
+	feeRate?: string | number;
+	dustLimit?: string | number;
+	changeAddress?: string;
+	lockTime?: number;
+	requestMemo?: string;
+};
+
+type KaspaComposeFromAddressInput = {
+	network?: string;
+	fromAddress: string;
+	toAddress?: string;
+	amount?: string | number;
+	outputs?: unknown;
+	utxoSelectionStrategy?: "fifo" | "feeRate" | "feerate";
+	utxoLimit?: number;
+	apiBaseUrl?: string;
+	apiKey?: string;
+	strictAddressCheck?: boolean;
 	feeRate?: string | number;
 	dustLimit?: string | number;
 	changeAddress?: string;
@@ -229,6 +249,113 @@ function parseKaspaUtxos(rawUtxos: unknown[]): KaspaUtxoInput[] {
 	return utxos;
 }
 
+function parseKaspaUtxoSelectionStrategy(value: unknown): "fifo" | "feeRate" {
+	if (typeof value !== "string") {
+		return "feeRate";
+	}
+	if (value === "fifo") {
+		return "fifo";
+	}
+	if (value === "feeRate" || value === "feerate") {
+		return "feeRate";
+	}
+	throw new Error("utxoSelectionStrategy must be 'fifo' or 'feeRate'");
+}
+
+function parseKaspaFetchedUtxosPayload(data: unknown): unknown[] {
+	if (Array.isArray(data)) {
+		if (data.length === 0) {
+			throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+		}
+		return data;
+	}
+	if (!data || typeof data !== "object") {
+		throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+	}
+	const payload = data as Record<string, unknown>;
+	if (Array.isArray(payload.utxos)) {
+		if (payload.utxos.length === 0) {
+			throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+		}
+		return payload.utxos;
+	}
+	if (Array.isArray(payload.outputs)) {
+		if (payload.outputs.length === 0) {
+			throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+		}
+		return payload.outputs;
+	}
+	if (Array.isArray(payload.data)) {
+		if (payload.data.length === 0) {
+			throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+		}
+		return payload.data;
+	}
+	throw new Error("kaspa_getAddressUtxos returned no UTXOs");
+}
+
+function normalizeKaspaFetchedUtxo(
+	raw: unknown,
+	index: number,
+): KaspaUtxoInput {
+	if (!raw || typeof raw !== "object") {
+		throw new Error(`utxos[${index}] must be an object`);
+	}
+	const candidate = raw as Record<string, unknown>;
+	const txId =
+		typeof candidate.txId === "string"
+			? candidate.txId.trim()
+			: typeof candidate.txid === "string"
+				? candidate.txid.trim()
+				: typeof candidate.txHash === "string"
+					? candidate.txHash.trim()
+					: typeof candidate.hash === "string"
+						? candidate.hash.trim()
+						: "";
+	if (!txId) {
+		throw new Error(`utxos[${index}].txId is required`);
+	}
+	const rawIndex =
+		typeof candidate.index === "number"
+			? candidate.index
+			: typeof candidate.outputIndex === "number"
+				? candidate.outputIndex
+				: typeof candidate.vout === "number"
+					? candidate.vout
+					: undefined;
+	if (
+		typeof rawIndex !== "number" ||
+		!Number.isInteger(rawIndex) ||
+		rawIndex < 0
+	) {
+		throw new Error(`utxos[${index}].index is required`);
+	}
+	const amountSource =
+		candidate.amount ?? candidate.value ?? candidate.satoshis;
+	if (amountSource == null) {
+		throw new Error(`utxos[${index}].amount is required`);
+	}
+	const amount = parseKaspaAmount(
+		amountSource as string | number,
+		`utxos[${index}].amount`,
+	).toString();
+	const utxo: KaspaUtxoInput = {
+		txId,
+		index: rawIndex,
+		amount,
+	};
+	if (typeof candidate.address === "string" && candidate.address.trim()) {
+		utxo.address = candidate.address.trim();
+	}
+	if (
+		typeof candidate.scriptPublicKey === "string" &&
+		candidate.scriptPublicKey.trim()
+	) {
+		utxo.scriptPublicKey = candidate.scriptPublicKey.trim();
+	}
+	return utxo;
+}
+
 function estimateKaspaMass(inputCount: number, outputCount: number): bigint {
 	return (
 		KASPA_TX_BASE_MASS +
@@ -251,6 +378,7 @@ function pickKaspaInputs(params: {
 	outputCount: number;
 	feeRate: bigint;
 	dustLimit: bigint;
+	selectionStrategy?: "fifo" | "feeRate";
 }): {
 	selected: KaspaUtxoInput[];
 	totalInput: bigint;
@@ -258,10 +386,13 @@ function pickKaspaInputs(params: {
 	hasChange: boolean;
 	change: bigint;
 } {
-	const sorted = [...params.utxos].sort((a, b) => {
-		const diff = BigInt(a.amount) > BigInt(b.amount);
-		return diff ? -1 : BigInt(a.amount) < BigInt(b.amount) ? 1 : 0;
-	});
+	const sorted =
+		params.selectionStrategy === "fifo"
+			? [...params.utxos]
+			: [...params.utxos].sort((a, b) => {
+					const diff = BigInt(a.amount) > BigInt(b.amount);
+					return diff ? -1 : BigInt(a.amount) < BigInt(b.amount) ? 1 : 0;
+				});
 
 	let selected: KaspaUtxoInput[] = [];
 	let totalInput = 0n;
@@ -545,6 +676,206 @@ export function createKaspaComposeTools(): RegisteredTool[] {
 						fromAddress,
 						changeAddress,
 						lockTime: normalizeLockTime(params.lockTime),
+						requestHash,
+						requiresLocalSignature: true,
+						tx: unsignedTransaction,
+						request: {
+							rawTransaction: JSON.stringify(unsignedTransaction),
+							metadata: {
+								...detailsMetadata,
+							},
+						},
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${KASPA_TOOL_PREFIX}buildTransferTransactionFromAddress`,
+			label: "Kaspa Build Transfer Transaction from Address",
+			description:
+				"Build an unsigned Kaspa transfer by reading UTXOs from an address.",
+			parameters: Type.Object({
+				network: kaspaNetworkSchema(),
+				fromAddress: Type.String({
+					description:
+						"Sender Kaspa address. Set strictAddressCheck=false if this is a valid address alias that is already normalized.",
+				}),
+				apiBaseUrl: Type.Optional(Type.String()),
+				apiKey: Type.Optional(Type.String()),
+				strictAddressCheck: Type.Optional(
+					Type.Boolean({
+						description:
+							"If true, require strict kaspa address validation; default false.",
+					}),
+				),
+				toAddress: Type.Optional(Type.String()),
+				amount: Type.Optional(Type.Union([Type.String(), Type.Number()])),
+				outputs: Type.Optional(
+					Type.Array(
+						Type.Object(
+							{
+								address: Type.String(),
+								amount: Type.Union([Type.String(), Type.Number()]),
+							},
+							{ minItems: 1 },
+						),
+					),
+				),
+				utxoSelectionStrategy: Type.Optional(
+					Type.Union([
+						Type.Literal("fifo"),
+						Type.Literal("feeRate"),
+						Type.Literal("feerate"),
+					]),
+				),
+				utxoLimit: Type.Optional(
+					Type.Integer({
+						minimum: 1,
+						description:
+							"Optional max number of UTXOs pulled from address endpoint.",
+					}),
+				),
+				feeRate: Type.Optional(
+					Type.Union([
+						Type.String({
+							description: "Optional fee rate for mass-based estimation.",
+						}),
+						Type.Integer({ minimum: 1 }),
+					]),
+				),
+				dustLimit: Type.Optional(
+					Type.Union([
+						Type.String({
+							description:
+								"Optional dust threshold. Change below this will be discarded.",
+						}),
+						Type.Integer({ minimum: 0 }),
+					]),
+				),
+				changeAddress: Type.Optional(Type.String()),
+				lockTime: Type.Optional(
+					Type.Integer({
+						minimum: 0,
+						description: "Optional transaction lockTime.",
+					}),
+				),
+				requestMemo: Type.Optional(
+					Type.String({
+						description: "Optional memo for transaction builders/tests.",
+					}),
+				),
+			}),
+			async execute(_toolCallId, rawParams) {
+				const params = rawParams as KaspaComposeFromAddressInput;
+				const network = parseKaspaNetwork(params.network);
+				const fromAddress = normalizeKaspaAddress(
+					params.fromAddress,
+					network,
+					params.strictAddressCheck === true,
+				);
+				const changeAddress = params.changeAddress
+					? normalizeKaspaAddress(params.changeAddress, network, false)
+					: fromAddress;
+				const outputs = parseKaspaOutputList(
+					params.toAddress,
+					params.amount,
+					params.outputs,
+					network,
+				);
+				const feeRate = parseKaspaFeeRate(params.feeRate);
+				const dustLimit = parseKaspaDustLimit(params.dustLimit);
+				const selectionStrategy = parseKaspaUtxoSelectionStrategy(
+					params.utxoSelectionStrategy,
+				);
+				const fetched = await fetchKaspaAddressUtxos({
+					address: fromAddress,
+					limit: params.utxoLimit
+						? parseKaspaPositiveInteger(params.utxoLimit, "utxoLimit")
+						: undefined,
+					network,
+					apiBaseUrl: params.apiBaseUrl,
+					apiKey: params.apiKey,
+					strictAddressCheck: params.strictAddressCheck,
+				});
+				const fetchedUtxos = parseKaspaFetchedUtxosPayload(fetched.data).map(
+					(rawUtxo, index) => normalizeKaspaFetchedUtxo(rawUtxo, index),
+				);
+				const targetAmount = outputs.reduce(
+					(sum, output) => sum + BigInt(output.amount),
+					0n,
+				);
+				const selected = pickKaspaInputs({
+					utxos: fetchedUtxos,
+					targetAmount,
+					outputCount: outputs.length,
+					feeRate,
+					dustLimit,
+					selectionStrategy,
+				});
+				const finalOutputs: KaspaTransactionOutput[] = [...outputs];
+				if (selected.hasChange && selected.change > 0n) {
+					finalOutputs.push({
+						address: changeAddress,
+						amount: selected.change.toString(),
+					});
+				}
+				const unsignedTransaction = {
+					version: 0,
+					network: resolveNetworkTag(network),
+					lockTime: normalizeLockTime(params.lockTime),
+					from: fromAddress,
+					inputs: selected.selected.map((utxo, index) => ({
+						index,
+						txId: utxo.txId,
+						outputIndex: utxo.index,
+						amount: utxo.amount,
+						address: utxo.address,
+						scriptPublicKey: utxo.scriptPublicKey,
+					})),
+					outputs: finalOutputs.map((output) => ({
+						address: output.address,
+						amount: output.amount,
+					})),
+					memo: params.requestMemo?.trim() || undefined,
+				};
+				const requestHashPayload = {
+					transaction: unsignedTransaction,
+				};
+				const requestHash = buildKaspaRequestHash(requestHashPayload);
+				const detailsMetadata = {
+					version: 0,
+					createdAt: new Date().toISOString(),
+					network,
+					networkTag: resolveNetworkTag(network),
+					requiresSignature: true,
+					selectionStrategy,
+					inputCount: selected.selected.length,
+					fetchedUtxoCount: fetchedUtxos.length,
+					feeRate: feeRate.toString(),
+					dustLimit: dustLimit.toString(),
+					totalInputAmount: selected.totalInput.toString(),
+					totalOutputAmount: outputs
+						.reduce((sum, output) => sum + BigInt(output.amount), 0n)
+						.toString(),
+					feeAmount: selected.fee.toString(),
+					changeAmount: selected.hasChange ? selected.change.toString() : "0",
+					requestHash,
+				};
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Kaspa unsigned transaction built from address UTXOs (chain=${network}, fee=${selected.fee}, inputCount=${selected.selected.length}, requestHash=${requestHash}).`,
+						},
+					],
+					details: {
+						schema: "kaspa.transaction.compose.v1",
+						network,
+						fromAddress,
+						changeAddress,
+						lockTime: normalizeLockTime(params.lockTime),
+						selectionStrategy,
+						utxoSource: "address",
 						requestHash,
 						requiresLocalSignature: true,
 						tx: unsignedTransaction,

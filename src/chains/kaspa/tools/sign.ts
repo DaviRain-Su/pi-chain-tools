@@ -1170,13 +1170,13 @@ export function createKaspaSignTools() {
 				privateKeyFile: Type.Optional(
 					Type.String({
 						description:
-							"Optional local file path containing private key content; supports JSON {privateKey|private_key|secretKey|secret_key}.",
+							"Optional local file path containing private key content; supports JSON {privateKey|private_key|secretKey|secret_key}. (legacy alias)",
 					}),
 				),
 				privateKeyPath: Type.Optional(
 					Type.String({
 						description:
-							"Alias for local file path containing private key content.",
+							"Alias for local file path containing private key content (preferred).",
 					}),
 				),
 				privateKeyPathEnv: Type.Optional(
