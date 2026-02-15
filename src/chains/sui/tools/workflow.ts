@@ -1248,9 +1248,9 @@ function parseIntentText(text?: string): ParsedIntentHints {
 			/(?:deltaLiquidity|delta_liquidity|liquidityDelta|移除流动性|减少流动性|liquidity)\s*[:= ]\s*(\d+)/i,
 		) ?? null;
 	const minAmountAMatch =
-		text.match(/(?:minAmountA|min_a|minA)\s*[:= ]\s*(\d+)/i) ?? null;
+		text.match(/(?:minAmountA|min_a|minA)\s*[:= ]\s*(\d+(?:\.\d+)?)/i) ?? null;
 	const minAmountBMatch =
-		text.match(/(?:minAmountB|min_b|minB)\s*[:= ]\s*(\d+)/i) ?? null;
+		text.match(/(?:minAmountB|min_b|minB)\s*[:= ]\s*(\d+(?:\.\d+)?)/i) ?? null;
 	const controlHints: Pick<
 		ParsedIntentHints,
 		"confirmMainnet" | "confirmToken" | "confirmRisk"
@@ -1859,6 +1859,25 @@ async function normalizeIntent(
 			params.deltaLiquidity?.trim() || parsed.deltaLiquidity;
 		const minAmountA = params.minAmountA?.trim() || parsed.minAmountA || "0";
 		const minAmountB = params.minAmountB?.trim() || parsed.minAmountB || "0";
+		const rpcUrl = params.rpcUrl;
+		const [normalizedMinAmountA, normalizedMinAmountB] = await Promise.all([
+			normalizeLpAmountToRaw({
+				amount: minAmountA,
+				coinType: coinTypeA,
+				network: parsedNetwork,
+				rpcUrl,
+				fieldName: "minAmountA",
+			}),
+			normalizeLpAmountToRaw({
+				amount: minAmountB,
+				coinType: coinTypeB,
+				network: parsedNetwork,
+				rpcUrl,
+				fieldName: "minAmountB",
+			}),
+		]);
+		const minAmountARaw = normalizedMinAmountA ?? "0";
+		const minAmountBRaw = normalizedMinAmountB ?? "0";
 		if (!poolId && positionId) {
 			poolId = await resolvePoolIdByPositionId(network, positionId);
 		}
@@ -1918,8 +1937,8 @@ async function normalizeIntent(
 			coinTypeA,
 			coinTypeB,
 			deltaLiquidity,
-			minAmountA,
-			minAmountB,
+			minAmountA: minAmountARaw,
+			minAmountB: minAmountBRaw,
 			collectFee: params.collectFee !== false,
 			rewarderCoinTypes: params.rewarderCoinTypes ?? [],
 		};
