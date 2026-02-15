@@ -559,6 +559,68 @@ function parseTokenPairFromText(text: string): {
 	return null;
 }
 
+function parseMinOutputNarrativeAmounts(params: {
+	text: string;
+	sideASymbol?: string;
+	sideBSymbol?: string;
+}): {
+	minAmountA?: string;
+	minAmountB?: string;
+} {
+	const minOutputMatch = params.text.match(
+		/(?:最少拿到|至少拿到|最小输出|最低输出)([^。！？!?;；,，]*)/i,
+	);
+	if (!minOutputMatch) return {};
+
+	const section = minOutputMatch[1] ?? "";
+	const sideA = params.sideASymbol?.trim().toUpperCase();
+	const sideB = params.sideBSymbol?.trim().toUpperCase();
+	if (!sideA && !sideB) return {};
+
+	const result: { minAmountA?: string; minAmountB?: string } = {};
+	const symbolMatchedAmounts: string[] = [];
+	const symbolAmountMatches = [
+		...section.matchAll(/(\d+(?:\.\d+)?)\s*([A-Za-z][A-Za-z0-9_]{1,15})/g),
+	];
+	for (const match of symbolAmountMatches) {
+		const amount = match[1];
+		const symbol = match[2]?.trim().toUpperCase();
+		if (!amount || !symbol) continue;
+		if (sideA && symbol === sideA && !result.minAmountA) {
+			result.minAmountA = amount;
+			continue;
+		}
+		if (sideB && symbol === sideB && !result.minAmountB) {
+			result.minAmountB = amount;
+			continue;
+		}
+		symbolMatchedAmounts.push(amount);
+	}
+
+	const plainAmounts = [...section.matchAll(/(\d+(?:\.\d+)?)/g)].map(
+		(match) => match[1],
+	);
+	const symbolAmountValues = symbolAmountMatches.map((match) => match[1]);
+	const bareAmounts = plainAmounts.filter(
+		(amount) => !symbolAmountValues.includes(amount),
+	);
+	const unassignedAmounts = [...symbolMatchedAmounts, ...bareAmounts];
+	const remaining = unassignedAmounts.filter(
+		(amount) => amount !== result.minAmountA && amount !== result.minAmountB,
+	);
+	if (!result.minAmountA && remaining[0]) {
+		result.minAmountA = remaining[0];
+	}
+	if (!result.minAmountB && remaining[1]) {
+		result.minAmountB = remaining[1];
+	}
+
+	return {
+		minAmountA: result.minAmountA,
+		minAmountB: result.minAmountB,
+	};
+}
+
 function normalizePairSymbolHints(params: {
 	coinTypeA?: string;
 	coinTypeB?: string;
@@ -1255,6 +1317,11 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		text.match(
 			/(?:minAmountB|min_b|minB|min b|min amount B|b min|最小B|最少B|至少B)\s*[:= ]\s*(\d+(?:\.\d+)?)/i,
 		) ?? null;
+	const minOutputNarrative = parseMinOutputNarrativeAmounts({
+		sideASymbol: pair?.left,
+		sideBSymbol: pair?.right,
+		text,
+	});
 	const controlHints: Pick<
 		ParsedIntentHints,
 		"confirmMainnet" | "confirmToken" | "confirmRisk"
@@ -1308,8 +1375,8 @@ function parseIntentText(text?: string): ParsedIntentHints {
 			coinTypeA: pairA || coinTypeCandidates[0],
 			coinTypeB: pairB || coinTypeCandidates[1],
 			deltaLiquidity: deltaLiquidityMatch?.[1] || integerMatch?.[0],
-			minAmountA: minAmountAMatch?.[1],
-			minAmountB: minAmountBMatch?.[1],
+			minAmountA: minAmountAMatch?.[1] || minOutputNarrative.minAmountA,
+			minAmountB: minAmountBMatch?.[1] || minOutputNarrative.minAmountB,
 		};
 	}
 
