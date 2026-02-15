@@ -175,6 +175,11 @@ h3 {
 	padding: 0;
 }
 
+.command-grid {
+	display: grid;
+	gap: 0.7rem;
+}
+
 .command-block {
 	align-items: center;
 	background: #101f24;
@@ -184,6 +189,7 @@ h3 {
 	gap: 0.7rem;
 	justify-content: space-between;
 	padding: 0.8rem;
+	width: 100%;
 }
 
 .command-block code {

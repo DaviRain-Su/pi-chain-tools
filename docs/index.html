@@ -184,7 +184,30 @@
 			</section>
 
 			<section class="panel reveal" id="demo">
-				<h2>Demo Checklist</h2>
+				<h2>Demo One-Click Commands</h2>
+				<p>演示前建议先执行以下命令（可一键复制到终端）：</p>
+				<div class="command-grid">
+					<div class="command-block">
+						<code id="demo-lint">npm run lint</code>
+						<button id="demo-lint-copy" type="button">Copy</button>
+					</div>
+					<div class="command-block">
+						<code id="demo-schema-audit">npm run schema:audit</code>
+						<button id="demo-schema-audit-copy" type="button">Copy</button>
+					</div>
+					<div class="command-block">
+						<code id="demo-check">npm run check</code>
+						<button id="demo-check-copy" type="button">Copy</button>
+					</div>
+					<div class="command-block">
+						<code id="demo-test">npm test</code>
+						<button id="demo-test-copy" type="button">Copy</button>
+					</div>
+					<div class="command-block">
+						<code id="demo-security">npm run security:check</code>
+						<button id="demo-security-copy" type="button">Copy</button>
+					</div>
+				</div>
 				<ul class="checklist">
 					<li>Show install from GitHub source.</li>
 					<li>Run <code>npm run schema:audit</code> before launch.</li>

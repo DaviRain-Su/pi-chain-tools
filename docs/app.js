@@ -23,6 +23,11 @@ function bindCopy(buttonId, commandId) {
 
 bindCopy("copy-button", "install-command");
 bindCopy("audit-copy", "audit-command");
+bindCopy("demo-lint-copy", "demo-lint");
+bindCopy("demo-schema-audit-copy", "demo-schema-audit");
+bindCopy("demo-check-copy", "demo-check");
+bindCopy("demo-test-copy", "demo-test");
+bindCopy("demo-security-copy", "demo-security");
 
 const revealItems = Array.from(document.querySelectorAll(".reveal"));
 
