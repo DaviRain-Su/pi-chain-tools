@@ -19,6 +19,7 @@ import {
 	parsePositiveBigInt,
 	parseSuiNetwork,
 	resolveSuiKeypair,
+	resolveSuiOwnerAddress,
 	suiNetworkSchema,
 	toMist,
 } from "../runtime.js";
@@ -342,6 +343,11 @@ const DEFAULT_SUI_SWAP_RISK_CRITICAL_SLIPPAGE_BPS = 1000;
 const SUI_OBJECT_ID_PATTERN = /^0x[a-fA-F0-9]{1,64}$/;
 
 type CetusClmmSdkLike = {
+	getPositionList?(
+		accountAddress: string,
+		assignPoolIds?: string[],
+		showDisplay?: boolean,
+	): Promise<unknown>;
 	Position: {
 		createAddLiquidityFixTokenPayload(params: {
 			pool_id: string;
@@ -370,6 +376,14 @@ type CetusClmmSdkLike = {
 			rewarder_coin_types: string[];
 		}): Promise<unknown>;
 	};
+};
+
+type CetusClmmPositionCandidate = {
+	positionId: string;
+	poolId: string;
+	coinTypeA: string;
+	coinTypeB: string;
+	coinPairKey: string;
 };
 
 type InitCetusSDKFn = (config: {
@@ -739,6 +753,150 @@ async function resolvePoolIdByPositionId(
 	} catch {
 		return undefined;
 	}
+}
+
+function normalizePositionAddress(value: string): string {
+	return value.trim().toLowerCase();
+}
+
+function normalizeCoinPairTypes(
+	coinTypeA: string,
+	coinTypeB: string,
+): [string, string] {
+	return [
+		normalizePositionAddress(coinTypeA),
+		normalizePositionAddress(coinTypeB),
+	];
+}
+
+function normalizePositionCandidateCoinType(
+	value: unknown,
+): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	if (!trimmed) return undefined;
+	return trimmed;
+}
+
+function normalizePositionCandidatePoolId(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	if (!SUI_OBJECT_ID_PATTERN.test(trimmed)) return undefined;
+	return trimmed;
+}
+
+function normalizePairKey(coinTypeA: string, coinTypeB: string): string {
+	const [lower, upper] = normalizeCoinPairTypes(coinTypeA, coinTypeB);
+	return `${lower}|${upper}`;
+}
+
+function extractCetusPositionCandidates(
+	value: unknown,
+): CetusClmmPositionCandidate[] {
+	const items = (() => {
+		if (Array.isArray(value)) return value;
+		if (
+			value &&
+			typeof value === "object" &&
+			Array.isArray((value as { data?: unknown }).data)
+		) {
+			return (value as { data: unknown[] }).data;
+		}
+		return [];
+	})();
+
+	const candidates: CetusClmmPositionCandidate[] = [];
+	for (const item of items) {
+		if (!item || typeof item !== "object") continue;
+		const record = item as Record<string, unknown>;
+		const positionId = normalizePositionCandidatePoolId(
+			record.position_id ??
+				record.pos_object_id ??
+				record.positionId ??
+				record.id,
+		);
+		const poolId = normalizePositionCandidatePoolId(
+			record.pool_id ?? record.clmm_pool_id ?? record.pool ?? record.poolId,
+		);
+		const coinTypeA = normalizePositionCandidateCoinType(
+			record.coin_type_a ?? record.coinTypeA,
+		);
+		const coinTypeB = normalizePositionCandidateCoinType(
+			record.coin_type_b ?? record.coinTypeB,
+		);
+		if (!positionId || !poolId || !coinTypeA || !coinTypeB) continue;
+		candidates.push({
+			positionId,
+			poolId,
+			coinTypeA,
+			coinTypeB,
+			coinPairKey: normalizePairKey(coinTypeA, coinTypeB),
+		});
+	}
+
+	return candidates;
+}
+
+function formatCandidateListForError(
+	candidates: CetusClmmPositionCandidate[],
+): string {
+	return candidates
+		.map((candidate, index) => {
+			const tag = `${index + 1}) position=${candidate.positionId} pool=${candidate.poolId}`;
+			return tag;
+		})
+		.slice(0, 6)
+		.join("; ");
+}
+
+async function resolveLpPositionByPair(params: {
+	network: SuiNetwork;
+	coinTypeA?: string;
+	coinTypeB?: string;
+	poolId?: string;
+	owner?: string;
+}): Promise<CetusClmmPositionCandidate[]> {
+	if (!params.coinTypeA || !params.coinTypeB) return [];
+
+	const targetOwner = params.owner?.trim();
+	if (!targetOwner) {
+		return [];
+	}
+
+	const initCetusSDK = await getInitCetusSDK();
+	const sdk = initCetusSDK({
+		network: resolveCetusNetwork(params.network),
+		fullNodeUrl: getSuiRpcEndpoint(params.network),
+		wallet: targetOwner,
+	});
+
+	if (typeof sdk.getPositionList !== "function") {
+		return [];
+	}
+
+	const [coinLower, coinUpper] = normalizeCoinPairTypes(
+		params.coinTypeA,
+		params.coinTypeB,
+	);
+	const targetPairKey = `${coinLower}|${coinUpper}`;
+	const reversePairKey = `${coinUpper}|${coinLower}`;
+	const poolIds = params.poolId && [params.poolId];
+	const raw = await sdk.getPositionList(targetOwner, poolIds);
+	const candidates = extractCetusPositionCandidates(raw);
+	const byPoolId = poolIds
+		? candidates.filter(
+				(candidate) =>
+					normalizePositionAddress(candidate.poolId) ===
+					normalizePositionAddress(poolIds[0] as string),
+			)
+		: candidates;
+
+	return byPoolId.filter((candidate) => {
+		const candidatePairKey = candidate.coinPairKey;
+		return (
+			candidatePairKey === targetPairKey || candidatePairKey === reversePairKey
+		);
+	});
 }
 
 function derivePoolAndPositionIds(params: {
@@ -1321,7 +1479,7 @@ async function normalizeIntent(
 
 	if (intentType === "sui.lp.cetus.add") {
 		let poolId = params.poolId?.trim() || parsed.poolId;
-		const positionId = params.positionId?.trim() || parsed.positionId;
+		let positionId = params.positionId?.trim() || parsed.positionId;
 		const coinTypeA =
 			normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) || parsed.coinTypeA;
 		const coinTypeB =
@@ -1333,6 +1491,36 @@ async function normalizeIntent(
 		if (!poolId && positionId) {
 			poolId = await resolvePoolIdByPositionId(network, positionId);
 		}
+		if (!positionId && coinTypeA && coinTypeB) {
+			let owner: string;
+			try {
+				owner = resolveSuiOwnerAddress();
+			} catch {
+				owner = "";
+			}
+			const candidates = await resolveLpPositionByPair({
+				network,
+				coinTypeA,
+				coinTypeB,
+				poolId,
+				owner,
+			});
+			if (candidates.length === 1) {
+				positionId = candidates[0].positionId;
+				if (!poolId) {
+					poolId = candidates[0].poolId;
+				}
+			} else if (candidates.length > 1) {
+				const candidateList = formatCandidateListForError(candidates);
+				throw new Error(
+					`Multiple LP positions found for ${coinTypeA}/${coinTypeB} in owner wallet. Please provide positionId. candidates=${candidateList}`,
+				);
+			} else if (!poolId) {
+				throw new Error(
+					"No matching LP position found for this coin pair. Specify positionId (preferred) or add poolId+positionId before execution.",
+				);
+			}
+		}
 		if (!poolId) {
 			throw new Error(
 				positionId
@@ -1340,10 +1528,11 @@ async function normalizeIntent(
 					: "poolId is required for sui.lp.cetus.add. Tip: first query Cetus pools and choose a poolId.",
 			);
 		}
-		if (!positionId)
+		if (!positionId) {
 			throw new Error(
 				"positionId is required for sui.lp.cetus.add. Tip: LP add currently targets an existing positionId.",
 			);
+		}
 		if (!coinTypeA)
 			throw new Error("coinTypeA is required for sui.lp.cetus.add");
 		if (!coinTypeB)
@@ -1375,7 +1564,7 @@ async function normalizeIntent(
 
 	if (intentType === "sui.lp.cetus.remove") {
 		let poolId = params.poolId?.trim() || parsed.poolId;
-		const positionId = params.positionId?.trim() || parsed.positionId;
+		let positionId = params.positionId?.trim() || parsed.positionId;
 		const coinTypeA =
 			normalizeCoinTypeOrSymbol(params.coinTypeA?.trim()) || parsed.coinTypeA;
 		const coinTypeB =
@@ -1387,6 +1576,36 @@ async function normalizeIntent(
 		if (!poolId && positionId) {
 			poolId = await resolvePoolIdByPositionId(network, positionId);
 		}
+		if (!positionId && coinTypeA && coinTypeB) {
+			let owner: string;
+			try {
+				owner = resolveSuiOwnerAddress();
+			} catch {
+				owner = "";
+			}
+			const candidates = await resolveLpPositionByPair({
+				network,
+				coinTypeA,
+				coinTypeB,
+				poolId,
+				owner,
+			});
+			if (candidates.length === 1) {
+				positionId = candidates[0].positionId;
+				if (!poolId) {
+					poolId = candidates[0].poolId;
+				}
+			} else if (candidates.length > 1) {
+				const candidateList = formatCandidateListForError(candidates);
+				throw new Error(
+					`Multiple LP positions found for ${coinTypeA}/${coinTypeB} in owner wallet. Please provide positionId. candidates=${candidateList}`,
+				);
+			} else if (!poolId) {
+				throw new Error(
+					"No matching LP position found for this coin pair. Specify positionId (preferred) or add poolId+positionId before execution.",
+				);
+			}
+		}
 		if (!poolId) {
 			throw new Error(
 				positionId
@@ -1394,10 +1613,11 @@ async function normalizeIntent(
 					: "poolId is required for sui.lp.cetus.remove. Tip: first query Cetus pools and choose a poolId.",
 			);
 		}
-		if (!positionId)
+		if (!positionId) {
 			throw new Error(
 				"positionId is required for sui.lp.cetus.remove. Tip: LP remove currently targets an existing positionId.",
 			);
+		}
 		if (!coinTypeA)
 			throw new Error("coinTypeA is required for sui.lp.cetus.remove");
 		if (!coinTypeB)

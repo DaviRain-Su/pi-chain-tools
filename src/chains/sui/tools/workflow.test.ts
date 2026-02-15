@@ -3,13 +3,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const cetusMocks = vi.hoisted(() => {
 	const createAddLiquidityFixTokenPayload = vi.fn();
 	const removeLiquidityTransactionPayload = vi.fn();
+	const getPositionList = vi.fn();
 	const initCetusSDK = vi.fn().mockImplementation(() => ({
+		getPositionList,
 		Position: {
 			createAddLiquidityFixTokenPayload,
 			removeLiquidityTransactionPayload,
 		},
 	}));
 	return {
+		getPositionList,
 		createAddLiquidityFixTokenPayload,
 		removeLiquidityTransactionPayload,
 		initCetusSDK,
@@ -25,6 +28,10 @@ const runtimeMocks = vi.hoisted(() => {
 		getSuiRpcEndpoint: vi.fn(() => "https://fullnode.mainnet.sui.io:443"),
 		parsePositiveBigInt: vi.fn((value: string) => BigInt(value)),
 		parseSuiNetwork: vi.fn(() => "mainnet"),
+		resolveSuiOwnerAddress: vi.fn(
+			() =>
+				"0x1111111111111111111111111111111111111111111111111111111111111111",
+		),
 		signTransaction,
 		resolveSuiKeypair: vi.fn(() => ({
 			toSuiAddress: () =>
@@ -88,6 +95,7 @@ vi.mock("../runtime.js", async () => {
 		getSuiRpcEndpoint: runtimeMocks.getSuiRpcEndpoint,
 		parsePositiveBigInt: runtimeMocks.parsePositiveBigInt,
 		parseSuiNetwork: runtimeMocks.parseSuiNetwork,
+		resolveSuiOwnerAddress: runtimeMocks.resolveSuiOwnerAddress,
 		resolveSuiKeypair: runtimeMocks.resolveSuiKeypair,
 		suiNetworkSchema: runtimeMocks.suiNetworkSchema,
 		toMist: runtimeMocks.toMist,
@@ -854,6 +862,79 @@ describe("w3rt_run_sui_workflow_v0", () => {
 		).rejects.toThrow("could not be auto-resolved from positionId");
 	});
 
+	it("auto-resolves LP add positionId/poolId from owner wallet by pair", async () => {
+		const tool = getTool();
+		const owner =
+			"0x1111111111111111111111111111111111111111111111111111111111111111";
+		runtimeMocks.resolveSuiOwnerAddress.mockReturnValue(owner);
+		cetusMocks.getPositionList.mockResolvedValue([
+			{
+				position_id:
+					"0x1111111111111111111111111111111111111111111111111111111111111111",
+				pool_id:
+					"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				coin_type_a: "0x2::sui::SUI",
+				coin_type_b: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+			},
+		]);
+
+		const result = await tool.execute("wf5c-auto-pair", {
+			runId: "wf-sui-05c-auto-pair",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText: "添加流动性 SUI/USDC tick: -5 to 5 amountA: 10 amountB: 20",
+		});
+
+		expect(cetusMocks.getPositionList).toHaveBeenCalledWith(owner, undefined);
+		expect(cetusMocks.getPositionList).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.add",
+			intent: {
+				type: "sui.lp.cetus.add",
+				positionId:
+					"0x1111111111111111111111111111111111111111111111111111111111111111",
+				poolId:
+					"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+			},
+		});
+	});
+
+	it("asks for positionId when LP add pair maps to multiple positions", async () => {
+		const tool = getTool();
+		const owner =
+			"0x1111111111111111111111111111111111111111111111111111111111111111";
+		runtimeMocks.resolveSuiOwnerAddress.mockReturnValue(owner);
+		cetusMocks.getPositionList.mockResolvedValue([
+			{
+				position_id:
+					"0x1111111111111111111111111111111111111111111111111111111111111111",
+				pool_id:
+					"0x1111111111111111111111111111111111111111111111111111111111111112",
+				coin_type_a: "0x2::sui::SUI",
+				coin_type_b: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+			},
+			{
+				position_id:
+					"0x2222222222222222222222222222222222222222222222222222222222222222",
+				pool_id:
+					"0x3333333333333333333333333333333333333333333333333333333333333333",
+				coin_type_a: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+				coin_type_b: "0x2::sui::SUI",
+			},
+		]);
+
+		await expect(
+			tool.execute("wf5c-auto-pair-multi", {
+				runId: "wf-sui-05c-auto-pair-multi",
+				runMode: "analysis",
+				network: "mainnet",
+				intentText: "添加流动性 SUI/USDC tick: -5 to 5 amountA: 10 amountB: 20",
+			}),
+		).rejects.toThrow(/Multiple LP positions/);
+	});
+
 	it("resolves symbol input/output coin types from structured params", async () => {
 		const tool = getTool();
 		const result = await tool.execute("wf5d", {
@@ -952,6 +1033,45 @@ describe("w3rt_run_sui_workflow_v0", () => {
 						riskEngine: "heuristic",
 					},
 				},
+			},
+		});
+	});
+
+	it("auto-resolves LP remove positionId from owner wallet by pair", async () => {
+		const tool = getTool();
+		const owner =
+			"0x1111111111111111111111111111111111111111111111111111111111111111";
+		runtimeMocks.resolveSuiOwnerAddress.mockReturnValue(owner);
+		cetusMocks.getPositionList.mockResolvedValue([
+			{
+				position_id:
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+				pool_id:
+					"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				coin_type_a: "0x2::sui::SUI",
+				coin_type_b: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
+			},
+		]);
+		const result = await tool.execute("wf5c-auto-remove", {
+			runId: "wf-sui-05c-auto-remove",
+			runMode: "analysis",
+			network: "mainnet",
+			intentText:
+				"remove liquidity SUI/USDC tick: -5 to 5 deltaLiquidity: 1000",
+		});
+
+		expect(cetusMocks.getPositionList).toHaveBeenCalledWith(owner, undefined);
+		expect(cetusMocks.getPositionList).toHaveBeenCalledTimes(1);
+		expect(result.details).toMatchObject({
+			intentType: "sui.lp.cetus.remove",
+			intent: {
+				type: "sui.lp.cetus.remove",
+				positionId:
+					"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1",
+				poolId:
+					"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				coinTypeA: "0x2::sui::SUI",
+				coinTypeB: stableLayerMocks.STABLE_LAYER_DEFAULT_USDC_COIN_TYPE,
 			},
 		});
 	});
