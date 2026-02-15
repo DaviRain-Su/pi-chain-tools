@@ -127,7 +127,7 @@
 - 调用 `kaspa_signTransferTransaction`
 - 输入：`request=<compose返回.request>`, `signatures=[<sig1>, <sig2>]`，或 `signature=<sig>`
 - 输出：`request`（含签名数组）与 `signatureEncoding`，以及 `requestHash`/`unsignedRequestHash`，并返回 `signingContext`（`hashInput.fingerprint`、`hashInput.messageDigest`、`hashInput.signaturePayload`、`hashInput.payloadPreview`、`metadata.providerApiShape`、`metadata.providerResultShape`、签名编码、是否覆盖签名）。
-- 建议生产环境通过 `privateKeyFile` 或环境变量 `KASPA_PRIVATE_KEY`/`KASPA_PRIVATE_KEY_PATH` 提供签名密钥，避免在请求参数里明文传递 `privateKey`。如需自定义文件变量名，可传 `privateKeyPathEnv`。
+- 建议生产环境通过 `privateKeyFile`（或别名 `privateKeyPath`）或环境变量 `KASPA_PRIVATE_KEY`/`KASPA_PRIVATE_KEY_PATH` 提供签名密钥，避免在请求参数里明文传递 `privateKey`。如需自定义文件变量名，可传 `privateKeyPathEnv`。
 
 #### Step A：analysis
 

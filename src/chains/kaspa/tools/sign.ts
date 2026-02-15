@@ -181,19 +181,19 @@ function resolveKaspaSignerPrivateKey(params: {
 	privateKey?: string;
 	privateKeyEnv?: string;
 	privateKeyFile?: string;
+	privateKeyPath?: string;
 	privateKeyPathEnv?: string;
 }): string {
 	if (typeof params.privateKey === "string" && params.privateKey.trim()) {
 		return normalizeKaspaPrivateKey(params.privateKey);
 	}
-	if (
-		typeof params.privateKeyFile === "string" &&
-		params.privateKeyFile.trim()
-	) {
-		const fromFile = resolveKaspaPrivateKeyFromFile(params.privateKeyFile);
+	const resolvedPrivateKeyFile =
+		params.privateKeyFile?.trim() || params.privateKeyPath?.trim() || undefined;
+	if (resolvedPrivateKeyFile) {
+		const fromFile = resolveKaspaPrivateKeyFromFile(resolvedPrivateKeyFile);
 		if (!fromFile) {
 			throw new Error(
-				`Unable to load Kaspa private key from privateKeyFile ${params.privateKeyFile}`,
+				`Unable to load Kaspa private key from privateKeyFile ${resolvedPrivateKeyFile}`,
 			);
 		}
 		return normalizeKaspaPrivateKey(fromFile);
@@ -504,6 +504,7 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 	privateKey?: string;
 	privateKeyEnv?: string;
 	privateKeyFile?: string;
+	privateKeyPath?: string;
 	privateKeyPathEnv?: string;
 	replaceExistingSignatures?: boolean;
 }): Promise<KaspaSignedSubmissionResult> {
@@ -513,6 +514,7 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 		privateKey: params.privateKey,
 		privateKeyEnv: params.privateKeyEnv,
 		privateKeyFile: params.privateKeyFile,
+		privateKeyPath: params.privateKeyPath,
 		privateKeyPathEnv: params.privateKeyPathEnv,
 	});
 	const body = resolveKaspaTransactionSubmissionRequest(
@@ -1171,6 +1173,12 @@ export function createKaspaSignTools() {
 							"Optional local file path containing private key content; supports JSON {privateKey|private_key|secretKey|secret_key}.",
 					}),
 				),
+				privateKeyPath: Type.Optional(
+					Type.String({
+						description:
+							"Alias for local file path containing private key content.",
+					}),
+				),
 				privateKeyPathEnv: Type.Optional(
 					Type.String({
 						description:
@@ -1206,6 +1214,7 @@ export function createKaspaSignTools() {
 					privateKey?: string;
 					privateKeyEnv?: string;
 					privateKeyFile?: string;
+					privateKeyPath?: string;
 					privateKeyPathEnv?: string;
 					signerProvider?: KaspaSignerProvider;
 					providerModule?: string;
@@ -1218,6 +1227,7 @@ export function createKaspaSignTools() {
 					privateKey: params.privateKey,
 					privateKeyEnv: params.privateKeyEnv,
 					privateKeyFile: params.privateKeyFile,
+					privateKeyPath: params.privateKeyPath,
 					privateKeyPathEnv: params.privateKeyPathEnv,
 					signerProvider: params.signerProvider ?? "auto",
 					providerModule: params.providerModule,
@@ -1266,6 +1276,7 @@ export function signKaspaSubmitRequestWithWallet(params: {
 	privateKey?: string;
 	privateKeyEnv?: string;
 	privateKeyFile?: string;
+	privateKeyPath?: string;
 	privateKeyPathEnv?: string;
 	signerProvider?: KaspaSignerProvider;
 	providerModule?: string;

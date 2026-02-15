@@ -39,7 +39,7 @@
 
 4. **签名与广播流（本地签名入口）**
    - ✅ 当前：`request.rawTransaction` 与 `kaspa_signTransferTransaction` 支持签名附加/覆盖并输出可执行请求，同时返回 `signingContext`（`fingerprint`、`messageDigest`、`signaturePayload`、`payloadPreview`、`providerApiShape`、`providerResultShape` 等签名输入摘要与元数据字段）。
-- ✅ 增补：`kaspa_signTransferTransactionWithWallet` 支持本地密钥来源可选链路（`privateKey` 直传 / `privateKeyFile` 本地文件 / `privateKeyEnv` / `KASPA_PRIVATE_KEY` / `KASPA_PRIVATE_KEY_PATH`，以及 `privateKeyPathEnv` 自定义文件路径变量名），支持在生产环境减少明文透传风险。
+- ✅ 增补：`kaspa_signTransferTransactionWithWallet` 支持本地密钥来源可选链路（`privateKey` 直传 / `privateKeyFile`/`privateKeyPath` 本地文件 / `privateKeyEnv` / `KASPA_PRIVATE_KEY` / `KASPA_PRIVATE_KEY_PATH`，以及 `privateKeyPathEnv` 自定义文件路径变量名），支持在生产环境减少明文透传风险。
    - ✅ 已补齐：新增 `kaspa_signTransferTransactionWithWallet`，可挂接可选官方签名后端（`@kaspa/wallet`、`kaspa-wasm32-sdk`）或自定义 provider；输出仍为可提交 `request`。
 
 5. **执行回执（`GeneratorSummary` / receipt）**
