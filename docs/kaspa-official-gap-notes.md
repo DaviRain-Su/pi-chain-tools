@@ -38,7 +38,7 @@
    - ⚠️ 差距：未输出可直接映射到官方钱包 SDK 的签名上下文（未内置签名/序列化器、签名哈希提取、DER/Schnorr 细节）。
 
 4. **签名与广播流（本地签名入口）**
-   - ✅ 当前：`request.rawTransaction` 与 `kaspa_signTransferTransaction` 支持签名附加/覆盖并输出可执行请求，同时返回 `signingContext`（签名输入指纹）。
+   - ✅ 当前：`request.rawTransaction` 与 `kaspa_signTransferTransaction` 支持签名附加/覆盖并输出可执行请求，同时返回 `signingContext`（`fingerprint`、`messageDigest`、`payloadPreview` 等签名输入摘要字段）。
    - ✅ 已补齐：新增 `kaspa_signTransferTransactionWithWallet`，可挂接可选官方签名后端（`@kaspa/wallet`、`kaspa-wasm32-sdk`）或自定义 provider；输出仍为可提交 `request`。
 
 5. **执行回执（`GeneratorSummary` / receipt）**

@@ -94,7 +94,12 @@ describe("kaspa sign tools", () => {
 			unsignedRequestHash: string;
 			signingContext?: {
 				mode: "manual";
-				hashInput: { fingerprint: string; signatureEncoding: string };
+				hashInput: {
+					fingerprint: string;
+					messageDigest: string;
+					signatureEncoding: string;
+					payloadPreview?: string;
+				};
 				metadata: { replaceExistingSignatures: boolean };
 			};
 		};
@@ -113,6 +118,10 @@ describe("kaspa sign tools", () => {
 		expect(details.signingContext?.hashInput?.fingerprint).toMatch(
 			/^[0-9a-f]{64}$/,
 		);
+		expect(details.signingContext?.hashInput?.messageDigest).toBe(
+			details.signingContext?.hashInput?.fingerprint,
+		);
+		expect(details.signingContext?.hashInput?.payloadPreview).toContain("{");
 		expect(details.signingContext?.hashInput?.signatureEncoding).toBe("hex");
 	});
 
@@ -163,8 +172,10 @@ describe("kaspa sign tools", () => {
 				mode: "wallet";
 				hashInput: {
 					fingerprint: string;
+					messageDigest: string;
 					signatureEncoding: string;
 					network?: string;
+					payloadPreview?: string;
 				};
 				metadata: { provider?: string; replaceExistingSignatures?: boolean };
 			};
@@ -178,6 +189,10 @@ describe("kaspa sign tools", () => {
 		expect(details.signingContext?.hashInput?.fingerprint).toMatch(
 			/^[0-9a-f]{64}$/,
 		);
+		expect(details.signingContext?.hashInput?.messageDigest).toBe(
+			details.signingContext?.hashInput?.fingerprint,
+		);
+		expect(details.signingContext?.hashInput?.payloadPreview).toContain("{");
 		expect(details.signingContext?.hashInput?.signatureEncoding).toBe("hex");
 		const signedRaw = JSON.parse(details.rawTransaction) as {
 			signatures: string[];

@@ -22,9 +22,12 @@ type KaspaSigningContext = {
 	mode: KaspaSigningMethod;
 	hashInput: {
 		fingerprint: string;
+		messageDigest: string;
 		signatureEncoding: string;
 		network?: string;
 		inputShape: string;
+		payloadPreview?: string;
+		schema: "kaspa-signing-input.v1";
 	};
 	metadata: {
 		provider?: KaspaSignerProvider;
@@ -105,16 +108,36 @@ function parseKaspaTransactionPayload(value?: string): unknown | undefined {
 	}
 }
 
-function buildKaspaSigningInputFingerprint(
+function buildKaspaSigningContextInput(
 	transaction: Record<string, unknown>,
 	signatureEncoding: string,
 	network?: string,
-): string {
-	return buildKaspaRequestFingerprint({
+): {
+	fingerprint: string;
+	payload: {
+		transaction: Record<string, unknown>;
+		signatureEncoding: string;
+		network?: string;
+	};
+} {
+	const payload = {
 		transaction: stripSignatures(transaction),
 		signatureEncoding,
 		network,
-	});
+	};
+	return {
+		fingerprint: buildKaspaRequestFingerprint(payload),
+		payload,
+	};
+}
+
+const KASPA_SIGNING_PREVIEW_MAX_LENGTH = 1024;
+
+function buildSigningInputPreview(payload: unknown): string {
+	const serialized = stableKaspaJson(payload);
+	return serialized.length > KASPA_SIGNING_PREVIEW_MAX_LENGTH
+		? `${serialized.slice(0, KASPA_SIGNING_PREVIEW_MAX_LENGTH)}...`
+		: serialized;
 }
 
 function resolveKaspaTransactionSubmissionRequest(
@@ -294,17 +317,21 @@ function signKaspaSubmitTransaction(params: {
 	}
 	const signingTransaction = cloneTransactionPayload(body.transaction);
 	const network = detectKaspaRequestNetwork(signingTransaction);
+	const signingInput = buildKaspaSigningContextInput(
+		signingTransaction,
+		resolvedEncoding,
+		network,
+	);
 	const signingContext: KaspaSigningContext = {
 		mode: "manual",
 		hashInput: {
-			fingerprint: buildKaspaSigningInputFingerprint(
-				signingTransaction,
-				resolvedEncoding,
-				network,
-			),
+			fingerprint: signingInput.fingerprint,
+			messageDigest: signingInput.fingerprint,
 			signatureEncoding: resolvedEncoding,
 			network,
 			inputShape: "transaction-without-signatures",
+			payloadPreview: buildSigningInputPreview(signingInput.payload),
+			schema: "kaspa-signing-input.v1",
 		},
 		metadata: {
 			replaceExistingSignatures: Boolean(params.replaceExistingSignatures),
@@ -351,11 +378,12 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 	const signer = signerResolution.signer;
 	const transaction = cloneTransactionPayload(body.transaction);
 	const network = detectKaspaRequestNetwork(transaction);
-	const signingHash = buildKaspaSigningInputFingerprint(
+	const signingInput = buildKaspaSigningContextInput(
 		transaction,
 		normalizedEncoding,
 		network,
 	);
+	const signingHash = signingInput.fingerprint;
 	const rawTransaction =
 		typeof body.rawTransaction === "string"
 			? body.rawTransaction
@@ -381,9 +409,12 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 		mode: "wallet",
 		hashInput: {
 			fingerprint: signingHash,
+			messageDigest: signingHash,
 			signatureEncoding: normalizedEncoding,
 			network,
 			inputShape: "transaction-without-signatures",
+			payloadPreview: buildSigningInputPreview(signingInput.payload),
+			schema: "kaspa-signing-input.v1",
 		},
 		metadata: {
 			provider: resolvedProvider,

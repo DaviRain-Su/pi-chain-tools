@@ -35,7 +35,7 @@
 - `kaspa_submitTransaction`：analysis 阶段增加预检开关（`skipFeePreflight` / `skipMempoolPreflight` / `skipReadStatePreflight`）和风险摘要（`riskLevel`/`readiness`）；
 - `kaspa_submitTransaction`：execute 阶段返回标准化 `receipt`（含 `preflightRiskLevel` / `preflightReadiness` / `broadcastStatus`）。
 - `kaspa_buildTransferTransaction`：新增 `compose` 组建模组，支持本地签名前的 UTXO 选择、输出拼装、手续费估算、找零策略与签名 payload 产出。
-- `kaspa_signTransferTransaction`：新增签名承接工具，支持在请求对象/原始交易基础上附加或覆盖签名，返回可执行 `request`、`requestHash`，并补充签名上下文元数据（输入指纹/编码/覆盖策略）。
+- `kaspa_signTransferTransaction`：新增签名承接工具，支持在请求对象/原始交易基础上附加或覆盖签名，返回可执行 `request`、`requestHash`，并补充签名上下文元数据（输入指纹/消息摘要/签名上下文预览/覆盖策略）。
 - `kaspa_signTransferTransactionWithWallet`：新增钱包签名承接工具，支持可选官方签名后端（`@kaspa/wallet` / `kaspa-wasm32-sdk` / 自定义 provider module）进行签名生成，再自动拼接为可提交请求。
 - `w3rt_run_kaspa_workflow_v0`：新增 Kaspa 工作流，支持 `analysis -> simulate -> execute` 三段闭环（可直接承接前置 preflight 与主网确认门禁）。
 - `kaspa_getAddressBalance`：查询地址余额快照。
@@ -126,7 +126,7 @@
 
 - 调用 `kaspa_signTransferTransaction`
 - 输入：`request=<compose返回.request>`, `signatures=[<sig1>, <sig2>]`，或 `signature=<sig>`
-- 输出：`request`（含签名数组）与 `signatureEncoding`，以及 `requestHash`/`unsignedRequestHash`，并返回 `signingContext`（签名哈希输入指纹、签名编码、是否覆盖签名）。
+- 输出：`request`（含签名数组）与 `signatureEncoding`，以及 `requestHash`/`unsignedRequestHash`，并返回 `signingContext`（`hashInput.fingerprint`、`hashInput.messageDigest`、`hashInput.payloadPreview`、签名编码、是否覆盖签名）。
 
 #### Step A：analysis
 
