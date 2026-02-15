@@ -190,6 +190,16 @@
 - 输入：`rawTransaction=<hex/base64>`, `network=testnet`, 可选 `feeEndpoint/mempoolEndpoint/readStateEndpoint`
 - 输出：`kaspa.transaction.preflight.v1`（`readiness`、`riskLevel`、`preflight` 报告）
 
+#### Step F：read 结果统一消费（展示层模板）
+
+- 调用 `kaspa_getTransaction`、`kaspa_getTransactionOutput` 或 `kaspa_getAddressUtxos`
+- 每个 read 结果会返回统一字段：
+  - `standardized.summary`
+  - `standardized.inputs`
+  - `standardized.outputs`
+  - `standardized.fees`
+  - 并且同步展开到顶层 `summary` / `inputs` / `outputs` / `fees`，便于直接展示。
+
 ## 8. 交付与后续建议
 
 - 代码清单（本次提交）：

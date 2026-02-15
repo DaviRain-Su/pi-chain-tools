@@ -1776,6 +1776,10 @@ export function createKaspaReadToolsLegacy() {
 			}),
 			async execute(_toolCallId, params) {
 				const result = await fetchKaspaTransaction(params);
+				const standardized = buildKaspaReadTransactionStandardization(
+					result.transactionId,
+					result,
+				);
 				return {
 					content: [
 						{ type: "text", text: summarizeKaspaTransactionResult(result) },
@@ -1786,10 +1790,11 @@ export function createKaspaReadToolsLegacy() {
 						transactionId: result.transactionId,
 						apiBaseUrl: result.apiBaseUrl,
 						data: result.data,
-						standardized: buildKaspaReadTransactionStandardization(
-							result.transactionId,
-							result,
-						),
+						standardized,
+						summary: standardized.summary,
+						inputs: standardized.inputs,
+						outputs: standardized.outputs,
+						fees: standardized.fees,
 					},
 				};
 			},
@@ -1808,6 +1813,7 @@ export function createKaspaReadToolsLegacy() {
 			}),
 			async execute(_toolCallId, params) {
 				const result = await fetchKaspaTransactionOutput(params);
+				const standardized = buildKaspaReadTransactionOutputStandardization(result);
 				return {
 					content: [
 						{
@@ -1822,7 +1828,11 @@ export function createKaspaReadToolsLegacy() {
 						outputIndex: result.outputIndex,
 						apiBaseUrl: result.apiBaseUrl,
 						data: result.data,
-						standardized: buildKaspaReadTransactionOutputStandardization(result),
+						standardized,
+						summary: standardized.summary,
+						inputs: standardized.inputs,
+						outputs: standardized.outputs,
+						fees: standardized.fees,
 					},
 				};
 			},
@@ -1908,6 +1918,7 @@ export function createKaspaReadToolsLegacy() {
 			}),
 			async execute(_toolCallId, params) {
 				const result = await fetchKaspaAddressUtxos(params);
+				const standardized = buildKaspaReadUtxoStandardization(result);
 				return {
 					content: [
 						{
@@ -1922,7 +1933,11 @@ export function createKaspaReadToolsLegacy() {
 						apiBaseUrl: result.apiBaseUrl,
 						limit: result.limit,
 						data: result.data,
-						standardized: buildKaspaReadUtxoStandardization(result),
+						standardized,
+						summary: standardized.summary,
+						inputs: standardized.inputs,
+						outputs: standardized.outputs,
+						fees: standardized.fees,
 					},
 				};
 			},
@@ -1967,6 +1982,13 @@ export function createKaspaReadToolsLegacy() {
 					apiKey: params.apiKey,
 					strictAddressCheck: params.strictAddressCheck,
 				});
+				const standardized = buildKaspaReadUtxoStandardization({
+					address: result.address,
+					network: result.network,
+					apiBaseUrl: result.apiBaseUrl,
+					limit: result.limit,
+					data: result.data,
+				});
 				return {
 					content: [
 						{
@@ -1985,15 +2007,12 @@ export function createKaspaReadToolsLegacy() {
 						rawCount: result.rawCount,
 						fetchedCount: result.fetchedCount,
 						selectedCount: result.selectedCount,
-						summary: result.summary,
 						data: result.data,
-						standardized: buildKaspaReadUtxoStandardization({
-							address: result.address,
-							network: result.network,
-							apiBaseUrl: result.apiBaseUrl,
-							limit: result.limit,
-							data: result.data,
-						}),
+						standardized,
+						summary: standardized.summary,
+						inputs: standardized.inputs,
+						outputs: standardized.outputs,
+						fees: standardized.fees,
 					},
 				};
 			},
