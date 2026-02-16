@@ -609,7 +609,7 @@ GET https://li.quest/v1/quote
 - [x] 处理 BSC USDC 18 decimals 差异（按网络覆盖 decimals）
 - [ ] 确认 BSC transfer 端到端可用
 
-### Phase 1：Venus Protocol Adapter + Types ⏱ 1-2 天
+### Phase 1：Venus Protocol Adapter + Types ⏱ 1-2 天 ✅
 - [x] `lending-types.ts` — 统一借贷接口（`LendingProtocolAdapter`）
 - [x] `venus-adapter.ts` — Venus 合约读取 + calldata 构建
 - [x] `venus-adapter.test.ts` — 27 个测试
@@ -625,19 +625,21 @@ GET https://li.quest/v1/quote
 - [ ] `PRIVY_APP_ID` + `PRIVY_APP_SECRET` + `PRIVY_WALLET_ID` env 配置
 - [ ] 测试（mock Privy API）
 
-### Phase 2：Venus Execute Tools + Workflow ⏱ 2-3 天
-- [ ] `venus-execute.ts` — supply / borrow / repay / withdraw（MCP 工具）
-- [ ] `venus-workflow.ts` — `w3rt_run_evm_venus_workflow_v0`（analysis→simulate→execute）
-- [ ] approve 处理（ERC-20 allowance 检查 + approve tx）
-- [ ] BNB 特殊处理（vBNB 用 msg.value）
-- [ ] Execute 路径通过 `EvmSignerProvider` 签名（支持本地/Privy）
-- [ ] 测试
+### Phase 2：Venus Execute Tools + Workflow ⏱ 2-3 天 ✅
+- [x] `venus-read.ts` — `evm_venusGetMarkets` / `evm_venusGetPosition`（MCP 工具）— 4 tests
+- [x] `venus-execute.ts` — supply / borrow / repay / withdraw / enterMarkets（dryRun + confirmMainnet 门控）— 8 tests
+- [x] `venus-workflow.ts` — `w3rt_run_evm_venus_workflow_v0`（analysis→simulate→execute + confirmToken）— 13 tests
+- [x] approve 处理（ERC-20 approve + mint/repayBorrow 序列化发送）
+- [x] BNB 特殊处理（vBNB 用 msg.value）
+- [x] tokenSymbol 快捷方式（BNB/USDC/USDT/BTCB/ETH → 地址解析）
+- [x] 注册到 `toolset.ts` — read 组 + execute 组
 
-### Phase 3：LTV Manager 集成 ⏱ 1 天
+### Phase 3：LTV Manager 集成 ⏱ 1 天 ✅
 - [x] `ltv-manager.ts` — 决策引擎（已完成）
-- [ ] Agent 配置模型（先内存/env，后续可 DB/链上）
-- [ ] 集成 Venus adapter + Signer Provider 完成闭环
-- [ ] 测试
+- [x] `venus-agent.ts` — Agent 工具（`evm_venusAgentCheck` + `evm_venusAgentAuditLog`）— 11 tests
+- [x] Agent 配置模型（env: `VENUS_AGENT_MAX_LTV` / `TARGET_LTV` / `MIN_YIELD_SPREAD` / `PAUSED`）
+- [x] 集成 Venus adapter — `buildLtvInput()` 桥接 position→LTV input
+- [x] 审计日志（内存 ring buffer，最近 100 条）
 
 ### Phase 4：LI.FI 跨链 ⏱ 1-2 天
 - [ ] `lifi-read.ts` — quote + status
