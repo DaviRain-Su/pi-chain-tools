@@ -8,22 +8,23 @@ import {
 
 // Mock the read tools to avoid real RPC calls
 vi.mock("./read.js", () => {
+	// Burrow returns APR as raw decimal: 0.0425 = 4.25%
 	const mockStableYieldPlan = {
 		selected: {
 			tokenId: "usdc.token.near",
 			symbol: "USDC",
-			supplyApr: "4.25",
+			supplyApr: "0.0425",
 		},
 		candidates: [
 			{
 				tokenId: "usdc.token.near",
 				symbol: "USDC",
-				supplyApr: "4.25",
+				supplyApr: "0.0425",
 			},
 			{
 				tokenId: "usdt.token.near",
 				symbol: "USDT",
-				supplyApr: "3.80",
+				supplyApr: "0.0380",
 			},
 		],
 	};
@@ -33,7 +34,7 @@ vi.mock("./read.js", () => {
 			{
 				tokenId: "usdt.token.near",
 				symbol: "USDT",
-				apr: "3.10",
+				apr: "0.0310",
 			},
 		],
 	};
@@ -183,11 +184,11 @@ describe("NEAR yield worker", () => {
 		await new Promise((r) => setTimeout(r, 100));
 
 		const lastLog = lastLogOf("near:testnet:eve.testnet");
-		// Mock: USDC 4.25% vs current USDT 3.10% = delta 1.15% > 0.5% threshold
+		// Mock: USDC 0.0425 (4.25%) vs current USDT 0.0310 (3.10%) = delta 0.0115 > 0.005 threshold
 		expect(lastLog.decision.action).toBe("rebalance");
 		expect(lastLog.decision.bestSymbol).toBe("USDC");
 		expect(lastLog.decision.currentSymbol).toBe("USDT");
-		expect(lastLog.decision.aprDelta).toBeCloseTo(1.15, 1);
+		expect(lastLog.decision.aprDelta).toBeCloseTo(0.0115, 3);
 	});
 
 	it("holds when APR delta is below threshold", async () => {

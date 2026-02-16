@@ -158,6 +158,14 @@ function parseApr(apr: string | null | undefined): number {
 	return Number.isFinite(n) ? n : 0;
 }
 
+/** Format Burrow raw APR (0.031 = 3.1%) as human-readable percentage string */
+function fmtApr(raw: string | number | null | undefined): string {
+	if (raw == null) return "n/a";
+	const n = typeof raw === "number" ? raw : Number.parseFloat(String(raw));
+	if (!Number.isFinite(n)) return "n/a";
+	return `${(n * 100).toFixed(2)}%`;
+}
+
 // ---------------------------------------------------------------------------
 // Single cycle
 // ---------------------------------------------------------------------------
@@ -284,19 +292,19 @@ async function runCycle(
 		} else if (currentSupplied == null) {
 			// No current position — first supply
 			decision.action = "supply";
-			decision.reason = `No current stablecoin supply. Best candidate: ${bestCandidate.symbol} at ${bestCandidate.supplyApr ?? "n/a"}% APR`;
+			decision.reason = `No current stablecoin supply. Best candidate: ${bestCandidate.symbol} at ${fmtApr(bestCandidate.supplyApr)} APR`;
 		} else if (
 			bestCandidate.tokenId.toLowerCase() ===
 			currentSupplied.tokenId.toLowerCase()
 		) {
 			decision.action = "hold";
-			decision.reason = `Already in best stablecoin (${currentSupplied.symbol} at ${currentApr.toFixed(2)}% APR)`;
-		} else if (aprDelta >= worker.config.minAprDelta) {
+			decision.reason = `Already in best stablecoin (${currentSupplied.symbol} at ${fmtApr(currentApr)} APR)`;
+		} else if (aprDelta >= worker.config.minAprDelta / 100) {
 			decision.action = "rebalance";
-			decision.reason = `Better APR available: ${bestCandidate.symbol} at ${bestApr.toFixed(2)}% vs current ${currentSupplied.symbol} at ${currentApr.toFixed(2)}% (delta: +${aprDelta.toFixed(2)}%)`;
+			decision.reason = `Better APR available: ${bestCandidate.symbol} at ${fmtApr(bestApr)} vs current ${currentSupplied.symbol} at ${fmtApr(currentApr)} (delta: +${fmtApr(aprDelta)})`;
 		} else {
 			decision.action = "hold";
-			decision.reason = `APR delta ${aprDelta.toFixed(2)}% below threshold ${worker.config.minAprDelta}% (current: ${currentSupplied.symbol} ${currentApr.toFixed(2)}%, best: ${bestCandidate.symbol} ${bestApr.toFixed(2)}%)`;
+			decision.reason = `APR delta ${fmtApr(aprDelta)} below threshold ${worker.config.minAprDelta}% (current: ${currentSupplied.symbol} ${fmtApr(currentApr)}, best: ${bestCandidate.symbol} ${fmtApr(bestApr)})`;
 		}
 
 		log.decision = decision;
@@ -721,12 +729,12 @@ export function createNearYieldWorkerTools() {
 					);
 					if (lastLog.decision.currentSymbol) {
 						lines.push(
-							`  Current: ${lastLog.decision.currentSymbol} at ${lastLog.decision.currentApr ?? "?"}% APR`,
+							`  Current: ${lastLog.decision.currentSymbol} at ${fmtApr(lastLog.decision.currentApr)} APR`,
 						);
 					}
 					if (lastLog.decision.bestSymbol) {
 						lines.push(
-							`  Best:    ${lastLog.decision.bestSymbol} at ${lastLog.decision.bestApr ?? "?"}% APR`,
+							`  Best:    ${lastLog.decision.bestSymbol} at ${fmtApr(lastLog.decision.bestApr)} APR`,
 						);
 					}
 				}
