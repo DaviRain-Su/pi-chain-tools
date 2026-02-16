@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	formatNearAmount,
+	getNearRpcEndpoints,
 	parseNearNetwork,
 	resolveNearAccountId,
 	resolveNearPrivateKey,
@@ -15,6 +16,10 @@ const ORIGINAL_ENV = {
 	NEAR_WALLET_ACCOUNT_ID: process.env.NEAR_WALLET_ACCOUNT_ID,
 	NEAR_PRIVATE_KEY: process.env.NEAR_PRIVATE_KEY,
 	NEAR_CREDENTIALS_DIR: process.env.NEAR_CREDENTIALS_DIR,
+	NEAR_RPC_URL: process.env.NEAR_RPC_URL,
+	NEAR_RPC_URLS: process.env.NEAR_RPC_URLS,
+	NEAR_MAINNET_RPC_URL: process.env.NEAR_MAINNET_RPC_URL,
+	NEAR_MAINNET_RPC_URLS: process.env.NEAR_MAINNET_RPC_URLS,
 };
 
 const tempDirs: string[] = [];
@@ -57,6 +62,10 @@ afterEach(() => {
 	setOptionalEnv("NEAR_WALLET_ACCOUNT_ID", ORIGINAL_ENV.NEAR_WALLET_ACCOUNT_ID);
 	setOptionalEnv("NEAR_PRIVATE_KEY", ORIGINAL_ENV.NEAR_PRIVATE_KEY);
 	setOptionalEnv("NEAR_CREDENTIALS_DIR", ORIGINAL_ENV.NEAR_CREDENTIALS_DIR);
+	setOptionalEnv("NEAR_RPC_URL", ORIGINAL_ENV.NEAR_RPC_URL);
+	setOptionalEnv("NEAR_RPC_URLS", ORIGINAL_ENV.NEAR_RPC_URLS);
+	setOptionalEnv("NEAR_MAINNET_RPC_URL", ORIGINAL_ENV.NEAR_MAINNET_RPC_URL);
+	setOptionalEnv("NEAR_MAINNET_RPC_URLS", ORIGINAL_ENV.NEAR_MAINNET_RPC_URLS);
 	while (tempDirs.length > 0) {
 		const dir = tempDirs.pop();
 		if (dir) {
@@ -75,6 +84,20 @@ describe("parseNearNetwork", () => {
 		expect(parseNearNetwork("mainnet-beta")).toBe("mainnet");
 		expect(parseNearNetwork("unknown")).toBe("mainnet");
 		expect(parseNearNetwork(undefined)).toBe("mainnet");
+	});
+});
+
+describe("getNearRpcEndpoints", () => {
+	it("uses rpc url list env when provided", () => {
+		setOptionalEnv("NEAR_MAINNET_RPC_URLS", "https://a,https://b");
+		expect(getNearRpcEndpoints("mainnet")).toEqual(["https://a", "https://b"]);
+	});
+
+	it("prefers explicit rpcUrl over env", () => {
+		setOptionalEnv("NEAR_MAINNET_RPC_URLS", "https://a,https://b");
+		expect(getNearRpcEndpoints("mainnet", "https://explicit")).toEqual([
+			"https://explicit",
+		]);
 	});
 });
 

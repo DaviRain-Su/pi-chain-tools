@@ -19,6 +19,11 @@ const NEAR_RPC_ENV_BY_NETWORK: Record<NearNetwork, string> = {
 	testnet: "NEAR_TESTNET_RPC_URL",
 };
 
+const NEAR_RPC_URLS_ENV_BY_NETWORK: Record<NearNetwork, string> = {
+	mainnet: "NEAR_MAINNET_RPC_URLS",
+	testnet: "NEAR_TESTNET_RPC_URLS",
+};
+
 const NEAR_DEFAULT_RPC_BY_NETWORK: Record<NearNetwork, string> = {
 	mainnet: "https://rpc.mainnet.near.org",
 	testnet: "https://rpc.testnet.near.org",
@@ -65,25 +70,52 @@ export function parseNearNetwork(value?: string): NearNetwork {
 	return DEFAULT_NETWORK;
 }
 
-export function getNearRpcEndpoint(network?: string, rpcUrl?: string): string {
+function parseRpcUrlList(value?: string): string[] {
+	if (!value) return [];
+	return value
+		.split(/[\n,;]/)
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0);
+}
+
+export function getNearRpcEndpoints(
+	network?: string,
+	rpcUrl?: string,
+): string[] {
 	const explicitRpcUrl = rpcUrl?.trim();
 	if (explicitRpcUrl) {
-		return explicitRpcUrl;
+		return [explicitRpcUrl];
 	}
 
 	const parsedNetwork = parseNearNetwork(network);
+	const networkListEnv = parseRpcUrlList(
+		process.env[NEAR_RPC_URLS_ENV_BY_NETWORK[parsedNetwork]],
+	);
+	if (networkListEnv.length > 0) {
+		return networkListEnv;
+	}
+
+	const fallbackListEnv = parseRpcUrlList(process.env.NEAR_RPC_URLS);
+	if (fallbackListEnv.length > 0) {
+		return fallbackListEnv;
+	}
+
 	const networkEnv =
 		process.env[NEAR_RPC_ENV_BY_NETWORK[parsedNetwork]]?.trim();
 	if (networkEnv) {
-		return networkEnv;
+		return [networkEnv];
 	}
 
 	const fallbackEnv = process.env.NEAR_RPC_URL?.trim();
 	if (fallbackEnv) {
-		return fallbackEnv;
+		return [fallbackEnv];
 	}
 
-	return NEAR_DEFAULT_RPC_BY_NETWORK[parsedNetwork];
+	return [NEAR_DEFAULT_RPC_BY_NETWORK[parsedNetwork]];
+}
+
+export function getNearRpcEndpoint(network?: string, rpcUrl?: string): string {
+	return getNearRpcEndpoints(network, rpcUrl)[0] as string;
 }
 
 function parseUnsignedBigInt(
@@ -544,6 +576,18 @@ export function getNearExplorerTransactionUrl(
 	return `${origin}/txns/${encodeURIComponent(txHash)}`;
 }
 
+function isTransientNearRpcError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	const text = error.message.toLowerCase();
+	return (
+		text.includes("429") ||
+		text.includes("too many requests") ||
+		text.includes("fetch failed") ||
+		text.includes("networkerror") ||
+		text.includes("timeout")
+	);
+}
+
 export async function callNearRpc<T>(params: {
 	method: string;
 	params?: unknown;
@@ -556,7 +600,7 @@ export async function callNearRpc<T>(params: {
 		throw new Error("NEAR RPC method is required");
 	}
 
-	const endpoint = getNearRpcEndpoint(params.network, params.rpcUrl);
+	const endpoints = getNearRpcEndpoints(params.network, params.rpcUrl);
 	const payload = {
 		jsonrpc: "2.0",
 		id: "pi-chain-tools",
@@ -564,37 +608,61 @@ export async function callNearRpc<T>(params: {
 		params: params.params ?? {},
 	};
 
-	const response = await fetch(endpoint, {
-		body: JSON.stringify(payload),
-		headers: {
-			"content-type": "application/json",
-		},
-		method: "POST",
-		signal: params.signal,
-	});
+	let lastError: Error | null = null;
+	for (const endpoint of endpoints) {
+		try {
+			const response = await fetch(endpoint, {
+				body: JSON.stringify(payload),
+				headers: {
+					"content-type": "application/json",
+				},
+				method: "POST",
+				signal: params.signal,
+			});
 
-	if (!response.ok) {
-		throw new Error(
-			`NEAR RPC request failed (${response.status} ${response.statusText})`,
-		);
+			if (!response.ok) {
+				throw new Error(
+					`NEAR RPC request failed (${response.status} ${response.statusText})`,
+				);
+			}
+
+			const json = (await response.json()) as NearRpcResponse<T>;
+			if (!json || typeof json !== "object") {
+				throw new Error("Invalid NEAR RPC response payload");
+			}
+
+			if (json.error) {
+				const code =
+					typeof json.error.code === "number" ? ` (${json.error.code})` : "";
+				const message = json.error.message?.trim() || "Unknown NEAR RPC error";
+				throw new Error(`NEAR RPC error${code}: ${message}`);
+			}
+
+			if (!("result" in json)) {
+				throw new Error("NEAR RPC response missing result");
+			}
+			return json.result as T;
+		} catch (error) {
+			if (!(error instanceof Error)) {
+				lastError = new Error(String(error));
+				continue;
+			}
+			lastError = error;
+			if (!isTransientNearRpcError(error)) {
+				throw error;
+			}
+		}
 	}
 
-	const json = (await response.json()) as NearRpcResponse<T>;
-	if (!json || typeof json !== "object") {
-		throw new Error("Invalid NEAR RPC response payload");
+	if (lastError) {
+		if (endpoints.length > 1) {
+			throw new Error(
+				`NEAR RPC failed across ${endpoints.length} endpoint(s): ${lastError.message}`,
+			);
+		}
+		throw lastError;
 	}
-
-	if (json.error) {
-		const code =
-			typeof json.error.code === "number" ? ` (${json.error.code})` : "";
-		const message = json.error.message?.trim() || "Unknown NEAR RPC error";
-		throw new Error(`NEAR RPC error${code}: ${message}`);
-	}
-
-	if (!("result" in json)) {
-		throw new Error("NEAR RPC response missing result");
-	}
-	return json.result as T;
+	throw new Error("NEAR RPC request failed with unknown error");
 }
 
 export const YOCTO_NEAR_PER_NEAR = YOCTO_PER_NEAR;
