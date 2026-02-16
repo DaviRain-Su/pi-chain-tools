@@ -19,41 +19,97 @@ Autonomous DeFi agent for NEAR Protocol — stablecoin yield optimization, lendi
 pi install https://github.com/DaviRain-Su/pi-chain-tools
 ```
 
-After install, reload extensions — all 43 NEAR tools become available.
+After install, reload extensions — all 44 NEAR tools become available.
 
-### 2. Environment Setup
+### 2. NEAR Account Setup
+
+**Option A: Use NEAR CLI (recommended)**
+
+The tools auto-discover your local NEAR CLI wallet credentials. No env vars needed.
 
 ```bash
-# Required for execute operations
+# Install near-cli-rs
+npm install -g near-cli-rs
+
+# Create new account (testnet)
+near account create-account fund-myself <your-name>.testnet autogenerate-new-keypair save-to-keychain
+
+# Or import existing account
+near account import-account using-private-key ed25519:... --account-id your-account.near
+
+# Credentials are saved to ~/.near-credentials/<network>/
+```
+
+**Option B: Environment variables (for CI/servers)**
+
+```bash
 export NEAR_ACCOUNT_ID=your-account.near
 export NEAR_PRIVATE_KEY=ed25519:...
+```
 
+**RPC and notifications (optional):**
+
+```bash
 # Recommended: use fastnear RPC (higher rate limits than public RPC)
 export NEAR_MAINNET_RPC_URL=https://free.rpc.fastnear.com
 
-# Optional: webhook for autonomous worker notifications
+# Webhook for autonomous worker notifications
 export NEAR_YIELD_WORKER_WEBHOOK_URL=https://your-webhook.example.com
-
-# Optional: custom testnet RPC
-export NEAR_TESTNET_RPC_URL=https://rpc.testnet.near.org
 ```
 
 ### 3. Verify Setup
 
+Run the setup checker first — it will detect your near-cli and credentials:
+
 ```
-near_getBalance({ accountId: "your-account.near", network: "mainnet" })
+near_checkSetup({ network: "mainnet" })
+```
+
+Output example (when configured):
+```
+NEAR Setup Check (mainnet)
+near-cli installed: yes
+Credentials dir: /Users/you/.near-credentials
+Account found: your-account.near
+Private key: yes
+
+Account your-account.near ready (credentials at ~/.near-credentials/mainnet/)
+```
+
+Output example (when NOT configured):
+```
+NEAR Setup Check (mainnet)
+near-cli installed: NO
+Credentials dir: /Users/you/.near-credentials
+Account found: none
+Private key: NO
+
+No NEAR credentials found.
+
+To get started:
+  1. Install near-cli:  npm install -g near-cli-rs
+  2. Create/import account:  near account create-account
+  3. Or import existing:  near account import-account using-private-key ed25519:...
+
+Credentials will be saved to ~/.near-credentials/mainnet/
+```
+
+Then verify connectivity:
+```
+near_getBalance({ network: "mainnet" })
 ```
 
 If this returns a balance, you're ready.
 
 ---
 
-## Tool Inventory (43 tools)
+## Tool Inventory (44 tools)
 
 ### Read Tools (no credentials needed)
 
 | Tool | Purpose |
 |------|---------|
+| `near_checkSetup` | **Diagnostic: detect near-cli + local wallet credentials** |
 | `near_getBalance` | Native NEAR balance |
 | `near_getAccount` | Account state (storage, code hash) |
 | `near_getFtBalance` | NEP-141 token balance |
@@ -498,5 +554,5 @@ steps:
 | `NEAR RPC error (-32000)` on testnet | Burrow only exists on mainnet; use `network: "mainnet"` |
 | Worker shows `error_pause` | Check `near_yieldWorkerStatus` for last error. Usually RPC issues. Restart with `near_yieldWorkerStart`. |
 | `confirmToken` mismatch | Must use same `runId` across analysis→execute phases |
-| No NEAR_PRIVATE_KEY | Read-only tools work without credentials. Execute tools need `NEAR_PRIVATE_KEY`. |
+| No NEAR_PRIVATE_KEY | Run `near_checkSetup` for diagnostic. Install near-cli: `npm install -g near-cli-rs`, then `near account import-account`. Or set `NEAR_PRIVATE_KEY` env. |
 | Account not found | Verify account exists with `near_getAccount` |

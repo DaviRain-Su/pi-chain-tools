@@ -79,7 +79,7 @@ That's it. The agent handles everything else autonomously.
 
 ### Tool Layer (MCP)
 
-The agent is built on a structured tool layer — 43 NEAR MCP tools covering the full DeFi stack:
+The agent is built on a structured tool layer — 44 NEAR MCP tools covering the full DeFi stack:
 
 | Category | Tools | Examples |
 |----------|-------|---------|
@@ -225,7 +225,7 @@ Output: Simulation with risk profile, confirmToken for execution gate
 
 | Metric | Value |
 |--------|-------|
-| NEAR MCP tools | **43** |
+| NEAR MCP tools | **44** |
 | NEAR test cases | **194** |
 | NEAR code (tools + runtime) | **~36,000 lines** |
 | Total project tests | **910 across 55 files** |

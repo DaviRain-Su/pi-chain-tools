@@ -28,6 +28,7 @@ describe("nearExtension", () => {
 			"near_buildTransferFtTransaction",
 			"near_buildTransferNearTransaction",
 			"near_buildWithdrawBurrowTransaction",
+			"near_checkSetup",
 			"near_getAccount",
 			"near_getBalance",
 			"near_getFtBalance",

@@ -1,6 +1,6 @@
 # Gradience
 
-Gradience is a multi-chain AI agent runtime — 43 NEAR tools, 30+ EVM tools, full Solana/Sui coverage — that turns blockchain capabilities into structured, safe, composable MCP services.
+Gradience is a multi-chain AI agent runtime — 44 NEAR tools, 30+ EVM tools, full Solana/Sui coverage — that turns blockchain capabilities into structured, safe, composable MCP services.
 
 **Featured: [Autonomous Stablecoin Yield Agent on NEAR](docs/near-hackathon.md)** — an AI agent that continuously monitors Burrow lending markets and autonomously rebalances stablecoin positions to maximize yield. Starts with one command, keeps working after you close the tab.
 
@@ -152,7 +152,7 @@ export EVM_TRANSFER_TOKEN_MAP_BASE='{"USDT":"0x111111111111111111111111111111111
 export EVM_TRANSFER_TOKEN_DECIMALS='{"USDC":6,"USDT":6}'
 ```
 
-## NEAR (Current) — 43 tools, 194 tests
+## NEAR (Current) — 44 tools, 194 tests
 
 ### 🔥 Autonomous Yield Worker
 

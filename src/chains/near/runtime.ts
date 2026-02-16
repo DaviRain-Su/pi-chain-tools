@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -187,12 +188,113 @@ export function toYoctoNear(amountNear: string | number): bigint {
 	);
 }
 
+/**
+ * Resolve NEAR credentials directory.
+ *
+ * Discovery order:
+ * 1. Explicit env: NEAR_CREDENTIALS_DIR
+ * 2. near-cli-rs / near-cli v4+: ~/.near-credentials/
+ * 3. near-cli legacy (v3): ~/.near/credentials/
+ *
+ * Returns the first existing directory, or falls back to ~/.near-credentials/
+ */
 function resolveNearCredentialsDir(): string {
 	const explicit = process.env[NEAR_CREDENTIALS_DIR_ENV]?.trim();
 	if (explicit) {
 		return explicit;
 	}
-	return path.join(os.homedir(), ".near-credentials");
+
+	// near-cli-rs / near-cli v4+
+	const primaryDir = path.join(os.homedir(), ".near-credentials");
+	if (existsSync(primaryDir)) {
+		return primaryDir;
+	}
+
+	// near-cli legacy (v3 and earlier)
+	const legacyDir = path.join(os.homedir(), ".near", "credentials");
+	if (existsSync(legacyDir)) {
+		return legacyDir;
+	}
+
+	// Fallback (will fail gracefully downstream)
+	return primaryDir;
+}
+
+/**
+ * Check if NEAR CLI credentials are available on this machine.
+ * Returns a diagnostic object for user-facing messages.
+ */
+export function checkNearCliCredentials(network?: string): {
+	found: boolean;
+	credentialsDir: string;
+	accountId: string | null;
+	hasPrivateKey: boolean;
+	nearCliInstalled: boolean;
+	hint: string;
+} {
+	const parsedNetwork = parseNearNetwork(network);
+	const credentialsDir = resolveNearCredentialsDir();
+	const dirExists = existsSync(credentialsDir);
+	const networkDir = path.join(credentialsDir, parsedNetwork);
+	const networkDirExists = existsSync(networkDir);
+
+	// Check if near-cli binary is available
+	let nearCliInstalled = false;
+	try {
+		execFileSync("near", ["--version"], {
+			stdio: "pipe",
+			timeout: 5_000,
+		});
+		nearCliInstalled = true;
+	} catch {
+		// near CLI not found
+	}
+
+	if (!dirExists || !networkDirExists) {
+		const installHint = nearCliInstalled
+			? `near-cli is installed but no credentials found for ${parsedNetwork}.\nRun: near login  (or near account import-account for near-cli-rs)`
+			: `No NEAR credentials found.\n\nTo get started:\n  1. Install near-cli:  npm install -g near-cli-rs\n  2. Create/import account:  near account create-account\n  3. Or import existing:  near account import-account using-private-key ed25519:...\n\nCredentials will be saved to ${credentialsDir}/${parsedNetwork}/`;
+
+		return {
+			found: false,
+			credentialsDir,
+			accountId: null,
+			hasPrivateKey: false,
+			nearCliInstalled,
+			hint: installHint,
+		};
+	}
+
+	const accountId = findAccountIdFromCredentials(parsedNetwork);
+	let hasPrivateKey = false;
+	if (accountId) {
+		const credPath = resolveCredentialPathForAccount(accountId, parsedNetwork);
+		if (credPath) {
+			hasPrivateKey = findPrivateKeyFromCredentialFile(credPath) !== null;
+		}
+	}
+
+	if (!accountId) {
+		return {
+			found: false,
+			credentialsDir,
+			accountId: null,
+			hasPrivateKey: false,
+			nearCliInstalled,
+			hint: `Credentials directory exists (${networkDir}) but no account files found.\nRun: near login  (or near account import-account for near-cli-rs)`,
+		};
+	}
+
+	return {
+		found: true,
+		credentialsDir,
+		accountId,
+		hasPrivateKey,
+		nearCliInstalled,
+		hint: hasPrivateKey
+			? `Account ${accountId} ready (credentials at ${credentialsDir}/${parsedNetwork}/)`
+			: `Account ${accountId} found but no private key. Re-import with: near account import-account using-private-key ed25519:... --account-id ${accountId}`,
+	};
 }
 
 type NearCredentialEntry = {
@@ -360,8 +462,9 @@ export function resolveNearAccountId(
 		return normalizeNearAccountId(credentialAccountId);
 	}
 
+	const diagnostics = checkNearCliCredentials(parsedNetwork);
 	throw new Error(
-		`No NEAR account id available. Provide accountId, set ${NEAR_ACCOUNT_ID_ENV}, or configure credentials under ~/.near-credentials/${parsedNetwork}.`,
+		`No NEAR account id available.\n\n${diagnostics.hint}\n\nAlternatively, set ${NEAR_ACCOUNT_ID_ENV} environment variable.`,
 	);
 }
 
@@ -395,8 +498,9 @@ export function resolveNearPrivateKey(params: {
 		}
 	}
 
+	const diagnostics = checkNearCliCredentials(parsedNetwork);
 	throw new Error(
-		`No NEAR signer key available. Provide privateKey, set ${NEAR_PRIVATE_KEY_ENV}, or configure private_key in ~/.near-credentials/${parsedNetwork}/${resolvedAccountId}.json.`,
+		`No NEAR signer key available for ${resolvedAccountId}.\n\n${diagnostics.hint}\n\nAlternatively, set ${NEAR_PRIVATE_KEY_ENV} environment variable.`,
 	);
 }
 

@@ -16,6 +16,7 @@ import { fetchRefPoolById, getRefContractId, getRefSwapQuote } from "../ref.js";
 import {
 	NEAR_TOOL_PREFIX,
 	callNearRpc,
+	checkNearCliCredentials,
 	formatNearAmount,
 	formatTokenAmount,
 	getNearRpcEndpoint,
@@ -2945,6 +2946,47 @@ async function resolveBurrowPositionAssetRows(params: {
 
 export function createNearReadTools() {
 	return [
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}checkSetup`,
+			label: "NEAR Check Setup",
+			description:
+				"Check NEAR CLI installation and local wallet credentials. " +
+				"Detects near-cli and ~/.near-credentials/ (or ~/.near/credentials/) automatically. " +
+				"Returns diagnostic info: account id, private key availability, and setup instructions if missing. " +
+				"Run this first before any execute operations.",
+			parameters: Type.Object({
+				network: nearNetworkSchema(),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNearNetwork(params.network);
+				const diag = checkNearCliCredentials(network);
+
+				const lines: string[] = [];
+				lines.push(`NEAR Setup Check (${network})`);
+				lines.push(
+					`near-cli installed: ${diag.nearCliInstalled ? "yes" : "NO"}`,
+				);
+				lines.push(`Credentials dir: ${diag.credentialsDir}`);
+				lines.push(`Account found: ${diag.accountId ?? "none"}`);
+				lines.push(`Private key: ${diag.hasPrivateKey ? "yes" : "NO"}`);
+				lines.push("");
+				lines.push(diag.hint);
+
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						schema: "near.check.setup.v1",
+						network,
+						nearCliInstalled: diag.nearCliInstalled,
+						credentialsDir: diag.credentialsDir,
+						accountId: diag.accountId,
+						hasPrivateKey: diag.hasPrivateKey,
+						found: diag.found,
+						hint: diag.hint,
+					},
+				};
+			},
+		}),
 		defineTool({
 			name: `${NEAR_TOOL_PREFIX}getBalance`,
 			label: "NEAR Get Balance",
