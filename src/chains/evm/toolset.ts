@@ -1,4 +1,5 @@
 import type { ChainToolset } from "../../core/types.js";
+import { createAgentWorkerTools } from "./tools/agent-worker.js";
 import { createEvmComposeTools } from "./tools/compose.js";
 import { createEvmExecuteTools } from "./tools/execute.js";
 import { createLifiExecuteTools } from "./tools/lifi-execute.js";
@@ -37,6 +38,7 @@ export function createEvmToolset(): ChainToolset {
 					...createVenusWorkflowTools(),
 					...createVenusAgentTools(),
 					...createLifiExecuteTools(),
+					...createAgentWorkerTools(),
 				],
 			},
 			{ name: "rpc", tools: createEvmRpcTools() },
