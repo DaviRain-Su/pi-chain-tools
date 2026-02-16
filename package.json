@@ -39,7 +39,8 @@
 		"schema:audit": "npm run schema:check-files:json && npm run schema:validate -- --strict --json",
 		"security:check": "node scripts/security-audit.mjs",
 		"test": "vitest run",
-		"ci": "npm run check && npm run security:check && npm test"
+		"ci": "npm run check && npm run security:check && npm test",
+		"dashboard:start": "node apps/dashboard/server.mjs"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",

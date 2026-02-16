@@ -790,6 +790,28 @@ Quick references:
 
 - Setup guide: `docs/openclaw-near-setup.md`
 - Env template: `.env.near.example`
+- Dashboard doc: `docs/near-dashboard.md`
+
+### Local NEAR Dashboard (web)
+
+A lightweight local dashboard is included for quick account visibility.
+It reads NEAR wallet + tracked FT balances + Burrow registration status.
+
+Start it from repo root:
+
+```bash
+npm run dashboard:start
+```
+
+Open in browser:
+
+- `http://127.0.0.1:4173`
+
+Optional env overrides:
+
+- `NEAR_ACCOUNT_ID` (default account shown on first load)
+- `NEAR_RPC_URL` (default `https://1rpc.io/near`)
+- `NEAR_DASHBOARD_PORT` (default `4173`)
 
 ## PR Required Checks
 

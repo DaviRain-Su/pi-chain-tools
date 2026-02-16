@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NEAR Agent Dashboard</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b1020;
+        --card: #151b2d;
+        --text: #e8eefc;
+        --muted: #96a3c7;
+        --accent: #65d5ff;
+      }
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      h1 {
+        margin: 0 0 8px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid #222b47;
+        border-radius: 12px;
+        padding: 14px;
+      }
+      input,
+      button {
+        border-radius: 8px;
+        border: 1px solid #2d3656;
+        background: #0e1529;
+        color: var(--text);
+        padding: 8px 10px;
+      }
+      button {
+        background: #1a2544;
+        cursor: pointer;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      td,
+      th {
+        padding: 8px 0;
+        border-bottom: 1px solid #232c49;
+        text-align: left;
+      }
+      .ok {
+        color: #8ff0a4;
+      }
+      .warn {
+        color: #ffd27d;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>NEAR Agent Dashboard</h1>
+      <p class="muted">Quick portfolio + Burrow status view for your account.</p>
+      <div class="row" style="margin-bottom: 16px">
+        <input id="accountId" size="36" placeholder="account.near" />
+        <button id="refresh">Refresh</button>
+        <span id="meta" class="muted"></span>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>NEAR Wallet</h3>
+          <div id="near">-</div>
+        </div>
+        <div class="card">
+          <h3>Burrow Registration</h3>
+          <div id="burrow">-</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 16px">
+        <h3>Tracked Token Balances</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Token</th>
+              <th>Balance</th>
+              <th>~USD</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="tokens"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <script>
+      const accountInput = document.getElementById("accountId");
+      const refreshBtn = document.getElementById("refresh");
+      const nearEl = document.getElementById("near");
+      const burrowEl = document.getElementById("burrow");
+      const metaEl = document.getElementById("meta");
+      const tokensEl = document.getElementById("tokens");
+
+      async function load() {
+        const accountId = accountInput.value.trim();
+        const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
+        const response = await fetch(`/api/snapshot${query}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+          metaEl.textContent = `Error: ${data.error || "Unknown"}`;
+          return;
+        }
+
+        accountInput.value = data.accountId;
+        metaEl.textContent = `Updated: ${new Date(data.updatedAt).toLocaleString()} · RPC: ${data.rpcUrl}`;
+
+        nearEl.innerHTML = `${data.near.available} NEAR <span class="muted">(~$${data.near.usd.toFixed(2)})</span><br/><span class="muted">locked: ${data.near.locked}</span>`;
+        burrowEl.innerHTML = data.burrow.registered
+          ? `<span class="ok">Registered</span>`
+          : `<span class="warn">Not registered</span>`;
+
+        tokensEl.innerHTML = "";
+        for (const row of data.tokens) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${row.symbol}</td><td>${row.amount}</td><td>$${(row.usd || 0).toFixed(2)}</td><td>${row.error ? `<span class="warn">${row.error}</span>` : "ok"}</td>`;
+          tokensEl.appendChild(tr);
+        }
+      }
+
+      refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));
+      load().catch((e) => (metaEl.textContent = e.message));
+      setInterval(() => load().catch(() => {}), 30000);
+    </script>
+  </body>
+</html>
