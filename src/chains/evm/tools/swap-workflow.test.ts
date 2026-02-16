@@ -152,6 +152,46 @@ describe("w3rt_run_evm_swap_workflow_v0", () => {
 		);
 	});
 
+	it("parses alias tokens from natural-language intent text", async () => {
+		const tool = getTool();
+		await tool.execute("wf2d_alias", {
+			runMode: "simulate",
+			network: "bsc",
+			intentText:
+				"先模拟 amountInRaw=10000 fromToken=0x1111111111111111111111111111111111111111 tokenOut=0x2222222222222222222222222222222222222222 recipient=0x000000000000000000000000000000000000dead",
+		});
+		expect(executeMocks.pancakeSwapExecute).toHaveBeenCalledWith(
+			"wf-evm-swap-simulate",
+			expect.objectContaining({
+				network: "bsc",
+				dryRun: true,
+				tokenInAddress: "0x1111111111111111111111111111111111111111",
+				tokenOutAddress: "0x2222222222222222222222222222222222222222",
+				amountInRaw: "10000",
+				toAddress: "0x000000000000000000000000000000000000dead",
+			}),
+		);
+	});
+
+	it("accepts slippage and deadline aliases in intent text", async () => {
+		const tool = getTool();
+		await tool.execute("wf2e_alias", {
+			runMode: "simulate",
+			network: "bsc",
+			intentText:
+				"先模拟 amountInRaw=10000 从 0x1111111111111111111111111111111111111111 换到 0x2222222222222222222222222222222222222222，收款到 0x000000000000000000000000000000000000dead，滑点=2.5%，截止=15",
+		});
+		expect(executeMocks.pancakeSwapExecute).toHaveBeenCalledWith(
+			"wf-evm-swap-simulate",
+			expect.objectContaining({
+				network: "bsc",
+				dryRun: true,
+				slippageBps: 250,
+				deadlineMinutes: 15,
+			}),
+		);
+	});
+
 	it("rejects natural-language input missing recipient and explains toAddress hint", async () => {
 		const tool = getTool();
 		await expect(

@@ -145,14 +145,20 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	if (!text?.trim()) return {};
 	const addresses = text.match(/0x[a-fA-F0-9]{40}/g) ?? [];
 	const tokenInAddress =
+		text.match(
+			/\b(?:tokenInAddress|fromAddress|fromToken|inputToken|tokenIn)\s*[:= ]\s*(0x[a-fA-F0-9]{40})\b/i,
+		)?.[1] ??
 		text.match(/\btoken(?:In)?Address\s*[:= ]\s*(0x[a-fA-F0-9]{40})\b/i)?.[1] ??
 		text.match(/\bfrom\s*[:= ]\s*(0x[a-fA-F0-9]{40})\b/i)?.[1];
 	const tokenOutAddress =
 		text.match(
-			/\btoken(?:Out)?Address\s*[:= ]\s*(0x[a-fA-F0-9]{40})\b/i,
-		)?.[1] ?? text.match(/\btoToken\s*[:= ]\s*(0x[a-fA-F0-9]{40})\b/i)?.[1];
+			/\b(?:tokenOutAddress|toToken|outputToken|tokenOut)\s*[:= ]\s*(0x[a-fA-F0-9]{40})\b/i,
+		)?.[1] ??
+		text.match(/\btoken(?:Out)?Address\s*[:= ]\s*(0x[a-fA-F0-9]{40})\b/i)?.[1];
 	const toAddressFromText =
-		text.match(/\btoAddress\s*[:= ]\s*(0x[a-fA-F0-9]{40})\b/i)?.[1] ??
+		text.match(
+			/\b(?:recipient|recipientAddress|receiver|receiverAddress|toAddress)\s*[:= ]\s*(0x[a-fA-F0-9]{40})\b/i,
+		)?.[1] ??
 		text.match(
 			/(?:^|\s)(?:给|给到|转给|转到|收款|收款到|收币|收币到)\s*[:： ]?\s*(0x[a-fA-F0-9]{40})/i,
 		)?.[1];
@@ -167,13 +173,23 @@ function parseIntentText(text?: string): ParsedIntentHints {
 			text.match(/(?:把|换|兑换|swap)\s*(\d+(?:\.\d+)?)/i)?.[1],
 	);
 	const amountOutMinRaw = parseAmountRaw(
-		text.match(/\bamountOutMinRaw\s*[:= ]\s*(\d+(?:\.\d+)?)\b/i)?.[1] ??
-			text.match(/\bminOut\s*[:= ]\s*(\d+(?:\.\d+)?)\b/i)?.[1],
+		text.match(
+			/\b(?:amountOutMinRaw|minOutRaw|minOut)\s*[:= ]\s*(\d+(?:\.\d+)?)\b/i,
+		)?.[1],
 	);
-	const slippageRaw = text.match(
-		/\bslippageBps\s*[:= ]\s*(\d+(?:\.\d+)?)\b/i,
-	)?.[1];
-	const deadlineRaw = text.match(/\bdeadlineMinutes\s*[:= ]\s*(\d+)\b/i)?.[1];
+	const slippageMatch = text.match(
+		/(?:^|[\s，。,.])(slippageBps|slippage|滑点)\s*[:=：]?\s*(\d+(?:\.\d+)?)\s*(%)?/i,
+	);
+	const slippageRawNumeric = slippageMatch?.[2];
+	const slippageRawPercent = slippageMatch?.[3]?.includes("%") === true;
+	const slippageBps =
+		slippageRawNumeric != null
+			? Number.parseFloat(slippageRawNumeric) * (slippageRawPercent ? 100 : 1)
+			: undefined;
+	const deadlineRaw =
+		text.match(
+			/(?:^|[\s，。,.])(?:deadlineMinutes|deadline|deadlineMin|截止|超时)\s*[:=：]?\s*(\d+)\b/i,
+		)?.[1] ?? text.match(/\bdeadlineMinutes\s*[:= ]\s*(\d+)\b/i)?.[1];
 	const uniqueAddresses = [
 		...new Set(addresses.map((entry) => entry.toLowerCase())),
 	];
@@ -208,8 +224,8 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		toAddress: resolvedTo,
 		amountOutMinRaw,
 		slippageBps:
-			slippageRaw && Number.parseFloat(slippageRaw) > 0
-				? Number.parseFloat(slippageRaw)
+			slippageBps != null && Number.isFinite(slippageBps) && slippageBps > 0
+				? slippageBps
 				: undefined,
 		deadlineMinutes:
 			deadlineRaw != null ? Number.parseInt(deadlineRaw, 10) : undefined,
