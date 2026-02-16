@@ -217,6 +217,20 @@
 
 `查一下测试网10地址 kaspa:qxyz... 的余额`
 
+- `w3rt_read_kaspa_wallet_v0`（一句话读取本地钱包）
+
+`读取本地kaspa钱包 地址和公钥`
+
+命中顺序：
+
+- 默认先读 `~/.kaspa/testnet10.private_key`（测试网10）
+- 如果你要用助记词，在一句话中直接给 12/24 词即可：  
+  `读取本地kaspa钱包，助记词是 battle zoo ...`
+
+注意：`kaspa-wallet` 官方 CLI 的 `export` 命令不支持 `xpub` 子命令，`export xpub` 会返回错误。若要从助记词直接推地址，请用我们的本地脚本：
+
+`node scripts/kaspa-derive-private-key.mjs --mnemonic "<12或24词>" --network testnet-10`
+
 ## 8. 交付与后续建议
 
 - 代码清单（本次提交）：

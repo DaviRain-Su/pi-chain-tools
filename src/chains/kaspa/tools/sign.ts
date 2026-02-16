@@ -79,6 +79,8 @@ type KaspaSignerPrivateKeyResolution = {
 type KaspaPrivateKeyNetworkAddress = {
 	network: string;
 	address: string;
+	derivationPath?: string;
+	derivationSource?: string;
 };
 
 type KaspaPrivateKeyInfo = {
@@ -106,6 +108,37 @@ const KASPA_PRIVATE_KEY_ADDRESS_PLANS = [
 	walletNetwork: "kaspa" | "kaspatest";
 }>;
 const KASPA_DEFAULT_MNEMONIC_DERIVATION_PATH = "m/44'/111111'/0'/0/0";
+const KASPA_MNEMONIC_DERIVATION_PATH_SCAN_LIMIT = 20;
+const KASPA_MNEMONIC_DERIVATION_PATH_TEMPLATES = [
+	{
+		label: "official-bip44-receive-acct0",
+		pathTemplate: "m/44'/111111'/0'/0/{index}",
+	},
+	{
+		label: "official-bip44-change-acct0",
+		pathTemplate: "m/44'/111111'/0'/1/{index}",
+	},
+	{
+		label: "official-bip44-receive-acct1",
+		pathTemplate: "m/44'/111111'/1'/0/{index}",
+	},
+	{
+		label: "official-bip44-change-acct1",
+		pathTemplate: "m/44'/111111'/1'/1/{index}",
+	},
+	{
+		label: "legacy-kdx-receive",
+		pathTemplate: "m/44'/972/0'/0'/{index}'",
+	},
+	{
+		label: "legacy-kdx-change",
+		pathTemplate: "m/44'/972/0'/1'/{index}'",
+	},
+	{
+		label: "legacy-kdx-nonhardened",
+		pathTemplate: "m/44'/972/0'/{index}",
+	},
+] as const;
 const KASPA_MNEMONIC_WORD_COUNTS = new Set([12, 24]);
 
 const KASPA_SIGNER_CACHE = new Map<string, KaspaWalletSignerResolution>();
@@ -131,6 +164,16 @@ type KaspaWalletSignerBinding = {
 	signerApiShape: string;
 };
 type KaspaSignMethod = (...args: unknown[]) => unknown | Promise<unknown>;
+
+type KaspaMnemonicDerivationTemplateEntry = {
+	label: string;
+	pathTemplate: string;
+};
+
+type KaspaMnemonicDerivationCandidate = {
+	path: string;
+	pathHint: string;
+};
 
 function getModuleExport<T>(value: unknown, key: string): T | undefined {
 	if (value == null || typeof value !== "object") {
@@ -292,6 +335,60 @@ function normalizeKaspaDerivationPath(rawPath: string): string {
 		);
 	}
 	return normalized;
+}
+
+function resolveKaspaMnemonicDerivationScanLimit(): number {
+	const envValue = process.env.KASPA_MNEMONIC_DERIVATION_PATH_SCAN_LIMIT?.trim();
+	const parsed = envValue ? Number.parseInt(envValue, 10) : NaN;
+	if (Number.isInteger(parsed) && parsed > 0) {
+		return Math.min(parsed, 200);
+	}
+	return KASPA_MNEMONIC_DERIVATION_PATH_SCAN_LIMIT;
+}
+
+function resolveKaspaMnemonicDerivationPathCandidates(
+	rawPath?: string,
+): KaspaMnemonicDerivationCandidate[] {
+	const resolvedPath = rawPath?.trim();
+	if (resolvedPath) {
+		return [
+			{
+				path: normalizeKaspaDerivationPath(resolvedPath),
+				pathHint: "manual",
+			},
+		];
+	}
+	const templates = KASPA_MNEMONIC_DERIVATION_PATH_TEMPLATES as readonly KaspaMnemonicDerivationTemplateEntry[];
+	const scanLimit = resolveKaspaMnemonicDerivationScanLimit();
+	const seen = new Set<string>();
+	const result: KaspaMnemonicDerivationCandidate[] = [];
+
+	for (const template of templates) {
+		for (let index = 0; index < scanLimit; index += 1) {
+			const candidate = template.pathTemplate.replace(
+				"{index}",
+				String(index),
+			);
+			const normalized = normalizeKaspaDerivationPath(candidate);
+			const cacheKey = `${normalized}`;
+			if (!seen.has(cacheKey)) {
+				seen.add(cacheKey);
+				result.push({
+					path: normalized,
+					pathHint: template.label,
+				});
+			}
+		}
+	}
+
+	const fallback = normalizeKaspaDerivationPath(KASPA_DEFAULT_MNEMONIC_DERIVATION_PATH);
+	if (!seen.has(fallback)) {
+		result.unshift({
+			path: fallback,
+			pathHint: "fallback",
+		});
+	}
+	return result;
 }
 
 function resolveKaspaSignerMnemonicWithSource(params: {
@@ -566,38 +663,52 @@ export async function resolveKaspaPrivateKeyInfo(params: {
 	}
 
 	const resolvedMnemonic = resolveKaspaSignerMnemonicWithSource(params);
-	const mnemonicDerivationPath = normalizeKaspaDerivationPath(
-		params.mnemonicDerivationPath?.trim() ||
-			process.env[KASPA_SIGNER_MNEMONIC_DERIVATION_PATH_ENV]?.trim() ||
-			KASPA_DEFAULT_MNEMONIC_DERIVATION_PATH,
-	);
+	const mnemonicDerivationPathCandidates =
+		resolveKaspaMnemonicDerivationPathCandidates(
+			params.mnemonicDerivationPath?.trim() ||
+				process.env[KASPA_SIGNER_MNEMONIC_DERIVATION_PATH_ENV]?.trim(),
+		);
 	const walletFactory = walletModule.Wallet;
-	const wallet = (seed: string, network: string) => {
-		return walletFactory.fromMnemonic(seed, {
+	const walletByNetwork = new Map<string, ReturnType<typeof walletFactory.fromMnemonic>>();
+	const getWallet = (network: string) => {
+		const existing = walletByNetwork.get(network);
+		if (existing) {
+			return existing;
+		}
+		const created = walletFactory.fromMnemonic(resolvedMnemonic.mnemonic, {
 			network,
 		});
+		walletByNetwork.set(network, created);
+		return created;
 	};
 
 	const requested = resolveKaspaPrivateKeyNetworks(params.networks);
-	const addresses: KaspaPrivateKeyNetworkAddress[] = requested.map((entry) => {
-		const childWallet = wallet(resolvedMnemonic.mnemonic, entry.walletNetwork);
-		const child = childWallet.HDWallet.deriveChild(mnemonicDerivationPath);
-		const publicAddress = child.privateKey.toAddress(entry.walletNetwork).toString();
-		return {
-			network: entry.network,
-			address: publicAddress,
-		};
-	});
+	const addresses: KaspaPrivateKeyNetworkAddress[] = [];
+	for (const entry of requested) {
+		const childWallet = getWallet(entry.walletNetwork);
+		for (const candidate of mnemonicDerivationPathCandidates) {
+			const child = childWallet.HDWallet.deriveChild(candidate.path);
+			const publicAddress = child.privateKey.toAddress(entry.walletNetwork).toString();
+			addresses.push({
+				network: entry.network,
+				address: publicAddress,
+				derivationPath: candidate.path,
+				derivationSource: candidate.pathHint,
+			});
+		}
+	}
 
-	const mnemonicPreviewWallet = wallet(resolvedMnemonic.mnemonic, "kaspatest");
+	const fallbackPath =
+		mnemonicDerivationPathCandidates[0]?.path || KASPA_DEFAULT_MNEMONIC_DERIVATION_PATH;
+	const mnemonicPreviewWallet = getWallet("kaspatest");
 	const mnemonicPreviewPrivateKey = mnemonicPreviewWallet.HDWallet.deriveChild(
-		mnemonicDerivationPath,
+		fallbackPath,
 	).privateKey.toString();
+	const mnemonicPreviewPublicKey = mnemonicPreviewWallet.HDWallet.deriveChild(
+		fallbackPath,
+	).privateKey.toPublicKey().toString();
 	return {
-		publicKey: wallet(resolvedMnemonic.mnemonic, "kaspatest")
-			.HDWallet.deriveChild(mnemonicDerivationPath)
-			.privateKey.toPublicKey()
-			.toString(),
+		publicKey: mnemonicPreviewPublicKey,
 		addresses,
 		source: resolvedMnemonic.source,
 		privateKeyPreview: maskKaspaSecret(mnemonicPreviewPrivateKey),

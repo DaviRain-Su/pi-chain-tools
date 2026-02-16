@@ -781,7 +781,12 @@ async function runKaspaWalletQuickWorkflow(
 			networks: networks,
 		});
 	const addressSummary = info.addresses
-		.map((entry) => `${entry.network}=${entry.address}`)
+		.map((entry) => {
+			const pathHint = entry.derivationPath
+				? ` path=${entry.derivationPath}`
+				: "";
+			return `${entry.network}=${entry.address}${pathHint}`;
+		})
 		.join("; ");
 	return {
 		content: [
