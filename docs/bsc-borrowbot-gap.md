@@ -687,6 +687,15 @@ GET https://li.quest/v1/quote
   - getMarkets / getAccountPosition / buildSupply/Borrow/Repay/Withdraw
   - MCP 工具：evm_morphoGetMarkets, evm_morphoGetPosition
   - $66M+ TVL，18+ 活跃市场
+- [x] Morpho execute tools（6 个 MCP 工具）
+  - supply/borrow/repay/withdraw/supplyCollateral/withdrawCollateral
+  - 全部 dryRun=true 默认 + confirmMainnet 门控
+- [x] ERC-4626 Vault adapter + tools（5 个 MCP 工具）
+  - getInfo/getBalance/deposit/withdraw/redeem
+- [x] LTV decision tool（`evm_ltvDecide` 纯计算 MCP 工具）
+- [x] Worker 泛化（protocol 参数化：venus/morpho）
+- [x] Base / Ethereum Morpho 部署地址（`0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb`）
+- [x] 全部 BorrowBot P0-P4 完成 — 详见 `docs/borrowbot-progress.md`
 
 ---
 
