@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
@@ -202,6 +203,10 @@ type NearStableYieldExecutionPlan = {
 	mode: "analysis-only";
 	requiresAgentWallet: true;
 	canAutoExecute: boolean;
+	planId: string;
+	proposalVersion: "v1";
+	generatedAt: string;
+	expiresAt: string;
 	reasons: string[];
 	guardrails: {
 		maxProtocols: number;
@@ -221,13 +226,15 @@ type NearStableYieldPlan = {
 	stableSymbols: string[];
 	includeDisabled: boolean;
 	status: "ready";
+	generatedAt: string;
+	planId: string;
+	executionPlan: NearStableYieldExecutionPlan;
 	candidates: NearStableYieldCandidate[];
 	allocationHint: {
 		tokenId: string;
 		symbol: string;
 		asCollateral: boolean;
 	} | null;
-	executionPlan: NearStableYieldExecutionPlan;
 };
 
 type NearBurrowPositionAssetRow = {
@@ -2615,6 +2622,40 @@ function parseApr(value: string | null): number | null {
 	return parsed;
 }
 
+function buildStableYieldPlanId(params: {
+	network: string;
+	burrowContractId: string;
+	topN: number;
+	stableSymbols: string[];
+	includeDisabled: boolean;
+	selectedTokenId: string | null;
+}): string {
+	const fingerprint = JSON.stringify({
+		network: params.network,
+		burrowContractId: params.burrowContractId,
+		topN: params.topN,
+		stableSymbols: [...params.stableSymbols].sort(),
+		includeDisabled: params.includeDisabled,
+		selectedTokenId: params.selectedTokenId,
+	});
+	const digest = createHash("sha256")
+		.update(fingerprint)
+		.digest("hex")
+		.slice(0, 16);
+	return `near.stable-yield.${digest}`;
+}
+
+function resolveStableYieldExpiryAt(params: {
+	generatedAt: string;
+	ttlMinutes?: number;
+}): string {
+	const parsed = Date.parse(params.generatedAt);
+	const fallback = Date.now();
+	const base = Number.isFinite(parsed) ? parsed : fallback;
+	const ttl = Math.max(30, params.ttlMinutes == null ? 60 : params.ttlMinutes);
+	return new Date(base + ttl * 60_000).toISOString();
+}
+
 function pickStableYieldCandidates(params: {
 	markets: NearBurrowMarketRow[];
 	stableSymbols: string[];
@@ -2651,14 +2692,24 @@ function pickStableYieldCandidates(params: {
 function buildStableYieldExecutionPlan(params: {
 	selected: NearStableYieldCandidate | null;
 	topN: number;
+	planId: string;
+	generatedAt: string;
+	reasonPrefix: string;
 }): NearStableYieldExecutionPlan {
 	if (params.selected == null) {
 		return {
 			mode: "analysis-only",
 			requiresAgentWallet: true,
 			canAutoExecute: false,
+			planId: `${params.planId}.hold`,
+			proposalVersion: "v1",
+			generatedAt: params.generatedAt,
+			expiresAt: resolveStableYieldExpiryAt({
+				generatedAt: params.generatedAt,
+				ttlMinutes: 60,
+			}),
 			reasons: [
-				"No eligible stablecoin candidate found with current scan filters.",
+				`No eligible stablecoin candidate found with current scan filters. ${params.reasonPrefix}`,
 			],
 			guardrails: {
 				maxProtocols: 1,
@@ -2686,6 +2737,13 @@ function buildStableYieldExecutionPlan(params: {
 		mode: "analysis-only",
 		requiresAgentWallet: true,
 		canAutoExecute: false,
+		planId: `${params.planId}.rank-1`,
+		proposalVersion: "v1",
+		generatedAt: params.generatedAt,
+		expiresAt: resolveStableYieldExpiryAt({
+			generatedAt: params.generatedAt,
+			ttlMinutes: 60,
+		}),
 		reasons: [
 			"Execution requires dedicated Agent Wallet/Vault, direct private-key signing disabled in workflow.",
 			"Stable-yield plan is optimized for strategy review before execution.",
@@ -2742,6 +2800,15 @@ async function resolveStableYieldPlan(params: {
 		topN: params.topN,
 	});
 	const selected = candidates[0] ?? null;
+	const generatedAt = new Date().toISOString();
+	const planId = buildStableYieldPlanId({
+		network: params.network,
+		burrowContractId: params.burrowContractId,
+		topN: params.topN,
+		stableSymbols: params.stableSymbols,
+		includeDisabled: params.includeDisabled,
+		selectedTokenId: selected?.tokenId ?? null,
+	});
 	return {
 		network: params.network,
 		protocol: "Burrow",
@@ -2749,6 +2816,8 @@ async function resolveStableYieldPlan(params: {
 		stableSymbols: params.stableSymbols,
 		includeDisabled: params.includeDisabled,
 		status: "ready",
+		generatedAt,
+		planId,
 		candidates,
 		selected,
 		allocationHint: selected
@@ -2761,6 +2830,9 @@ async function resolveStableYieldPlan(params: {
 		executionPlan: buildStableYieldExecutionPlan({
 			selected,
 			topN: params.topN,
+			planId,
+			generatedAt,
+			reasonPrefix: `Request from ${params.network} Burrow via ${params.burrowContractId}.`,
 		}),
 	};
 }

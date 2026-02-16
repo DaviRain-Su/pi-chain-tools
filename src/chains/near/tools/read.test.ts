@@ -1055,11 +1055,23 @@ describe("near_getStableYieldPlan", () => {
 			network: "mainnet",
 			topN: 3,
 		});
+		const details = result.details as Record<string, unknown>;
 
 		expect(result.content[0]?.text).toContain("NEAR stable yield plan");
 		expect(result.content[0]?.text).toContain("USDC");
 		expect(result.content[0]?.text).toContain("Recommended: #1 USDC");
-		expect(result.details).toMatchObject({
+		expect(details.generatedAt as string).toMatch(/\d{4}-\d{2}-\d{2}T/);
+		expect(details.planId).toMatch(/^near\.stable-yield\.[a-f0-9]{16}$/);
+		expect((details.executionPlan as Record<string, unknown>).planId).toMatch(
+			new RegExp(`^${details.planId}\\.`),
+		);
+		expect(new Date(details.generatedAt as string).getTime()).toBeGreaterThan(
+			0,
+		);
+		expect(
+			(details.executionPlan as Record<string, unknown>).expiresAt,
+		).toBeDefined();
+		expect(details).toMatchObject({
 			schema: "near.defi.stableYieldPlan.v1",
 			network: "mainnet",
 			protocol: "Burrow",
@@ -1135,29 +1147,33 @@ describe("near_getStableYieldPlan", () => {
 			includeDisabled: false,
 			stableSymbols: ["USDC", "USDT"],
 		});
+		const details = result.details as Record<string, unknown>;
 
-		expect(result.details).toMatchObject({
+		expect(details).toMatchObject({
 			schema: "near.defi.stableYieldPlan.v1",
 			protocol: "Burrow",
 			topN: 3,
 			stableSymbols: ["USDC", "USDT"],
 			status: "ready",
-			executionPlan: {
-				mode: "analysis-only",
-				requiresAgentWallet: true,
-				canAutoExecute: false,
-				proposedActions: [
-					{
-						action: "hold",
-						protocol: "Burrow",
-						step: 1,
-						tokenId: null,
-						symbol: null,
-						asCollateral: true,
-						allocationHint: "max-eligible",
-					},
-				],
-			},
+		});
+		expect((details.executionPlan as Record<string, unknown>).planId).toMatch(
+			new RegExp(`^${String(details.planId)}\\.hold$`),
+		);
+		expect(details.executionPlan).toMatchObject({
+			mode: "analysis-only",
+			requiresAgentWallet: true,
+			proposedActions: [
+				{
+					action: "hold",
+					protocol: "Burrow",
+					step: 1,
+					tokenId: null,
+					symbol: null,
+					asCollateral: true,
+					allocationHint: "max-eligible",
+				},
+			],
+			recommendedApproach: "single-best-candidate",
 		});
 	});
 });

@@ -4137,8 +4137,9 @@ describe("w3rt_run_near_workflow_v0", () => {
 					schema: "near.defi.stableYieldPlan.v1",
 					protocol: "Burrow",
 					executionPlan: {
-						canAutoExecute: false,
+						mode: "analysis-only",
 						requiresAgentWallet: true,
+						canAutoExecute: false,
 						recommendedApproach: "single-best-candidate",
 					},
 					summary: {
