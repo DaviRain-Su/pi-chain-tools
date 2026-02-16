@@ -472,7 +472,11 @@
         const latestText = latest
           ? `Latest: ${latest.status} · runId=${latest.runId || "-"}`
           : "Latest: -";
-        return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText}`;
+        const latestPnl = (m.pnlSeries || [])[0] || null;
+        const pnlText = latestPnl
+          ? `Δstable: ${(Number(latestPnl.deltaStable || 0)).toFixed(6)} (before ${Number(latestPnl.beforeTotalStable || 0).toFixed(6)} -> after ${Number(latestPnl.afterTotalStable || 0).toFixed(6)})`
+          : "Δstable: n/a";
+        return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText} · ${pnlText}`;
       }
 
       function toCsv(snapshot) {

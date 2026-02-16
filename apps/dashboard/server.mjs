@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,9 @@ const SESSION_DIR =
 		process.env.HOME || "/home/davirain",
 		".openclaw/agents/main/sessions",
 	);
+const METRICS_PATH =
+	process.env.NEAR_DASHBOARD_METRICS_PATH ||
+	path.join(__dirname, "data", "rebalance-metrics.json");
 const ALERT_WEBHOOK_URL = process.env.NEAR_REBAL_ALERT_WEBHOOK_URL || "";
 const ALERT_TELEGRAM_BOT_TOKEN =
 	process.env.NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN || "";
@@ -54,7 +57,38 @@ const REBALANCE_METRICS = {
 	rollbackRuns: 0,
 	reconcileWarnings: 0,
 	recent: [],
+	pnlSeries: [],
 };
+
+async function saveMetricsToDisk() {
+	try {
+		await mkdir(path.dirname(METRICS_PATH), { recursive: true });
+		await writeFile(METRICS_PATH, JSON.stringify(REBALANCE_METRICS, null, 2));
+	} catch {
+		// best-effort persistence
+	}
+}
+
+async function loadMetricsFromDisk() {
+	try {
+		const raw = await readFile(METRICS_PATH, "utf8");
+		const parsed = JSON.parse(raw);
+		if (!parsed || typeof parsed !== "object") return;
+		REBALANCE_METRICS.totalRuns = Number(parsed.totalRuns || 0);
+		REBALANCE_METRICS.successRuns = Number(parsed.successRuns || 0);
+		REBALANCE_METRICS.failedRuns = Number(parsed.failedRuns || 0);
+		REBALANCE_METRICS.rollbackRuns = Number(parsed.rollbackRuns || 0);
+		REBALANCE_METRICS.reconcileWarnings = Number(parsed.reconcileWarnings || 0);
+		REBALANCE_METRICS.recent = Array.isArray(parsed.recent)
+			? parsed.recent.slice(0, 30)
+			: [];
+		REBALANCE_METRICS.pnlSeries = Array.isArray(parsed.pnlSeries)
+			? parsed.pnlSeries.slice(0, 100)
+			: [];
+	} catch {
+		// ignore missing/corrupt metrics file
+	}
+}
 
 const TOKENS = [
 	{ symbol: "USDt", contractId: "usdt.tether-token.near", decimals: 6 },
@@ -600,6 +634,8 @@ async function snapshotRebalanceState(accountId) {
 		walletUsdcRaw: String(walletUsdcRaw || "0"),
 		collateralUsdtRaw: String(cUsdt?.balanceRawInner || "0"),
 		collateralUsdcRaw: String(cUsdc?.balanceRawInner || "0"),
+		collateralUsdtAmount: Number.parseFloat(String(cUsdt?.amount || "0")) || 0,
+		collateralUsdcAmount: Number.parseFloat(String(cUsdc?.amount || "0")) || 0,
 	};
 }
 
@@ -753,6 +789,7 @@ function recordRebalanceMetric(entry) {
 	if (REBALANCE_METRICS.recent.length > 30) {
 		REBALANCE_METRICS.recent.length = 30;
 	}
+	void saveMetricsToDisk();
 }
 
 async function executeAction(payload) {
@@ -1147,6 +1184,21 @@ async function executeAction(payload) {
 							: null,
 					reconciled,
 				});
+				const beforeTotalStable =
+					stateBefore.collateralUsdtAmount + stateBefore.collateralUsdcAmount;
+				const afterTotalStable =
+					stateAfter.collateralUsdtAmount + stateAfter.collateralUsdcAmount;
+				REBALANCE_METRICS.pnlSeries.unshift({
+					timestamp: new Date().toISOString(),
+					runId,
+					beforeTotalStable,
+					afterTotalStable,
+					deltaStable: afterTotalStable - beforeTotalStable,
+				});
+				if (REBALANCE_METRICS.pnlSeries.length > 100) {
+					REBALANCE_METRICS.pnlSeries.length = 100;
+				}
+				void saveMetricsToDisk();
 				markRebalanceExecuted();
 				endRebalanceRun(runId, "success", {
 					step1Tx,
@@ -1300,6 +1352,8 @@ const server = http.createServer(async (req, res) => {
 	}
 });
 
-server.listen(PORT, () => {
-	console.log(`NEAR dashboard listening on http://127.0.0.1:${PORT}`);
+loadMetricsFromDisk().finally(() => {
+	server.listen(PORT, () => {
+		console.log(`NEAR dashboard listening on http://127.0.0.1:${PORT}`);
+	});
 });
