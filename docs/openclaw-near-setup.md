@@ -17,18 +17,30 @@ openclaw gateway restart
 
 ## 2) Configure NEAR env
 
-Use the template at repo root:
+### Credential/account resolution order (important)
+
+`pi-chain-tools` NEAR runtime **can auto-read near-cli credentials by default**.
+Environment variables are optional in many local setups.
+
+Resolution priority:
+
+1. Explicit tool param `accountId`
+2. Environment variables (`NEAR_ACCOUNT_ID`, `NEAR_CREDENTIALS_DIR`, etc.)
+3. Auto-discovery from near-cli default credentials directory (for example `~/.near-credentials/`, with legacy path compatibility)
+4. If none available, runtime throws a configuration hint
+
+Use the template at repo root when you want explicit control:
 
 ```bash
 cp .env.near.example .env.near.local
 ```
 
-Set at minimum:
+Recommended minimum explicit settings:
 
-- `NEAR_ACCOUNT_ID`
-- `NEAR_RPC_URL` (or rely on defaults)
+- `NEAR_ACCOUNT_ID` (optional if auto-discovery already resolves correctly)
+- `NEAR_RPC_URL` (optional; defaults exist)
 
-For execute/sign flows, also set one of:
+For execute/sign flows, set one signer source explicitly when possible:
 
 - `NEAR_PRIVATE_KEY`
 - `NEAR_CREDENTIALS_DIR`
