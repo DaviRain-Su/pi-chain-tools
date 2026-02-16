@@ -53,6 +53,9 @@ describe("nearExtension", () => {
 			"near_transferNear",
 			"near_withdrawBurrow",
 			"near_withdrawRefToken",
+			"near_yieldWorkerStart",
+			"near_yieldWorkerStatus",
+			"near_yieldWorkerStop",
 			"w3rt_run_near_workflow_v0",
 		]);
 	});
