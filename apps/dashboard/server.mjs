@@ -400,6 +400,17 @@ function pushActionHistory(entry) {
 	}
 }
 
+function extractTxHash(outputText) {
+	const text = String(outputText || "");
+	const m = text.match(/Transaction ID:\s*([A-Za-z0-9_-]{20,})/i);
+	return m?.[1] || null;
+}
+
+function nearExplorerUrl(txHash) {
+	if (!txHash) return null;
+	return `https://explorer.near.org/transactions/${txHash}`;
+}
+
 async function executeAction(payload) {
 	const accountId = String(payload.accountId || ACCOUNT_ID).trim();
 	const nearBin = "near";
@@ -425,13 +436,22 @@ async function executeAction(payload) {
 				"sign-with-keychain",
 				"send",
 			]);
-			const result = { ok: true, action: payload.action, output: out };
+			const txHash = extractTxHash(out);
+			const result = {
+				ok: true,
+				action: payload.action,
+				output: out,
+				txHash,
+				explorerUrl: nearExplorerUrl(txHash),
+			};
 			pushActionHistory({
 				action: payload.action,
 				step: payload.step || null,
 				accountId,
 				status: "success",
 				summary: `wrapped ${amountNear} NEAR`,
+				txHash,
+				explorerUrl: nearExplorerUrl(txHash),
 			});
 			return result;
 		}
@@ -474,13 +494,22 @@ async function executeAction(payload) {
 				"sign-with-keychain",
 				"send",
 			]);
-			const result = { ok: true, action: payload.action, output: out };
+			const txHash = extractTxHash(out);
+			const result = {
+				ok: true,
+				action: payload.action,
+				output: out,
+				txHash,
+				explorerUrl: nearExplorerUrl(txHash),
+			};
 			pushActionHistory({
 				action: payload.action,
 				step: payload.step || null,
 				accountId,
 				status: "success",
 				summary: `supplied ${amountRaw} raw USDt`,
+				txHash,
+				explorerUrl: nearExplorerUrl(txHash),
 			});
 			return result;
 		}

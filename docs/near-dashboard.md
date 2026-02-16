@@ -20,6 +20,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Step runner helper: build Step1/Step2/Step3 commands and feed Step2 output raw into Step3 template
 - Step2 parser helper: paste swap result text and auto-extract output raw for Step3
 - Action History now supports optional `step` tag for execution traceability (e.g. step1/step2/step3)
+- Action History includes txHash + explorer link when parsed from execution output
 - CSV export for latest snapshot
 - Best-effort USD estimates from NEAR Intents token feed
 

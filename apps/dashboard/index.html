@@ -102,7 +102,7 @@
       <div class="card" style="margin-top:16px">
         <h3>Action History</h3>
         <table>
-          <thead><tr><th>Time</th><th>Action</th><th>Step</th><th>Status</th><th>Summary</th></tr></thead>
+          <thead><tr><th>Time</th><th>Action</th><th>Step</th><th>Status</th><th>Tx</th><th>Summary</th></tr></thead>
           <tbody id="actions"></tbody>
         </table>
       </div>
@@ -410,7 +410,12 @@
         for (const row of data.actionHistory || []) {
           const tr = document.createElement("tr");
           const status = row.status === "success" ? `<span class="ok">success</span>` : `<span class="warn">error</span>`;
-          tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.action}</td><td>${row.step || "-"}</td><td>${status}</td><td>${row.summary || ""}</td>`;
+          const tx = row.txHash
+            ? (row.explorerUrl
+                ? `<a href="${row.explorerUrl}" target="_blank" rel="noreferrer">${row.txHash}</a>`
+                : row.txHash)
+            : "-";
+          tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.action}</td><td>${row.step || "-"}</td><td>${status}</td><td>${tx}</td><td>${row.summary || ""}</td>`;
           actionsEl.appendChild(tr);
         }
       }
