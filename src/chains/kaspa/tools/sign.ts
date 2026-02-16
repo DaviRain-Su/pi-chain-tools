@@ -66,7 +66,11 @@ type KaspaWalletCoreModule = {
 			seedPhrase: string,
 			networkOptions: { network: string },
 		) => {
-			HDWallet: { deriveChild: (path: string) => { privateKey: KaspaWalletCorePrivateKey } };
+			HDWallet: {
+				deriveChild: (path: string) => {
+					privateKey: KaspaWalletCorePrivateKey;
+				};
+			};
 		};
 	};
 };
@@ -281,11 +285,7 @@ function resolveKaspaMnemonicFromFile(rawFilePath: string): string | null {
 		}
 		try {
 			const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-			const candidates = [
-				"mnemonic",
-				"seedPhrase",
-				"seed_phrase",
-			];
+			const candidates = ["mnemonic", "seedPhrase", "seed_phrase"];
 			for (const key of candidates) {
 				const candidate = parsed[key];
 				if (typeof candidate === "string" && candidate.trim()) {
@@ -310,10 +310,7 @@ function normalizeKaspaPrivateKey(privateKey: string): string {
 }
 
 function normalizeKaspaMnemonic(rawMnemonic: string): string {
-	const normalized = rawMnemonic
-		.trim()
-		.toLowerCase()
-		.replace(/\s+/g, " ");
+	const normalized = rawMnemonic.trim().toLowerCase().replace(/\s+/g, " ");
 	if (!normalized) {
 		throw new Error("mnemonic cannot be empty");
 	}
@@ -338,8 +335,9 @@ function normalizeKaspaDerivationPath(rawPath: string): string {
 }
 
 function resolveKaspaMnemonicDerivationScanLimit(): number {
-	const envValue = process.env.KASPA_MNEMONIC_DERIVATION_PATH_SCAN_LIMIT?.trim();
-	const parsed = envValue ? Number.parseInt(envValue, 10) : NaN;
+	const envValue =
+		process.env.KASPA_MNEMONIC_DERIVATION_PATH_SCAN_LIMIT?.trim();
+	const parsed = envValue ? Number.parseInt(envValue, 10) : Number.NaN;
 	if (Number.isInteger(parsed) && parsed > 0) {
 		return Math.min(parsed, 200);
 	}
@@ -358,17 +356,15 @@ function resolveKaspaMnemonicDerivationPathCandidates(
 			},
 		];
 	}
-	const templates = KASPA_MNEMONIC_DERIVATION_PATH_TEMPLATES as readonly KaspaMnemonicDerivationTemplateEntry[];
+	const templates =
+		KASPA_MNEMONIC_DERIVATION_PATH_TEMPLATES as readonly KaspaMnemonicDerivationTemplateEntry[];
 	const scanLimit = resolveKaspaMnemonicDerivationScanLimit();
 	const seen = new Set<string>();
 	const result: KaspaMnemonicDerivationCandidate[] = [];
 
 	for (const template of templates) {
 		for (let index = 0; index < scanLimit; index += 1) {
-			const candidate = template.pathTemplate.replace(
-				"{index}",
-				String(index),
-			);
+			const candidate = template.pathTemplate.replace("{index}", String(index));
 			const normalized = normalizeKaspaDerivationPath(candidate);
 			const cacheKey = `${normalized}`;
 			if (!seen.has(cacheKey)) {
@@ -381,7 +377,9 @@ function resolveKaspaMnemonicDerivationPathCandidates(
 		}
 	}
 
-	const fallback = normalizeKaspaDerivationPath(KASPA_DEFAULT_MNEMONIC_DERIVATION_PATH);
+	const fallback = normalizeKaspaDerivationPath(
+		KASPA_DEFAULT_MNEMONIC_DERIVATION_PATH,
+	);
 	if (!seen.has(fallback)) {
 		result.unshift({
 			path: fallback,
@@ -591,7 +589,7 @@ async function getKaspaWalletModule(): Promise<KaspaWalletCoreModule> {
 				throw new Error("Unable to load @kaspa/wallet Wallet.fromMnemonic()");
 			}
 			await initKaspaFramework();
-			return raw as KaspaWalletCoreModule;
+			return raw as unknown as KaspaWalletCoreModule;
 		})();
 	}
 	return KASPA_WALLET_MODULE_CACHE;
@@ -599,7 +597,7 @@ async function getKaspaWalletModule(): Promise<KaspaWalletCoreModule> {
 
 function resolveKaspaPrivateKeyNetworks(
 	networks?: Array<"mainnet" | "testnet10" | "testnet11">,
-): typeof KASPA_PRIVATE_KEY_ADDRESS_PLANS {
+): Array<(typeof KASPA_PRIVATE_KEY_ADDRESS_PLANS)[number]> {
 	if (!networks || networks.length === 0) {
 		return KASPA_PRIVATE_KEY_ADDRESS_PLANS;
 	}
@@ -650,10 +648,12 @@ export async function resolveKaspaPrivateKeyInfo(params: {
 		);
 		const publicKey = privateKeyObj.toPublicKey().toString();
 		const requested = resolveKaspaPrivateKeyNetworks(params.networks);
-		const addresses: KaspaPrivateKeyNetworkAddress[] = requested.map((entry) => ({
-			network: entry.network,
-			address: privateKeyObj.toAddress(entry.walletNetwork).toString(),
-		}));
+		const addresses: KaspaPrivateKeyNetworkAddress[] = requested.map(
+			(entry) => ({
+				network: entry.network,
+				address: privateKeyObj.toAddress(entry.walletNetwork).toString(),
+			}),
+		);
 		return {
 			publicKey,
 			addresses,
@@ -669,7 +669,10 @@ export async function resolveKaspaPrivateKeyInfo(params: {
 				process.env[KASPA_SIGNER_MNEMONIC_DERIVATION_PATH_ENV]?.trim(),
 		);
 	const walletFactory = walletModule.Wallet;
-	const walletByNetwork = new Map<string, ReturnType<typeof walletFactory.fromMnemonic>>();
+	const walletByNetwork = new Map<
+		string,
+		ReturnType<typeof walletFactory.fromMnemonic>
+	>();
 	const getWallet = (network: string) => {
 		const existing = walletByNetwork.get(network);
 		if (existing) {
@@ -688,7 +691,9 @@ export async function resolveKaspaPrivateKeyInfo(params: {
 		const childWallet = getWallet(entry.walletNetwork);
 		for (const candidate of mnemonicDerivationPathCandidates) {
 			const child = childWallet.HDWallet.deriveChild(candidate.path);
-			const publicAddress = child.privateKey.toAddress(entry.walletNetwork).toString();
+			const publicAddress = child.privateKey
+				.toAddress(entry.walletNetwork)
+				.toString();
 			addresses.push({
 				network: entry.network,
 				address: publicAddress,
@@ -699,14 +704,18 @@ export async function resolveKaspaPrivateKeyInfo(params: {
 	}
 
 	const fallbackPath =
-		mnemonicDerivationPathCandidates[0]?.path || KASPA_DEFAULT_MNEMONIC_DERIVATION_PATH;
+		mnemonicDerivationPathCandidates[0]?.path ||
+		KASPA_DEFAULT_MNEMONIC_DERIVATION_PATH;
 	const mnemonicPreviewWallet = getWallet("kaspatest");
-	const mnemonicPreviewPrivateKey = mnemonicPreviewWallet.HDWallet.deriveChild(
-		fallbackPath,
-	).privateKey.toString();
+	const mnemonicPreviewPrivateKey =
+		mnemonicPreviewWallet.HDWallet.deriveChild(
+			fallbackPath,
+		).privateKey.toString();
 	const mnemonicPreviewPublicKey = mnemonicPreviewWallet.HDWallet.deriveChild(
 		fallbackPath,
-	).privateKey.toPublicKey().toString();
+	)
+		.privateKey.toPublicKey()
+		.toString();
 	return {
 		publicKey: mnemonicPreviewPublicKey,
 		addresses,
@@ -953,16 +962,16 @@ function signKaspaSubmitTransaction(params: {
 		network,
 	);
 	const signingContext: KaspaSigningContext = {
-			mode: "manual",
-			hashInput: {
-				fingerprint: signingInput.fingerprint,
-				messageDigest: signingInput.fingerprint,
-				hashAlgorithm: KASPA_DEFAULT_SIGNATURE_HASH_ALGORITHM,
-				signatureEncoding: resolvedEncoding,
-				network,
-				inputShape: "transaction-without-signatures",
-				payloadPreview: buildSigningInputPreview(signingInput.payload),
-				signaturePayload: buildKaspaSigningPayload(signingInput.payload),
+		mode: "manual",
+		hashInput: {
+			fingerprint: signingInput.fingerprint,
+			messageDigest: signingInput.fingerprint,
+			hashAlgorithm: KASPA_DEFAULT_SIGNATURE_HASH_ALGORITHM,
+			signatureEncoding: resolvedEncoding,
+			network,
+			inputShape: "transaction-without-signatures",
+			payloadPreview: buildSigningInputPreview(signingInput.payload),
+			signaturePayload: buildKaspaSigningPayload(signingInput.payload),
 			schema: "kaspa-signing-input.v1",
 		},
 		metadata: {
@@ -1049,15 +1058,15 @@ async function signKaspaSubmitTransactionWithWallet(params: {
 	const source = `kaspa-wallet:${resolvedProvider}`;
 	const signerResolutionModule = signerResolution.backend?.moduleName;
 	const signingContext: KaspaSigningContext = {
-			mode: "wallet",
-			hashInput: {
-				fingerprint: signingHash,
-				messageDigest: signingHash,
-				hashAlgorithm: KASPA_DEFAULT_SIGNATURE_HASH_ALGORITHM,
-				signatureEncoding: normalizedEncoding,
-				network,
-				inputShape: "transaction-without-signatures",
-				payloadPreview: buildSigningInputPreview(signingInput.payload),
+		mode: "wallet",
+		hashInput: {
+			fingerprint: signingHash,
+			messageDigest: signingHash,
+			hashAlgorithm: KASPA_DEFAULT_SIGNATURE_HASH_ALGORITHM,
+			signatureEncoding: normalizedEncoding,
+			network,
+			inputShape: "transaction-without-signatures",
+			payloadPreview: buildSigningInputPreview(signingInput.payload),
 			signaturePayload: buildKaspaSigningPayload(signingInput.payload),
 			schema: "kaspa-signing-input.v1",
 		},

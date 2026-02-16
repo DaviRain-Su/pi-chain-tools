@@ -10,8 +10,8 @@ import {
 	summarizeKaspaAddressBalanceResult,
 } from "./read.js";
 import {
-	signKaspaSubmitRequestWithWallet,
 	resolveKaspaPrivateKeyInfo,
+	signKaspaSubmitRequestWithWallet,
 } from "./sign.js";
 
 type KaspaWorkflowRunMode = "analysis" | "simulate" | "execute";
@@ -174,18 +174,16 @@ function normalizeKaspaTransferQuickMinimalInput(
 				}
 			: {};
 	}
-	if (
-		!rawParams ||
-		typeof rawParams !== "object" ||
-		Array.isArray(rawParams)
-	) {
+	if (!rawParams || typeof rawParams !== "object" || Array.isArray(rawParams)) {
 		throw new Error(
 			"w3rt_run_kaspa_send_v0 requires a natural language intent string or an object payload.",
 		);
 	}
 	const params = rawParams as KaspaTransferQuickMinimalParams;
 	const inlineText =
-		typeof params.intentText === "string" ? params.intentText.trim() : undefined;
+		typeof params.intentText === "string"
+			? params.intentText.trim()
+			: undefined;
 	const fallbackText =
 		typeof params.text === "string" ? params.text.trim() : undefined;
 	const normalizedIntent = inlineText || fallbackText;
@@ -202,18 +200,16 @@ function normalizeKaspaBalanceQuickInput(
 		const trimmed = rawParams.trim();
 		return trimmed ? { intentText: trimmed } : {};
 	}
-	if (
-		!rawParams ||
-		typeof rawParams !== "object" ||
-		Array.isArray(rawParams)
-	) {
+	if (!rawParams || typeof rawParams !== "object" || Array.isArray(rawParams)) {
 		throw new Error(
 			"w3rt_read_kaspa_balance_v0 requires a natural language intent string or an object payload.",
 		);
 	}
 	const params = rawParams as KaspaBalanceQuickParams;
-	const inlineText = typeof params.intentText === "string" ? params.intentText.trim() : "";
-	const fallbackText = typeof params.text === "string" ? params.text.trim() : "";
+	const inlineText =
+		typeof params.intentText === "string" ? params.intentText.trim() : "";
+	const fallbackText =
+		typeof params.text === "string" ? params.text.trim() : "";
 	const normalizedIntent = inlineText || fallbackText;
 	return {
 		...params,
@@ -228,18 +224,16 @@ function normalizeKaspaWalletQuickInput(
 		const trimmed = rawParams.trim();
 		return trimmed ? { intentText: trimmed } : {};
 	}
-	if (
-		!rawParams ||
-		typeof rawParams !== "object" ||
-		Array.isArray(rawParams)
-	) {
+	if (!rawParams || typeof rawParams !== "object" || Array.isArray(rawParams)) {
 		throw new Error(
 			"w3rt_read_kaspa_wallet_v0 requires a natural language intent string or an object payload.",
 		);
 	}
 	const params = rawParams as KaspaWalletQuickParams;
 	const inlineText =
-		typeof params.intentText === "string" ? params.intentText.trim() : undefined;
+		typeof params.intentText === "string"
+			? params.intentText.trim()
+			: undefined;
 	const fallbackText =
 		typeof params.text === "string" ? params.text.trim() : undefined;
 	const normalizedIntent = inlineText || fallbackText;
@@ -300,17 +294,14 @@ function parseKaspaTransferIntentText(
 	const input = intentText.trim();
 	const fromMatch = /(?:从|from)\s*(kaspa[a-z]*:[a-z0-9]+)/i.exec(input);
 	const toMatch = /(?:到|to)\s*(kaspa[a-z]*:[a-z0-9]+)/i.exec(input);
-	const addresses = Array.from(input.matchAll(KASPA_TRANSFER_QUICK_ADDRESS_REGEX)).map(
-		(match) => match[0].toLowerCase(),
-	);
+	const addresses = Array.from(
+		input.matchAll(KASPA_TRANSFER_QUICK_ADDRESS_REGEX),
+	).map((match) => match[0].toLowerCase());
 	const amountMatch = KASPA_TRANSFER_QUICK_AMOUNT_REGEX.exec(input);
 	const network = parseKaspaTransferIntentNetwork(input);
 	return {
-		fromAddress:
-			fromMatch?.[1]?.toLowerCase() ??
-			addresses[0],
-		toAddress:
-			toMatch?.[1]?.toLowerCase() ?? (addresses[1] || undefined),
+		fromAddress: fromMatch?.[1]?.toLowerCase() ?? addresses[0],
+		toAddress: toMatch?.[1]?.toLowerCase() ?? (addresses[1] || undefined),
 		amount: amountMatch?.[1] ?? undefined,
 		network: network,
 	};
@@ -345,7 +336,9 @@ function cleanKaspaWalletPathToken(value: string): string {
 		.trim();
 }
 
-function resolveKaspaWalletNetworkAlias(rawNetwork?: string): "mainnet" | "testnet10" | "testnet11" {
+function resolveKaspaWalletNetworkAlias(
+	rawNetwork?: string,
+): "mainnet" | "testnet10" | "testnet11" {
 	const normalized = parseKaspaNetwork(rawNetwork);
 	return normalized === "testnet" ? "testnet10" : normalized;
 }
@@ -382,15 +375,15 @@ function parseKaspaWalletIntentText(
 		return {};
 	}
 	const input = intentText.trim();
-	const parsedPathMatch =
-		KASPA_WALLET_PATH_FROM_TEXT_REGEX.exec(input);
+	const parsedPathMatch = KASPA_WALLET_PATH_FROM_TEXT_REGEX.exec(input);
 	const quotedPath = parsedPathMatch?.[2] || parsedPathMatch?.[3];
 	const tokenPath = parsedPathMatch?.[4];
 	const mnemonicMatch = KASPA_MNEMONIC_FROM_TEXT_REGEX.exec(input);
 	let privateKeyFile = quotedPath || tokenPath;
-	let mnemonic =
-		normalizeKaspaWalletIntentMnemonic(mnemonicMatch?.[2] || "");
-	let mnemonicDerivationPath = (input.match(KASPA_DERIVATION_PATH_FROM_TEXT_REGEX) || [])[0];
+	let mnemonic = normalizeKaspaWalletIntentMnemonic(mnemonicMatch?.[2] || "");
+	const mnemonicDerivationPath = (input.match(
+		KASPA_DERIVATION_PATH_FROM_TEXT_REGEX,
+	) || [])[0];
 
 	if (!mnemonic) {
 		const fallbackCandidates =
@@ -417,18 +410,24 @@ function parseKaspaWalletIntentText(
 	};
 }
 
-function normalizeKaspaTransferRequestForSubmit(value: unknown): Record<string, unknown> {
+function normalizeKaspaTransferRequestForSubmit(
+	value: unknown,
+): Record<string, unknown> {
 	if (!value || typeof value !== "object" || Array.isArray(value)) {
 		throw new Error("Kaspa request must be an object.");
 	}
 	const request = value as Record<string, unknown>;
 	if (!("rawTransaction" in request) && !("transaction" in request)) {
-		throw new Error("Kaspa request must contain rawTransaction or transaction.");
+		throw new Error(
+			"Kaspa request must contain rawTransaction or transaction.",
+		);
 	}
 	return request;
 }
 
-function resolveKaspaTransferComposeRequest(details: unknown): Record<string, unknown> {
+function resolveKaspaTransferComposeRequest(
+	details: unknown,
+): Record<string, unknown> {
 	if (!details || typeof details !== "object" || Array.isArray(details)) {
 		throw new Error("Kaspa compose result has unexpected details payload.");
 	}
@@ -436,13 +435,16 @@ function resolveKaspaTransferComposeRequest(details: unknown): Record<string, un
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
 		throw new Error("Kaspa compose result did not return request payload.");
 	}
+	const normalizedRaw = raw as Record<string, unknown>;
 	if (
-		!(typeof raw.rawTransaction === "string") &&
-		!("transaction" in raw)
+		!(typeof normalizedRaw.rawTransaction === "string") &&
+		!("transaction" in normalizedRaw)
 	) {
-		throw new Error("Kaspa compose request is missing rawTransaction/transaction.");
+		throw new Error(
+			"Kaspa compose request is missing rawTransaction/transaction.",
+		);
 	}
-	return raw as Record<string, unknown>;
+	return normalizedRaw;
 }
 
 function isKaspaTransferRequestLikelySigned(value: unknown): boolean {
@@ -484,7 +486,10 @@ function hasKaspaSignatureInValue(value: unknown): boolean {
 async function resolveKaspaTransferQuickRequest(
 	params: KaspaTransferQuickParams,
 	network: string,
-): Promise<{ request: Record<string, unknown>; source: "compose" | "provided" }> {
+): Promise<{
+	request: Record<string, unknown>;
+	source: "compose" | "provided";
+}> {
 	if (params.request !== undefined) {
 		return {
 			request: normalizeKaspaTransferRequestForSubmit(params.request),
@@ -550,10 +555,7 @@ async function resolveKaspaTransferQuickSignedRequest(
 async function runKaspaTransferQuickWorkflow(
 	params: KaspaTransferQuickParams,
 ): Promise<KaspaTransferQuickWorkflowResult> {
-	const runMode = resolveWorkflowRunMode(
-		params.runMode,
-		params.intentText,
-	);
+	const runMode = resolveWorkflowRunMode(params.runMode, params.intentText);
 	const parsedIntent = parseKaspaTransferIntentText(params.intentText);
 	const network = resolveKaspaTransferQuickNetwork(
 		params.network || parsedIntent.network,
@@ -570,7 +572,10 @@ async function runKaspaTransferQuickWorkflow(
 	const submitRequest =
 		runMode === "analysis" || runMode === "simulate"
 			? requestPack.request
-			: await resolveKaspaTransferQuickSignedRequest(params, requestPack.request);
+			: await resolveKaspaTransferQuickSignedRequest(
+					params,
+					requestPack.request,
+				);
 	const analysis = await submitKaspaTransaction({
 		runMode: "analysis",
 		request: submitRequest,
@@ -613,12 +618,11 @@ async function runKaspaTransferQuickWorkflow(
 				preflight: analysis.preflight,
 				confirmToken: analysis.confirmToken,
 				preflightChecks: analysis.preflightChecks,
-				preflightSummary:
-					analysis.preflight && {
-						allOk: analysis.preflight.allOk,
-						riskLevel: analysis.preflight.riskLevel,
-						readiness: analysis.preflight.readiness,
-					},
+				preflightSummary: analysis.preflight && {
+					allOk: analysis.preflight.allOk,
+					riskLevel: analysis.preflight.riskLevel,
+					readiness: analysis.preflight.readiness,
+				},
 				intent: {
 					runMode,
 					fromAddress: params.fromAddress || parsedIntent.fromAddress,
@@ -666,16 +670,17 @@ async function runKaspaTransferQuickWorkflow(
 		content: [
 			{
 				type: "text",
-				text: summarizeKaspaTransferQuickSummary({
-					network,
-					runMode: "execute",
-					fromAddress: params.fromAddress || parsedIntent.fromAddress,
-					toAddress: params.toAddress || parsedIntent.toAddress,
-					amount: params.amount ?? parsedIntent.amount,
-					requestSource: requestPack.source,
-					requestHash: executeResult.requestHash,
-					confirmed: true,
-				}) + (txId ? ` txId=${txId}` : ""),
+				text:
+					summarizeKaspaTransferQuickSummary({
+						network,
+						runMode: "execute",
+						fromAddress: params.fromAddress || parsedIntent.fromAddress,
+						toAddress: params.toAddress || parsedIntent.toAddress,
+						amount: params.amount ?? parsedIntent.amount,
+						requestSource: requestPack.source,
+						requestHash: executeResult.requestHash,
+						confirmed: true,
+					}) + (txId ? ` txId=${txId}` : ""),
 			},
 		],
 		details: {
@@ -707,7 +712,9 @@ async function runKaspaBalanceQuickWorkflow(
 ): Promise<KaspaTransferQuickWorkflowResult> {
 	const parsedIntent = parseKaspaBalanceIntentText(params.intentText);
 	const network = parseKaspaNetwork(
-		params.network || parsedIntent.network || KASPA_TRANSFER_QUICK_DEFAULT_NETWORK,
+		params.network ||
+			parsedIntent.network ||
+			KASPA_TRANSFER_QUICK_DEFAULT_NETWORK,
 	);
 	const address = params.address?.trim() || parsedIntent.address;
 	if (!address) {
@@ -758,28 +765,29 @@ async function runKaspaWalletQuickWorkflow(
 	const privateKeyFile = explicitPath || pathFromIntent;
 	const mnemonic = params.mnemonic?.trim() || parsedIntent.mnemonic;
 	const mnemonicDerivationPath =
-		params.mnemonicDerivationPath?.trim() || parsedIntent.mnemonicDerivationPath;
+		params.mnemonicDerivationPath?.trim() ||
+		parsedIntent.mnemonicDerivationPath;
 	const resolvedPrivateKeyFile =
-		privateKeyFile || KASPA_WALLET_QUICK_DEFAULT_PATH_BY_NETWORK[resolvedNetwork];
+		privateKeyFile ||
+		KASPA_WALLET_QUICK_DEFAULT_PATH_BY_NETWORK[resolvedNetwork];
 
 	const requestNetworks = requestNetwork;
-	const networks =
-		requestNetworks
-			? [resolveKaspaWalletNetworkAlias(requestNetworks)]
-			: undefined;
+	const networks = requestNetworks
+		? [resolveKaspaWalletNetworkAlias(requestNetworks)]
+		: undefined;
 	const info = await resolveKaspaPrivateKeyInfo({
 		privateKeyFile: resolvedPrivateKeyFile,
 		privateKeyPath: params.privateKeyPath,
 		privateKeyPathEnv: params.privateKeyPathEnv,
 		privateKeyEnv: params.privateKeyEnv,
 		mnemonic: mnemonic,
-			mnemonicFile: params.mnemonicFile,
-			mnemonicPath: params.mnemonicPath,
-			mnemonicPathEnv: params.mnemonicPathEnv,
-			mnemonicEnv: params.mnemonicEnv,
-			mnemonicDerivationPath,
-			networks: networks,
-		});
+		mnemonicFile: params.mnemonicFile,
+		mnemonicPath: params.mnemonicPath,
+		mnemonicPathEnv: params.mnemonicPathEnv,
+		mnemonicEnv: params.mnemonicEnv,
+		mnemonicDerivationPath,
+		networks: networks,
+	});
 	const addressSummary = info.addresses
 		.map((entry) => {
 			const pathHint = entry.derivationPath
@@ -825,9 +833,14 @@ function summarizeKaspaTransferQuickSummary(params: {
 	confirmed: boolean;
 }): string {
 	const amount = params.amount ?? "unknown";
-	const route = params.toAddress ? `to=${params.toAddress}` : "to=<custom-request>";
-	const source = params.requestSource === "compose" ? "auto-compose" : "provided-request";
-	const requestHash = params.requestHash ? ` requestHash=${params.requestHash}` : "";
+	const route = params.toAddress
+		? `to=${params.toAddress}`
+		: "to=<custom-request>";
+	const source =
+		params.requestSource === "compose" ? "auto-compose" : "provided-request";
+	const requestHash = params.requestHash
+		? ` requestHash=${params.requestHash}`
+		: "";
 	return `Kaspa transfer quick-${params.runMode} network=${params.network} from=${params.fromAddress} ${route} amount=${amount} source=${source} confirmed=${params.confirmed}${requestHash}`;
 }
 const KASPA_WORKFLOW_SESSIONS = new Map<string, KaspaWorkflowSession>();
@@ -842,9 +855,17 @@ if (!KASPA_COMPOSE_TOOL) {
 		"kaspa_buildTransferTransaction tool is required for workflow compose path",
 	);
 }
-const KASPA_BUILD_FROM_ADDRESS_TOOL = KASPA_COMPOSE_TOOLS.find(
-	(tool) => tool.name === "kaspa_buildTransferTransactionFromAddress",
-);
+const KASPA_BUILD_FROM_ADDRESS_TOOL = (() => {
+	const tool = KASPA_COMPOSE_TOOLS.find(
+		(tool) => tool.name === "kaspa_buildTransferTransactionFromAddress",
+	);
+	if (!tool) {
+		throw new Error(
+			"kaspa_buildTransferTransactionFromAddress tool is required for quick transfer workflow",
+		);
+	}
+	return tool;
+})();
 
 function createKaspaWorkflowRunId(): string {
 	return `wf-kaspa-${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 8)}`;
@@ -1073,8 +1094,8 @@ function extractTxIdFromSubmitResult(data: unknown): string | null {
 	return null;
 }
 
-	export function createKaspaWorkflowTools() {
-		return [
+export function createKaspaWorkflowTools() {
+	return [
 		defineTool({
 			name: "w3rt_run_kaspa_workflow_v0",
 			label: "Kaspa workflow",
@@ -1474,25 +1495,25 @@ function extractTxIdFromSubmitResult(data: unknown): string | null {
 						description: "Alias for local file path containing mnemonic words.",
 					}),
 				),
-					mnemonicPathEnv: Type.Optional(
-						Type.String({
-							description:
-								"Optional env var name for mnemonic file path (default: KASPA_MNEMONIC_PATH).",
-						}),
-					),
-					mnemonicEnv: Type.Optional(
-						Type.String({
-							description:
-								"Optional env var name for mnemonic fallback (default: KASPA_MNEMONIC).",
-						}),
-					),
-					mnemonicDerivationPath: Type.Optional(
-						Type.String({
-							description:
-								"BIP32 derivation path for mnemonic-based address generation, e.g. m/44'/111111'/0'/0/0.",
-						}),
-					),
-				}),
+				mnemonicPathEnv: Type.Optional(
+					Type.String({
+						description:
+							"Optional env var name for mnemonic file path (default: KASPA_MNEMONIC_PATH).",
+					}),
+				),
+				mnemonicEnv: Type.Optional(
+					Type.String({
+						description:
+							"Optional env var name for mnemonic fallback (default: KASPA_MNEMONIC).",
+					}),
+				),
+				mnemonicDerivationPath: Type.Optional(
+					Type.String({
+						description:
+							"BIP32 derivation path for mnemonic-based address generation, e.g. m/44'/111111'/0'/0/0.",
+					}),
+				),
+			}),
 			async execute(_toolCallId, rawParams) {
 				const params = normalizeKaspaWalletQuickInput(rawParams);
 				return runKaspaWalletQuickWorkflow(params);

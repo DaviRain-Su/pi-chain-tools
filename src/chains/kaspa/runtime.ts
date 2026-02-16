@@ -29,8 +29,11 @@ export function kaspaNetworkSchema() {
 
 export function parseKaspaNetwork(value?: string): KaspaNetwork {
 	const normalized = value?.trim().toLowerCase();
-	if (!normalized || normalized === "testnet") return "testnet";
-	if (normalized === "mainnet" || normalized === "kaspa-mainnet") return "mainnet";
+	if (!normalized) return "mainnet";
+	if (normalized === "testnet") return "testnet";
+	if (normalized === "mainnet" || normalized === "kaspa-mainnet") {
+		return "mainnet";
+	}
 	if (
 		normalized === "testnet10" ||
 		normalized === "tn10" ||
@@ -39,7 +42,11 @@ export function parseKaspaNetwork(value?: string): KaspaNetwork {
 	) {
 		return "testnet10";
 	}
-	if (normalized === "testnet11" || normalized === "tn11" || normalized === "kaspa-testnet11") {
+	if (
+		normalized === "testnet11" ||
+		normalized === "tn11" ||
+		normalized === "kaspa-testnet11"
+	) {
 		return "testnet11";
 	}
 	return "mainnet";

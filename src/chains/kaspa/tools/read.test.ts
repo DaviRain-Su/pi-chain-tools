@@ -169,7 +169,8 @@ describe("kaspa read tools", () => {
 
 		const tool = getTool("kaspa_fetchUtxos");
 		const result = await tool.execute("kaspa-fetch-utxos", {
-			address: "kaspa:qtestsender11111111111111111111111111111111111111111111111111",
+			address:
+				"kaspa:qtestsender11111111111111111111111111111111111111111111111111",
 			selectionStrategy: "feerate",
 			selectionLimit: 2,
 		});
@@ -191,10 +192,7 @@ describe("kaspa read tools", () => {
 		expect(details.rawCount).toBe(3);
 		expect(details.selectedCount).toBe(2);
 		expect(details.data).toHaveLength(2);
-		expect(details.data.map((entry) => entry.txId)).toEqual([
-			"tx-b",
-			"tx-a",
-		]);
+		expect(details.data.map((entry) => entry.txId)).toEqual(["tx-b", "tx-a"]);
 		expect(details.data[0].amount).toBe("200000000");
 		expect(details.summary.totalAmount).toBe("360000000");
 		expect(details.summary.selectedAmount).toBe("310000000");
@@ -220,7 +218,8 @@ describe("kaspa read tools", () => {
 
 		const tool = getTool("kaspa_fetchUtxos");
 		const result = await tool.execute("kaspa-fetch-utxos-alias", {
-			address: "kaspa:qtestsender11111111111111111111111111111111111111111111111111",
+			address:
+				"kaspa:qtestsender11111111111111111111111111111111111111111111111111",
 			selectionStrategy: "fifo",
 		});
 		const details = result.details as {

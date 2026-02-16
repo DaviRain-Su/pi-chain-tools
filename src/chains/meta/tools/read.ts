@@ -298,7 +298,10 @@ const CHAIN_CAPABILITIES: ChainCapability[] = [
 				tool: "w3rt_run_kaspa_send_v0",
 				description:
 					"Fastest way to run a Kaspa transfer: one intent sentence is enough, with optional analysis/simulation/execute.",
-				intentTypes: ["kaspa.transaction.submit", "kaspa.transaction.send.natural"],
+				intentTypes: [
+					"kaspa.transaction.submit",
+					"kaspa.transaction.send.natural",
+				],
 				nlExamples: [
 					"从 kaspa:... 转 kaspa:... 0.01",
 					"从 kaspa:... 转 0.01 给 kaspa:...，先模拟",

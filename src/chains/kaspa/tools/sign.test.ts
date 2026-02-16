@@ -100,6 +100,7 @@ describe("kaspa sign tools", () => {
 				hashInput: {
 					fingerprint: string;
 					messageDigest: string;
+					hashAlgorithm: string;
 					signatureEncoding: string;
 					payloadPreview?: string;
 					signaturePayload?: string;
@@ -179,6 +180,7 @@ describe("kaspa sign tools", () => {
 				hashInput: {
 					fingerprint: string;
 					messageDigest: string;
+					hashAlgorithm: string;
 					signatureEncoding: string;
 					network?: string;
 					payloadPreview?: string;

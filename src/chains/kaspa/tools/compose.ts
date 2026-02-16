@@ -307,8 +307,7 @@ function buildKaspaSelectionSummary(params: {
 		hasChange: params.hasChange,
 		changeAmount: params.hasChange ? params.change.toString() : "0",
 		selectionOrder: params.selectedUtxos.map(
-			(utxo, index) =>
-				`${index}:${utxo.txId}:${utxo.index}:${utxo.amount}`,
+			(utxo, index) => `${index}:${utxo.txId}:${utxo.index}:${utxo.amount}`,
 		),
 	};
 }

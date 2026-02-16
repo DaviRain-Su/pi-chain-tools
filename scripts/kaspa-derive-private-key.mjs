@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { writeFileSync } from "node:fs";
-import process from "node:process";
 import { createRequire } from "node:module";
+import process from "node:process";
 
 const DEFAULT_DERIVATION_PATH = "m/44'/111111'/0'/0/0";
 
@@ -34,80 +34,61 @@ function parseArgs(argv) {
 		accountLimit: 20,
 		changeLimit: 3,
 		indexLimit: 20,
-			coinType: 111111,
+		coinType: 111111,
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
-		if (!arg || typeof arg !== "string") continue;
+		if (!arg || typeof arg !== "string") {
+			continue;
+		}
 		if (arg === "--help" || arg === "-h") {
 			out.help = true;
-			continue;
-		}
-		if (arg === "--mnemonic" || arg === "-m") {
+		} else if (arg === "--mnemonic" || arg === "-m") {
 			out.mnemonic = argv[index + 1];
 			index += 1;
-			continue;
-		}
-		if (arg === "--network" || arg === "-n") {
+		} else if (arg === "--network" || arg === "-n") {
 			out.network = argv[index + 1] ?? out.network;
 			index += 1;
-			continue;
-		}
-		if (arg === "--path" || arg === "-p") {
+		} else if (arg === "--path" || arg === "-p") {
 			out.path = argv[index + 1] ?? out.path;
 			index += 1;
-			continue;
-		}
-		if (arg === "--scan-for") {
+		} else if (arg === "--scan-for") {
 			out.scanTarget = argv[index + 1];
 			index += 1;
-			continue;
-		}
-		if (arg === "--account-limit") {
+		} else if (arg === "--account-limit") {
 			const parsed = Number.parseInt(argv[index + 1] ?? "", 10);
 			if (!Number.isNaN(parsed) && parsed > 0) out.accountLimit = parsed;
 			index += 1;
-			continue;
-		}
-		if (arg === "--change-limit") {
+		} else if (arg === "--change-limit") {
 			const parsed = Number.parseInt(argv[index + 1] ?? "", 10);
 			if (!Number.isNaN(parsed) && parsed > 0) out.changeLimit = parsed;
 			index += 1;
-			continue;
-		}
-		if (arg === "--index-limit") {
+		} else if (arg === "--index-limit") {
 			const parsed = Number.parseInt(argv[index + 1] ?? "", 10);
 			if (!Number.isNaN(parsed) && parsed > 0) out.indexLimit = parsed;
 			index += 1;
-			continue;
-		}
-		if (arg === "--coin-type") {
+		} else if (arg === "--coin-type") {
 			const parsed = Number.parseInt(argv[index + 1] ?? "", 10);
 			if (!Number.isNaN(parsed) && parsed > 0) out.coinType = parsed;
 			index += 1;
-			continue;
-		}
-		if (arg === "--mnemonic-file") {
+		} else if (arg === "--mnemonic-file") {
 			out.mnemonicFile = argv[index + 1];
 			index += 1;
-			continue;
-		}
-		if (arg === "--output" || arg === "-o") {
+		} else if (arg === "--output" || arg === "-o") {
 			out.outputPath = argv[index + 1];
 			index += 1;
-			continue;
-		}
-		if (arg === "--format" || arg === "--fmt") {
+		} else if (arg === "--format" || arg === "--fmt") {
 			out.format = argv[index + 1] ?? out.format;
 			index += 1;
-			continue;
 		}
 	}
 	return out;
 }
 
 function resolveKaspaWalletNetwork(network) {
-	const normalized = String(network || "").toLowerCase().trim();
+	const normalized = String(network || "")
+		.toLowerCase()
+		.trim();
 	if (normalized.includes("main")) return "kaspa";
 	if (normalized.includes("dev")) return "kaspadev";
 	if (normalized.includes("sim")) return "kaspasim";
@@ -132,7 +113,7 @@ function summarize(output) {
 		walletNetwork: output.walletNetwork,
 		coinType: output.coinType,
 		derivationPath: output.path,
-		rootXprvHead: output.rootXprv.slice(0, 30) + "...",
+		rootXprvHead: `${output.rootXprv.slice(0, 30)}...`,
 		privateKey: output.privateKey,
 		receiveAddress: output.receiveAddress,
 	};
@@ -162,7 +143,7 @@ async function resolveKaspaAddressMatch({
 	accountLimit,
 	changeLimit,
 	indexLimit,
-	}) {
+}) {
 	for (let account = 0; account < accountLimit; account += 1) {
 		for (let change = 0; change < changeLimit; change += 1) {
 			for (let index = 0; index < indexLimit; index += 1) {
@@ -202,7 +183,7 @@ async function main() {
 	mnemonic = typeof mnemonic === "string" ? mnemonic.trim() : "";
 	if (!mnemonic) {
 		throw new Error(
-			"请传入 --mnemonic 或 --mnemonic-file。示例：--mnemonic \"battle zoo ...\"",
+			'请传入 --mnemonic 或 --mnemonic-file。示例：--mnemonic "battle zoo ..."',
 		);
 	}
 
