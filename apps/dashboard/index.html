@@ -70,8 +70,16 @@
       </div>
 
       <div class="card" style="margin-top:16px">
-        <h3>Action Console (safe command builder)</h3>
-        <p class="muted">Build reviewed commands first, then execute in terminal. This panel does not auto-send transactions.</p>
+        <h3>Action History</h3>
+        <table>
+          <thead><tr><th>Time</th><th>Action</th><th>Status</th><th>Summary</th></tr></thead>
+          <tbody id="actions"></tbody>
+        </table>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h3>Action Console</h3>
+        <p class="muted">Supports command build + confirmed direct execution for selected actions.</p>
         <div class="row">
           <input id="wrapAmount" placeholder="Wrap amount NEAR (e.g. 1)" size="24" />
           <button id="buildWrap">Build wrap command</button>
@@ -109,6 +117,7 @@
       const metaEl = document.getElementById("meta");
       const tokensEl = document.getElementById("tokens");
       const txsEl = document.getElementById("txs");
+      const actionsEl = document.getElementById("actions");
       const wrapAmountEl = document.getElementById("wrapAmount");
       const supplyRawEl = document.getElementById("supplyRaw");
       const buildWrapBtn = document.getElementById("buildWrap");
@@ -171,6 +180,14 @@
           const hash = tx.explorerUrl ? `<a href="${tx.explorerUrl}" target="_blank" rel="noreferrer">${tx.txHash}</a>` : tx.txHash;
           tr.innerHTML = `<td>${new Date(tx.timestamp).toLocaleString()}</td><td>${tx.tool}</td><td>${hash}</td>`;
           txsEl.appendChild(tr);
+        }
+
+        actionsEl.innerHTML = "";
+        for (const row of data.actionHistory || []) {
+          const tr = document.createElement("tr");
+          const status = row.status === "success" ? `<span class="ok">success</span>` : `<span class="warn">error</span>`;
+          tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.action}</td><td>${status}</td><td>${row.summary || ""}</td>`;
+          actionsEl.appendChild(tr);
         }
       }
 

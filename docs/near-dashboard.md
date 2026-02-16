@@ -10,8 +10,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Yield worker status (best-effort from latest local OpenClaw session log)
 - Recent execution tx list (best-effort from latest local OpenClaw session log)
 - Strategy view: current stable collateral APR ranking + quick recommendation
-- Action Console: safe command builder for wrap/supply/worker start-stop (manual execution)
-- Optional direct execution buttons for `wrap_near` and `supply_usdt_collateral` (requires browser confirm)
+- Action Console: command builder + optional direct execution for selected actions (requires browser confirm)
+- Action history panel: success/error timeline for dashboard-triggered actions
 - Best-effort USD estimates from NEAR Intents token feed
 
 ## Start

@@ -26,6 +26,8 @@ const SESSION_DIR =
 		".openclaw/agents/main/sessions",
 	);
 
+const ACTION_HISTORY = [];
+
 const TOKENS = [
 	{ symbol: "USDt", contractId: "usdt.tether-token.near", decimals: 6 },
 	{
@@ -371,6 +373,7 @@ async function buildSnapshot(accountId) {
 		strategy,
 		worker: localSignals.worker,
 		recentTxs: localSignals.recentTxs,
+		actionHistory: ACTION_HISTORY,
 	};
 }
 
@@ -386,74 +389,109 @@ function runCommand(command, args) {
 	});
 }
 
+function pushActionHistory(entry) {
+	ACTION_HISTORY.unshift({
+		id: `act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+		timestamp: new Date().toISOString(),
+		...entry,
+	});
+	if (ACTION_HISTORY.length > 30) {
+		ACTION_HISTORY.length = 30;
+	}
+}
+
 async function executeAction(payload) {
 	const accountId = String(payload.accountId || ACCOUNT_ID).trim();
 	const nearBin = "near";
-	if (payload.action === "wrap_near") {
-		const amountNear = String(payload.amountNear || "1").trim();
-		const out = await runCommand(nearBin, [
-			"contract",
-			"call-function",
-			"as-transaction",
-			"wrap.near",
-			"near_deposit",
-			"json-args",
-			"{}",
-			"prepaid-gas",
-			"100 Tgas",
-			"attached-deposit",
-			`${amountNear} NEAR`,
-			"sign-as",
-			accountId,
-			"network-config",
-			"mainnet",
-			"sign-with-keychain",
-			"send",
-		]);
-		return { ok: true, action: payload.action, output: out };
-	}
-	if (payload.action === "supply_usdt_collateral") {
-		const amountRaw = String(payload.amountRaw || "1000000").trim();
-		const msg = JSON.stringify({
-			Execute: {
-				actions: [
-					{
-						IncreaseCollateral: {
-							token_id: "usdt.tether-token.near",
-							amount: null,
-							max_amount: null,
+	try {
+		if (payload.action === "wrap_near") {
+			const amountNear = String(payload.amountNear || "1").trim();
+			const out = await runCommand(nearBin, [
+				"contract",
+				"call-function",
+				"as-transaction",
+				"wrap.near",
+				"near_deposit",
+				"json-args",
+				"{}",
+				"prepaid-gas",
+				"100 Tgas",
+				"attached-deposit",
+				`${amountNear} NEAR`,
+				"sign-as",
+				accountId,
+				"network-config",
+				"mainnet",
+				"sign-with-keychain",
+				"send",
+			]);
+			const result = { ok: true, action: payload.action, output: out };
+			pushActionHistory({
+				action: payload.action,
+				accountId,
+				status: "success",
+				summary: `wrapped ${amountNear} NEAR`,
+			});
+			return result;
+		}
+		if (payload.action === "supply_usdt_collateral") {
+			const amountRaw = String(payload.amountRaw || "1000000").trim();
+			const msg = JSON.stringify({
+				Execute: {
+					actions: [
+						{
+							IncreaseCollateral: {
+								token_id: "usdt.tether-token.near",
+								amount: null,
+								max_amount: null,
+							},
 						},
-					},
-				],
-			},
-		});
-		const args = JSON.stringify({
-			receiver_id: BURROW_CONTRACT,
-			amount: amountRaw,
-			msg,
-		});
-		const out = await runCommand(nearBin, [
-			"contract",
-			"call-function",
-			"as-transaction",
-			"usdt.tether-token.near",
-			"ft_transfer_call",
-			"json-args",
-			args,
-			"prepaid-gas",
-			"180 Tgas",
-			"attached-deposit",
-			"1 yoctoNEAR",
-			"sign-as",
+					],
+				},
+			});
+			const args = JSON.stringify({
+				receiver_id: BURROW_CONTRACT,
+				amount: amountRaw,
+				msg,
+			});
+			const out = await runCommand(nearBin, [
+				"contract",
+				"call-function",
+				"as-transaction",
+				"usdt.tether-token.near",
+				"ft_transfer_call",
+				"json-args",
+				args,
+				"prepaid-gas",
+				"180 Tgas",
+				"attached-deposit",
+				"1 yoctoNEAR",
+				"sign-as",
+				accountId,
+				"network-config",
+				"mainnet",
+				"sign-with-keychain",
+				"send",
+			]);
+			const result = { ok: true, action: payload.action, output: out };
+			pushActionHistory({
+				action: payload.action,
+				accountId,
+				status: "success",
+				summary: `supplied ${amountRaw} raw USDt`,
+			});
+			return result;
+		}
+		throw new Error(`Unsupported action: ${payload.action}`);
+	} catch (error) {
+		pushActionHistory({
+			action: payload.action,
 			accountId,
-			"network-config",
-			"mainnet",
-			"sign-with-keychain",
-			"send",
-		]);
-		return { ok: true, action: payload.action, output: out };
+			status: "error",
+			summary: error instanceof Error ? error.message : String(error),
+		});
+		throw error;
 	}
-	throw new Error(`Unsupported action: ${payload.action}`);
 }
 
 const server = http.createServer(async (req, res) => {
