@@ -128,6 +128,86 @@ function getTool(name: string): ExecuteTool {
 	return tool as unknown as ExecuteTool;
 }
 
+const PANCAKE_TEST_DATA = {
+	pairAddress: "0xcccccccccccccccccccccccccccccccccccccccc",
+	routerAddress: "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+};
+
+function encodeUint256Word(value: bigint): string {
+	return value.toString(16).padStart(64, "0");
+}
+
+function encodeAddressWord(address: string): string {
+	const normalized = address.toLowerCase().replace(/^0x/, "");
+	return `0x${normalized.padStart(64, "0")}`;
+}
+
+function mockJsonRpcPancakeSwapFetch() {
+	const tokenIn = "0x1111111111111111111111111111111111111111";
+	const tokenOut = "0x2222222222222222222222222222222222222222";
+	const pairAddress = PANCAKE_TEST_DATA.pairAddress;
+	const reserve0 = 2_000_000n;
+	const reserve1 = 1_000_000n;
+	const txHash = `0x${"2".repeat(64)}`;
+	const selectorGetPair = "0xe6a43905";
+	const selectorToken0 = "0x0dfe1681";
+	const selectorToken1 = "0xd21220a7";
+	const selectorReserves = "0x0902f1ac";
+	const fetchMock = vi.fn(
+		async (_url: string | URL | Request, init?: RequestInit) => {
+			const body = JSON.parse(String(init?.body ?? "{}")) as {
+				id?: string | number;
+				method?: string;
+				params?: Array<{ to?: string; data?: string }>;
+			};
+			const method = body.method ?? "";
+			let result = "0x0";
+			if (method === "eth_call") {
+				const payload = body.params?.[0];
+				const data = payload?.data ?? "";
+				switch (data.slice(0, 10)) {
+					case selectorGetPair:
+						result = encodeAddressWord(pairAddress);
+						break;
+					case selectorToken0:
+						result = encodeAddressWord(tokenIn);
+						break;
+					case selectorToken1:
+						result = encodeAddressWord(tokenOut);
+						break;
+					case selectorReserves:
+						result = `${encodeUint256Word(reserve0)}${encodeUint256Word(reserve1)}${encodeUint256Word(0n)}`;
+						break;
+					default:
+						result = "0x";
+				}
+			}
+			if (method === "eth_getTransactionCount") result = "0x2";
+			if (method === "eth_gasPrice") result = "0x3b9aca00";
+			if (method === "eth_estimateGas") result = "0x5208";
+			if (method === "eth_sendRawTransaction") result = txHash;
+			return {
+				ok: true,
+				status: 200,
+				statusText: "OK",
+				text: async () =>
+					JSON.stringify({
+						jsonrpc: "2.0",
+						id: body.id ?? 1,
+						result,
+					}),
+			} as Response;
+		},
+	);
+	global.fetch = fetchMock as unknown as typeof fetch;
+	return {
+		fetchMock,
+		tokenIn,
+		tokenOut,
+		txHash,
+	};
+}
+
 function mockJsonRpcFetch() {
 	const txHash = `0x${"1".repeat(64)}`;
 	const fetchMock = vi.fn(
@@ -604,5 +684,92 @@ describe("evm execute tools", () => {
 				confirmMainnet: true,
 			}),
 		).rejects.toThrow("Transfer blocked by policy");
+	});
+
+	it("previews BSC PancakeSwap V2 quote and swap tx", async () => {
+		const { fetchMock, tokenIn, tokenOut } = mockJsonRpcPancakeSwapFetch();
+		const tool = getTool("evm_pancakeV2Swap");
+		const result = await tool.execute("swap-preview", {
+			network: "bsc",
+			tokenInAddress: tokenIn,
+			tokenOutAddress: tokenOut,
+			amountInRaw: "10000",
+			toAddress: "0x000000000000000000000000000000000000dEaD",
+			slippageBps: 50,
+			dryRun: true,
+		});
+		expect(result.content[0]?.text).toContain("PancakeSwap V2 swap preview");
+		if (typeof result.details === "object" && result.details !== null) {
+			expect((result.details as { amountOutRaw?: string }).amountOutRaw).toBe(
+				"4960",
+			);
+		}
+		expect(result.details).toMatchObject({
+			dryRun: true,
+			network: "bsc",
+			tokenInAddress: tokenIn,
+			tokenOutAddress: tokenOut,
+			pairAddress: PANCAKE_TEST_DATA.pairAddress,
+			tx: {
+				toAddress: PANCAKE_TEST_DATA.routerAddress,
+			},
+		});
+		const methods = fetchMock.mock.calls.map((call) => {
+			const body = JSON.parse(String(call[1]?.body ?? "{}")) as {
+				method?: string;
+			};
+			return body.method;
+		});
+		expect(methods).toContain("eth_call");
+		expect(methods).not.toContain("eth_sendRawTransaction");
+	});
+
+	it("submits BSC PancakeSwap V2 swap when confirmed", async () => {
+		const { fetchMock, tokenIn, tokenOut, txHash } =
+			mockJsonRpcPancakeSwapFetch();
+		const tool = getTool("evm_pancakeV2Swap");
+		const result = await tool.execute("swap-submit", {
+			network: "bsc",
+			tokenInAddress: tokenIn,
+			tokenOutAddress: tokenOut,
+			amountInRaw: "10000",
+			toAddress: "0x000000000000000000000000000000000000dEaD",
+			deadlineMinutes: 10,
+			confirmMainnet: true,
+			dryRun: false,
+		});
+		expect(result.content[0]?.text).toContain("swap submitted");
+		expect(result.details).toMatchObject({
+			dryRun: false,
+			network: "bsc",
+			txHash,
+		});
+		if (typeof result.details === "object" && result.details !== null) {
+			expect((result.details as { amountOutRaw?: string }).amountOutRaw).toBe(
+				"4960",
+			);
+		}
+		const methods = fetchMock.mock.calls.map((call) => {
+			const body = JSON.parse(String(call[1]?.body ?? "{}")) as {
+				method?: string;
+			};
+			return body.method;
+		});
+		expect(methods).toContain("eth_sendRawTransaction");
+	});
+
+	it("rejects PancakeSwap V2 swap on unsupported network", async () => {
+		const { tokenIn, tokenOut } = mockJsonRpcPancakeSwapFetch();
+		const tool = getTool("evm_pancakeV2Swap");
+		await expect(
+			tool.execute("swap-unsupported", {
+				network: "polygon",
+				tokenInAddress: tokenIn,
+				tokenOutAddress: tokenOut,
+				amountInRaw: "10000",
+				toAddress: "0x000000000000000000000000000000000000dEaD",
+				dryRun: true,
+			}),
+		).rejects.toThrow("pancakeV2Swap currently supports BSC network only");
 	});
 });

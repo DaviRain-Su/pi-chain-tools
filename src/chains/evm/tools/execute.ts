@@ -16,6 +16,7 @@ import {
 } from "../polymarket.js";
 import {
 	EVM_TOOL_PREFIX,
+	type EvmNetwork,
 	evmHttpJson,
 	evmNetworkSchema,
 	getEvmChainId,
@@ -119,6 +120,329 @@ type ClobClientAuthParams = {
 	apiPassphrase?: string;
 	signatureType?: number;
 };
+
+type PancakeV2SwapRouteConfig = {
+	chainId: number;
+	factoryAddress: string;
+	routerAddress: string;
+	wrappedNativeAddress: string;
+};
+
+const PANCAKE_V2_NETWORK_CONFIG: Partial<
+	Record<EvmNetwork, PancakeV2SwapRouteConfig>
+> = {
+	bsc: {
+		chainId: 56,
+		factoryAddress: "0xca143ce32fe78f1f7019d7d551a6402fc5350c73",
+		routerAddress: "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+		wrappedNativeAddress: "0xbb4cdb9cbd36b01bd1cbaeBF2de08d9173bc095c",
+	},
+};
+
+const PANCAKE_V2_SELECTOR_GET_PAIR = "0xe6a43905";
+const PANCAKE_V2_SELECTOR_TOKEN0 = "0x0dfe1681";
+const PANCAKE_V2_SELECTOR_TOKEN1 = "0xd21220a7";
+const PANCAKE_V2_SELECTOR_GET_RESERVES = "0x0902f1ac";
+const PANCAKE_V2_SELECTOR_SWAP_EXACT_TOKENS_FOR_TOKENS = "0x38ed1739";
+const PANCAKE_V2_SELECTOR_SWAP_EXACT_ETH_FOR_TOKENS = "0x7ff36ab5";
+const PANCAKE_V2_SELECTOR_SWAP_EXACT_TOKENS_FOR_ETH = "0x18cbafe5";
+
+function resolvePancakeV2Config(network: EvmNetwork): PancakeV2SwapRouteConfig {
+	const config = PANCAKE_V2_NETWORK_CONFIG[network];
+	if (!config) {
+		throw new Error(
+			`PancakeSwap v2 execution is only supported on BSC in this toolset. Current network=${network}`,
+		);
+	}
+	return config;
+}
+
+function toNormalizedAddress(address: string): string {
+	return address.toLowerCase();
+}
+
+function toAddressWord(address: string): string {
+	return toNormalizedAddress(address).replace(/^0x/, "").padStart(64, "0");
+}
+
+function toUint256Word(value: bigint): string {
+	if (value < 0n) {
+		throw new Error("amount/value cannot be negative");
+	}
+	return value.toString(16).padStart(64, "0");
+}
+
+function isZeroAddress(address: string): boolean {
+	return /^0x0{40}$/i.test(address);
+}
+
+function parseUint256Word(value: string): bigint {
+	const normalized = value.startsWith("0x")
+		? value.slice(2).replace(/^0x/i, "")
+		: value;
+	if (!normalized) return 0n;
+	return BigInt(`0x${normalized}`);
+}
+
+function parseAddressWord(value: string): string {
+	const normalized = value.startsWith("0x") ? value.slice(2) : value;
+	const address = normalized.slice(-40);
+	return `0x${address}`;
+}
+
+function encodeAddressList(path: string[]): string {
+	return `${toUint256Word(BigInt(path.length))}${path
+		.map((entry) => toAddressWord(entry))
+		.join("")}`;
+}
+
+async function callEvmContract(params: {
+	rpcUrl: string;
+	toAddress: string;
+	data: string;
+}): Promise<string> {
+	return callEvmRpc<string>(params.rpcUrl, "eth_call", [
+		{ to: params.toAddress, data: params.data },
+		"latest",
+	]);
+}
+
+function buildEvmCallPancakeGetPair(params: {
+	tokenInAddress: string;
+	tokenOutAddress: string;
+}): string {
+	return `${PANCAKE_V2_SELECTOR_GET_PAIR}${toAddressWord(params.tokenInAddress)}${toAddressWord(params.tokenOutAddress)}`;
+}
+
+function buildSwapExactTokensForTokensData(params: {
+	amountInRaw: bigint;
+	amountOutMinRaw: bigint;
+	path: [string, string];
+	toAddress: string;
+	deadlineSeconds: number;
+}): string {
+	const pathData = encodeAddressList(params.path);
+	const deadline = BigInt(Math.trunc(params.deadlineSeconds));
+	const head = [
+		toUint256Word(params.amountInRaw),
+		toUint256Word(params.amountOutMinRaw),
+		toUint256Word(0xa0n),
+		toAddressWord(params.toAddress),
+		toUint256Word(deadline),
+	].join("");
+	return `${PANCAKE_V2_SELECTOR_SWAP_EXACT_TOKENS_FOR_TOKENS}${head}${pathData}`;
+}
+
+function buildSwapExactEthForTokensData(params: {
+	amountOutMinRaw: bigint;
+	path: [string, string];
+	toAddress: string;
+	deadlineSeconds: number;
+}): string {
+	const pathData = encodeAddressList(params.path);
+	const deadline = BigInt(Math.trunc(params.deadlineSeconds));
+	const head = [
+		toUint256Word(params.amountOutMinRaw),
+		toUint256Word(0x80n),
+		toAddressWord(params.toAddress),
+		toUint256Word(deadline),
+	].join("");
+	return `${PANCAKE_V2_SELECTOR_SWAP_EXACT_ETH_FOR_TOKENS}${head}${pathData}`;
+}
+
+function buildSwapExactTokensForEthData(params: {
+	amountInRaw: bigint;
+	amountOutMinRaw: bigint;
+	path: [string, string];
+	toAddress: string;
+	deadlineSeconds: number;
+}): string {
+	const pathData = encodeAddressList(params.path);
+	const deadline = BigInt(Math.trunc(params.deadlineSeconds));
+	const head = [
+		toUint256Word(params.amountInRaw),
+		toUint256Word(params.amountOutMinRaw),
+		toUint256Word(0xa0n),
+		toAddressWord(params.toAddress),
+		toUint256Word(deadline),
+	].join("");
+	return `${PANCAKE_V2_SELECTOR_SWAP_EXACT_TOKENS_FOR_ETH}${head}${pathData}`;
+}
+
+function computeV2AmountOut(params: {
+	amountInRaw: bigint;
+	reserveInRaw: bigint;
+	reserveOutRaw: bigint;
+}): bigint {
+	if (
+		params.amountInRaw <= 0n ||
+		params.reserveInRaw <= 0n ||
+		params.reserveOutRaw <= 0n
+	) {
+		return 0n;
+	}
+	const amountInWithFee = params.amountInRaw * 997n;
+	const numerator = amountInWithFee * params.reserveOutRaw;
+	const denominator = params.reserveInRaw * 1000n + amountInWithFee;
+	return denominator === 0n ? 0n : numerator / denominator;
+}
+
+function normalizeDeadlineMinutes(value: number | undefined): number {
+	if (value == null) return 20;
+	const minutes = Math.trunc(value);
+	if (!Number.isFinite(minutes) || minutes < 1) {
+		throw new Error("deadlineMinutes must be >= 1");
+	}
+	if (minutes > 60 * 24 * 7) {
+		throw new Error("deadlineMinutes must be <= 10080");
+	}
+	return minutes;
+}
+
+function buildPancakeV2SwapTx(params: {
+	isInputNative: boolean;
+	isOutputNative: boolean;
+	amountInRaw: bigint;
+	amountOutMinRaw: bigint;
+	routerAddress: string;
+	tokenInAddress: string;
+	tokenOutAddress: string;
+	recipientAddress: string;
+	deadlineSeconds: number;
+}): { toAddress: string; data: string; valueWei: bigint } {
+	if (params.isInputNative) {
+		return {
+			toAddress: params.routerAddress,
+			data: buildSwapExactEthForTokensData({
+				amountOutMinRaw: params.amountOutMinRaw,
+				path: [params.tokenInAddress, params.tokenOutAddress] as [
+					string,
+					string,
+				],
+				toAddress: params.recipientAddress,
+				deadlineSeconds: params.deadlineSeconds,
+			}),
+			valueWei: params.amountInRaw,
+		};
+	}
+	if (params.isOutputNative) {
+		return {
+			toAddress: params.routerAddress,
+			data: buildSwapExactTokensForEthData({
+				amountInRaw: params.amountInRaw,
+				amountOutMinRaw: params.amountOutMinRaw,
+				path: [params.tokenInAddress, params.tokenOutAddress] as [
+					string,
+					string,
+				],
+				toAddress: params.recipientAddress,
+				deadlineSeconds: params.deadlineSeconds,
+			}),
+			valueWei: 0n,
+		};
+	}
+	return {
+		toAddress: params.routerAddress,
+		data: buildSwapExactTokensForTokensData({
+			amountInRaw: params.amountInRaw,
+			amountOutMinRaw: params.amountOutMinRaw,
+			path: [params.tokenInAddress, params.tokenOutAddress] as [string, string],
+			toAddress: params.recipientAddress,
+			deadlineSeconds: params.deadlineSeconds,
+		}),
+		valueWei: 0n,
+	};
+}
+
+async function quotePancakeV2Swap(params: {
+	rpcUrl: string;
+	tokenInAddress: string;
+	tokenOutAddress: string;
+	amountInRaw: bigint;
+	slippageBps?: number;
+	factoryAddress: string;
+}): Promise<{
+	pairAddress: string;
+	amountOutRaw: bigint;
+	amountOutMinRaw: bigint;
+	reserveInRaw: bigint;
+	reserveOutRaw: bigint;
+}> {
+	if (params.amountInRaw <= 0n) {
+		throw new Error("amountInRaw must be greater than 0");
+	}
+	const pairAddressRaw = await callEvmContract({
+		rpcUrl: params.rpcUrl,
+		toAddress: params.factoryAddress,
+		data: buildEvmCallPancakeGetPair({
+			tokenInAddress: params.tokenInAddress,
+			tokenOutAddress: params.tokenOutAddress,
+		}),
+	});
+	const pairAddress = parseAddressWord(pairAddressRaw);
+	if (isZeroAddress(pairAddress)) {
+		throw new Error(
+			`No direct PancakeSwap v2 pair found for tokenIn=${params.tokenInAddress}, tokenOut=${params.tokenOutAddress} on BSC`,
+		);
+	}
+	const pairToken0 = parseAddressWord(
+		await callEvmContract({
+			rpcUrl: params.rpcUrl,
+			toAddress: pairAddress,
+			data: PANCAKE_V2_SELECTOR_TOKEN0,
+		}),
+	);
+	const pairToken1 = parseAddressWord(
+		await callEvmContract({
+			rpcUrl: params.rpcUrl,
+			toAddress: pairAddress,
+			data: PANCAKE_V2_SELECTOR_TOKEN1,
+		}),
+	);
+	const reservesRaw = await callEvmContract({
+		rpcUrl: params.rpcUrl,
+		toAddress: pairAddress,
+		data: PANCAKE_V2_SELECTOR_GET_RESERVES,
+	});
+	const reservesHex = reservesRaw.startsWith("0x")
+		? reservesRaw.slice(2)
+		: reservesRaw;
+	const reserve0 = parseUint256Word(`0x${reservesHex.slice(0, 64)}`);
+	const reserve1 = parseUint256Word(`0x${reservesHex.slice(64, 128)}`);
+	let reserveInRaw: bigint;
+	let reserveOutRaw: bigint;
+	const tokenInNormalized = toNormalizedAddress(params.tokenInAddress);
+	if (tokenInNormalized === toNormalizedAddress(pairToken0)) {
+		reserveInRaw = reserve0;
+		reserveOutRaw = reserve1;
+	} else if (tokenInNormalized === toNormalizedAddress(pairToken1)) {
+		reserveInRaw = reserve1;
+		reserveOutRaw = reserve0;
+	} else {
+		throw new Error("Pair does not include provided tokenIn address");
+	}
+	const amountOutRaw = computeV2AmountOut({
+		amountInRaw: params.amountInRaw,
+		reserveInRaw,
+		reserveOutRaw,
+	});
+	if (amountOutRaw <= 0n) {
+		throw new Error("Pair has insufficient liquidity for this swap amount");
+	}
+	const bps = params.slippageBps == null ? 50 : Math.trunc(params.slippageBps);
+	if (!Number.isFinite(bps) || bps <= 0 || bps >= 10_000) {
+		throw new Error("slippageBps must be in (0,10000)");
+	}
+	const slippagePenalty = (amountOutRaw * BigInt(bps)) / 10_000n;
+	const amountOutMinRaw = amountOutRaw - slippagePenalty;
+	return {
+		pairAddress,
+		amountOutRaw,
+		amountOutMinRaw,
+		reserveInRaw,
+		reserveOutRaw,
+	};
+}
 
 function parseSignatureType(value: number | undefined): number {
 	if (value === 0 || value === 1 || value === 2) return value;
@@ -1389,6 +1713,193 @@ export function createEvmExecuteTools() {
 						gasLimit: gasLimit.toString(),
 						data,
 						policyCheck,
+						txHash,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${EVM_TOOL_PREFIX}pancakeV2Swap`,
+			label: "EVM PancakeSwap v2 Swap",
+			description:
+				"Build/submit exact-input PancakeSwap V2 swaps on BSC (single-hop pair only). Defaults to dryRun=true.",
+			parameters: Type.Object({
+				network: evmNetworkSchema(),
+				tokenInAddress: Type.String(),
+				tokenOutAddress: Type.String(),
+				amountInRaw: Type.String(),
+				toAddress: Type.String(),
+				slippageBps: Type.Optional(Type.Number({ minimum: 1, maximum: 9999 })),
+				deadlineMinutes: Type.Optional(
+					Type.Number({ minimum: 1, maximum: 10080 }),
+				),
+				amountOutMinRaw: Type.Optional(Type.String()),
+				rpcUrl: Type.Optional(Type.String()),
+				nonce: Type.Optional(Type.Number({ minimum: 0 })),
+				gasPriceGwei: Type.Optional(Type.Number({ minimum: 0.000000001 })),
+				gasLimit: Type.Optional(Type.Number({ minimum: 21000 })),
+				dryRun: Type.Optional(Type.Boolean()),
+				confirmMainnet: Type.Optional(Type.Boolean()),
+				fromPrivateKey: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseEvmNetwork(params.network);
+				if (network !== "bsc") {
+					throw new Error("pancakeV2Swap currently supports BSC network only.");
+				}
+				const mainnetLike = isMainnetLikeEvmNetwork(network);
+				const dryRun = params.dryRun !== false;
+				if (!dryRun && mainnetLike && params.confirmMainnet !== true) {
+					throw new Error(
+						"Mainnet swap blocked. Re-run with confirmMainnet=true.",
+					);
+				}
+				const tokenInAddress = parseEvmAddress(
+					params.tokenInAddress,
+					"tokenInAddress",
+				);
+				const tokenOutAddress = parseEvmAddress(
+					params.tokenOutAddress,
+					"tokenOutAddress",
+				);
+				if (tokenInAddress === tokenOutAddress) {
+					throw new Error("tokenInAddress and tokenOutAddress must differ");
+				}
+				const toAddress = parseEvmAddress(params.toAddress, "toAddress");
+				const amountInRaw = BigInt(
+					parsePositiveIntegerString(params.amountInRaw, "amountInRaw"),
+				);
+				const config = resolvePancakeV2Config(network);
+				const rpcUrl = getEvmRpcEndpoint(network, params.rpcUrl);
+				const deadlineMinutes = normalizeDeadlineMinutes(
+					params.deadlineMinutes,
+				);
+				const deadlineSeconds =
+					Math.floor(Date.now() / 1000) + deadlineMinutes * 60;
+				const quote = await quotePancakeV2Swap({
+					rpcUrl,
+					tokenInAddress,
+					tokenOutAddress,
+					amountInRaw,
+					slippageBps: params.slippageBps,
+					factoryAddress: config.factoryAddress,
+				});
+				const amountOutMinRaw = params.amountOutMinRaw
+					? BigInt(
+							parsePositiveIntegerString(
+								params.amountOutMinRaw,
+								"amountOutMinRaw",
+							),
+						)
+					: quote.amountOutMinRaw;
+				const isInputNative =
+					toNormalizedAddress(tokenInAddress) ===
+					toNormalizedAddress(config.wrappedNativeAddress);
+				const isOutputNative =
+					toNormalizedAddress(tokenOutAddress) ===
+					toNormalizedAddress(config.wrappedNativeAddress);
+				const tx = buildPancakeV2SwapTx({
+					isInputNative,
+					isOutputNative,
+					amountInRaw,
+					amountOutMinRaw,
+					routerAddress: config.routerAddress,
+					tokenInAddress,
+					tokenOutAddress,
+					recipientAddress: toAddress,
+					deadlineSeconds,
+				});
+				if (dryRun) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `PancakeSwap V2 swap preview (${network}): ${tokenInAddress} -> ${tokenOutAddress} amountIn=${amountInRaw.toString()} amountOutMin=${amountOutMinRaw.toString()} pair=${quote.pairAddress}`,
+							},
+						],
+						details: {
+							dryRun: true,
+							network,
+							tokenInAddress,
+							tokenOutAddress,
+							toAddress,
+							pairAddress: quote.pairAddress,
+							amountInRaw: amountInRaw.toString(),
+							amountOutRaw: quote.amountOutRaw.toString(),
+							amountOutMinRaw: amountOutMinRaw.toString(),
+							reserveInRaw: quote.reserveInRaw.toString(),
+							reserveOutRaw: quote.reserveOutRaw.toString(),
+							tx,
+							slippageBps: params.slippageBps ?? 50,
+							deadlineSeconds,
+							chainId: config.chainId,
+							rpcUrl,
+						},
+					};
+				}
+
+				const privateKey = resolveEvmPrivateKey(params.fromPrivateKey);
+				const signer = new Wallet(privateKey);
+				const fromAddress = signer.address;
+				const chainId = getEvmChainId(network);
+				const nonce = await resolveNonce({
+					rpcUrl,
+					address: fromAddress,
+					nonce: params.nonce,
+				});
+				const gasPriceWei = await resolveGasPriceWei({
+					rpcUrl,
+					gasPriceGwei: params.gasPriceGwei,
+				});
+				const gasLimit = await resolveGasLimit({
+					rpcUrl,
+					fromAddress,
+					toAddress: tx.toAddress,
+					valueWei: tx.valueWei,
+					data: tx.data,
+					gasLimit: params.gasLimit,
+				});
+				const signedTx = await signer.signTransaction({
+					to: tx.toAddress,
+					nonce: Number(nonce),
+					chainId,
+					value: toHexQuantity(tx.valueWei),
+					gasPrice: toHexQuantity(gasPriceWei),
+					gasLimit: toHexQuantity(gasLimit),
+					data: tx.data,
+				});
+				const txHash = await callEvmRpc<string>(
+					rpcUrl,
+					"eth_sendRawTransaction",
+					[signedTx],
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `PancakeSwap V2 swap submitted (${network}): ${txHash}`,
+						},
+					],
+					details: {
+						dryRun: false,
+						network,
+						rpcUrl,
+						chainId,
+						fromAddress,
+						pairAddress: quote.pairAddress,
+						tokenInAddress,
+						tokenOutAddress,
+						toAddress,
+						amountInRaw: amountInRaw.toString(),
+						amountOutRaw: quote.amountOutRaw.toString(),
+						amountOutMinRaw: amountOutMinRaw.toString(),
+						reserveInRaw: quote.reserveInRaw.toString(),
+						reserveOutRaw: quote.reserveOutRaw.toString(),
+						deadlineSeconds,
+						tx,
+						gasPriceWei: gasPriceWei.toString(),
+						gasLimit: gasLimit.toString(),
+						nonce: nonce.toString(),
 						txHash,
 					},
 				};

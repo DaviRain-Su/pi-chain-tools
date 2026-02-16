@@ -3,6 +3,7 @@ import { createEvmComposeTools } from "./tools/compose.js";
 import { createEvmExecuteTools } from "./tools/execute.js";
 import { createEvmReadTools } from "./tools/read.js";
 import { createEvmRpcTools } from "./tools/rpc.js";
+import { createEvmSwapWorkflowTools } from "./tools/swap-workflow.js";
 import { createEvmTransferWorkflowTools } from "./tools/transfer-workflow.js";
 import { createEvmWorkflowTools } from "./tools/workflow.js";
 
@@ -17,6 +18,7 @@ export function createEvmToolset(): ChainToolset {
 				tools: [
 					...createEvmExecuteTools(),
 					...createEvmWorkflowTools(),
+					...createEvmSwapWorkflowTools(),
 					...createEvmTransferWorkflowTools(),
 				],
 			},

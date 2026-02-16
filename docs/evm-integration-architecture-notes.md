@@ -23,6 +23,8 @@
 - `parseEvmNetwork` 支持 `bsc`
 - 默认 RPC/chainId 覆盖（`https://bsc.publicnode.com`，chainId=56）
 - 转账层补齐 BSC 别名（`parseEvmNetworkAlias` 支持 `bsc`/`bnb`）与主流地址映射（`USDT`/`WETH`）
+- 新增 BSC DeFi 执行入口 `evm_pancakeV2Swap`（单跳 PancakeSwap V2 直连 pair 报价/交易）
+- 新增对应 NL 工作流 `w3rt_run_evm_swap_workflow_v0`（分析→模拟→执行）
 - 主网门禁统一改为 `isMainnetLikeEvmNetwork(network)`，避免逐工具重复写死
 
 ## BSC DeFi 接入优先级（当前阶段）
@@ -33,10 +35,11 @@
   - 覆盖主流 DEX（包括 PancakeSwap）市场/交易对信息。
   - 提供按网络与 DEX 的过滤与按流动性排序，作为 BSC DeFi 入口。
   - 对外部单点源不稳定（如某些专网/API）有天然兜底能力：可优先退回到通用市场发现。
-- 下一步可在该入口上增加：
-  - 交易对详情补齐（滑点/深度/最近成交）
-  - 定向集成（PancakeSwap Router/聚合）用于可执行 swap 逻辑
+- 下一步可在该能力上增强：
+  - 多跳路径与中间池路由（覆盖非直接 pair 场景）
+  - 添加额度/滑点前置校验与可选签名前置授权（allowance）判断
   - 资产级别的 DEX 过滤策略和健康检查（如链上 TVL/稳定性）
+  - 抽出可复用 `evm_deFi` 协议配置层，承接更多 BSC DEX（如 Biswap / MDEX）
 
 ## 何时考虑拆文件夹
 

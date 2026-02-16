@@ -21,6 +21,7 @@ describe("evmExtension", () => {
 		expect(names).toContain("evm_transferNative");
 		expect(names).toContain("evm_transferErc20");
 		expect(names).toContain("w3rt_run_evm_polymarket_workflow_v0");
+		expect(names).toContain("w3rt_run_evm_swap_workflow_v0");
 		expect(names).toContain("w3rt_run_evm_transfer_workflow_v0");
 		expect(new Set(names).size).toBe(names.length);
 	});

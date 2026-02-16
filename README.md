@@ -70,7 +70,9 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `evm_polymarketCancelOrder` (cancel by orderId(s)/token scope/cancel-all, supports stale filters `maxAgeMinutes` / `maxFillRatio`, default `dryRun=true`)
 - `execute`: `evm_transferNative` (native token transfer, default `dryRun=true`, execute requires `confirmMainnet=true`)
 - `execute`: `evm_transferErc20` (ERC20 transfer by `tokenAddress + amountRaw`, default `dryRun=true`, execute requires `confirmMainnet=true`)
+- `execute`: `evm_pancakeV2Swap` (BSC PancakeSwap V2 exact-input swap quote + unsigned/sign execution; supports direct pair swaps with raw amounts)
 - `workflow`: `w3rt_run_evm_polymarket_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken)
+- `workflow`: `w3rt_run_evm_swap_workflow_v0` (BSC PancakeSwap V2 direct pair swap workflow with analysis/simulate/execute + deterministic mainnet confirmToken)
 - `workflow`: `w3rt_run_evm_transfer_workflow_v0` (native/ERC20 transfer workflow with analysis/simulate/execute + deterministic mainnet confirmToken; supports `tokenSymbol + amountToken` for mapped tokens)
 - `workflow cancel intent`: supports `evm.polymarket.btc5m.cancel` (analysis/simulate/execute + deterministic mainnet confirmToken)
 - `mainnet guard`: workflow execute on polygon requires `confirmMainnet=true` + correct `confirmToken`
