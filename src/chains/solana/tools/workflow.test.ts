@@ -4424,8 +4424,11 @@ describe("w3rt_run_workflow_v0", () => {
 			},
 		});
 		expect(
-			(result.details as { artifacts?: { analysis?: { intent?: { tokenAAmountRaw?: string } } } })
-				.artifacts?.analysis?.intent?.tokenAAmountRaw,
+			(
+				result.details as {
+					artifacts?: { analysis?: { intent?: { tokenAAmountRaw?: string } } };
+				}
+			).artifacts?.analysis?.intent?.tokenAAmountRaw,
 		).toMatch(/^(?:1|1000000)$/);
 	});
 
