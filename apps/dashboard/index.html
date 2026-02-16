@@ -81,6 +81,10 @@
           <button id="buildSupply">Build supply command</button>
         </div>
         <div class="row" style="margin-top:8px">
+          <button id="execWrap">Execute wrap (confirmed)</button>
+          <button id="execSupply">Execute supply USDt (confirmed)</button>
+        </div>
+        <div class="row" style="margin-top:8px">
           <button id="buildWorkerDry">Build worker dry-run start</button>
           <button id="buildWorkerStop">Build worker stop</button>
         </div>
@@ -111,6 +115,8 @@
       const buildSupplyBtn = document.getElementById("buildSupply");
       const buildWorkerDryBtn = document.getElementById("buildWorkerDry");
       const buildWorkerStopBtn = document.getElementById("buildWorkerStop");
+      const execWrapBtn = document.getElementById("execWrap");
+      const execSupplyBtn = document.getElementById("execSupply");
       const cmdOutEl = document.getElementById("cmdOut");
       const copyCmdBtn = document.getElementById("copyCmd");
       const cmdMetaEl = document.getElementById("cmdMeta");
@@ -202,6 +208,34 @@
         } catch {
           cmdMetaEl.textContent = "Copy failed";
         }
+      });
+
+      async function executeAction(payload) {
+        const ok = window.confirm("This will execute an on-chain transaction. Continue?");
+        if (!ok) return;
+        cmdMetaEl.textContent = "Executing...";
+        try {
+          const res = await fetch("/api/action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...payload, confirm: true, accountId: currentAccount() }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Action failed");
+          cmdOutEl.value = data.output || "Done";
+          cmdMetaEl.textContent = "Executed";
+          await load();
+        } catch (e) {
+          cmdMetaEl.textContent = `Execution failed: ${e.message || e}`;
+        }
+      }
+
+      execWrapBtn.addEventListener("click", () => {
+        executeAction({ action: "wrap_near", amountNear: (wrapAmountEl.value || "1").trim() });
+      });
+
+      execSupplyBtn.addEventListener("click", () => {
+        executeAction({ action: "supply_usdt_collateral", amountRaw: (supplyRawEl.value || "1000000").trim() });
       });
 
       refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));

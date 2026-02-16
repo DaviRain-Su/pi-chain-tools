@@ -11,6 +11,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Recent execution tx list (best-effort from latest local OpenClaw session log)
 - Strategy view: current stable collateral APR ranking + quick recommendation
 - Action Console: safe command builder for wrap/supply/worker start-stop (manual execution)
+- Optional direct execution buttons for `wrap_near` and `supply_usdt_collateral` (requires browser confirm)
 - Best-effort USD estimates from NEAR Intents token feed
 
 ## Start

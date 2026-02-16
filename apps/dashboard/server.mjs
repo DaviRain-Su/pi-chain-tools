@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execFile } from "node:child_process";
 import { readFile, readdir, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -373,6 +374,88 @@ async function buildSnapshot(accountId) {
 	};
 }
 
+function runCommand(command, args) {
+	return new Promise((resolve, reject) => {
+		execFile(command, args, { timeout: 120_000 }, (error, stdout, stderr) => {
+			if (error) {
+				reject(new Error(stderr?.trim() || error.message));
+				return;
+			}
+			resolve((stdout || "").trim());
+		});
+	});
+}
+
+async function executeAction(payload) {
+	const accountId = String(payload.accountId || ACCOUNT_ID).trim();
+	const nearBin = "near";
+	if (payload.action === "wrap_near") {
+		const amountNear = String(payload.amountNear || "1").trim();
+		const out = await runCommand(nearBin, [
+			"contract",
+			"call-function",
+			"as-transaction",
+			"wrap.near",
+			"near_deposit",
+			"json-args",
+			"{}",
+			"prepaid-gas",
+			"100 Tgas",
+			"attached-deposit",
+			`${amountNear} NEAR`,
+			"sign-as",
+			accountId,
+			"network-config",
+			"mainnet",
+			"sign-with-keychain",
+			"send",
+		]);
+		return { ok: true, action: payload.action, output: out };
+	}
+	if (payload.action === "supply_usdt_collateral") {
+		const amountRaw = String(payload.amountRaw || "1000000").trim();
+		const msg = JSON.stringify({
+			Execute: {
+				actions: [
+					{
+						IncreaseCollateral: {
+							token_id: "usdt.tether-token.near",
+							amount: null,
+							max_amount: null,
+						},
+					},
+				],
+			},
+		});
+		const args = JSON.stringify({
+			receiver_id: BURROW_CONTRACT,
+			amount: amountRaw,
+			msg,
+		});
+		const out = await runCommand(nearBin, [
+			"contract",
+			"call-function",
+			"as-transaction",
+			"usdt.tether-token.near",
+			"ft_transfer_call",
+			"json-args",
+			args,
+			"prepaid-gas",
+			"180 Tgas",
+			"attached-deposit",
+			"1 yoctoNEAR",
+			"sign-as",
+			accountId,
+			"network-config",
+			"mainnet",
+			"sign-with-keychain",
+			"send",
+		]);
+		return { ok: true, action: payload.action, output: out };
+	}
+	throw new Error(`Unsupported action: ${payload.action}`);
+}
+
 const server = http.createServer(async (req, res) => {
 	try {
 		const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -389,6 +472,18 @@ const server = http.createServer(async (req, res) => {
 			const accountId = url.searchParams.get("accountId") || ACCOUNT_ID;
 			const snapshot = await buildSnapshot(accountId);
 			return json(res, 200, snapshot);
+		}
+
+		if (url.pathname === "/api/action" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const result = await executeAction(payload);
+			return json(res, 200, result);
 		}
 
 		if (url.pathname === "/" || url.pathname === "/index.html") {
