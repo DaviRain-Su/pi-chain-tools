@@ -7074,39 +7074,9 @@ export function createNearWorkflowTools() {
 				}
 
 				if (intent.type === "near.defi.stableYieldPlan") {
-					const executeArtifact = await runNearStableYieldPlan({
-						intent,
-						network,
-						rpcUrl: params.rpcUrl,
-					});
-					const executeArtifactWithSummary = attachExecuteSummaryLine(
-						intent.type,
-						executeArtifact,
+					throw new Error(
+						"near.defi.stableYieldPlan is read-only; use simulate to generate an executionPlan and route execution through a dedicated runner.",
 					);
-					rememberWorkflowSession({
-						runId,
-						network,
-						intent,
-						confirmToken: null,
-						poolCandidates: [],
-					});
-					return {
-						content: [
-							{ type: "text", text: `Workflow executed: ${intent.type}` },
-						],
-						details: {
-							runId,
-							runMode,
-							network,
-							intentType: intent.type,
-							intent,
-							approvalRequired,
-							confirmToken: null,
-							artifacts: {
-								execute: executeArtifactWithSummary,
-							},
-						},
-					};
 				}
 				const executeTool =
 					intent.type === "near.transfer.near"

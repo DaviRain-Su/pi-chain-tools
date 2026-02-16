@@ -4315,4 +4315,18 @@ describe("w3rt_run_near_workflow_v0", () => {
 			}),
 		).rejects.toThrow("read-only");
 	});
+
+	it("does not support execute for stable yield plan in workflow", async () => {
+		const tool = getTool();
+		await expect(
+			tool.execute("near-wf-stable-yield-execute", {
+				runMode: "execute",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				network: "mainnet",
+				topN: 3,
+				stableSymbols: ["USDC", "USDT"],
+			}),
+		).rejects.toThrow("read-only");
+	});
 });
