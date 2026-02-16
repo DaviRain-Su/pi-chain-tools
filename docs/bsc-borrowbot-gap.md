@@ -624,7 +624,10 @@ GET https://li.quest/v1/quote
 - [x] `src/types/privy-io-node.d.ts` — 可选依赖类型 stub
 - [x] 向后兼容：`fromPrivateKey` / `EVM_PRIVATE_KEY` → LocalKey；`PRIVY_*` → Privy
 - [x] 测试 — 16 tests（后端解析 7 + LocalKey 3 + Privy 3 + 集成 3）
-- [ ] Workflow 层重构：execute 路径从直接 `new Wallet(privateKey)` 改为 `signerProvider.signAndSend()`（Phase 5 Worker Loop 集成时完成）
+- [x] Workflow 层重构：Venus execute + workflow 从 `new Wallet(privateKey)` 迁移到 `signerProvider.signAndSend()`
+  - `venus-execute.ts`：5 个工具全部迁移，删除 164 行重复代码
+  - `venus-workflow.ts`：execute phase 迁移，删除 122 行
+  - `execute.ts`（基础 transfer）：保留旧模式（Polymarket ClobClient 需要 Wallet 实例）
 
 ### Phase 2：Venus Execute Tools + Workflow ⏱ 2-3 天 ✅
 - [x] `venus-read.ts` — `evm_venusGetMarkets` / `evm_venusGetPosition`（MCP 工具）— 4 tests
@@ -654,7 +657,11 @@ GET https://li.quest/v1/quote
 - [x] 自动暂停（maxConsecutiveErrors 连续失败阈值）
 - [x] dryRun 默认（observe-only 模式）
 - [x] 使用 EvmSignerProvider 签名（Local/Privy）
-- [ ] Telegram 通知（可选，后续）
+- [x] 通知机制：webhook callback（替代内置 Telegram）
+  - `fireWebhook()` — fire-and-forget POST，5s 超时，永不抛异常
+  - 事件：action_executed / error_pause / ltv_critical / worker_stopped
+  - OpenClaw 编排器在 webhook 接收端路由到 Telegram/Slack/Discord
+  - 设计原则：Agent 是纯数据生产者，通知渠道零耦合
 - [ ] Privy Policy 配置（限制 Agent 只能操作 Venus 合约 + LI.FI Diamond）（后续）
 
 ### Phase 6：Berachain 扩展 ✅ / Monad（待生态成熟）
