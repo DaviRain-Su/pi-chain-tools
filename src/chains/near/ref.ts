@@ -138,6 +138,48 @@ function encodeNearCallArgs(args: Record<string, unknown>): string {
 	return Buffer.from(JSON.stringify(args), "utf8").toString("base64");
 }
 
+function isTransientRefRpcError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	const text = error.message.toLowerCase();
+	return (
+		text.includes("429") ||
+		text.includes("too many requests") ||
+		text.includes("fetch failed") ||
+		text.includes("timeout") ||
+		text.includes("503")
+	);
+}
+
+async function callNearRpcWithRetry<T>(params: {
+	method: string;
+	network?: string;
+	rpcUrl?: string;
+	params: unknown;
+	maxAttempts?: number;
+}): Promise<T> {
+	const maxAttempts = Math.max(1, Math.min(4, params.maxAttempts ?? 3));
+	let lastError: unknown;
+	for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+		try {
+			return await callNearRpc<T>({
+				method: params.method,
+				network: params.network,
+				rpcUrl: params.rpcUrl,
+				params: params.params,
+			});
+		} catch (error) {
+			lastError = error;
+			if (attempt >= maxAttempts || !isTransientRefRpcError(error)) {
+				throw error;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+		}
+	}
+	throw lastError instanceof Error
+		? lastError
+		: new Error("NEAR RPC retry failed");
+}
+
 function decodeNearCallResult<T>(payload: NearCallFunctionResult): T {
 	if (!Array.isArray(payload.result)) {
 		throw new Error("Invalid call_function result payload");
@@ -532,7 +574,7 @@ export async function fetchRefPools(params: {
 	let fromIndex = 0;
 
 	for (let page = 0; page < maxPages; page += 1) {
-		const result = await callNearRpc<NearCallFunctionResult>({
+		const result = await callNearRpcWithRetry<NearCallFunctionResult>({
 			method: "query",
 			network,
 			rpcUrl: params.rpcUrl,
@@ -598,7 +640,7 @@ export async function fetchRefPoolById(params: {
 	const refContractId = getRefContractId(network, params.refContractId);
 	const poolId = parsePoolId(params.poolId);
 
-	const result = await callNearRpc<NearCallFunctionResult>({
+	const result = await callNearRpcWithRetry<NearCallFunctionResult>({
 		method: "query",
 		network,
 		rpcUrl: params.rpcUrl,
@@ -800,7 +842,7 @@ async function queryRefReturn(params: {
 }): Promise<string> {
 	const network = parseNearNetwork(params.network);
 	const refContractId = getRefContractId(network, params.refContractId);
-	const result = await callNearRpc<NearCallFunctionResult>({
+	const result = await callNearRpcWithRetry<NearCallFunctionResult>({
 		method: "query",
 		network,
 		rpcUrl: params.rpcUrl,
