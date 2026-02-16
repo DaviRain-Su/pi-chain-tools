@@ -89,6 +89,8 @@ const SEL = {
 	borrowRatePerBlock: "0xf8f9da28",
 	exchangeRateCurrent: "0xbd6d894d",
 	underlying: "0x6f307dc3",
+	totalBorrows: "0x47bd3718",
+	getCash: "0x3b1d21a2",
 	// Comptroller
 	enterMarkets: "0xc2998238",
 	getAccountLiquidity: "0x5ec88c79",
@@ -236,6 +238,27 @@ async function readBorrowBalanceCurrent(
 	return decodeUint256(hex);
 }
 
+async function readTotalBorrows(
+	network: EvmNetwork,
+	vToken: string,
+): Promise<bigint> {
+	const hex = await ethCall({
+		network,
+		to: vToken,
+		data: SEL.totalBorrows,
+	});
+	return decodeUint256(hex);
+}
+
+async function readCash(network: EvmNetwork, vToken: string): Promise<bigint> {
+	const hex = await ethCall({
+		network,
+		to: vToken,
+		data: SEL.getCash,
+	});
+	return decodeUint256(hex);
+}
+
 async function readMarketInfo(
 	network: EvmNetwork,
 	vToken: string,
@@ -314,14 +337,20 @@ export function createVenusAdapter(): LendingProtocolAdapter {
 
 			const markets: LendingMarket[] = [];
 			for (const [, entry] of Object.entries(VENUS_MARKET_REGISTRY)) {
-				const [supplyRate, borrowRate, marketInfo] = await Promise.all([
-					readSupplyRatePerBlock(network, entry.vToken),
-					readBorrowRatePerBlock(network, entry.vToken),
-					readMarketInfo(network, entry.vToken),
-				]);
+				const [supplyRate, borrowRate, marketInfo, totalBorrows, cash] =
+					await Promise.all([
+						readSupplyRatePerBlock(network, entry.vToken),
+						readBorrowRatePerBlock(network, entry.vToken),
+						readMarketInfo(network, entry.vToken),
+						readTotalBorrows(network, entry.vToken),
+						readCash(network, entry.vToken),
+					]);
 
 				const collateralFactor =
 					Number(marketInfo.collateralFactorMantissa) / 1e18;
+
+				// totalSupply (underlying) ≈ cash + totalBorrows
+				const totalSupplyUnderlying = cash + totalBorrows;
 
 				markets.push({
 					protocol: VENUS_PROTOCOL_ID,
@@ -332,8 +361,8 @@ export function createVenusAdapter(): LendingProtocolAdapter {
 					underlyingDecimals: entry.decimals,
 					supplyAPY: ratePerBlockToAPY(supplyRate),
 					borrowAPY: ratePerBlockToAPY(borrowRate),
-					totalSupply: "0", // TODO: read totalSupply * exchangeRate
-					totalBorrow: "0", // TODO: read totalBorrows
+					totalSupply: formatUnits(totalSupplyUnderlying, entry.decimals),
+					totalBorrow: formatUnits(totalBorrows, entry.decimals),
 					collateralFactor,
 					isCollateral: collateralFactor > 0,
 					isListed: marketInfo.isListed,
