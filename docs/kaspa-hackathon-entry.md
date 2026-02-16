@@ -224,12 +224,19 @@
 命中顺序：
 
 - 默认先读 `~/.kaspa/testnet10.private_key`（测试网10）
+- 若不存在会按顺序尝试 `~/.kaspa/testnet10.wallet`、`~/.kaspa/testnet10.kpk`、`~/.kaspa/wallet`，用于提示你当前持有的官方钱包文件类型。
 - 如果你要用助记词，在一句话中直接给 12/24 词即可：  
   `读取本地kaspa钱包，助记词是 battle zoo ...`
 
-注意：`kaspa-wallet` 官方 CLI 的 `export` 命令不支持 `xpub` 子命令，`export xpub` 会返回错误。若要从助记词直接推地址，请用我们的本地脚本：
+注意：`kaspa-wallet` 官方 CLI 的 `export` 命令通常只对外输出助记词，不直接输出私钥。
+
+若你当前只有 `.wallet`/`.kpk` 文件，请先从 CLI 导出助记词（或加密内容）后，再用本工具做一次本地转换：
 
 `node scripts/kaspa-derive-private-key.mjs --mnemonic "<12或24词>" --network testnet-10`
+
+如需同时确认官方钱包地址与助记词是否在同一导出链上，可先扫描：
+
+`node scripts/kaspa-derive-private-key.mjs --mnemonic "<12或24词>" --network testnet-10 --scan-for "kaspatest:..."`
 
 ## 8. 交付与后续建议
 

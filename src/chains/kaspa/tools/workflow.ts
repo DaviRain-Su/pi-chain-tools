@@ -344,13 +344,28 @@ function resolveKaspaWalletNetworkAlias(
 }
 
 const KASPA_WALLET_QUICK_DEFAULT_PATH_BY_NETWORK = {
-	mainnet: "~/.kaspa/mainnet.private_key",
-	testnet10: "~/.kaspa/testnet10.private_key",
-	testnet11: "~/.kaspa/testnet11.private_key",
+  mainnet: [
+    "~/.kaspa/mainnet.private_key",
+    "~/.kaspa/mainnet.wallet",
+    "~/.kaspa/mainnet.kpk",
+    "~/.kaspa/wallet",
+  ],
+  testnet10: [
+    "~/.kaspa/testnet10.private_key",
+    "~/.kaspa/testnet10.wallet",
+    "~/.kaspa/testnet10.kpk",
+    "~/.kaspa/wallet",
+  ],
+  testnet11: [
+    "~/.kaspa/testnet11.private_key",
+    "~/.kaspa/testnet11.wallet",
+    "~/.kaspa/testnet11.kpk",
+    "~/.kaspa/wallet",
+  ],
 } as const;
 
 const KASPA_WALLET_PATH_FROM_TEXT_REGEX =
-	/("([^"]+?\.private_key)"|'([^']+?\.private_key)'|([^\s"'“”‘’\\[\\](){}【】]+?\.private_key))/i;
+	/("([^"]+?\.(?:private_key|wallet|kpk))"|'([^']+?\.(?:private_key|wallet|kpk))'|([^\s"'“”‘’\\[\\](){}【】]+?\.(?:private_key|wallet|kpk)))/i;
 const KASPA_MNEMONIC_FROM_TEXT_REGEX =
 	/(?:\b(?:mnemonic|助记词|seed\s*phrase)\b)[^a-z0-9]{0,16}(?:\s*[:：]\s*|\s+)(["“"])?([a-zA-Z]+(?:\s+[a-zA-Z]+){11,23})(\1)/gi;
 const KASPA_DERIVATION_PATH_FROM_TEXT_REGEX =
@@ -767,27 +782,57 @@ async function runKaspaWalletQuickWorkflow(
 	const mnemonicDerivationPath =
 		params.mnemonicDerivationPath?.trim() ||
 		parsedIntent.mnemonicDerivationPath;
-	const resolvedPrivateKeyFile =
-		privateKeyFile ||
-		KASPA_WALLET_QUICK_DEFAULT_PATH_BY_NETWORK[resolvedNetwork];
-
+	const resolvedPrivateKeyFiles = privateKeyFile
+		? [privateKeyFile]
+		: KASPA_WALLET_QUICK_DEFAULT_PATH_BY_NETWORK[resolvedNetwork];
 	const requestNetworks = requestNetwork;
 	const networks = requestNetworks
 		? [resolveKaspaWalletNetworkAlias(requestNetworks)]
 		: undefined;
-	const info = await resolveKaspaPrivateKeyInfo({
-		privateKeyFile: resolvedPrivateKeyFile,
-		privateKeyPath: params.privateKeyPath,
-		privateKeyPathEnv: params.privateKeyPathEnv,
-		privateKeyEnv: params.privateKeyEnv,
-		mnemonic: mnemonic,
-		mnemonicFile: params.mnemonicFile,
-		mnemonicPath: params.mnemonicPath,
-		mnemonicPathEnv: params.mnemonicPathEnv,
-		mnemonicEnv: params.mnemonicEnv,
-		mnemonicDerivationPath,
-		networks: networks,
-	});
+	let info: Awaited<ReturnType<typeof resolveKaspaPrivateKeyInfo>> | null = null;
+	let resolvedPrivateKeyFile: string | null = null;
+	let lastFailure: Error | null = null;
+	let lastBinaryFailure: Error | null = null;
+	for (const candidateFile of resolvedPrivateKeyFiles) {
+		try {
+			info = await resolveKaspaPrivateKeyInfo({
+				privateKeyFile: candidateFile,
+				privateKeyPath: params.privateKeyPath,
+				privateKeyPathEnv: params.privateKeyPathEnv,
+				privateKeyEnv: params.privateKeyEnv,
+				mnemonic: mnemonic,
+				mnemonicFile: params.mnemonicFile,
+				mnemonicPath: params.mnemonicPath,
+				mnemonicPathEnv: params.mnemonicPathEnv,
+				mnemonicEnv: params.mnemonicEnv,
+				mnemonicDerivationPath,
+				networks: networks,
+			});
+			resolvedPrivateKeyFile = candidateFile;
+			break;
+		} catch (error) {
+			const parsedError =
+				error instanceof Error ? error : new Error(String(error));
+			lastFailure = parsedError;
+			if (
+				/Kaspa wallet binary file format detected/i.test(parsedError.message)
+			) {
+				lastBinaryFailure = parsedError;
+				continue;
+			}
+		}
+	}
+	if (!info) {
+		if (lastBinaryFailure) {
+			throw lastBinaryFailure;
+		}
+		throw (
+			lastFailure ??
+			new Error(
+				`Unable to resolve Kaspa private key for ${resolvedNetwork}; provide a supported private-key path or mnemonic.`,
+			)
+		);
+	}
 	const addressSummary = info.addresses
 		.map((entry) => {
 			const pathHint = entry.derivationPath
@@ -812,7 +857,7 @@ async function runKaspaWalletQuickWorkflow(
 			privateKeyPreview: info.privateKeyPreview,
 			query: {
 				intentText: params.intentText,
-				privateKeyFile: resolvedPrivateKeyFile,
+				privateKeyFile: resolvedPrivateKeyFile || "",
 			},
 		},
 	};
