@@ -770,6 +770,22 @@ Deploy with GitHub Pages:
   4. `w3rt_getPolicyAudit_v0` (optional, verify policy update record)
   5. run workflow analysis/simulate before execute
 
+### Install as OpenClaw NEAR plugin (local path)
+
+This repository now includes an OpenClaw plugin manifest (`openclaw.plugin.json`) at repo root.
+To expose the NEAR toolset in OpenClaw directly:
+
+```bash
+openclaw plugins install /absolute/path/to/pi-chain-tools
+```
+
+Then ensure plugin is enabled (if needed) and restart/reload gateway:
+
+```bash
+openclaw plugins enable pi-chain-tools
+openclaw gateway restart
+```
+
 ## PR Required Checks
 
 To enforce CI as merge-gate on `main`:

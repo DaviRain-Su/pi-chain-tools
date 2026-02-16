@@ -22,6 +22,9 @@
 		"extensions": ["./src/pi/default-extension.ts"],
 		"skills": ["skills/"]
 	},
+	"openclaw": {
+		"extensions": ["./index.ts"]
+	},
 	"scripts": {
 		"postinstall": "node scripts/ensure-mysten-compat.mjs",
 		"kaspa:mnemonic:key": "node scripts/kaspa-derive-private-key.mjs",

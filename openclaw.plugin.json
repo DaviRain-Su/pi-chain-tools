@@ -1,0 +1,12 @@
+{
+  "id": "pi-chain-tools",
+  "name": "pi-chain-tools NEAR for OpenClaw",
+  "description": "Expose pi-chain-tools NEAR toolset to OpenClaw as plugin tools",
+  "version": "0.1.0",
+  "repository": "github:DaviRain-Su/pi-chain-tools",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
