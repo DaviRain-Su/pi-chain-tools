@@ -182,10 +182,32 @@ steps:
 **我们不需要复刻那些部分** — OpenClaw 已经提供了编排、通知、前端、状态管理。
 我们只需要确保**链上原子操作（MCP 工具）完整且正确**。
 
-## 下一步行动顺序
+## 实施状态
 
-1. **P0: 修复 Morpho calldata** — 让 MarketParams 真实化（~2h）
-2. **P1: Morpho execute tools + workflow** — 参照 Venus 模式（~4h）
-3. **P2: ERC-4626 vault adapter** — 通用 deposit/withdraw（~3h）
-4. **P3: BorrowBot playbook** — OpenClaw 编排模板（~2h）
-5. **P4: Base Morpho 部署** — 加地址（~30min）
+- [x] **P0: 修复 Morpho calldata** — MarketParams 从 GraphQL API 实时解析
+- [x] **P1: Morpho execute tools** — 6 个 MCP execute 工具
+- [x] **P1: Worker 泛化** — protocol 参数化（venus/morpho）
+- [x] **P2: ERC-4626 vault adapter** — deposit/withdraw/redeem + 2 read tools
+- [x] **P3: LTV decision tool** — evm_ltvDecide 纯计算 MCP 工具
+- [x] **P4: Base Morpho 部署** — 0xBBBBB... (Base + Ethereum)
+
+### BorrowBot MCP 工具清单（16 个新工具）
+
+| 工具 | 类型 | 说明 |
+|------|------|------|
+| `evm_morphoGetMarkets` | read | Morpho 市场列表 |
+| `evm_morphoGetPosition` | read | 账户仓位 |
+| `evm_morphoSupply` | execute | 供给（借出） |
+| `evm_morphoBorrow` | execute | 借入 |
+| `evm_morphoRepay` | execute | 还款 |
+| `evm_morphoWithdraw` | execute | 取回供给 |
+| `evm_morphoSupplyCollateral` | execute | 存入抵押品 |
+| `evm_morphoWithdrawCollateral` | execute | 取回抵押品 |
+| `evm_vaultGetInfo` | read | Vault 元数据 |
+| `evm_vaultGetBalance` | read | Vault 余额 |
+| `evm_vaultDeposit` | execute | 存入 Vault |
+| `evm_vaultWithdraw` | execute | 从 Vault 取款 |
+| `evm_vaultRedeem` | execute | 赎回 Vault 份额 |
+| `evm_ltvDecide` | read | LTV 决策（纯计算） |
+| `evm_lifiGetQuote` | read | 跨链报价 |
+| `evm_lifiExecuteBridge` | execute | 跨链执行 |
