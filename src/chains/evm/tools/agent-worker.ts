@@ -41,9 +41,25 @@ import {
 	type LtvManagerInput,
 	decideLtvAction,
 } from "./ltv-manager.js";
+import { createMorphoAdapter } from "./morpho-adapter.js";
 import { resolveEvmSignerForTool } from "./signer-resolve.js";
 import type { EvmSignerProvider } from "./signer-types.js";
 import { createVenusAdapter } from "./venus-adapter.js";
+
+type SupportedProtocol = "venus" | "morpho";
+
+function resolveAdapter(protocol: SupportedProtocol): LendingProtocolAdapter {
+	switch (protocol) {
+		case "venus":
+			return createVenusAdapter();
+		case "morpho":
+			return createMorphoAdapter();
+		default:
+			throw new Error(
+				`Unsupported protocol: ${protocol}. Use 'venus' or 'morpho'.`,
+			);
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Worker state
@@ -399,19 +415,29 @@ function resolveWorkerConfig(params: {
 	return {
 		maxLTV:
 			params.maxLTV ??
-			fromEnv("VENUS_AGENT_MAX_LTV", DEFAULT_AGENT_CONFIG.maxLTV),
+			fromEnv(
+				"AGENT_MAX_LTV",
+				fromEnv("VENUS_AGENT_MAX_LTV", DEFAULT_AGENT_CONFIG.maxLTV),
+			),
 		targetLTV:
 			params.targetLTV ??
-			fromEnv("VENUS_AGENT_TARGET_LTV", DEFAULT_AGENT_CONFIG.targetLTV),
+			fromEnv(
+				"AGENT_TARGET_LTV",
+				fromEnv("VENUS_AGENT_TARGET_LTV", DEFAULT_AGENT_CONFIG.targetLTV),
+			),
 		minYieldSpread:
 			params.minYieldSpread ??
 			fromEnv(
-				"VENUS_AGENT_MIN_YIELD_SPREAD",
-				DEFAULT_AGENT_CONFIG.minYieldSpread,
+				"AGENT_MIN_YIELD_SPREAD",
+				fromEnv(
+					"VENUS_AGENT_MIN_YIELD_SPREAD",
+					DEFAULT_AGENT_CONFIG.minYieldSpread,
+				),
 			),
 		paused:
 			params.paused ??
-			(process.env.VENUS_AGENT_PAUSED?.trim()?.toLowerCase() === "true" ||
+			(process.env.AGENT_PAUSED?.trim()?.toLowerCase() === "true" ||
+				process.env.VENUS_AGENT_PAUSED?.trim()?.toLowerCase() === "true" ||
 				DEFAULT_AGENT_CONFIG.paused),
 	};
 }
@@ -464,7 +490,13 @@ export function createAgentWorkerTools() {
 				"Start an autonomous lending position management worker. Continuously monitors position, decides actions (hold/repay/optimize), and optionally executes. Returns immediately — worker runs in background.",
 			parameters: Type.Object({
 				network: evmNetworkSchema(),
-				account: Type.String({ description: "BSC wallet address to manage" }),
+				account: Type.String({ description: "EVM wallet address to manage" }),
+				protocol: Type.Optional(
+					Type.Union([Type.Literal("venus"), Type.Literal("morpho")], {
+						description:
+							"Lending protocol adapter (default 'venus'). Use 'morpho' for Morpho Blue on Monad/Base.",
+					}),
+				),
 				dryRun: Type.Optional(
 					Type.Boolean({
 						description: "Log decisions without executing (default true)",
@@ -523,7 +555,9 @@ export function createAgentWorkerTools() {
 					});
 				}
 
-				const adapter = createVenusAdapter();
+				const protocol: SupportedProtocol =
+					(params.protocol as SupportedProtocol) ?? "venus";
+				const adapter = resolveAdapter(protocol);
 
 				const webhookUrl =
 					params.webhookUrl?.trim() ||

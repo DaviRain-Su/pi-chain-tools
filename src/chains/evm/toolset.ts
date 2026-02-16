@@ -4,12 +4,17 @@ import { createEvmComposeTools } from "./tools/compose.js";
 import { createEvmExecuteTools } from "./tools/execute.js";
 import { createLifiExecuteTools } from "./tools/lifi-execute.js";
 import { createLifiReadTools } from "./tools/lifi-read.js";
+import { createMorphoExecuteTools } from "./tools/morpho-execute.js";
 import { createMorphoReadTools } from "./tools/morpho-read.js";
 import { createPrivyPolicyTools } from "./tools/privy-policy.js";
 import { createEvmReadTools } from "./tools/read.js";
 import { createEvmRpcTools } from "./tools/rpc.js";
 import { createEvmSwapWorkflowTools } from "./tools/swap-workflow.js";
 import { createEvmTransferWorkflowTools } from "./tools/transfer-workflow.js";
+import {
+	createVaultExecuteTools,
+	createVaultReadTools,
+} from "./tools/vault-tools.js";
 import { createVenusAgentTools } from "./tools/venus-agent.js";
 import { createVenusExecuteTools } from "./tools/venus-execute.js";
 import { createVenusReadTools } from "./tools/venus-read.js";
@@ -27,6 +32,7 @@ export function createEvmToolset(): ChainToolset {
 					...createVenusReadTools(),
 					...createLifiReadTools(),
 					...createMorphoReadTools(),
+					...createVaultReadTools(),
 					...createPrivyPolicyTools(),
 				],
 			},
@@ -41,6 +47,8 @@ export function createEvmToolset(): ChainToolset {
 					...createVenusExecuteTools(),
 					...createVenusWorkflowTools(),
 					...createVenusAgentTools(),
+					...createMorphoExecuteTools(),
+					...createVaultExecuteTools(),
 					...createLifiExecuteTools(),
 					...createAgentWorkerTools(),
 				],
