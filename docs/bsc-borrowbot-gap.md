@@ -642,21 +642,28 @@ GET https://li.quest/v1/quote
 - [x] 集成 Venus adapter — `buildLtvInput()` 桥接 position→LTV input
 - [x] 审计日志（内存 ring buffer，最近 100 条）
 
-### Phase 4：LI.FI 跨链 ⏱ 1-2 天
-- [ ] `lifi-read.ts` — quote + status
-- [ ] `lifi-execute.ts` — approve + bridge（通过 `EvmSignerProvider`）
-- [ ] 测试
+### Phase 4：LI.FI 跨链 ⏱ 1-2 天 ✅
+- [x] `lifi-types.ts` — Quote/Status/TransactionRequest 类型
+- [x] `lifi-read.ts` — `evm_lifiGetQuote` / `evm_lifiGetStatus` — 5 tests
+- [x] `lifi-execute.ts` — `evm_lifiExecuteBridge`（approve + bridge，通过 EvmSignerProvider）— 3 tests
+- [x] 注册到 `toolset.ts` — read 组 + execute 组
 
-### Phase 5：Agent Worker Loop ⏱ 2-3 天
-- [ ] 持续监控循环（定时读取仓位 → 决策 → 执行）
-- [ ] 审计日志
-- [ ] Telegram 通知（可选）
-- [ ] Privy Policy 配置（限制 Agent 只能操作 Venus 合约 + LI.FI Diamond）
+### Phase 5：Agent Worker Loop ⏱ 2-3 天 ✅
+- [x] `agent-worker.ts` — 持续监控循环（`evm_agentWorkerStart/Stop/Status`）— 12 tests
+- [x] 审计日志（WorkerCycleLog ring buffer，50 条）
+- [x] 自动暂停（maxConsecutiveErrors 连续失败阈值）
+- [x] dryRun 默认（observe-only 模式）
+- [x] 使用 EvmSignerProvider 签名（Local/Privy）
+- [ ] Telegram 通知（可选，后续）
+- [ ] Privy Policy 配置（限制 Agent 只能操作 Venus 合约 + LI.FI Diamond）（后续）
 
-### Phase 6：Monad / Berachain 扩展 ⏱ 视生态成熟度
-- [ ] 注册 network（EvmNetwork 联合类型 + RPC + chainId）
-- [ ] 实现该链的 LendingProtocolAdapter
-- [ ] 复用 LTV Manager + LI.FI + Workflow + **Privy 签名（同一 walletId，改 caip2 即可）**
+### Phase 6：Berachain 扩展 ✅ / Monad（待生态成熟）
+- [x] Berachain 注册（EvmNetwork + RPC + chainId 80094）
+- [x] WBERA / HONEY token map
+- [x] 网络别名（berachain/bera/bartio）
+- [x] Privy 签名零改动（caip2=eip155:80094）
+- [ ] Berachain LendingProtocolAdapter（待 Dolomite/BeraBorrow 稳定）
+- [ ] Monad 注册（待 mainnet 上线，chainId TBD）
 
 ---
 
