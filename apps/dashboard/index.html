@@ -132,6 +132,10 @@
           <input id="step2OutRaw" placeholder="Step2 output raw" size="18" />
           <button id="buildStep3">Build Step3 (supply)</button>
         </div>
+        <div class="row" style="margin-top:8px">
+          <input id="step2ResultText" placeholder="Paste Step2 result text here" size="42" />
+          <button id="parseStep2Raw">Parse output raw</button>
+        </div>
         <div style="margin-top:10px">
           <textarea id="cmdOut" rows="6" style="width:100%;border-radius:8px;border:1px solid #2d3656;background:#0e1529;color:#e8eefc;padding:8px"></textarea>
         </div>
@@ -178,6 +182,8 @@
       const buildStep2Btn = document.getElementById("buildStep2");
       const buildStep3Btn = document.getElementById("buildStep3");
       const step2OutRawEl = document.getElementById("step2OutRaw");
+      const step2ResultTextEl = document.getElementById("step2ResultText");
+      const parseStep2RawBtn = document.getElementById("parseStep2Raw");
       const execWrapBtn = document.getElementById("execWrap");
       const execSupplyBtn = document.getElementById("execSupply");
       const cmdOutEl = document.getElementById("cmdOut");
@@ -628,6 +634,21 @@
         }
         cmdOutEl.value = `near_supplyBurrow network=mainnet tokenId=${p.toToken} amountRaw=${outRaw} asCollateral=true confirmMainnet=true`;
         cmdMetaEl.textContent = "Step3 prepared from Step2 output";
+      });
+
+      parseStep2RawBtn.addEventListener("click", () => {
+        const text = (step2ResultTextEl.value || "").trim();
+        if (!text) {
+          cmdMetaEl.textContent = "Paste Step2 result text first";
+          return;
+        }
+        const m = text.match(/raw\s+(\d{2,})/) || text.match(/->\s*(\d{2,})\s*raw/i) || text.match(/\b(\d{2,})\b/);
+        if (!m) {
+          cmdMetaEl.textContent = "Could not parse raw output";
+          return;
+        }
+        step2OutRawEl.value = m[1];
+        cmdMetaEl.textContent = `Parsed raw output: ${m[1]}`;
       });
 
       refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));

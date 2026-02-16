@@ -18,6 +18,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Rebalance execution draft: one-click generate/copy 3-step withdraw/swap/supply command draft
 - One-click fill Action Console from latest rebalance plan (with pre-execution checklist)
 - Step runner helper: build Step1/Step2/Step3 commands and feed Step2 output raw into Step3 template
+- Step2 parser helper: paste swap result text and auto-extract output raw for Step3
 - CSV export for latest snapshot
 - Best-effort USD estimates from NEAR Intents token feed
 
