@@ -9,7 +9,6 @@
  */
 
 import { createHash } from "node:crypto";
-import { Wallet } from "@ethersproject/wallet";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
@@ -17,14 +16,12 @@ import { isMainnetLikeEvmNetwork } from "../policy.js";
 import {
 	EVM_TOOL_PREFIX,
 	type EvmNetwork,
-	evmHttpJson,
 	evmNetworkSchema,
-	getEvmChainId,
-	getEvmRpcEndpoint,
 	parseEvmNetwork,
 	parsePositiveIntegerString,
 } from "../runtime.js";
 import type { EvmCallData } from "./lending-types.js";
+import { resolveEvmSignerForTool } from "./signer-resolve.js";
 import { VENUS_MARKET_REGISTRY, createVenusAdapter } from "./venus-adapter.js";
 
 // ---------------------------------------------------------------------------
@@ -101,64 +98,6 @@ function parseEvmAddress(value: string, fieldName: string): string {
 		throw new Error(`${fieldName} must be a valid EVM address (0x + 40 hex)`);
 	}
 	return normalized;
-}
-
-function resolveEvmPrivateKey(input?: string): string {
-	const key =
-		input?.trim() ||
-		process.env.EVM_PRIVATE_KEY?.trim() ||
-		process.env.POLYMARKET_PRIVATE_KEY?.trim() ||
-		"";
-	if (!key) {
-		throw new Error(
-			"No EVM private key provided. Set fromPrivateKey or EVM_PRIVATE_KEY.",
-		);
-	}
-	return key;
-}
-
-function toHexQuantity(value: bigint): string {
-	if (value === 0n) return "0x0";
-	return `0x${value.toString(16)}`;
-}
-
-type JsonRpcResponse<T> = {
-	result?: T;
-	error?: { message?: string };
-};
-
-async function callEvmRpc<T>(
-	rpcUrl: string,
-	method: string,
-	params: unknown[],
-): Promise<T> {
-	const payload = await evmHttpJson<JsonRpcResponse<T>>({
-		url: rpcUrl,
-		method: "POST",
-		body: {
-			jsonrpc: "2.0",
-			id: `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
-			method,
-			params,
-		},
-	});
-	if (payload.error) {
-		const msg =
-			typeof payload.error === "object" && payload.error.message
-				? payload.error.message
-				: JSON.stringify(payload.error);
-		throw new Error(`RPC ${method} failed: ${msg}`);
-	}
-	if (payload.result == null) {
-		throw new Error(`RPC ${method} returned empty result`);
-	}
-	return payload.result;
-}
-
-function parseHexQuantity(hex: string, label: string): bigint {
-	const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
-	if (!cleaned) throw new Error(`${label}: empty hex value`);
-	return BigInt(`0x${cleaned}`);
 }
 
 /** Resolve known Venus token symbol to underlying address. */
@@ -519,65 +458,26 @@ export function createVenusWorkflowTools() {
 						}
 					}
 
-					const privateKey = resolveEvmPrivateKey(params.fromPrivateKey);
-					const signer = new Wallet(privateKey);
-					const rpcUrl = getEvmRpcEndpoint(session.network);
-					const chainId = getEvmChainId(session.network);
-					const fromAddress = signer.address;
+					const signer = resolveEvmSignerForTool({
+						fromPrivateKey: params.fromPrivateKey,
+						network: session.network,
+					});
 
 					const txHashes: string[] = [];
 					const descriptions: string[] = [];
-					let nonce = await (async () => {
-						const hex = await callEvmRpc<string>(
-							rpcUrl,
-							"eth_getTransactionCount",
-							[fromAddress, "pending"],
-						);
-						return parseHexQuantity(hex, "nonce");
-					})();
 
 					for (const cd of session.calldata) {
-						const gasPriceHex = await callEvmRpc<string>(
-							rpcUrl,
-							"eth_gasPrice",
-							[],
-						);
-						const gasPrice = parseHexQuantity(gasPriceHex, "gasPrice");
-
-						const gasLimitHex = await callEvmRpc<string>(
-							rpcUrl,
-							"eth_estimateGas",
-							[
-								{
-									from: fromAddress,
-									to: cd.to,
-									data: cd.data,
-									value: cd.value ?? "0x0",
-								},
-							],
-						);
-						const gasLimit = parseHexQuantity(gasLimitHex, "gasLimit");
-
-						const signedTx = await signer.signTransaction({
+						const result = await signer.signAndSend({
+							network: session.network,
 							to: cd.to,
-							nonce: Number(nonce),
-							chainId,
-							value: cd.value ?? "0x0",
-							gasPrice: toHexQuantity(gasPrice),
-							gasLimit: toHexQuantity(gasLimit),
 							data: cd.data,
+							value: cd.value,
 						});
-
-						const txHash = await callEvmRpc<string>(
-							rpcUrl,
-							"eth_sendRawTransaction",
-							[signedTx],
-						);
-
-						txHashes.push(txHash);
+						txHashes.push(result.txHash);
 						descriptions.push(cd.description);
-						nonce += 1n;
 					}
+
+					const fromAddress = await signer.getAddress(session.network);
 
 					return {
 						content: [

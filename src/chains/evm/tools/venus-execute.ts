@@ -2,8 +2,7 @@
  * Venus Protocol execute tools — MCP tool wrappers for Venus lending operations.
  *
  * All tools default to `dryRun=true` and require `confirmMainnet=true` for BSC mainnet execution.
- * Signing uses existing `resolveEvmPrivateKey` + `ethers.Wallet` pattern (to be replaced by
- * EvmSignerProvider in Phase 1.5).
+ * Signing uses EvmSignerProvider abstraction (LocalKeySigner or PrivyEvmSigner).
  *
  * - `evm_venusSupply`:        Supply (deposit) underlying token to Venus
  * - `evm_venusBorrow`:        Borrow from Venus market
@@ -12,44 +11,24 @@
  * - `evm_venusEnterMarkets`:  Enable market(s) as collateral
  */
 
-import { Wallet } from "@ethersproject/wallet";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import { isMainnetLikeEvmNetwork } from "../policy.js";
 import {
 	EVM_TOOL_PREFIX,
-	evmHttpJson,
+	type EvmNetwork,
 	evmNetworkSchema,
-	getEvmChainId,
-	getEvmRpcEndpoint,
 	parseEvmNetwork,
 	parsePositiveIntegerString,
 } from "../runtime.js";
 import type { EvmCallData } from "./lending-types.js";
+import { resolveEvmSignerForTool } from "./signer-resolve.js";
+import type { EvmSignerProvider } from "./signer-types.js";
 import { createVenusAdapter } from "./venus-adapter.js";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
-
-type JsonRpcResponse<T> = {
-	result?: T;
-	error?: { message?: string; code?: number };
-};
-
-function resolveEvmPrivateKey(input?: string): string {
-	const key =
-		input?.trim() ||
-		process.env.EVM_PRIVATE_KEY?.trim() ||
-		process.env.POLYMARKET_PRIVATE_KEY?.trim() ||
-		"";
-	if (!key) {
-		throw new Error(
-			"No EVM private key provided. Set fromPrivateKey or EVM_PRIVATE_KEY.",
-		);
-	}
-	return key;
-}
 
 function parseEvmAddress(value: string, fieldName: string): string {
 	const normalized = value.trim();
@@ -59,136 +38,39 @@ function parseEvmAddress(value: string, fieldName: string): string {
 	return normalized;
 }
 
-function toHexQuantity(value: bigint): string {
-	if (value === 0n) return "0x0";
-	return `0x${value.toString(16)}`;
-}
-
-async function callEvmRpc<T>(
-	rpcUrl: string,
-	method: string,
-	params: unknown[],
-): Promise<T> {
-	const payload = await evmHttpJson<JsonRpcResponse<T>>({
-		url: rpcUrl,
-		method: "POST",
-		body: {
-			jsonrpc: "2.0",
-			id: `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
-			method,
-			params,
-		},
-	});
-	if (payload.error) {
-		const msg =
-			typeof payload.error === "object" && payload.error.message
-				? payload.error.message
-				: JSON.stringify(payload.error);
-		throw new Error(`RPC ${method} failed: ${msg}`);
-	}
-	if (payload.result == null) {
-		throw new Error(`RPC ${method} returned empty result`);
-	}
-	return payload.result;
-}
-
-function parseHexQuantity(hex: string, label: string): bigint {
-	const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
-	if (!cleaned) throw new Error(`${label}: empty hex value`);
-	return BigInt(`0x${cleaned}`);
-}
-
-async function resolveNonce(params: {
-	rpcUrl: string;
-	address: string;
-}): Promise<bigint> {
-	const nonceHex = await callEvmRpc<string>(
-		params.rpcUrl,
-		"eth_getTransactionCount",
-		[params.address, "pending"],
-	);
-	return parseHexQuantity(nonceHex, "nonce");
-}
-
-async function resolveGasPriceWei(rpcUrl: string): Promise<bigint> {
-	const gasPriceHex = await callEvmRpc<string>(rpcUrl, "eth_gasPrice", []);
-	return parseHexQuantity(gasPriceHex, "gasPrice");
-}
-
-async function estimateGas(params: {
-	rpcUrl: string;
-	from: string;
-	to: string;
-	data: string;
-	value?: string;
-}): Promise<bigint> {
-	const estimateHex = await callEvmRpc<string>(
-		params.rpcUrl,
-		"eth_estimateGas",
-		[
-			{
-				from: params.from,
-				to: params.to,
-				data: params.data,
-				value: params.value ?? "0x0",
-			},
-		],
-	);
-	return parseHexQuantity(estimateHex, "gasLimit");
-}
-
 // ---------------------------------------------------------------------------
-// Send a batch of EvmCallData txs in sequence (approve + main tx pattern)
+// Send a batch of EvmCallData txs in sequence via EvmSignerProvider
 // ---------------------------------------------------------------------------
 
 type SendCallDataResult = {
 	txHashes: string[];
 	descriptions: string[];
+	from: string;
 };
 
-async function sendCallDataSequence(params: {
-	rpcUrl: string;
-	chainId: number;
-	signer: InstanceType<typeof Wallet>;
+async function sendCalldataViaSigner(params: {
+	network: EvmNetwork;
+	signer: EvmSignerProvider;
 	calldata: EvmCallData[];
 }): Promise<SendCallDataResult> {
-	const { rpcUrl, chainId, signer } = params;
-	const fromAddress = signer.address;
+	const { network, signer, calldata } = params;
 	const txHashes: string[] = [];
 	const descriptions: string[] = [];
+	let from = "";
 
-	let nonce = await resolveNonce({ rpcUrl, address: fromAddress });
-
-	for (const cd of params.calldata) {
-		const gasPrice = await resolveGasPriceWei(rpcUrl);
-		const gasLimit = await estimateGas({
-			rpcUrl,
-			from: fromAddress,
+	for (const cd of calldata) {
+		const result = await signer.signAndSend({
+			network,
 			to: cd.to,
 			data: cd.data,
 			value: cd.value,
 		});
-
-		const signedTx = await signer.signTransaction({
-			to: cd.to,
-			nonce: Number(nonce),
-			chainId,
-			value: cd.value ?? "0x0",
-			gasPrice: toHexQuantity(gasPrice),
-			gasLimit: toHexQuantity(gasLimit),
-			data: cd.data,
-		});
-
-		const txHash = await callEvmRpc<string>(rpcUrl, "eth_sendRawTransaction", [
-			signedTx,
-		]);
-
-		txHashes.push(txHash);
+		txHashes.push(result.txHash);
 		descriptions.push(cd.description);
-		nonce += 1n;
+		from = result.from;
 	}
 
-	return { txHashes, descriptions };
+	return { txHashes, descriptions, from };
 }
 
 // ---------------------------------------------------------------------------
@@ -288,13 +170,12 @@ export function createVenusExecuteTools() {
 					};
 				}
 
-				const privateKey = resolveEvmPrivateKey(params.fromPrivateKey);
-				const signer = new Wallet(privateKey);
-				const rpcUrl = getEvmRpcEndpoint(network);
-				const chainId = getEvmChainId(network);
-				const result = await sendCallDataSequence({
-					rpcUrl,
-					chainId,
+				const signer = resolveEvmSignerForTool({
+					fromPrivateKey: params.fromPrivateKey,
+					network,
+				});
+				const result = await sendCalldataViaSigner({
+					network,
 					signer,
 					calldata,
 				});
@@ -310,7 +191,7 @@ export function createVenusExecuteTools() {
 						schema: "evm.venus.supply.v1",
 						dryRun: false,
 						network,
-						fromAddress: signer.address,
+						fromAddress: result.from,
 						tokenAddress,
 						amountRaw,
 						txHashes: result.txHashes,
@@ -383,13 +264,12 @@ export function createVenusExecuteTools() {
 					};
 				}
 
-				const privateKey = resolveEvmPrivateKey(params.fromPrivateKey);
-				const signer = new Wallet(privateKey);
-				const rpcUrl = getEvmRpcEndpoint(network);
-				const chainId = getEvmChainId(network);
-				const result = await sendCallDataSequence({
-					rpcUrl,
-					chainId,
+				const signer = resolveEvmSignerForTool({
+					fromPrivateKey: params.fromPrivateKey,
+					network,
+				});
+				const result = await sendCalldataViaSigner({
+					network,
 					signer,
 					calldata: [calldata],
 				});
@@ -405,7 +285,7 @@ export function createVenusExecuteTools() {
 						schema: "evm.venus.borrow.v1",
 						dryRun: false,
 						network,
-						fromAddress: signer.address,
+						fromAddress: result.from,
 						marketAddress,
 						amountRaw,
 						txHash: result.txHashes[0],
@@ -481,13 +361,12 @@ export function createVenusExecuteTools() {
 					};
 				}
 
-				const privateKey = resolveEvmPrivateKey(params.fromPrivateKey);
-				const signer = new Wallet(privateKey);
-				const rpcUrl = getEvmRpcEndpoint(network);
-				const chainId = getEvmChainId(network);
-				const result = await sendCallDataSequence({
-					rpcUrl,
-					chainId,
+				const signer = resolveEvmSignerForTool({
+					fromPrivateKey: params.fromPrivateKey,
+					network,
+				});
+				const result = await sendCalldataViaSigner({
+					network,
 					signer,
 					calldata,
 				});
@@ -503,7 +382,7 @@ export function createVenusExecuteTools() {
 						schema: "evm.venus.repay.v1",
 						dryRun: false,
 						network,
-						fromAddress: signer.address,
+						fromAddress: result.from,
 						tokenAddress,
 						amountRaw,
 						txHashes: result.txHashes,
@@ -576,13 +455,12 @@ export function createVenusExecuteTools() {
 					};
 				}
 
-				const privateKey = resolveEvmPrivateKey(params.fromPrivateKey);
-				const signer = new Wallet(privateKey);
-				const rpcUrl = getEvmRpcEndpoint(network);
-				const chainId = getEvmChainId(network);
-				const result = await sendCallDataSequence({
-					rpcUrl,
-					chainId,
+				const signer = resolveEvmSignerForTool({
+					fromPrivateKey: params.fromPrivateKey,
+					network,
+				});
+				const result = await sendCalldataViaSigner({
+					network,
 					signer,
 					calldata: [calldata],
 				});
@@ -598,7 +476,7 @@ export function createVenusExecuteTools() {
 						schema: "evm.venus.withdraw.v1",
 						dryRun: false,
 						network,
-						fromAddress: signer.address,
+						fromAddress: result.from,
 						tokenAddress,
 						amountRaw,
 						txHash: result.txHashes[0],
@@ -663,13 +541,12 @@ export function createVenusExecuteTools() {
 					};
 				}
 
-				const privateKey = resolveEvmPrivateKey(params.fromPrivateKey);
-				const signer = new Wallet(privateKey);
-				const rpcUrl = getEvmRpcEndpoint(network);
-				const chainId = getEvmChainId(network);
-				const result = await sendCallDataSequence({
-					rpcUrl,
-					chainId,
+				const signer = resolveEvmSignerForTool({
+					fromPrivateKey: params.fromPrivateKey,
+					network,
+				});
+				const result = await sendCalldataViaSigner({
+					network,
 					signer,
 					calldata: [calldata],
 				});
@@ -685,7 +562,7 @@ export function createVenusExecuteTools() {
 						schema: "evm.venus.enterMarkets.v1",
 						dryRun: false,
 						network,
-						fromAddress: signer.address,
+						fromAddress: result.from,
 						marketAddresses,
 						txHash: result.txHashes[0],
 						description: result.descriptions[0],
