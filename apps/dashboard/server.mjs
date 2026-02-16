@@ -30,6 +30,12 @@ const ALERT_TELEGRAM_BOT_TOKEN =
 	process.env.NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN || "";
 const ALERT_TELEGRAM_CHAT_ID =
 	process.env.NEAR_REBAL_ALERT_TELEGRAM_CHAT_ID || "";
+const ALERT_SUCCESS_ENABLED =
+	String(process.env.NEAR_REBAL_ALERT_SUCCESS || "false").toLowerCase() ===
+	"true";
+const ALERT_DEDUPE_WINDOW_MS =
+	Number.parseInt(process.env.NEAR_REBAL_ALERT_DEDUPE_MS || "300000", 10) ||
+	300000;
 
 const ACTION_HISTORY = [];
 const TOKEN_DECIMALS_CACHE = new Map();
@@ -40,6 +46,7 @@ const REBALANCE_STATE = {
 	activeRunId: null,
 	recentRuns: new Map(),
 };
+const ALERT_DEDUPE_CACHE = new Map();
 
 const TOKENS = [
 	{ symbol: "USDt", contractId: "usdt.tether-token.near", decimals: 6 },
@@ -498,6 +505,24 @@ function nearExplorerUrl(txHash) {
 }
 
 async function sendAlert(params) {
+	const level = String(params.level || "info").toLowerCase();
+	if (level === "info" && !ALERT_SUCCESS_ENABLED) {
+		return;
+	}
+	const dedupeKey = `${level}|${params.title || "event"}|${params.message || ""}`;
+	const now = Date.now();
+	const lastSentAt = ALERT_DEDUPE_CACHE.get(dedupeKey) || 0;
+	if (now - lastSentAt < ALERT_DEDUPE_WINDOW_MS) {
+		return;
+	}
+	ALERT_DEDUPE_CACHE.set(dedupeKey, now);
+	if (ALERT_DEDUPE_CACHE.size > 200) {
+		const entries = [...ALERT_DEDUPE_CACHE.entries()];
+		for (const [key] of entries.slice(0, entries.length - 200)) {
+			ALERT_DEDUPE_CACHE.delete(key);
+		}
+	}
+
 	const payload = {
 		timestamp: new Date().toISOString(),
 		...params,
@@ -514,7 +539,7 @@ async function sendAlert(params) {
 	}
 	if (ALERT_TELEGRAM_BOT_TOKEN && ALERT_TELEGRAM_CHAT_ID) {
 		const text = [
-			`[NEAR Rebalance][${params.level || "info"}] ${params.title || "event"}`,
+			`[NEAR Rebalance][${level}] ${params.title || "event"}`,
 			params.message || "",
 		].join("\n");
 		tasks.push(
@@ -1088,6 +1113,11 @@ async function executeAction(payload) {
 						message: `runId=${runId} residual wallet balances usdt=${stateAfter.walletUsdtRaw} usdc=${stateAfter.walletUsdcRaw}`,
 					});
 				}
+				await sendAlert({
+					level: "info",
+					title: "Rebalance success",
+					message: `runId=${runId} amountRaw=${amountRaw} suppliedRaw=${supplyOutRaw} reconciled=${reconciled}`,
+				});
 
 				return {
 					ok: true,
