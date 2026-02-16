@@ -252,8 +252,8 @@ export function checkNearCliCredentials(network?: string): {
 
 	if (!dirExists || !networkDirExists) {
 		const installHint = nearCliInstalled
-			? `near-cli is installed but no credentials found for ${parsedNetwork}.\nRun: near login  (or near account import-account for near-cli-rs)`
-			: `No NEAR credentials found.\n\nTo get started:\n  1. Install near-cli:  npm install -g near-cli-rs\n  2. Create/import account:  near account create-account\n  3. Or import existing:  near account import-account using-private-key ed25519:...\n\nCredentials will be saved to ${credentialsDir}/${parsedNetwork}/`;
+			? `near-cli is installed but no credentials found for ${parsedNetwork}.\nRun (near-cli-rs): near account import-account using-web-wallet\nOr import key directly: near account import-account using-private-key ed25519:...\n(Legacy near-cli users can also run: near login)`
+			: `No NEAR credentials found.\n\nTo get started (recommended near-cli-rs):\n  1. Install near-cli-rs\n  2. Import via web wallet:  near account import-account using-web-wallet\n  3. Or import existing key:  near account import-account using-private-key ed25519:...\n\nCredentials will be saved to ${credentialsDir}/${parsedNetwork}/`;
 
 		return {
 			found: false,
@@ -281,7 +281,7 @@ export function checkNearCliCredentials(network?: string): {
 			accountId: null,
 			hasPrivateKey: false,
 			nearCliInstalled,
-			hint: `Credentials directory exists (${networkDir}) but no account files found.\nRun: near login  (or near account import-account for near-cli-rs)`,
+			hint: `Credentials directory exists (${networkDir}) but no account files found.\nRun (near-cli-rs): near account import-account using-web-wallet\n(or legacy near-cli: near login)`,
 		};
 	}
 

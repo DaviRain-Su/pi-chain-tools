@@ -17,6 +17,21 @@ openclaw gateway restart
 
 ## 2) Configure NEAR env
 
+### Recommended CLI
+
+Use **near-cli-rs** as the default local credential manager.
+If credentials are already present under `~/.near-credentials/<network>/`, runtime auto-discovers them.
+
+Common near-cli-rs setup commands:
+
+```bash
+# import/sign in via web wallet
+near account import-account using-web-wallet
+
+# or import an existing private key
+near account import-account using-private-key ed25519:... --account-id <your-account>.near
+```
+
 ### Credential/account resolution order (important)
 
 `pi-chain-tools` NEAR runtime **can auto-read near-cli credentials by default**.
