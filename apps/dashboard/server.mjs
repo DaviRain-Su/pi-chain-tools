@@ -27,6 +27,7 @@ const SESSION_DIR =
 	);
 
 const ACTION_HISTORY = [];
+const TOKEN_DECIMALS_CACHE = new Map();
 
 const TOKENS = [
 	{ symbol: "USDt", contractId: "usdt.tether-token.near", decimals: 6 },
@@ -176,14 +177,41 @@ async function getBurrowTokenMetaMap() {
 	}
 }
 
-function toTokenAmountFromBurrowInner(balanceInner, extraDecimals = 0) {
-	const decimals = 24 - Number(extraDecimals || 0);
+function toTokenAmountFromBurrowInner(
+	balanceInner,
+	extraDecimals = 0,
+	tokenDecimals = 24,
+) {
+	const decimals = Number(extraDecimals || 0) + Number(tokenDecimals || 0);
 	return formatUnits(balanceInner || "0", Math.max(0, decimals));
 }
 
 function stableSymbol(tokenId) {
 	const match = TOKENS.find((item) => item.contractId === tokenId);
 	return match?.symbol || tokenId;
+}
+
+async function resolveTokenDecimals(tokenId) {
+	if (TOKEN_DECIMALS_CACHE.has(tokenId)) {
+		return TOKEN_DECIMALS_CACHE.get(tokenId);
+	}
+	const known = TOKENS.find((item) => item.contractId === tokenId)?.decimals;
+	if (typeof known === "number") {
+		TOKEN_DECIMALS_CACHE.set(tokenId, known);
+		return known;
+	}
+	try {
+		const meta = await viewFunction(tokenId, "ft_metadata", {});
+		const decimals = Number(meta?.decimals);
+		if (Number.isFinite(decimals) && decimals >= 0) {
+			TOKEN_DECIMALS_CACHE.set(tokenId, decimals);
+			return decimals;
+		}
+	} catch {
+		// ignore
+	}
+	TOKEN_DECIMALS_CACHE.set(tokenId, 24);
+	return 24;
 }
 
 async function getBurrowAccount(accountId) {
@@ -200,26 +228,33 @@ async function getBurrowAccount(accountId) {
 			return { registered: false, collateral: [], supplied: [], borrowed: [] };
 		}
 
-		const normalizeRows = (rows = []) =>
-			rows.map((row) => {
-				const meta = metaMap.get(row.token_id) || {
-					extraDecimals: 0,
-					symbol: row.token_id,
-				};
-				return {
-					tokenId: row.token_id,
-					symbol: meta.symbol,
-					apr: row.apr,
-					balanceRawInner: row.balance,
-					amount: toTokenAmountFromBurrowInner(row.balance, meta.extraDecimals),
-				};
-			});
+		const normalizeRows = async (rows = []) =>
+			Promise.all(
+				rows.map(async (row) => {
+					const meta = metaMap.get(row.token_id) || {
+						extraDecimals: 0,
+						symbol: row.token_id,
+					};
+					const tokenDecimals = await resolveTokenDecimals(row.token_id);
+					return {
+						tokenId: row.token_id,
+						symbol: meta.symbol,
+						apr: row.apr,
+						balanceRawInner: row.balance,
+						amount: toTokenAmountFromBurrowInner(
+							row.balance,
+							meta.extraDecimals,
+							tokenDecimals,
+						),
+					};
+				}),
+			);
 
 		return {
 			registered: true,
-			collateral: normalizeRows(account.collateral),
-			supplied: normalizeRows(account.supplied),
-			borrowed: normalizeRows(account.borrowed),
+			collateral: await normalizeRows(account.collateral),
+			supplied: await normalizeRows(account.supplied),
+			borrowed: await normalizeRows(account.borrowed),
 		};
 	} catch (error) {
 		return {
