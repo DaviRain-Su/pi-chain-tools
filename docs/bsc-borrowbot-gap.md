@@ -674,7 +674,10 @@ GET https://li.quest/v1/quote
 - [x] 网络别名（berachain/bera/bartio）
 - [x] Privy 签名零改动（caip2=eip155:80094）
 - [ ] Berachain LendingProtocolAdapter（待 Dolomite/BeraBorrow 稳定）
-- [ ] Monad 注册（待 mainnet 上线，chainId TBD）
+- [x] Monad 注册（chainId 143，RPC `https://rpc.monad.xyz`）
+  - WMON token（地址待确认，可通过 `EVM_TRANSFER_TOKEN_MAP_MONAD` 配置）
+  - 网络别名：monad/mon
+  - Privy caip2=eip155:143
 
 ---
 
