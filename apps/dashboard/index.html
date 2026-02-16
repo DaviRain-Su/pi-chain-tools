@@ -58,6 +58,14 @@
         </div>
         <div id="targetAlert" class="muted">-</div>
         <div id="targetPlan" class="muted" style="margin-top:8px">-</div>
+        <div style="margin-top:10px">
+          <textarea id="rebalanceDraft" rows="6" style="width:100%;border-radius:8px;border:1px solid #2d3656;background:#0e1529;color:#e8eefc;padding:8px" placeholder="Rebalance execution draft will appear here"></textarea>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="buildRebalanceDraft">Build execution draft</button>
+          <button id="copyRebalanceDraft">Copy draft</button>
+          <span id="rebalanceMeta" class="muted"></span>
+        </div>
       </div>
 
       <div class="card" style="margin-top:16px">
@@ -141,6 +149,10 @@
       const saveTargetsBtn = document.getElementById("saveTargets");
       const targetAlertEl = document.getElementById("targetAlert");
       const targetPlanEl = document.getElementById("targetPlan");
+      const rebalanceDraftEl = document.getElementById("rebalanceDraft");
+      const buildRebalanceDraftBtn = document.getElementById("buildRebalanceDraft");
+      const copyRebalanceDraftBtn = document.getElementById("copyRebalanceDraft");
+      const rebalanceMetaEl = document.getElementById("rebalanceMeta");
       const burrowPosEl = document.getElementById("burrowPos");
       const metaEl = document.getElementById("meta");
       const tokensEl = document.getElementById("tokens");
@@ -237,7 +249,9 @@
 
       function computeRebalancePlan(snapshot, targets) {
         const mix = getStableMix(snapshot);
-        if (mix.total <= 0) return "No rebalance plan: stable collateral is empty.";
+        if (mix.total <= 0) {
+          return { text: "No rebalance plan: stable collateral is empty.", amount: 0, from: null, to: null };
+        }
 
         const targetUsdtAmount = (targets.usdt / 100) * mix.total;
         const targetUsdceAmount = (targets.usdce / 100) * mix.total;
@@ -245,18 +259,35 @@
         const usdceGap = targetUsdceAmount - mix.usdce;
 
         if (Math.abs(usdtGap) < 0.000001 && Math.abs(usdceGap) < 0.000001) {
-          return "Rebalance plan: already at target.";
+          return { text: "Rebalance plan: already at target.", amount: 0, from: null, to: null };
         }
 
         if (usdtGap > 0 && usdceGap < 0) {
-          return `Suggestion: move ${Math.min(usdtGap, -usdceGap).toFixed(6)} from USDC.e -> USDt.`;
+          const amount = Math.min(usdtGap, -usdceGap);
+          return {
+            text: `Suggestion: move ${amount.toFixed(6)} from USDC.e -> USDt.`,
+            amount,
+            from: "USDC.e",
+            to: "USDt",
+          };
         }
 
         if (usdceGap > 0 && usdtGap < 0) {
-          return `Suggestion: move ${Math.min(usdceGap, -usdtGap).toFixed(6)} from USDt -> USDC.e.`;
+          const amount = Math.min(usdceGap, -usdtGap);
+          return {
+            text: `Suggestion: move ${amount.toFixed(6)} from USDt -> USDC.e.`,
+            amount,
+            from: "USDt",
+            to: "USDC.e",
+          };
         }
 
-        return `Suggestion: adjust composition manually (USDt gap ${usdtGap.toFixed(6)}, USDC.e gap ${usdceGap.toFixed(6)}).`;
+        return {
+          text: `Suggestion: adjust composition manually (USDt gap ${usdtGap.toFixed(6)}, USDC.e gap ${usdceGap.toFixed(6)}).`,
+          amount: 0,
+          from: null,
+          to: null,
+        };
       }
 
       function computeYieldHealth(snapshot) {
@@ -320,7 +351,8 @@
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
         yieldHealthEl.textContent = computeYieldHealth(data);
         targetAlertEl.innerHTML = computeTargetAlert(data, targetConfig);
-        targetPlanEl.textContent = computeRebalancePlan(data, targetConfig);
+        const plan = computeRebalancePlan(data, targetConfig);
+        targetPlanEl.textContent = plan.text;
 
         if (data.worker) {
           workerEl.innerHTML = `<span class="ok">${data.worker.status}</span> · ${data.worker.dryRun ? "dry-run" : "live"}<br/><span class="muted">cycles: ${data.worker.cycleCount} · last: ${data.worker.lastCycleAt || "-"}</span>`;
@@ -455,7 +487,49 @@
         saveTargets(targetConfig);
         if (lastSnapshot) {
           targetAlertEl.innerHTML = computeTargetAlert(lastSnapshot, targetConfig);
-          targetPlanEl.textContent = computeRebalancePlan(lastSnapshot, targetConfig);
+          const plan = computeRebalancePlan(lastSnapshot, targetConfig);
+          targetPlanEl.textContent = plan.text;
+        }
+      });
+
+      function toRaw6(uiAmount) {
+        return String(Math.max(0, Math.round(parseNum(uiAmount) * 1_000_000)));
+      }
+
+      function buildRebalanceDraft(snapshot, targets) {
+        const plan = computeRebalancePlan(snapshot, targets);
+        if (!plan.from || !plan.to || plan.amount <= 0) {
+          return "# No executable rebalance draft\n# Reason: " + plan.text;
+        }
+
+        const fromToken = plan.from === "USDt" ? "usdt.tether-token.near" : "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
+        const toToken = plan.to === "USDt" ? "usdt.tether-token.near" : "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
+        const raw = toRaw6(plan.amount);
+
+        return [
+          `# Rebalance draft (${plan.from} -> ${plan.to})`,
+          `# Estimated move amount: ${plan.amount.toFixed(6)} (${raw} raw)`,
+          `1) Withdraw from Burrow: near_withdrawBurrow network=mainnet tokenId=${fromToken} amountRaw=${raw} confirmMainnet=true`,
+          `2) Swap on Ref: near_swapRef network=mainnet tokenInId=${fromToken} tokenOutId=${toToken} amountInRaw=${raw} slippageBps=50 confirmMainnet=true`,
+          `3) Supply to Burrow: near_supplyBurrow network=mainnet tokenId=${toToken} amountRaw=<use swap output raw> asCollateral=true confirmMainnet=true`,
+        ].join("\n");
+      }
+
+      buildRebalanceDraftBtn.addEventListener("click", () => {
+        if (!lastSnapshot) {
+          rebalanceMetaEl.textContent = "No snapshot loaded";
+          return;
+        }
+        rebalanceDraftEl.value = buildRebalanceDraft(lastSnapshot, targetConfig);
+        rebalanceMetaEl.textContent = "Draft built";
+      });
+
+      copyRebalanceDraftBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(rebalanceDraftEl.value || "");
+          rebalanceMetaEl.textContent = "Draft copied";
+        } catch {
+          rebalanceMetaEl.textContent = "Copy failed";
         }
       });
 
