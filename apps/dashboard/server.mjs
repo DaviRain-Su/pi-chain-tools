@@ -1195,6 +1195,31 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, result);
 		}
 
+		if (url.pathname === "/api/alerts/test" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			await sendAlert({
+				level: payload.level || "info",
+				title: payload.title || "Manual test alert",
+				message:
+					payload.message ||
+					`dashboard test ping account=${payload.accountId || ACCOUNT_ID}`,
+			});
+			return json(res, 200, {
+				ok: true,
+				sent: true,
+				channel: {
+					webhook: Boolean(ALERT_WEBHOOK_URL),
+					telegram: Boolean(ALERT_TELEGRAM_BOT_TOKEN && ALERT_TELEGRAM_CHAT_ID),
+				},
+			});
+		}
+
 		if (url.pathname === "/" || url.pathname === "/index.html") {
 			const html = await readFile(path.join(__dirname, "index.html"), "utf8");
 			res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });

@@ -263,6 +263,7 @@
         </div>
         <div class="row" style="margin-top:8px">
           <button id="copyCmd">Copy command</button>
+          <button id="testAlerts">Test alerts</button>
           <span id="cmdMeta" class="muted"></span>
         </div>
       </div>
@@ -312,6 +313,7 @@
       const execStepTagEl = document.getElementById("execStepTag");
       const cmdOutEl = document.getElementById("cmdOut");
       const copyCmdBtn = document.getElementById("copyCmd");
+      const testAlertsBtn = document.getElementById("testAlerts");
       const cmdMetaEl = document.getElementById("cmdMeta");
 
       function rowsToText(rows) {
@@ -575,6 +577,32 @@
           cmdMetaEl.textContent = "Copied";
         } catch {
           cmdMetaEl.textContent = "Copy failed";
+        }
+      });
+
+      testAlertsBtn.addEventListener("click", async () => {
+        const ok = window.confirm("Send a test alert to configured channels?");
+        if (!ok) return;
+        cmdMetaEl.textContent = "Sending alert test...";
+        try {
+          const res = await fetch("/api/alerts/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              confirm: true,
+              accountId: currentAccount(),
+              level: "info",
+              title: "Dashboard alert test",
+              message: `manual test from dashboard at ${new Date().toLocaleString()}`,
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Alert test failed");
+          const tg = data?.channel?.telegram ? "telegram:on" : "telegram:off";
+          const wh = data?.channel?.webhook ? "webhook:on" : "webhook:off";
+          cmdMetaEl.textContent = `Alert test sent (${tg}, ${wh})`;
+        } catch (e) {
+          cmdMetaEl.textContent = `Alert test failed: ${e.message || e}`;
         }
       });
 

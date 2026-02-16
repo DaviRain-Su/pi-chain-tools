@@ -30,6 +30,9 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `NEAR_REBAL_ALERT_TELEGRAM_CHAT_ID`
   - `NEAR_REBAL_ALERT_SUCCESS=true` (send success/info alerts)
   - `NEAR_REBAL_ALERT_DEDUPE_MS=300000` (same-alert dedupe window)
+- Dashboard alert test endpoint/button:
+  - API: `POST /api/alerts/test` (requires `confirm=true`)
+  - UI: `Action Console -> Test alerts`
 - Rebalance risk guards (env-tunable): max amount, min quote out, max slippage, cooldown, and daily execution cap (`NEAR_REBAL_*`)
   - `NEAR_REBAL_MAX_AMOUNT_RAW` (default `5000000`)
   - `NEAR_REBAL_MIN_QUOTE_OUT_RAW` (default `500000`)
