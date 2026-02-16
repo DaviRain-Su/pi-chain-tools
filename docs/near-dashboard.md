@@ -22,6 +22,12 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Action History now supports optional `step` tag for execution traceability (e.g. step1/step2/step3)
 - Action History includes txHash + explorer link when parsed from execution output
 - One-click transactional rebalance action (`USDt -> USDC.e`): step1 withdraw -> step2 swap -> step3 supply, with automatic rollback (resupply USDt) when step2 fails
+- Rebalance risk guards (env-tunable): max amount, min quote out, max slippage, cooldown, and daily execution cap (`NEAR_REBAL_*`)
+  - `NEAR_REBAL_MAX_AMOUNT_RAW` (default `5000000`)
+  - `NEAR_REBAL_MIN_QUOTE_OUT_RAW` (default `500000`)
+  - `NEAR_REBAL_MAX_SLIPPAGE_BPS` (default `100`)
+  - `NEAR_REBAL_COOLDOWN_SECONDS` (default `120`)
+  - `NEAR_REBAL_DAILY_MAX` (default `6`)
 - CSV export for latest snapshot
 - Best-effort USD estimates from NEAR Intents token feed
 

@@ -28,6 +28,11 @@ const SESSION_DIR =
 
 const ACTION_HISTORY = [];
 const TOKEN_DECIMALS_CACHE = new Map();
+const REBALANCE_STATE = {
+	lastExecutedAt: 0,
+	dailyWindowDay: "",
+	dailyCount: 0,
+};
 
 const TOKENS = [
 	{ symbol: "USDt", contractId: "usdt.tether-token.near", decimals: 6 },
@@ -501,6 +506,80 @@ function parsePositiveRaw(value, fieldName) {
 	return text;
 }
 
+function parsePositiveInt(value, fallback) {
+	const n = Number.parseInt(String(value || fallback), 10);
+	if (!Number.isFinite(n) || n <= 0) return fallback;
+	return n;
+}
+
+function currentDayKey() {
+	return new Date().toISOString().slice(0, 10);
+}
+
+function enforceRebalanceGuards({ amountRaw, quoteOutRaw, slippageBps }) {
+	const maxAmountRaw = BigInt(
+		process.env.NEAR_REBAL_MAX_AMOUNT_RAW || "5000000",
+	);
+	const minQuoteOutRaw = BigInt(
+		process.env.NEAR_REBAL_MIN_QUOTE_OUT_RAW || "500000",
+	);
+	const maxSlippageBps = parsePositiveInt(
+		process.env.NEAR_REBAL_MAX_SLIPPAGE_BPS,
+		100,
+	);
+	const cooldownSeconds = parsePositiveInt(
+		process.env.NEAR_REBAL_COOLDOWN_SECONDS,
+		120,
+	);
+	const dailyMax = parsePositiveInt(process.env.NEAR_REBAL_DAILY_MAX, 6);
+
+	const amount = BigInt(amountRaw);
+	const quoteOut = BigInt(quoteOutRaw);
+	if (amount > maxAmountRaw) {
+		throw new Error(
+			`risk guard: amountRaw ${amountRaw} exceeds max ${maxAmountRaw.toString()}`,
+		);
+	}
+	if (quoteOut < minQuoteOutRaw) {
+		throw new Error(
+			`quote guard: quoteOutRaw ${quoteOutRaw} below minimum ${minQuoteOutRaw.toString()}`,
+		);
+	}
+	if (Number(slippageBps) > maxSlippageBps) {
+		throw new Error(
+			`risk guard: slippageBps ${slippageBps} exceeds max ${maxSlippageBps}`,
+		);
+	}
+
+	const now = Date.now();
+	const day = currentDayKey();
+	if (REBALANCE_STATE.dailyWindowDay !== day) {
+		REBALANCE_STATE.dailyWindowDay = day;
+		REBALANCE_STATE.dailyCount = 0;
+	}
+	if (REBALANCE_STATE.dailyCount >= dailyMax) {
+		throw new Error(`risk guard: daily rebalance limit reached (${dailyMax})`);
+	}
+	if (
+		REBALANCE_STATE.lastExecutedAt > 0 &&
+		now - REBALANCE_STATE.lastExecutedAt < cooldownSeconds * 1000
+	) {
+		throw new Error(
+			`risk guard: cooldown active (${cooldownSeconds}s). please retry later.`,
+		);
+	}
+}
+
+function markRebalanceExecuted() {
+	const day = currentDayKey();
+	if (REBALANCE_STATE.dailyWindowDay !== day) {
+		REBALANCE_STATE.dailyWindowDay = day;
+		REBALANCE_STATE.dailyCount = 0;
+	}
+	REBALANCE_STATE.dailyCount += 1;
+	REBALANCE_STATE.lastExecutedAt = Date.now();
+}
+
 async function executeAction(payload) {
 	const accountId = String(payload.accountId || ACCOUNT_ID).trim();
 	const nearBin = "near";
@@ -680,6 +759,11 @@ async function executeAction(payload) {
 				payload.minAmountOutRaw || applySlippage(refQuoteOutRaw, slippageBps),
 				"minAmountOutRaw",
 			);
+			enforceRebalanceGuards({
+				amountRaw,
+				quoteOutRaw: refQuoteOutRaw,
+				slippageBps,
+			});
 
 			const swapMsg = JSON.stringify({
 				force: 0,
@@ -839,6 +923,7 @@ async function executeAction(payload) {
 				txHash: step3Tx,
 				explorerUrl: nearExplorerUrl(step3Tx),
 			});
+			markRebalanceExecuted();
 
 			return {
 				ok: true,
