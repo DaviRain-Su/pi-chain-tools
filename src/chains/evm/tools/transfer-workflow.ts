@@ -15,9 +15,18 @@ import {
 import { createEvmExecuteTools } from "./execute.js";
 
 type WorkflowRunMode = "analysis" | "simulate" | "execute";
-export type KnownTokenSymbol = "USDC" | "USDT" | "DAI" | "WETH" | "WBTC";
+export type KnownTokenSymbol =
+	| "USDC"
+	| "USDT"
+	| "DAI"
+	| "WETH"
+	| "WBTC"
+	| "WBNB"
+	| "BTCB";
 export type TokenSymbolMetadata = {
 	decimals: number;
+	/** Per-network decimals override (e.g. BSC Binance-Peg USDC is 18, not 6). */
+	decimalsByNetwork?: Partial<Record<EvmNetwork, number>>;
 	addresses: Partial<Record<EvmNetwork, string>>;
 };
 
@@ -49,6 +58,7 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 	{
 		USDC: {
 			decimals: 6,
+			decimalsByNetwork: { bsc: 18 },
 			addresses: {
 				ethereum: "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
 				sepolia: "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238",
@@ -56,10 +66,12 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 				base: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
 				arbitrum: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
 				optimism: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+				bsc: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
 			},
 		},
 		USDT: {
 			decimals: 6,
+			decimalsByNetwork: { bsc: 18 },
 			addresses: {
 				ethereum: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
 				polygon: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
@@ -96,6 +108,18 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 				polygon: "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",
 				arbitrum: "0x2f2a2543B76A4166549F7AaB2e75Bef0aefC5B0f",
 				optimism: "0x68f180fcce6836688e9084f035309e29bf0a2095",
+			},
+		},
+		WBNB: {
+			decimals: 18,
+			addresses: {
+				bsc: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+			},
+		},
+		BTCB: {
+			decimals: 18,
+			addresses: {
+				bsc: "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",
 			},
 		},
 	};
@@ -181,6 +205,8 @@ function parseKnownTokenSymbol(value?: string): KnownTokenSymbol | undefined {
 	if (normalized === "DAI") return "DAI";
 	if (normalized === "WETH") return "WETH";
 	if (normalized === "WBTC") return "WBTC";
+	if (normalized === "WBNB" || normalized === "BNB") return "WBNB";
+	if (normalized === "BTCB") return "BTCB";
 	return undefined;
 }
 
@@ -314,10 +340,24 @@ function copyDefaultTokenMetadata(): Record<
 	return {
 		USDC: {
 			decimals: TOKEN_METADATA_BY_SYMBOL.USDC.decimals,
+			...(TOKEN_METADATA_BY_SYMBOL.USDC.decimalsByNetwork
+				? {
+						decimalsByNetwork: {
+							...TOKEN_METADATA_BY_SYMBOL.USDC.decimalsByNetwork,
+						},
+					}
+				: {}),
 			addresses: { ...TOKEN_METADATA_BY_SYMBOL.USDC.addresses },
 		},
 		USDT: {
 			decimals: TOKEN_METADATA_BY_SYMBOL.USDT.decimals,
+			...(TOKEN_METADATA_BY_SYMBOL.USDT.decimalsByNetwork
+				? {
+						decimalsByNetwork: {
+							...TOKEN_METADATA_BY_SYMBOL.USDT.decimalsByNetwork,
+						},
+					}
+				: {}),
 			addresses: { ...TOKEN_METADATA_BY_SYMBOL.USDT.addresses },
 		},
 		DAI: {
@@ -331,6 +371,14 @@ function copyDefaultTokenMetadata(): Record<
 		WBTC: {
 			decimals: TOKEN_METADATA_BY_SYMBOL.WBTC.decimals,
 			addresses: { ...TOKEN_METADATA_BY_SYMBOL.WBTC.addresses },
+		},
+		WBNB: {
+			decimals: TOKEN_METADATA_BY_SYMBOL.WBNB.decimals,
+			addresses: { ...TOKEN_METADATA_BY_SYMBOL.WBNB.addresses },
+		},
+		BTCB: {
+			decimals: TOKEN_METADATA_BY_SYMBOL.BTCB.decimals,
+			addresses: { ...TOKEN_METADATA_BY_SYMBOL.BTCB.addresses },
 		},
 	};
 }
@@ -390,6 +438,17 @@ function parsePositiveDecimalString(value: string, fieldName: string): string {
 		throw new Error(`${fieldName} must be greater than 0`);
 	}
 	return normalized;
+}
+
+/** Resolve decimals for a token on a specific network, respecting per-network overrides. */
+function resolveTokenDecimals(
+	metadata: TokenSymbolMetadata,
+	network?: EvmNetwork,
+): number {
+	if (network && metadata.decimalsByNetwork?.[network] != null) {
+		return metadata.decimalsByNetwork[network] as number;
+	}
+	return metadata.decimals;
 }
 
 function decimalToRaw(params: {
@@ -474,7 +533,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		undefined;
 	const tokenSymbolMatch =
 		text.match(/\btoken(?:Symbol)?\s*[:= ]\s*([A-Za-z0-9._-]{2,16})\b/i)?.[1] ??
-		text.match(/\b(USDC(?:\.E)?|USDT|DAI|WETH|WBTC)\b/i)?.[1] ??
+		text.match(/\b(USDC(?:\.E)?|USDT|DAI|WETH|WBTC|WBNB|BTCB)\b/i)?.[1] ??
 		undefined;
 	const toAddressMatch =
 		text.match(
@@ -491,7 +550,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	const amountTokenMatch =
 		text.match(/\bamount(?:Token)?\s*[:= ]\s*(\d+(?:\.\d+)?)\b/i)?.[1] ??
 		text.match(
-			/(\d+(?:\.\d+)?)\s*(?:USDC(?:\.E)?|USDT|DAI|WETH|WBTC)\b/i,
+			/(\d+(?:\.\d+)?)\s*(?:USDC(?:\.E)?|USDT|DAI|WETH|WBTC|WBNB|BTCB)\b/i,
 		)?.[1] ??
 		undefined;
 	const amountNativeMatch =
@@ -579,7 +638,7 @@ function normalizeIntent(
 				);
 			}
 			throw new Error(
-				"Provide tokenAddress (or known tokenSymbol like USDC/USDT/DAI/WETH/WBTC with configured map)",
+				"Provide tokenAddress (or known tokenSymbol like USDC/USDT/DAI/WETH/WBTC/WBNB/BTCB with configured map)",
 			);
 		}
 		const tokenAddress = parseEvmAddress(tokenAddressInput, "tokenAddress");
@@ -598,7 +657,10 @@ function normalizeIntent(
 					"Provide amountRaw, or amountToken together with tokenSymbol/known token text for evm.transfer.erc20",
 				);
 			}
-			const decimals = metadataBySymbol[tokenSymbol].decimals;
+			const decimals = resolveTokenDecimals(
+				metadataBySymbol[tokenSymbol],
+				network,
+			);
 			amountRaw = decimalToRaw({
 				amountDecimal: amountTokenInput,
 				decimals,

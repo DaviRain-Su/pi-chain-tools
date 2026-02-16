@@ -348,9 +348,11 @@ function filterTokenMapEntries(params: {
 		}
 		const address = metadata.addresses[params.network];
 		if (!address) continue;
+		const networkDecimals =
+			metadata.decimalsByNetwork?.[params.network] ?? metadata.decimals;
 		entries.push({
 			symbol,
-			decimals: metadata.decimals,
+			decimals: networkDecimals,
 			addresses: { [params.network]: address },
 		});
 	}
