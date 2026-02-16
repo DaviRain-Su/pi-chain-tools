@@ -1,6 +1,10 @@
 # Gradience
 
-Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is implemented, Sui has a practical read/compose/execute/workflow slice, NEAR has read/execute/workflow coverage (including Ref swap), and EVM now includes a Polymarket BTC 5m trading slice (read/compose/execute/workflow), with a chain-agnostic grouping model:
+Gradience is a multi-chain AI agent runtime — 43 NEAR tools, 30+ EVM tools, full Solana/Sui coverage — that turns blockchain capabilities into structured, safe, composable MCP services.
+
+**Featured: [Autonomous Stablecoin Yield Agent on NEAR](docs/near-hackathon.md)** — an AI agent that continuously monitors Burrow lending markets and autonomously rebalances stablecoin positions to maximize yield. Starts with one command, keeps working after you close the tab.
+
+Multi-chain toolset library for Pi extensions with a chain-agnostic grouping model:
 
 - `read`
 - `compose`
@@ -18,8 +22,9 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - Workflow artifact summaries use a stable schema: `summaryLine` (string) + `summary` (`schema = w3rt.workflow.summary.v1`)
 - Pi extension registration now prefers workflow `summary.line` as first response line for `w3rt_run_*` tools.
 
-### Hackathon Submission
+### Hackathon Submissions
 
+- **`docs/near-hackathon.md`：NEAR Innovation Sandbox — Autonomous Stablecoin Yield Agent**
 - `docs/monad-ai-hackathon.md`：Monad AI Hackathon 参赛文档（赛道选择、架构优势、展示脚本与评审话术）
 
 ## Solana Tool Groups
@@ -147,7 +152,15 @@ export EVM_TRANSFER_TOKEN_MAP_BASE='{"USDT":"0x111111111111111111111111111111111
 export EVM_TRANSFER_TOKEN_DECIMALS='{"USDC":6,"USDT":6}'
 ```
 
-## NEAR (Current)
+## NEAR (Current) — 43 tools, 194 tests
+
+### 🔥 Autonomous Yield Worker
+
+- `execute`: `near_yieldWorkerStart` — start autonomous stablecoin yield optimization loop (scans Burrow markets, compares APR, decides rebalance/hold/supply, executes, notifies via webhook, repeats on interval; `dryRun=true` default)
+- `execute`: `near_yieldWorkerStop` — stop a running yield worker
+- `execute`: `near_yieldWorkerStatus` — get worker state + recent decision audit logs (last 50 cycles)
+
+### Full Tool List
 
 - `read`: `near_getBalance` (native NEAR balance, available + locked)
 - `read`: `near_getAccount` (view account state)
