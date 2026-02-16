@@ -783,6 +783,74 @@ function parseTopNForStableYield(
 	return value;
 }
 
+function parseTopNForStableYieldFromText(value: string): number | undefined {
+	const match = value.match(
+		/top\s*n?\s*[:：]?\s*(\d{1,3})|前(\d{1,3})(?:个|种|名)?|第(\d{1,3})(?:个|名)?|排行(?:前|第)\s*(\d{1,3})/i,
+	);
+	if (!match) return undefined;
+	const rawTopN = match[1] ?? match[2] ?? match[3] ?? match[4];
+	if (!rawTopN) return undefined;
+	const parsed = Number(rawTopN);
+	if (!Number.isInteger(parsed) || parsed <= 0) return undefined;
+	return parsed;
+}
+
+const STABLE_YIELD_SYMBOL_CANDIDATES = [
+	"USDC",
+	"USDT",
+	"DAI",
+	"USDD",
+	"BUSD",
+	"FRAX",
+	"LUSD",
+	"TUSD",
+	"PYUSD",
+	"GUSD",
+	"USDE",
+	"SUSD",
+] as const;
+
+const STABLE_YIELD_SYMBOL_SET = new Set(
+	STABLE_YIELD_SYMBOL_CANDIDATES.map((symbol) => symbol.toLowerCase()),
+);
+const STABLE_YIELD_SYMBOL_TOKEN_PATTERN = `(?:^|[^a-z0-9._-])(${STABLE_YIELD_SYMBOL_CANDIDATES.map((symbol) => symbol.toLowerCase()).join("|")})(?=[^a-z0-9._-]|$)`;
+const STABLE_YIELD_SYMBOL_BOUNDARY_RE = new RegExp(
+	STABLE_YIELD_SYMBOL_TOKEN_PATTERN,
+	"ig",
+);
+
+function extractStableYieldSymbolsFromText(value: string): string[] {
+	const lower = value.toLowerCase();
+	const explicitSymbolsMatch = lower.match(
+		/(?:币种|代币|symbols?|assets?|stablecoins?|稳定币(?:列表|清单)?)\s*(?:[:：]|是|为)?\s*([^。.!?,，。；;]*)/i,
+	);
+	const explicitSymbols =
+		explicitSymbolsMatch?.[1]
+			?.split(/[\s,，/、\|]+/)
+			.map((symbol) => symbol.replace(/[^a-z0-9._-]/g, ""))
+			.map((symbol) => symbol.trim())
+			.filter((symbol) => STABLE_YIELD_SYMBOL_SET.has(symbol))
+			.map((symbol) => symbol.toUpperCase()) ?? [];
+
+	const detectedSymbols: string[] = [];
+	const foundSet = new Set<string>();
+	for (const symbol of explicitSymbols) {
+		if (!foundSet.has(symbol)) {
+			detectedSymbols.push(symbol);
+			foundSet.add(symbol);
+		}
+	}
+
+	for (const match of lower.matchAll(STABLE_YIELD_SYMBOL_BOUNDARY_RE)) {
+		const token = match[1]?.toUpperCase();
+		if (!token || foundSet.has(token)) continue;
+		foundSet.add(token);
+		detectedSymbols.push(token);
+	}
+
+	return detectedSymbols;
+}
+
 function normalizeStableYieldSymbols(
 	value: string[] | undefined,
 	fieldName: string,
@@ -1886,20 +1954,6 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		}
 	}
 
-	const stableSymbolCandidates = [
-		"USDC",
-		"USDT",
-		"DAI",
-		"USDD",
-		"BUSD",
-		"FRAX",
-		"LUSD",
-		"TUSD",
-		"PYUSD",
-		"GUSD",
-		"USDE",
-		"SUSD",
-	];
 	if (
 		((lower.includes("stable") ||
 			lower.includes("稳定币") ||
@@ -1914,19 +1968,11 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		lower.includes("stable yield")
 	) {
 		hints.intentType = "near.defi.stableYieldPlan";
-		const topNMatch = lower.match(
-			/top\s*n?\s*[:：]?\s*(\d{1,3})|前(\d{1,3})(?:个|种|名)?|第(\d{1,3})(?:个|名)?/i,
-		);
-		const topNRaw = topNMatch?.[1] ?? topNMatch?.[2] ?? topNMatch?.[3];
-		if (topNRaw) {
-			const parsed = Number(topNRaw);
-			if (Number.isInteger(parsed) && parsed > 0) {
-				hints.topN = parsed;
-			}
+		const parsedTopN = parseTopNForStableYieldFromText(lower);
+		if (parsedTopN != null) {
+			hints.topN = parsedTopN;
 		}
-		const detectedSymbols = stableSymbolCandidates.filter((symbol) =>
-			lower.includes(symbol.toLowerCase()),
-		);
+		const detectedSymbols = extractStableYieldSymbolsFromText(text);
 		if (detectedSymbols.length > 0) {
 			hints.stableSymbols = detectedSymbols;
 		}
@@ -1994,6 +2040,7 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	}
 
 	if (
+		hints.intentType !== "near.defi.stableYieldPlan" &&
 		hints.tokenInId &&
 		hints.tokenOutId &&
 		(likelySwap || hints.amountInRaw || hints.amountInUi)
@@ -2003,13 +2050,17 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	}
 
 	if (
-		hints.ftContractId ||
-		(likelyFt && hints.amountRaw && hints.toAccountId)
+		hints.intentType !== "near.defi.stableYieldPlan" &&
+		(hints.ftContractId || (likelyFt && hints.amountRaw && hints.toAccountId))
 	) {
 		hints.intentType = "near.transfer.ft";
 		return hints;
 	}
-	if (hasNearAmount && hints.toAccountId) {
+	if (
+		hints.intentType !== "near.defi.stableYieldPlan" &&
+		hasNearAmount &&
+		hints.toAccountId
+	) {
 		hints.intentType = "near.transfer.near";
 		return hints;
 	}

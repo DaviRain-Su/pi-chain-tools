@@ -4119,7 +4119,6 @@ describe("w3rt_run_near_workflow_v0", () => {
 			},
 		});
 	});
-
 	it("supports chinese ranking phrases like 第3名 in stable yield intent", async () => {
 		const tool = getTool();
 		await tool.execute("near-wf-stable-yield-cn-rank", {
@@ -4172,6 +4171,44 @@ describe("w3rt_run_near_workflow_v0", () => {
 			topN: 2,
 			stableSymbols: expect.arrayContaining(["DAI"]),
 		});
+	});
+
+	it("keeps stable yield plan with top5 and slash-separated symbols", async () => {
+		const tool = getTool();
+		await tool.execute("near-wf-stable-yield-top5", {
+			runMode: "simulate",
+			network: "mainnet",
+			intentText: "NEAR 稳定币 yield 排行 top5，币种 USDC/USDT/GUSD，包含停用",
+			confirmMainnet: true,
+		});
+
+		expect(readMocks.getStableYieldPlan).toHaveBeenCalledWith(
+			"near-wf-stable-yield-plan",
+			expect.objectContaining({
+				topN: 5,
+				stableSymbols: ["USDC", "USDT", "GUSD"],
+				includeDisabled: true,
+			}),
+		);
+	});
+
+	it("does not get overridden by swap wording when stable yield is present", async () => {
+		const tool = getTool();
+		await tool.execute("near-wf-stable-yield-swap-phrase", {
+			runMode: "simulate",
+			network: "mainnet",
+			intentText: "NEAR 稳定币 yield 排行，top2，USDC 换到 USDT，包含停用",
+			confirmMainnet: true,
+		});
+
+		expect(readMocks.getStableYieldPlan).toHaveBeenCalledWith(
+			"near-wf-stable-yield-plan",
+			expect.objectContaining({
+				topN: 2,
+				stableSymbols: ["USDC", "USDT"],
+				includeDisabled: true,
+			}),
+		);
 	});
 
 	it("supports stable yield plan with explicit params", async () => {
