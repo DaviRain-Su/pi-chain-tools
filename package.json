@@ -19,7 +19,8 @@
 		"./pi/near-extension": "./src/pi/near-extension.ts"
 	},
 	"pi": {
-		"extensions": ["./src/pi/default-extension.ts"]
+		"extensions": ["./src/pi/default-extension.ts"],
+		"skills": ["skills/"]
 	},
 	"scripts": {
 		"postinstall": "node scripts/ensure-mysten-compat.mjs",
