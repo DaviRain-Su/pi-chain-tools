@@ -10,6 +10,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Yield worker status (best-effort from latest local OpenClaw session log)
 - Recent execution tx list (best-effort from latest local OpenClaw session log)
 - Strategy view: current stable collateral APR ranking + quick recommendation
+- Action Console: safe command builder for wrap/supply/worker start-stop (manual execution)
 - Best-effort USD estimates from NEAR Intents token feed
 
 ## Start

@@ -68,6 +68,30 @@
           <tbody id="txs"></tbody>
         </table>
       </div>
+
+      <div class="card" style="margin-top:16px">
+        <h3>Action Console (safe command builder)</h3>
+        <p class="muted">Build reviewed commands first, then execute in terminal. This panel does not auto-send transactions.</p>
+        <div class="row">
+          <input id="wrapAmount" placeholder="Wrap amount NEAR (e.g. 1)" size="24" />
+          <button id="buildWrap">Build wrap command</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <input id="supplyRaw" placeholder="Supply raw (USDt, e.g. 1000000)" size="24" />
+          <button id="buildSupply">Build supply command</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="buildWorkerDry">Build worker dry-run start</button>
+          <button id="buildWorkerStop">Build worker stop</button>
+        </div>
+        <div style="margin-top:10px">
+          <textarea id="cmdOut" rows="6" style="width:100%;border-radius:8px;border:1px solid #2d3656;background:#0e1529;color:#e8eefc;padding:8px"></textarea>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="copyCmd">Copy command</button>
+          <span id="cmdMeta" class="muted"></span>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -81,6 +105,15 @@
       const metaEl = document.getElementById("meta");
       const tokensEl = document.getElementById("tokens");
       const txsEl = document.getElementById("txs");
+      const wrapAmountEl = document.getElementById("wrapAmount");
+      const supplyRawEl = document.getElementById("supplyRaw");
+      const buildWrapBtn = document.getElementById("buildWrap");
+      const buildSupplyBtn = document.getElementById("buildSupply");
+      const buildWorkerDryBtn = document.getElementById("buildWorkerDry");
+      const buildWorkerStopBtn = document.getElementById("buildWorkerStop");
+      const cmdOutEl = document.getElementById("cmdOut");
+      const copyCmdBtn = document.getElementById("copyCmd");
+      const cmdMetaEl = document.getElementById("cmdMeta");
 
       function rowsToText(rows) {
         if (!rows || rows.length === 0) return "none";
@@ -134,6 +167,42 @@
           txsEl.appendChild(tr);
         }
       }
+
+      function setCommand(text) {
+        cmdOutEl.value = text;
+        cmdMetaEl.textContent = "Command generated";
+      }
+
+      function currentAccount() {
+        return (accountInput.value || "davirain8.near").trim();
+      }
+
+      buildWrapBtn.addEventListener("click", () => {
+        const amount = (wrapAmountEl.value || "1").trim();
+        setCommand(`near contract call-function as-transaction wrap.near near_deposit json-args '{}' prepaid-gas '100 Tgas' attached-deposit '${amount} NEAR' sign-as ${currentAccount()} network-config mainnet sign-with-keychain send`);
+      });
+
+      buildSupplyBtn.addEventListener("click", () => {
+        const raw = (supplyRawEl.value || "1000000").trim();
+        setCommand(`near_supplyBurrow network=mainnet rpcUrl=https://1rpc.io/near tokenId=usdt.tether-token.near amountRaw=${raw} asCollateral=true confirmMainnet=true`);
+      });
+
+      buildWorkerDryBtn.addEventListener("click", () => {
+        setCommand(`near_yieldWorkerStart network=mainnet accountId=${currentAccount()} dryRun=true intervalSeconds=300 minAprDelta=0.5 topN=5`);
+      });
+
+      buildWorkerStopBtn.addEventListener("click", () => {
+        setCommand(`near_yieldWorkerStop network=mainnet accountId=${currentAccount()}`);
+      });
+
+      copyCmdBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(cmdOutEl.value || "");
+          cmdMetaEl.textContent = "Copied";
+        } catch {
+          cmdMetaEl.textContent = "Copy failed";
+        }
+      });
 
       refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));
       load().catch((e) => (metaEl.textContent = e.message));
