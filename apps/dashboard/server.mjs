@@ -32,6 +32,8 @@ const REBALANCE_STATE = {
 	lastExecutedAt: 0,
 	dailyWindowDay: "",
 	dailyCount: 0,
+	activeRunId: null,
+	recentRuns: new Map(),
 };
 
 const TOKENS = [
@@ -600,6 +602,38 @@ function markRebalanceExecuted() {
 	REBALANCE_STATE.lastExecutedAt = Date.now();
 }
 
+function beginRebalanceRun(runId) {
+	if (REBALANCE_STATE.activeRunId && REBALANCE_STATE.activeRunId !== runId) {
+		throw new Error(
+			`idempotency guard: another rebalance is running (${REBALANCE_STATE.activeRunId})`,
+		);
+	}
+	if (REBALANCE_STATE.recentRuns.has(runId)) {
+		const recent = REBALANCE_STATE.recentRuns.get(runId);
+		throw new Error(
+			`idempotency guard: runId already processed (${recent.status})`,
+		);
+	}
+	REBALANCE_STATE.activeRunId = runId;
+}
+
+function endRebalanceRun(runId, status, details = {}) {
+	if (REBALANCE_STATE.activeRunId === runId) {
+		REBALANCE_STATE.activeRunId = null;
+	}
+	REBALANCE_STATE.recentRuns.set(runId, {
+		status,
+		at: new Date().toISOString(),
+		...details,
+	});
+	const entries = [...REBALANCE_STATE.recentRuns.entries()];
+	if (entries.length > 30) {
+		for (const [key] of entries.slice(0, entries.length - 30)) {
+			REBALANCE_STATE.recentRuns.delete(key);
+		}
+	}
+}
+
 async function executeAction(payload) {
 	const accountId = String(payload.accountId || ACCOUNT_ID).trim();
 	const nearBin = "near";
@@ -704,119 +738,52 @@ async function executeAction(payload) {
 		}
 		if (payload.action === "rebalance_usdt_to_usdce_txn") {
 			const stepBase = String(payload.step || "rebalance").trim();
-			const amountRaw = parsePositiveRaw(payload.amountRaw, "amountRaw");
-			const poolId = Number.parseInt(String(payload.poolId || "3725"), 10);
-			const slippageBps = Number.parseInt(
-				String(payload.slippageBps || "50"),
-				10,
-			);
-			if (!Number.isFinite(poolId) || poolId < 0) {
-				throw new Error("poolId must be a non-negative integer");
-			}
-			if (
-				!Number.isFinite(slippageBps) ||
-				slippageBps < 0 ||
-				slippageBps > 5000
-			) {
-				throw new Error("slippageBps must be between 0 and 5000");
-			}
-
-			const usdcToken =
-				"a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
-			const usdtToken = "usdt.tether-token.near";
-			const refContract = "v2.ref-finance.near";
-
-			const usdcBeforeRaw = String(
-				(await viewFunction(usdcToken, "ft_balance_of", {
-					account_id: accountId,
-				})) || "0",
-			);
-
-			const withdrawArgs = JSON.stringify({
-				token_id: usdtToken,
-				amount: amountRaw,
-				recipient_id: accountId,
-			});
-			const step1 = await runNearCommandWithRpcFallback([
-				"contract",
-				"call-function",
-				"as-transaction",
-				BURROW_CONTRACT,
-				"simple_withdraw",
-				"json-args",
-				withdrawArgs,
-				"prepaid-gas",
-				"250 Tgas",
-				"attached-deposit",
-				"1 yoctoNEAR",
-				"sign-as",
-				accountId,
-				"network-config",
-				"mainnet",
-				"sign-with-keychain",
-				"send",
-			]);
-			const step1Tx = extractTxHash(step1.output);
-			pushActionHistory({
-				action: payload.action,
-				step: `${stepBase}-step1`,
-				accountId,
-				status: "success",
-				summary: `withdraw ${amountRaw} raw USDt from Burrow`,
-				txHash: step1Tx,
-				explorerUrl: nearExplorerUrl(step1Tx),
-			});
-
-			const refQuoteOutRaw = String(
-				await viewFunction(refContract, "get_return", {
-					pool_id: poolId,
-					token_in: usdtToken,
-					amount_in: amountRaw,
-					token_out: usdcToken,
-				}),
-			);
-			const minAmountOutRaw = parsePositiveRaw(
-				payload.minAmountOutRaw || applySlippage(refQuoteOutRaw, slippageBps),
-				"minAmountOutRaw",
-			);
-			enforceRebalanceGuards({
-				amountRaw,
-				quoteOutRaw: refQuoteOutRaw,
-				minAmountOutRaw,
-				slippageBps,
-			});
-
-			const swapMsg = JSON.stringify({
-				force: 0,
-				actions: [
-					{
-						pool_id: poolId,
-						token_in: usdtToken,
-						amount_in: amountRaw,
-						token_out: usdcToken,
-						min_amount_out: minAmountOutRaw,
-					},
-				],
-			});
-			const swapArgs = JSON.stringify({
-				receiver_id: refContract,
-				amount: amountRaw,
-				msg: swapMsg,
-			});
-
-			let step2;
-			let step2Tx = null;
+			const runId = String(payload.runId || `run-${Date.now()}`).trim();
+			beginRebalanceRun(runId);
 			try {
-				step2 = await runNearCommandWithRpcFallback([
+				const amountRaw = parsePositiveRaw(payload.amountRaw, "amountRaw");
+				const poolId = Number.parseInt(String(payload.poolId || "3725"), 10);
+				const slippageBps = Number.parseInt(
+					String(payload.slippageBps || "50"),
+					10,
+				);
+				if (!Number.isFinite(poolId) || poolId < 0) {
+					throw new Error("poolId must be a non-negative integer");
+				}
+				if (
+					!Number.isFinite(slippageBps) ||
+					slippageBps < 0 ||
+					slippageBps > 5000
+				) {
+					throw new Error("slippageBps must be between 0 and 5000");
+				}
+
+				const usdcToken =
+					"a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
+				const usdtToken = "usdt.tether-token.near";
+				const refContract = "v2.ref-finance.near";
+
+				const usdcBeforeRaw = String(
+					(await viewFunction(usdcToken, "ft_balance_of", {
+						account_id: accountId,
+					})) || "0",
+				);
+
+				const withdrawArgs = JSON.stringify({
+					token_id: usdtToken,
+					amount: amountRaw,
+					recipient_id: accountId,
+				});
+				const step1 = await runNearCommandWithRpcFallback([
 					"contract",
 					"call-function",
 					"as-transaction",
-					usdtToken,
-					"ft_transfer_call",
+					BURROW_CONTRACT,
+					"simple_withdraw",
 					"json-args",
-					swapArgs,
+					withdrawArgs,
 					"prepaid-gas",
-					"180 Tgas",
+					"250 Tgas",
 					"attached-deposit",
 					"1 yoctoNEAR",
 					"sign-as",
@@ -826,23 +793,153 @@ async function executeAction(payload) {
 					"sign-with-keychain",
 					"send",
 				]);
-				step2Tx = extractTxHash(step2.output);
+				const step1Tx = extractTxHash(step1.output);
 				pushActionHistory({
 					action: payload.action,
-					step: `${stepBase}-step2`,
+					step: `${stepBase}-step1`,
 					accountId,
 					status: "success",
-					summary: `swap ${amountRaw} raw USDt -> USDC.e`,
-					txHash: step2Tx,
-					explorerUrl: nearExplorerUrl(step2Tx),
+					summary: `withdraw ${amountRaw} raw USDt from Burrow`,
+					txHash: step1Tx,
+					explorerUrl: nearExplorerUrl(step1Tx),
 				});
-			} catch (error) {
-				const rollbackMsg = JSON.stringify({
+
+				const refQuoteOutRaw = String(
+					await viewFunction(refContract, "get_return", {
+						pool_id: poolId,
+						token_in: usdtToken,
+						amount_in: amountRaw,
+						token_out: usdcToken,
+					}),
+				);
+				const minAmountOutRaw = parsePositiveRaw(
+					payload.minAmountOutRaw || applySlippage(refQuoteOutRaw, slippageBps),
+					"minAmountOutRaw",
+				);
+				enforceRebalanceGuards({
+					amountRaw,
+					quoteOutRaw: refQuoteOutRaw,
+					minAmountOutRaw,
+					slippageBps,
+				});
+
+				const swapMsg = JSON.stringify({
+					force: 0,
+					actions: [
+						{
+							pool_id: poolId,
+							token_in: usdtToken,
+							amount_in: amountRaw,
+							token_out: usdcToken,
+							min_amount_out: minAmountOutRaw,
+						},
+					],
+				});
+				const swapArgs = JSON.stringify({
+					receiver_id: refContract,
+					amount: amountRaw,
+					msg: swapMsg,
+				});
+
+				let step2;
+				let step2Tx = null;
+				try {
+					step2 = await runNearCommandWithRpcFallback([
+						"contract",
+						"call-function",
+						"as-transaction",
+						usdtToken,
+						"ft_transfer_call",
+						"json-args",
+						swapArgs,
+						"prepaid-gas",
+						"180 Tgas",
+						"attached-deposit",
+						"1 yoctoNEAR",
+						"sign-as",
+						accountId,
+						"network-config",
+						"mainnet",
+						"sign-with-keychain",
+						"send",
+					]);
+					step2Tx = extractTxHash(step2.output);
+					pushActionHistory({
+						action: payload.action,
+						step: `${stepBase}-step2`,
+						accountId,
+						status: "success",
+						summary: `swap ${amountRaw} raw USDt -> USDC.e`,
+						txHash: step2Tx,
+						explorerUrl: nearExplorerUrl(step2Tx),
+					});
+				} catch (error) {
+					const rollbackMsg = JSON.stringify({
+						Execute: {
+							actions: [
+								{
+									IncreaseCollateral: {
+										token_id: usdtToken,
+										amount: null,
+										max_amount: null,
+									},
+								},
+							],
+						},
+					});
+					const rollbackArgs = JSON.stringify({
+						receiver_id: BURROW_CONTRACT,
+						amount: amountRaw,
+						msg: rollbackMsg,
+					});
+					const rollback = await runNearCommandWithRpcFallback([
+						"contract",
+						"call-function",
+						"as-transaction",
+						usdtToken,
+						"ft_transfer_call",
+						"json-args",
+						rollbackArgs,
+						"prepaid-gas",
+						"180 Tgas",
+						"attached-deposit",
+						"1 yoctoNEAR",
+						"sign-as",
+						accountId,
+						"network-config",
+						"mainnet",
+						"sign-with-keychain",
+						"send",
+					]);
+					const rollbackTx = extractTxHash(rollback.output);
+					pushActionHistory({
+						action: payload.action,
+						step: `${stepBase}-rollback`,
+						accountId,
+						status: "success",
+						summary: `step2 failed, rolled back ${amountRaw} raw USDt to Burrow`,
+						txHash: rollbackTx,
+						explorerUrl: nearExplorerUrl(rollbackTx),
+					});
+					throw new Error(
+						`step2 swap failed and rollback completed: ${error instanceof Error ? error.message : String(error)}`,
+					);
+				}
+
+				const usdcAfterRaw = String(
+					(await viewFunction(usdcToken, "ft_balance_of", {
+						account_id: accountId,
+					})) || "0",
+				);
+				const delta = (BigInt(usdcAfterRaw) - BigInt(usdcBeforeRaw)).toString();
+				const supplyOutRaw = BigInt(delta) > 0n ? delta : minAmountOutRaw;
+
+				const supplyUsdcMsg = JSON.stringify({
 					Execute: {
 						actions: [
 							{
 								IncreaseCollateral: {
-									token_id: usdtToken,
+									token_id: usdcToken,
 									amount: null,
 									max_amount: null,
 								},
@@ -850,19 +947,19 @@ async function executeAction(payload) {
 						],
 					},
 				});
-				const rollbackArgs = JSON.stringify({
+				const supplyUsdcArgs = JSON.stringify({
 					receiver_id: BURROW_CONTRACT,
-					amount: amountRaw,
-					msg: rollbackMsg,
+					amount: supplyOutRaw,
+					msg: supplyUsdcMsg,
 				});
-				const rollback = await runNearCommandWithRpcFallback([
+				const step3 = await runNearCommandWithRpcFallback([
 					"contract",
 					"call-function",
 					"as-transaction",
-					usdtToken,
+					usdcToken,
 					"ft_transfer_call",
 					"json-args",
-					rollbackArgs,
+					supplyUsdcArgs,
 					"prepaid-gas",
 					"180 Tgas",
 					"attached-deposit",
@@ -874,92 +971,44 @@ async function executeAction(payload) {
 					"sign-with-keychain",
 					"send",
 				]);
-				const rollbackTx = extractTxHash(rollback.output);
+				const step3Tx = extractTxHash(step3.output);
 				pushActionHistory({
 					action: payload.action,
-					step: `${stepBase}-rollback`,
+					step: `${stepBase}-step3`,
 					accountId,
 					status: "success",
-					summary: `step2 failed, rolled back ${amountRaw} raw USDt to Burrow`,
-					txHash: rollbackTx,
-					explorerUrl: nearExplorerUrl(rollbackTx),
+					summary: `supplied ${supplyOutRaw} raw USDC.e to Burrow`,
+					txHash: step3Tx,
+					explorerUrl: nearExplorerUrl(step3Tx),
 				});
-				throw new Error(
-					`step2 swap failed and rollback completed: ${error instanceof Error ? error.message : String(error)}`,
-				);
-			}
-
-			const usdcAfterRaw = String(
-				(await viewFunction(usdcToken, "ft_balance_of", {
-					account_id: accountId,
-				})) || "0",
-			);
-			const delta = (BigInt(usdcAfterRaw) - BigInt(usdcBeforeRaw)).toString();
-			const supplyOutRaw = BigInt(delta) > 0n ? delta : minAmountOutRaw;
-
-			const supplyUsdcMsg = JSON.stringify({
-				Execute: {
-					actions: [
-						{
-							IncreaseCollateral: {
-								token_id: usdcToken,
-								amount: null,
-								max_amount: null,
-							},
-						},
-					],
-				},
-			});
-			const supplyUsdcArgs = JSON.stringify({
-				receiver_id: BURROW_CONTRACT,
-				amount: supplyOutRaw,
-				msg: supplyUsdcMsg,
-			});
-			const step3 = await runNearCommandWithRpcFallback([
-				"contract",
-				"call-function",
-				"as-transaction",
-				usdcToken,
-				"ft_transfer_call",
-				"json-args",
-				supplyUsdcArgs,
-				"prepaid-gas",
-				"180 Tgas",
-				"attached-deposit",
-				"1 yoctoNEAR",
-				"sign-as",
-				accountId,
-				"network-config",
-				"mainnet",
-				"sign-with-keychain",
-				"send",
-			]);
-			const step3Tx = extractTxHash(step3.output);
-			pushActionHistory({
-				action: payload.action,
-				step: `${stepBase}-step3`,
-				accountId,
-				status: "success",
-				summary: `supplied ${supplyOutRaw} raw USDC.e to Burrow`,
-				txHash: step3Tx,
-				explorerUrl: nearExplorerUrl(step3Tx),
-			});
-			markRebalanceExecuted();
-
-			return {
-				ok: true,
-				action: payload.action,
-				step: stepBase,
-				summary: "rebalance completed",
-				details: {
-					amountRaw,
-					minAmountOutRaw,
-					suppliedRaw: supplyOutRaw,
+				markRebalanceExecuted();
+				endRebalanceRun(runId, "success", {
 					step1Tx,
 					step2Tx,
 					step3Tx,
-				},
-			};
+				});
+
+				return {
+					ok: true,
+					action: payload.action,
+					step: stepBase,
+					runId,
+					summary: "rebalance completed",
+					details: {
+						amountRaw,
+						minAmountOutRaw,
+						suppliedRaw: supplyOutRaw,
+						step1Tx,
+						step2Tx,
+						step3Tx,
+					},
+				};
+			} catch (error) {
+				endRebalanceRun(runId, "failed", {
+					error: error instanceof Error ? error.message : String(error),
+				});
+				throw error;
+			}
 		}
 		throw new Error(`Unsupported action: ${payload.action}`);
 	} catch (error) {
