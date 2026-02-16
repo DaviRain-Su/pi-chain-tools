@@ -613,7 +613,7 @@ export async function callNearRpc<T>(params: {
 	};
 
 	let lastError: Error | null = null;
-	for (const endpoint of endpoints) {
+	for (const [index, endpoint] of endpoints.entries()) {
 		try {
 			const response = await fetch(endpoint, {
 				body: JSON.stringify(payload),
@@ -654,6 +654,9 @@ export async function callNearRpc<T>(params: {
 			lastError = error;
 			if (!isTransientNearRpcError(error)) {
 				throw error;
+			}
+			if (index < endpoints.length - 1) {
+				await new Promise((resolve) => setTimeout(resolve, 150 * (index + 1)));
 			}
 		}
 	}
