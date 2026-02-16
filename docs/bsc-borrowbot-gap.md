@@ -8,7 +8,209 @@
 
 ## 0. 架构核心判断
 
-### 0.1 现有 EVM 架构的扩展性分析
+### 0.1 Agent 钱包方案：Privy Agentic Wallets
+
+> **决策：采用 Privy 作为 Agent 钱包签名后端**，替代本地私钥管理（`ethers.Wallet` + `EVM_PRIVATE_KEY`）。
+> Privy 提供 MPC/enclave 托管签名，消除 Agent 直接持有私钥的安全风险。
+
+#### 0.1.1 Privy SDK 多链支持分析
+
+基于 `@privy-io/node@0.9.0` SDK 类型定义（`resources/wallets/wallets.d.ts`），Privy 钱包支持以下链类型：
+
+```typescript
+// 钱包创建支持的完整链类型列表
+type WalletChainType =
+  | 'ethereum'        // ← 所有 EVM 链共用这一个 chain_type
+  | 'solana'
+  | 'cosmos'
+  | 'stellar'
+  | 'sui'
+  | 'aptos'
+  | 'movement'
+  | 'tron'
+  | 'bitcoin-segwit'
+  | 'near'
+  | 'ton'
+  | 'starknet'
+  | 'spark';
+
+// 分级：
+type FirstClassChainType = 'ethereum' | 'solana';                     // 完整 RPC 方法支持
+type ExtendedChainType   = 'cosmos' | 'stellar' | 'sui' | ...;       // rawSign 签名支持
+type CurveSigningChainType = 'cosmos' | 'stellar' | 'sui' | ...;     // 曲线级签名
+```
+
+**关键发现：EVM 多链通过 CAIP-2 标识符区分，而非独立 chain_type。**
+
+```typescript
+// EVM 交易发送接口
+interface EthereumSendTransactionRpcInput {
+  caip2: string;                    // ← CAIP-2 指定具体 EVM 链
+  method: 'eth_sendTransaction';
+  chain_type?: 'ethereum';          // ← 固定 'ethereum'
+  sponsor?: boolean;                // ← gas 代付（需配 paymaster）
+}
+```
+
+| CAIP-2 标识符 | 链 | BorrowBot 需要 |
+|---|---|---|
+| `eip155:1` | Ethereum Mainnet | Bridge 目标 |
+| `eip155:56` | **BSC** | **首站** |
+| `eip155:137` | Polygon | Polymarket 已有 |
+| `eip155:8453` | Base | 原方案 |
+| `eip155:42161` | Arbitrum | Bridge 目标 |
+| `eip155:80094` | **Berachain** | **后续扩展** |
+| `eip155:<N>` | **任意 EVM 链** | Monad 等 |
+
+**核心结论：一个 Privy `ethereum` 钱包 = 同一 EOA 地址可在所有 EVM 链上签名和发送交易。**
+
+#### 0.1.2 Privy vs 现有方案对比
+
+| 维度 | 现有方案 (本地私钥) | Privy Agentic Wallets |
+|---|---|---|
+| 钱包创建 | 手动生成/导入私钥 | `privy.wallets.create({ chain_type: 'ethereum' })` |
+| 密钥管理 | `EVM_PRIVATE_KEY` env 明文 | MPC/enclave 托管，Agent 不接触私钥 |
+| 签名 | `ethers.Wallet.signTransaction()` 本地 | `privy.wallets.ethereum().sendTransaction()` 远程 |
+| 多链 | 同一私钥手动配不同 RPC | 同一 walletId + `caip2` 切链 |
+| 交易策略控制 | 无（或自建 allowlist） | Policy API（按 `chain_id` / 合约 / 金额限制） |
+| Gas 代付 | 自付 BNB | `sponsor: true`（需 Dashboard 配 paymaster） |
+| Smart Wallet | 无 | 内置 EIP-7702 支持（`sign7702Authorization`） |
+| 非 EVM 链 | 各链独立密钥管理 | `privy.wallets.solana()` / NEAR / Sui 等统一 API |
+| 安全风险 | 私钥泄露 = 资产丢失 | 密钥永不离开 enclave |
+
+#### 0.1.3 集成架构
+
+Privy 作为可替换的 **Signer Provider** 接入，Workflow / Adapter / LTV Manager 层完全不变：
+
+```
+┌──────────────────────────────────────────────────┐
+│  Layer 4: Agent Orchestrator                     │  ← 链无关、签名无关
+│  (LTV Manager, Worker Loop, Config)              │
+├──────────────────────────────────────────────────┤
+│  Layer 3: Workflow                               │  ← analysis→simulate→execute
+│  (venus-workflow, transfer-workflow)             │
+├──────────────────────────────────────────────────┤
+│  Layer 2: Protocol Adapters                      │  ← 每链/每协议一个
+│  (Venus, Morpho, Aave, Compound, ...)            │  ← 返回 EvmCallData（未签名）
+├──────────────────────────────────────────────────┤
+│  Layer 1: Signer Provider (可替换)               │  ← 签名 + 广播
+│  ┌─────────────────┐  ┌──────────────────────┐  │
+│  │ LocalKeySigner   │  │ PrivySigner          │  │
+│  │ ethers.Wallet    │  │ privy.wallets.eth()  │  │
+│  │ EVM_PRIVATE_KEY  │  │ walletId + caip2     │  │
+│  └─────────────────┘  └──────────────────────┘  │
+├──────────────────────────────────────────────────┤
+│  Layer 0: EVM Runtime                            │  ← RPC/chainId/schema
+│  (runtime.ts, policy.ts)                         │
+└──────────────────────────────────────────────────┘
+```
+
+**Signer Provider 接口（新增）：**
+
+```typescript
+// src/chains/evm/tools/signer-types.ts
+
+interface EvmSignerProvider {
+  /** 签名并广播交易，返回 tx hash */
+  signAndSend(params: {
+    network: EvmNetwork;
+    to: string;
+    data: string;
+    value?: string;        // wei（十六进制或十进制字符串）
+    gasLimit?: string;
+  }): Promise<{ txHash: string }>;
+
+  /** 获取签名者地址 */
+  getAddress(network: EvmNetwork): Promise<string>;
+}
+
+// 现有实现（向后兼容）
+class LocalKeySigner implements EvmSignerProvider {
+  constructor(private privateKey: string) {}
+  async signAndSend(params) {
+    const rpcUrl = getEvmRpcEndpoint(params.network);
+    const wallet = new ethers.Wallet(this.privateKey);
+    // ... 现有 ethers 签名逻辑
+  }
+  async getAddress() {
+    return new ethers.Wallet(this.privateKey).address;
+  }
+}
+
+// Privy 实现
+class PrivyEvmSigner implements EvmSignerProvider {
+  constructor(
+    private privy: PrivyClient,
+    private walletId: string,
+  ) {}
+
+  async signAndSend(params) {
+    const caip2 = `eip155:${getEvmChainId(params.network)}`;
+    const result = await this.privy.wallets.ethereum().sendTransaction(
+      this.walletId,
+      { params: { transaction: {
+        to: params.to,
+        data: params.data,
+        value: params.value,
+        gas: params.gasLimit,
+      }}, caip2 },
+    );
+    return { txHash: result.hash };
+  }
+
+  async getAddress(network) {
+    // Privy 钱包地址在所有 EVM 链上相同
+    const wallet = await this.privy.wallets.get(this.walletId);
+    return wallet.address;
+  }
+}
+```
+
+#### 0.1.4 非 EVM 链 Privy 适配（Future）
+
+Privy 同样可用于项目中已有的非 EVM 链签名需求：
+
+| 链 | 现有签名方式 | Privy 适配 |
+|---|---|---|
+| Solana | `Keypair.fromSecretKey()` | `privy.wallets.solana().signAndSendTransaction()` |
+| NEAR | `KeyPairSigner.fromSecretKey()` | `privy.wallets.create({ chain_type: 'near' })` + rawSign |
+| Sui | 本地 keystore / `SUI_PRIVATE_KEY` | `privy.wallets.create({ chain_type: 'sui' })` + rawSign |
+| Kaspa | `KASPA_PRIVATE_KEY` / kaspa-wasm | ❌ 不支持（Privy 无 `kaspa` chain_type） |
+
+**注意：Kaspa 不在 Privy 支持列表中，需继续使用现有本地密钥签名方案。**
+
+#### 0.1.5 Privy Policy 层（安全策略）
+
+Privy 原生支持交易策略控制（`resources/policies.d.ts`）：
+
+```typescript
+// 可按链/合约/金额限制 Agent 行为
+{
+  chain_type: 'ethereum' | 'solana' | 'tron' | 'sui',
+  // 条件字段：
+  field: 'to' | 'value' | 'chain_id',  // ← 可按 chain_id 限制只允许 BSC
+  // ...
+}
+```
+
+这可以取代或增强我们现有的 `isMainnetLikeEvmNetwork` + `confirmMainnet` 门控：
+- **Privy Policy**：在密钥托管层强制执行（即使 Agent 代码被绕过也无法越权）
+- **现有门控**：在 workflow 层执行（代码级保护）
+- **推荐：两层并用**——Privy Policy 作为最后防线，workflow 门控作为一线检查。
+
+### 0.2 Privy 集成决策摘要
+
+| 决策 | 结论 |
+|---|---|
+| 生产签名后端 | **Privy Agentic Wallets** |
+| 开发/测试后端 | **LocalKeySigner**（`ethers.Wallet` + `EVM_PRIVATE_KEY`） |
+| 多 EVM 链 | 同一 walletId，通过 `caip2` 切链（零签名层改动） |
+| 非 EVM 链 | Solana / NEAR / Sui 可选接入；**Kaspa 不支持** |
+| 集成模式 | `EvmSignerProvider` 接口抽象，Adapter 不感知签名方式 |
+| 安全模型 | Workflow 门控 + Privy Policy 双层防线 |
+| 实施阶段 | Phase 1.5（Signer Provider 抽象），Venus execute 之前 |
+
+### 0.3 现有 EVM 架构的扩展性分析
 
 当前 EVM 采用 **"单一工具层 + 网络枚举"** 模式（见 `docs/evm-integration-architecture-notes.md`）：
 
@@ -35,7 +237,7 @@ src/chains/evm/
 
 **结论：每加一条链约改 4 个文件、~40 处散点。核心 transfer/swap/workflow 逻辑完全复用，不需要任何改动。**
 
-### 0.2 多链扩展路径
+### 0.4 多链扩展路径
 
 目前架构在 BSC 为止是 ok 的。但要继续加 Monad / Berachain / Linea / Scroll 等，有两个选择：
 
@@ -51,24 +253,36 @@ src/chains/evm/
 
 **本文档先按选项 A 执行 BSC，同时为 Monad/Bera 预留注册位。**
 
-### 0.3 BorrowBot 核心能力的链抽象层级
+### 0.5 BorrowBot 核心能力的链抽象层级
 
-BorrowBot 的核心能力可以分为三层：
+BorrowBot 的核心能力可以分为四层：
 
 ```
-┌────────────────────────────────────────────┐
-│  Layer 3: Agent Orchestrator               │  ← 链无关
-│  (LTV Manager, Worker Loop, Config)        │
-├────────────────────────────────────────────┤
-│  Layer 2: Protocol Adapters                │  ← 每链/每协议一个
-│  (Venus, Morpho, Aave, Compound, ...)      │
-├────────────────────────────────────────────┤
-│  Layer 1: EVM Runtime                      │  ← 已有，跨链复用
-│  (RPC, transfer, approve, call)            │
-└────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  Layer 4: Agent Orchestrator                     │  ← 链无关、签名无关
+│  (LTV Manager, Worker Loop, Config)              │
+├──────────────────────────────────────────────────┤
+│  Layer 3: Workflow                               │  ← analysis→simulate→execute
+│  (venus-workflow, transfer-workflow)             │
+├──────────────────────────────────────────────────┤
+│  Layer 2: Protocol Adapters                      │  ← 每链/每协议一个
+│  (Venus, Morpho, Aave, Compound, ...)            │  ← 返回 EvmCallData（未签名）
+├──────────────────────────────────────────────────┤
+│  Layer 1: Signer Provider (可替换)               │  ← 签名 + 广播
+│  ┌─────────────────┐  ┌──────────────────────┐  │
+│  │ LocalKeySigner   │  │ PrivyEvmSigner       │  │
+│  │ ethers.Wallet    │  │ privy.wallets.eth()  │  │
+│  └─────────────────┘  └──────────────────────┘  │
+├──────────────────────────────────────────────────┤
+│  Layer 0: EVM Runtime                            │  ← RPC/chainId/schema/policy
+│  (runtime.ts, policy.ts)                         │
+└──────────────────────────────────────────────────┘
 ```
 
-**关键设计决策：Protocol Adapter 层用统一接口抽象，每个协议一个实现文件。**
+**关键设计决策：**
+1. **Protocol Adapter 层**用统一接口抽象，每个协议一个实现文件。
+2. **Signer Provider 层**可替换——本地私钥（开发/测试）或 Privy（生产）。
+3. Adapter 只返回 `EvmCallData`（未签名 calldata），签名职责在 Signer Provider。
 
 ---
 
@@ -78,11 +292,12 @@ BorrowBot 的核心能力可以分为三层：
 
 | BorrowBot 能力 | Base 原方案 | BSC 方案 | 成熟度 |
 |---|---|---|---|
+| Agent 钱包 | Coinbase CDP + EIP-7702 | **Privy Agentic Wallets** (`caip2: eip155:56`) | 生产级 |
 | 借贷 | Morpho Blue | **Venus Protocol** | 生产级（$2B+ TVL） |
 | Yield Vault | 40acres / YO | **Venus vUSDC 自带收益** | 生产级 |
 | DEX | 无（直接借贷） | **PancakeSwap V2**（已集成） | 已就绪 |
 | 跨链桥 | LI.FI | **LI.FI**（BSC 已支持） | 直接复用 |
-| Gas 代付 | Coinbase Paymaster | EOA 自付 → Biconomy（后续） | P2 |
+| Gas 代付 | Coinbase Paymaster | **Privy `sponsor: true`**（需配 paymaster） | P1 |
 
 **Venus Protocol 核心合约（Mainnet）：**
 ```
@@ -193,7 +408,16 @@ interface LendingPosition {
 
 ## 3. 新增文件清单
 
-### 3.1 Protocol Adapter 层
+### 3.1 Signer Provider 层
+
+```
+src/chains/evm/tools/signer-types.ts             ← EvmSignerProvider 接口
+src/chains/evm/tools/signer-local.ts             ← LocalKeySigner（ethers.Wallet，向后兼容）
+src/chains/evm/tools/signer-privy.ts             ← PrivyEvmSigner（Privy SDK）
+src/chains/evm/tools/signer-privy.test.ts
+```
+
+### 3.2 Protocol Adapter 层
 
 ```
 src/chains/evm/tools/lending-types.ts           ← 统一借贷接口定义 (LendingProtocolAdapter)
@@ -201,7 +425,7 @@ src/chains/evm/tools/venus-adapter.ts            ← Venus Protocol 实现
 src/chains/evm/tools/venus-adapter.test.ts
 ```
 
-### 3.2 Venus Read / Execute / Workflow
+### 3.3 Venus Read / Execute / Workflow
 
 ```
 src/chains/evm/tools/venus-read.ts               ← evm_venusGetMarkets / evm_venusGetPosition
@@ -212,14 +436,14 @@ src/chains/evm/tools/venus-workflow.ts            ← w3rt_run_evm_venus_workflo
 src/chains/evm/tools/venus-workflow.test.ts
 ```
 
-### 3.3 LTV Manager（链无关）
+### 3.4 LTV Manager（链无关）
 
 ```
 src/chains/evm/tools/ltv-manager.ts              ← 决策引擎
 src/chains/evm/tools/ltv-manager.test.ts
 ```
 
-### 3.4 LI.FI 跨链桥
+### 3.5 LI.FI 跨链桥
 
 ```
 src/chains/evm/tools/lifi-read.ts                ← evm_lifiGetQuote / evm_lifiGetStatus
@@ -228,7 +452,7 @@ src/chains/evm/tools/lifi-execute.ts              ← evm_lifiExecuteBridge
 src/chains/evm/tools/lifi-execute.test.ts
 ```
 
-### 3.5 需修改的现有文件
+### 3.6 需修改的现有文件
 
 ```
 src/chains/evm/tools/transfer-workflow.ts         ← BSC token map 补全
@@ -267,8 +491,11 @@ markets(address)               → 0x8e8f294b    // 市场配置（collateralFac
 
 所有 Venus 操作通过 EVM 已有基础设施执行：
 - **Read**：`eth_call` 到 RPC endpoint（`getEvmRpcEndpoint("bsc")`）
-- **Execute**：构建 calldata → 通过 `ethers.Wallet` 签名 → 发送 `eth_sendRawTransaction`
+- **Execute（两种签名路径）**：
+  - **本地私钥**：构建 calldata → `ethers.Wallet` 签名 → `eth_sendRawTransaction`
+  - **Privy（推荐）**：构建 calldata → `privy.wallets.ethereum().sendTransaction(walletId, { caip2: 'eip155:56', params: { transaction } })` → Privy 远程签名+广播
 - **BNB 特殊处理**：`vBNB.mint()` 需 `msg.value`，不走 `approve` + `mint(amount)` 模式
+- **签名路径对 Adapter 透明**：Venus adapter 只返回 `EvmCallData`（to, data, value），由上层 Signer Provider 决定如何签名
 
 ### 4.3 利率计算
 
@@ -382,54 +609,93 @@ GET https://li.quest/v1/quote
 - [x] 处理 BSC USDC 18 decimals 差异（按网络覆盖 decimals）
 - [ ] 确认 BSC transfer 端到端可用
 
-### Phase 1：Venus Protocol Read ⏱ 1-2 天
-- [ ] `lending-types.ts` — 统一借贷接口
-- [ ] `venus-adapter.ts` — Venus 合约读取实现
-- [ ] `venus-read.ts` — `evm_venusGetMarkets` / `evm_venusGetPosition`
-- [ ] 测试
+### Phase 1：Venus Protocol Adapter + Types ⏱ 1-2 天
+- [x] `lending-types.ts` — 统一借贷接口（`LendingProtocolAdapter`）
+- [x] `venus-adapter.ts` — Venus 合约读取 + calldata 构建
+- [x] `venus-adapter.test.ts` — 27 个测试
+- [x] `ltv-manager.ts` — 链无关 LTV 决策引擎
+- [x] `ltv-manager.test.ts` — 22 个测试
 
-### Phase 2：Venus Protocol Execute + Workflow ⏱ 2-3 天
-- [ ] `venus-execute.ts` — supply / borrow / repay / withdraw
-- [ ] `venus-workflow.ts` — `w3rt_run_evm_venus_workflow_v0`
+### Phase 1.5：Signer Provider 抽象 ⏱ 1 天 ★ NEW
+- [ ] `signer-types.ts` — `EvmSignerProvider` 接口定义
+- [ ] `signer-local.ts` — `LocalKeySigner`（封装现有 `ethers.Wallet` + `resolveEvmPrivateKey()` 逻辑）
+- [ ] `signer-privy.ts` — `PrivyEvmSigner`（`@privy-io/node` SDK 封装）
+- [ ] Workflow 层重构：execute 路径从直接 `new Wallet(privateKey)` 改为 `signerProvider.signAndSend()`
+- [ ] 向后兼容：`fromPrivateKey` 参数仍可用（自动选择 `LocalKeySigner`）
+- [ ] `PRIVY_APP_ID` + `PRIVY_APP_SECRET` + `PRIVY_WALLET_ID` env 配置
+- [ ] 测试（mock Privy API）
+
+### Phase 2：Venus Execute Tools + Workflow ⏱ 2-3 天
+- [ ] `venus-execute.ts` — supply / borrow / repay / withdraw（MCP 工具）
+- [ ] `venus-workflow.ts` — `w3rt_run_evm_venus_workflow_v0`（analysis→simulate→execute）
 - [ ] approve 处理（ERC-20 allowance 检查 + approve tx）
 - [ ] BNB 特殊处理（vBNB 用 msg.value）
+- [ ] Execute 路径通过 `EvmSignerProvider` 签名（支持本地/Privy）
 - [ ] 测试
 
-### Phase 3：LTV Manager ⏱ 1-2 天
-- [ ] `ltv-manager.ts` — 决策引擎
-- [ ] Agent 配置模型（先内存/DB，后续可链上）
-- [ ] 集成 Venus adapter
+### Phase 3：LTV Manager 集成 ⏱ 1 天
+- [x] `ltv-manager.ts` — 决策引擎（已完成）
+- [ ] Agent 配置模型（先内存/env，后续可 DB/链上）
+- [ ] 集成 Venus adapter + Signer Provider 完成闭环
 - [ ] 测试
 
 ### Phase 4：LI.FI 跨链 ⏱ 1-2 天
 - [ ] `lifi-read.ts` — quote + status
-- [ ] `lifi-execute.ts` — approve + bridge
+- [ ] `lifi-execute.ts` — approve + bridge（通过 `EvmSignerProvider`）
 - [ ] 测试
 
 ### Phase 5：Agent Worker Loop ⏱ 2-3 天
 - [ ] 持续监控循环（定时读取仓位 → 决策 → 执行）
 - [ ] 审计日志
 - [ ] Telegram 通知（可选）
+- [ ] Privy Policy 配置（限制 Agent 只能操作 Venus 合约 + LI.FI Diamond）
 
 ### Phase 6：Monad / Berachain 扩展 ⏱ 视生态成熟度
 - [ ] 注册 network（EvmNetwork 联合类型 + RPC + chainId）
 - [ ] 实现该链的 LendingProtocolAdapter
-- [ ] 复用 LTV Manager + LI.FI + Workflow
+- [ ] 复用 LTV Manager + LI.FI + Workflow + **Privy 签名（同一 walletId，改 caip2 即可）**
 
 ---
 
 ## 8. 安全约束
 
-| 约束 | 实现 |
-|---|---|
-| BSC mainnet 执行 | 需要 `confirmMainnet=true` |
-| Venus execute 默认 | `dryRun=true` |
-| auto-repay 免确认 | 清算保护优先（`maxLTV * 0.95` 触发） |
-| auto-optimize 门控 | `yieldSpread > minYieldSpread` + `!paused` |
-| 合约白名单 | Venus Comptroller / vTokens / LI.FI Diamond |
-| 重放保护 | 每次从链上读取最新状态，基于实时 LTV 决策 |
-| Bridge 安全 | LI.FI Diamond 地址白名单 |
-| Agent 停止 | `config.paused=true` → 所有操作暂停 |
+### 8.1 双层安全模型
+
+BorrowBot 采用 **Workflow 层 + Privy Policy 层** 双重安全门控：
+
+```
+交易请求
+  │
+  ▼
+┌─────────────────────────────────┐
+│  Layer 1: Workflow 门控 (代码级) │  ← confirmMainnet / dryRun / paused / LTV 检查
+│  可被 Agent 代码 bug 绕过       │
+└─────────────────┬───────────────┘
+                  │ 通过
+                  ▼
+┌─────────────────────────────────┐
+│  Layer 2: Privy Policy (密钥级) │  ← chain_id / to 白名单 / value 上限
+│  密钥托管层强制执行，不可绕过    │
+└─────────────────┬───────────────┘
+                  │ 通过
+                  ▼
+            签名 + 广播
+```
+
+### 8.2 约束清单
+
+| 约束 | Workflow 层 | Privy Policy 层 |
+|---|---|---|
+| BSC mainnet 执行 | `confirmMainnet=true` | `chain_id = 56` 白名单 |
+| Venus execute 默认 | `dryRun=true` | — |
+| 合约白名单 | 代码中校验 `to` 地址 | **`to` in [Comptroller, vTokens, LI.FI]** |
+| 转账金额上限 | — | **`value` 上限（防单笔大额）** |
+| auto-repay 免确认 | 清算保护优先（`maxLTV * 0.95`） | — |
+| auto-optimize 门控 | `yieldSpread > minYieldSpread` + `!paused` | — |
+| 重放保护 | 每次从链上读取最新状态 | — |
+| Bridge 安全 | LI.FI Diamond 地址校验 | **`to` = LI.FI Diamond** |
+| Agent 停止 | `config.paused=true` | 可在 Privy Dashboard 冻结钱包 |
+| 私钥安全 | ~~EVM_PRIVATE_KEY env~~ | **密钥在 Privy enclave，Agent 不接触** |
 
 ---
 
@@ -438,25 +704,102 @@ GET https://li.quest/v1/quote
 | 维度 | BSC (Phase 0-5) | Monad | Berachain |
 |---|---|---|---|
 | Network | ✅ 已注册 | 待注册 | 待注册 |
+| Privy CAIP-2 | `eip155:56` | `eip155:<chainId>` | `eip155:80094` |
+| Privy 钱包 | **同一 walletId** | **同一 walletId** | **同一 walletId** |
 | Lending | Venus | TBD (Compound fork?) | Dolomite / BeraBorrow |
 | DEX | PancakeSwap V2 ✅ | TBD | BEX |
 | Bridge | LI.FI ✅ | TBD | LI.FI ✅ |
 | 复用层 | 100% EVM runtime | 100% EVM runtime | 100% EVM runtime |
 | 新增层 | Venus adapter | 新 lending adapter | 新 lending adapter |
 | LTV Manager | ✅ 直接复用 | ✅ 直接复用 | ✅ 直接复用 |
+| Signer | ✅ PrivyEvmSigner | ✅ **零改动** | ✅ **零改动** |
 
 **核心结论：每条新 EVM 链只需要做两件事：**
 1. **注册 network**（~40 处散点改动）
 2. **实现该链的 LendingProtocolAdapter**（一个文件 + 合约地址配置）
 
-LTV Manager / Workflow / LI.FI / Transfer 全部直接复用。
+**Privy 签名层完全不需要改动** — 同一 walletId，只改 `caip2` 字符串（自动从 `getEvmChainId(network)` 派生）。
+
+LTV Manager / Workflow / LI.FI / Transfer / **Signer** 全部直接复用。
 
 ---
 
 ## 10. 先决条件
 
+### 10.1 基础设施
 - BSC RPC 可用（`bsc.publicnode.com` 或自有节点）
-- 测试用 BSC 账户 + BNB gas
 - Venus Protocol ABI（公开）
 - LI.FI API（免费 tier 即可）
 - 未来扩展：Monad testnet RPC / Berachain mainnet RPC
+
+### 10.2 Privy 配置 ★ NEW
+- Privy 账户 + App 创建（[dashboard.privy.io](https://dashboard.privy.io)）
+- `PRIVY_APP_ID` — App ID
+- `PRIVY_APP_SECRET` — App Secret（服务端 SDK 认证）
+- Agent 钱包创建：`privy.wallets.create({ chain_type: 'ethereum' })` → 获得 `walletId`
+- `PRIVY_WALLET_ID` — Agent 钱包 ID（env 配置）
+- **可选**：Dashboard 配置 Paymaster（BSC gas 代付）
+- **可选**：Dashboard 配置 Policy（合约白名单 + chain_id 限制）
+
+### 10.3 环境变量汇总
+
+```bash
+# Privy（生产推荐）
+PRIVY_APP_ID=clxxxxxxxxxxxxx
+PRIVY_APP_SECRET=xxxxxxxxxxxxx
+PRIVY_WALLET_ID=wallet-id-from-create
+
+# 本地私钥（开发/测试，与 Privy 二选一）
+EVM_PRIVATE_KEY=0x...
+
+# 通用
+BSC_RPC_URL=https://bsc.publicnode.com    # 可选覆盖默认 RPC
+LIFI_API_KEY=...                           # 可选
+```
+
+---
+
+## 11. 附录：Privy SDK 类型参考
+
+> 来源：`@privy-io/node@0.9.0`（`resources/wallets/wallets.d.ts`）
+
+```typescript
+// 完整钱包链类型
+type WalletChainType =
+  | 'ethereum' | 'solana' | 'cosmos' | 'stellar' | 'sui'
+  | 'aptos' | 'movement' | 'tron' | 'bitcoin-segwit'
+  | 'near' | 'ton' | 'starknet' | 'spark';
+
+// 分级支持
+type FirstClassChainType = 'ethereum' | 'solana';             // 完整 RPC 方法
+type ExtendedChainType   = 'cosmos' | 'stellar' | 'sui' | …; // rawSign 签名
+type CurveSigningChainType = 'cosmos' | 'stellar' | 'sui' | …;
+
+// 发送 EVM 交易（核心接口）
+interface EthereumSendTransactionRpcInput {
+  caip2: string;                // "eip155:56" | "eip155:1" | ...
+  method: 'eth_sendTransaction';
+  params: { transaction: { to, data, value, gas, ... } };
+  chain_type?: 'ethereum';
+  sponsor?: boolean;            // gas 代付
+}
+
+// SDK 入口
+privy.wallets.ethereum().sendTransaction(walletId, input)
+privy.wallets.ethereum().signTransaction(walletId, input)
+privy.wallets.ethereum().signMessage(walletId, input)
+privy.wallets.ethereum().signTypedData(walletId, input)
+privy.wallets.ethereum().sign7702Authorization(walletId, input)  // Smart Wallet
+privy.wallets.solana().signTransaction(walletId, input)          // Solana
+privy.wallets.rawSign(walletId, input)                           // 任意链曲线签名
+
+// Policy（交易策略控制）
+{
+  chain_type: 'ethereum' | 'solana' | 'tron' | 'sui',
+  // 条件字段：
+  field: 'to' | 'value' | 'chain_id',
+  // 运算符：eq / neq / in / not_in / gt / lt / gte / lte / ...
+}
+```
+
+**Privy 不支持的链（需继续用现有方案）：** Kaspa。

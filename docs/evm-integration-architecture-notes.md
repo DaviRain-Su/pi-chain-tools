@@ -29,7 +29,7 @@
 
 ## BSC DeFi 接入优先级（当前阶段）
 
-为了优先支持“主流 DeFi 产品”发现能力，当前先接入了 **DexScreener 聚合入口**（`evm_dexscreenerPairs` / `evm_dexscreenerTokenPairs`）：
+为了优先支持"主流 DeFi 产品"发现能力，当前先接入了 **DexScreener 聚合入口**（`evm_dexscreenerPairs` / `evm_dexscreenerTokenPairs`）：
 
 - 优点：
   - 覆盖主流 DEX（包括 PancakeSwap）市场/交易对信息。
@@ -41,9 +41,22 @@
   - 资产级别的 DEX 过滤策略和健康检查（如链上 TVL/稳定性）
   - 抽出可复用 `evm_deFi` 协议配置层，承接更多 BSC DEX（如 Biswap / MDEX）
 
+## 签名后端：Signer Provider 抽象
+
+> 详见 `docs/bsc-borrowbot-gap.md` § 0.1
+
+EVM 签名从 `ethers.Wallet` 硬绑定改为 **`EvmSignerProvider` 接口**，支持两种后端：
+
+1. **`LocalKeySigner`**（开发/测试）：封装 `ethers.Wallet` + `EVM_PRIVATE_KEY`，向后兼容现有行为。
+2. **`PrivyEvmSigner`**（生产推荐）：通过 Privy Server SDK（`@privy-io/node`）远程签名，Agent 不接触私钥。
+
+Privy 的 EVM 交易通过 CAIP-2 标识符选链（`eip155:56` = BSC, `eip155:80094` = Berachain, ...），一个钱包 ID 可在所有 EVM 链上操作。Protocol Adapter 只返回 `EvmCallData`（未签名 calldata），签名职责在 Signer Provider 层。
+
+Privy 额外提供 **Policy 层**（合约白名单、chain_id 限制、金额上限），作为 workflow 层门控之外的密钥级安全防线。
+
 ## 何时考虑拆文件夹
 
-当某条链出现“非共享行为”明显增大（如专用签名/交易构造/地址体系/鉴权流程）时，再按能力分层抽出子目录，例如：
+当某条链出现"非共享行为"明显增大（如专用签名/交易构造/地址体系/鉴权流程）时，再按能力分层抽出子目录，例如：
 
 - `src/chains/evm/networks/<network>/`（网络配置层）
 - `src/chains/evm/apps/polymarket/`（应用能力层）
