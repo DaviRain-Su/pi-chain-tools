@@ -315,12 +315,19 @@ beforeEach(() => {
 			topN: 3,
 			includeDisabled: false,
 			status: "ready",
+			planId: "near.stable-yield.mockplanid1234",
 			candidates: [],
 			selected: null,
 			executionPlan: {
+				planId: "near.stable-yield.mockplanid1234.hold",
 				mode: "analysis-only",
 				requiresAgentWallet: true,
 				canAutoExecute: false,
+				riskProfile: {
+					riskBand: "low",
+					riskScore: 0.25,
+					rationale: "mock",
+				},
 				reasons: ["mock"],
 				guardrails: {
 					maxProtocols: 1,
@@ -329,6 +336,7 @@ beforeEach(() => {
 				proposedActions: [
 					{
 						action: "hold",
+						actionId: "near.stable-yield.mockplanid1234.hold",
 						protocol: "Burrow",
 						step: 1,
 						tokenId: null,
@@ -4142,11 +4150,6 @@ describe("w3rt_run_near_workflow_v0", () => {
 						canAutoExecute: false,
 						recommendedApproach: "single-best-candidate",
 					},
-					summary: {
-						schema: "w3rt.workflow.summary.v1",
-						phase: "simulate",
-						intentType: "near.defi.stableYieldPlan",
-					},
 				},
 			},
 		});
@@ -4288,10 +4291,13 @@ describe("w3rt_run_near_workflow_v0", () => {
 						recommendedApproach: "single-best-candidate",
 						proposedActions: expect.any(Array),
 					},
-					summary: {
-						schema: "w3rt.workflow.summary.v1",
-						phase: "simulate",
-						intentType: "near.defi.stableYieldPlan",
+					executionApproval: {
+						schema: "near.defi.stableYieldProposalApproval.v1",
+						type: "agent-wallet-required",
+						requiresAgentWallet: true,
+						canAutoExecute: false,
+						planId: expect.any(String),
+						approvalToken: expect.any(String),
 					},
 				},
 			},

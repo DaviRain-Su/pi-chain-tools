@@ -1085,9 +1085,14 @@ describe("near_getStableYieldPlan", () => {
 				requiresAgentWallet: true,
 				canAutoExecute: false,
 				recommendedApproach: "single-best-candidate",
+				riskProfile: {
+					riskBand: expect.stringMatching(/^(low|medium|high)$/),
+					riskScore: expect.any(Number),
+				},
 				proposedActions: [
 					{
 						action: "supply",
+						actionId: expect.stringMatching(/\.rank-1$/),
 						protocol: "Burrow",
 						step: 1,
 						tokenId: "usdc.tether-token.near",
@@ -1162,9 +1167,14 @@ describe("near_getStableYieldPlan", () => {
 		expect(details.executionPlan).toMatchObject({
 			mode: "analysis-only",
 			requiresAgentWallet: true,
+			riskProfile: {
+				riskBand: expect.stringMatching(/^(low|medium|high)$/),
+				riskScore: expect.any(Number),
+			},
 			proposedActions: [
 				{
 					action: "hold",
+					actionId: expect.stringMatching(/\.hold$/),
 					protocol: "Burrow",
 					step: 1,
 					tokenId: null,

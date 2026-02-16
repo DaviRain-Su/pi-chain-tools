@@ -5988,6 +5988,58 @@ function attachSimulateSummaryLine(
 	};
 }
 
+function attachStableYieldProposalArtifact(params: {
+	simulateArtifact: unknown;
+	planApprovalToken: string;
+}): unknown {
+	if (!isObjectRecord(params.simulateArtifact)) {
+		return params.simulateArtifact;
+	}
+	const artifact = params.simulateArtifact;
+	const executionPlan = isObjectRecord(artifact.executionPlan)
+		? artifact.executionPlan
+		: null;
+	const planId =
+		typeof artifact.planId === "string"
+			? artifact.planId
+			: typeof executionPlan?.planId === "string"
+				? executionPlan.planId
+				: null;
+	if (planId == null) {
+		return artifact;
+	}
+	return {
+		...artifact,
+		executionApproval: {
+			schema: "near.defi.stableYieldProposalApproval.v1",
+			planId,
+			type: "agent-wallet-required",
+			proposalVersion:
+				typeof executionPlan?.proposalVersion === "string"
+					? executionPlan.proposalVersion
+					: "v1",
+			requiresAgentWallet:
+				typeof executionPlan?.requiresAgentWallet === "boolean"
+					? executionPlan.requiresAgentWallet
+					: true,
+			canAutoExecute:
+				typeof executionPlan?.canAutoExecute === "boolean"
+					? executionPlan.canAutoExecute
+					: false,
+			riskProfile: isObjectRecord(executionPlan?.riskProfile)
+				? executionPlan.riskProfile
+				: null,
+			expiresAt:
+				typeof executionPlan?.expiresAt === "string"
+					? executionPlan.expiresAt
+					: undefined,
+			approvalToken: params.planApprovalToken,
+			approvalTokenHint:
+				"Attach this token when routing this plan to the approved executor.",
+		},
+	};
+}
+
 function buildWorkflowAnalysisOneLineSummary(
 	intentType: NearWorkflowIntent["type"],
 	approvalRequired: boolean,
@@ -6818,10 +6870,18 @@ export function createNearWorkflowTools() {
 						confirmToken: sessionConfirmToken,
 						poolCandidates: sessionPoolCandidates,
 					});
-					const simulateArtifactWithSummary = attachSimulateSummaryLine(
-						intent.type,
-						simulateArtifact,
-					);
+					const stableYieldApprovalToken = createConfirmToken({
+						runId,
+						network,
+						intent: sessionIntent,
+					});
+					const simulateArtifactWithSummary =
+						intent.type === "near.defi.stableYieldPlan"
+							? attachStableYieldProposalArtifact({
+									simulateArtifact,
+									planApprovalToken: stableYieldApprovalToken,
+								})
+							: attachSimulateSummaryLine(intent.type, simulateArtifact);
 					return {
 						content: [
 							{

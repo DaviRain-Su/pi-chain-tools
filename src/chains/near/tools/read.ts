@@ -190,12 +190,19 @@ type NearStableYieldCandidate = {
 
 type NearStableYieldExecutionAction = {
 	action: "supply" | "withdraw" | "hold";
+	actionId: string;
 	protocol: "Burrow";
 	step: number;
 	tokenId: string | null;
 	symbol: string | null;
 	asCollateral: boolean;
 	allocationHint: "max-eligible" | "single-winner";
+	rationale: string;
+};
+
+type NearStableYieldExecutionRiskProfile = {
+	riskScore: number;
+	riskBand: "low" | "medium" | "high";
 	rationale: string;
 };
 
@@ -216,6 +223,7 @@ type NearStableYieldExecutionPlan = {
 	};
 	proposedActions: NearStableYieldExecutionAction[];
 	recommendedApproach: "single-best-candidate";
+	riskProfile: NearStableYieldExecutionRiskProfile;
 };
 
 type NearStableYieldPlan = {
@@ -2622,6 +2630,41 @@ function parseApr(value: string | null): number | null {
 	return parsed;
 }
 
+function buildStableYieldExecutionRiskProfile(params: {
+	selected: NearStableYieldCandidate | null;
+}): NearStableYieldExecutionRiskProfile {
+	if (params.selected == null) {
+		return {
+			riskScore: 1,
+			riskBand: "high",
+			rationale:
+				"No stable candidate selected for execution path, so execution risk is not assessable; hold action only.",
+		};
+	}
+	let score = 0.25;
+	if (!params.selected.canWithdraw) {
+		score += 0.15;
+	}
+	if (!params.selected.canDeposit) {
+		score += 0.2;
+	}
+	const apr = parseApr(params.selected.supplyApr);
+	if (apr == null || apr <= 0) {
+		score += 0.1;
+	}
+	score = Math.min(1, Math.max(0, score));
+	const riskBand = score >= 0.7 ? "high" : score >= 0.35 ? "medium" : "low";
+	const rationale =
+		score === 1
+			? "No reliable APR/depositability profile available."
+			: `Heuristic risk score ${score.toFixed(2)} derived from deposit/withdraw APR attributes.`;
+	return {
+		riskScore: Number(score.toFixed(3)),
+		riskBand,
+		rationale,
+	};
+}
+
 function buildStableYieldPlanId(params: {
 	network: string;
 	burrowContractId: string;
@@ -2718,6 +2761,7 @@ function buildStableYieldExecutionPlan(params: {
 			proposedActions: [
 				{
 					action: "hold",
+					actionId: `${params.planId}.hold`,
 					protocol: "Burrow",
 					step: 1,
 					tokenId: null,
@@ -2729,6 +2773,9 @@ function buildStableYieldExecutionPlan(params: {
 				},
 			],
 			recommendedApproach: "single-best-candidate",
+			riskProfile: buildStableYieldExecutionRiskProfile({
+				selected: params.selected,
+			}),
 		};
 	}
 
@@ -2757,6 +2804,7 @@ function buildStableYieldExecutionPlan(params: {
 		proposedActions: [
 			{
 				action: "supply",
+				actionId: `${params.planId}.rank-1`,
 				protocol: "Burrow",
 				step: 1,
 				tokenId: params.selected.tokenId,
@@ -2767,6 +2815,9 @@ function buildStableYieldExecutionPlan(params: {
 			},
 		],
 		recommendedApproach: "single-best-candidate",
+		riskProfile: buildStableYieldExecutionRiskProfile({
+			selected: params.selected,
+		}),
 	};
 }
 
