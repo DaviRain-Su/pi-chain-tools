@@ -192,6 +192,39 @@ describe("w3rt_run_evm_swap_workflow_v0", () => {
 		);
 	});
 
+	it("accepts minOut and receiver aliases in intent text", async () => {
+		const tool = getTool();
+		await tool.execute("wf2f_alias", {
+			runMode: "simulate",
+			network: "bsc",
+			intentText:
+				"先模拟 amountInRaw=10000 tokenIn=0x1111111111111111111111111111111111111111 minOut=1234 tokenOut=0x2222222222222222222222222222222222222222 receiverAddress=0x000000000000000000000000000000000000dead",
+		});
+		expect(executeMocks.pancakeSwapExecute).toHaveBeenCalledWith(
+			"wf-evm-swap-simulate",
+			expect.objectContaining({
+				network: "bsc",
+				dryRun: true,
+				tokenInAddress: "0x1111111111111111111111111111111111111111",
+				tokenOutAddress: "0x2222222222222222222222222222222222222222",
+				amountOutMinRaw: "1234",
+				toAddress: "0x000000000000000000000000000000000000dead",
+			}),
+		);
+	});
+
+	it("rejects slippage too low", async () => {
+		const tool = getTool();
+		await expect(
+			tool.execute("wf2g_alias", {
+				runMode: "simulate",
+				network: "bsc",
+				intentText:
+					"先模拟 amountInRaw=10000 从 0x1111111111111111111111111111111111111111 换到 0x2222222222222222222222222222222222222222，收款到 0x000000000000000000000000000000000000dead，滑点=0.2",
+			}),
+		).rejects.toThrow("slippageBps must be within 1 and 9999");
+	});
+
 	it("rejects natural-language input missing recipient and explains toAddress hint", async () => {
 		const tool = getTool();
 		await expect(
@@ -497,5 +530,68 @@ describe("w3rt_run_evm_swap_workflow_v0", () => {
 		});
 
 		expect(executeMocks.pancakeSwapExecute).toHaveBeenCalledTimes(2);
+	});
+
+	it("auto-picks latest session for execute continuation without explicit runId", async () => {
+		const tool = getTool();
+		executeMocks.pancakeSwapExecute.mockResolvedValueOnce({
+			content: [{ type: "text", text: "swap preview" }],
+			details: {
+				dryRun: true,
+				network: "bsc",
+				pairAddress: "0x1111111111111111111111111111111111111111",
+				amountOutRaw: "1111",
+			},
+		});
+		executeMocks.pancakeSwapExecute.mockResolvedValueOnce({
+			content: [{ type: "text", text: "swap preview" }],
+			details: {
+				dryRun: true,
+				network: "bsc",
+				pairAddress: "0x2222222222222222222222222222222222222222",
+				amountOutRaw: "2222",
+			},
+		});
+		executeMocks.pancakeSwapExecute.mockResolvedValueOnce({
+			content: [{ type: "text", text: "swap submitted" }],
+			details: {
+				dryRun: false,
+				txHash: `0x${"f".repeat(64)}`,
+			},
+		});
+
+		await tool.execute("wf-latest-a", {
+			runMode: "simulate",
+			network: "bsc",
+			tokenInAddress: "0x1111111111111111111111111111111111111111",
+			tokenOutAddress: "0x2222222222222222222222222222222222222222",
+			amountInRaw: "10000",
+			toAddress: "0x000000000000000000000000000000000000dead",
+		});
+
+		await tool.execute("wf-latest-b", {
+			runMode: "simulate",
+			network: "bsc",
+			tokenInAddress: "0x2222222222222222222222222222222222222222",
+			tokenOutAddress: "0x3333333333333333333333333333333333333333",
+			amountInRaw: "20000",
+			toAddress: "0x000000000000000000000000000000000000beef",
+		});
+
+		await tool.execute("wf-latest-exec", {
+			runMode: "execute",
+			network: "bsc",
+			confirmMainnet: true,
+		});
+
+		expect(executeMocks.pancakeSwapExecute).toHaveBeenLastCalledWith(
+			"wf-evm-swap-execute",
+			expect.objectContaining({
+				tokenInAddress: "0x2222222222222222222222222222222222222222",
+				tokenOutAddress: "0x3333333333333333333333333333333333333333",
+				amountInRaw: "20000",
+				toAddress: "0x000000000000000000000000000000000000beef",
+			}),
+		);
 	});
 });
