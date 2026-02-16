@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,13 @@ const __dirname = path.dirname(__filename);
 const PORT = Number.parseInt(process.env.NEAR_DASHBOARD_PORT || "4173", 10);
 const RPC_URL = process.env.NEAR_RPC_URL || "https://1rpc.io/near";
 const ACCOUNT_ID = process.env.NEAR_ACCOUNT_ID || "davirain8.near";
+const BURROW_CONTRACT = "contract.main.burrow.near";
+const SESSION_DIR =
+	process.env.OPENCLAW_SESSION_DIR ||
+	path.join(
+		process.env.HOME || "/home/davirain",
+		".openclaw/agents/main/sessions",
+	);
 
 const TOKENS = [
 	{ symbol: "USDt", contractId: "usdt.tether-token.near", decimals: 6 },
@@ -59,13 +66,9 @@ async function nearRpc(method, params) {
 			params,
 		}),
 	});
-	if (!response.ok) {
-		throw new Error(`RPC HTTP ${response.status}`);
-	}
+	if (!response.ok) throw new Error(`RPC HTTP ${response.status}`);
 	const payload = await response.json();
-	if (payload.error) {
-		throw new Error(payload.error?.message || "RPC error");
-	}
+	if (payload.error) throw new Error(payload.error?.message || "RPC error");
 	return payload.result;
 }
 
@@ -96,7 +99,7 @@ async function getNearBalance(accountId) {
 }
 
 async function getFtBalances(accountId) {
-	const rows = await Promise.all(
+	return Promise.all(
 		TOKENS.map(async (token) => {
 			try {
 				const raw = await viewFunction(token.contractId, "ft_balance_of", {
@@ -117,21 +120,77 @@ async function getFtBalances(accountId) {
 			}
 		}),
 	);
-	return rows;
 }
 
-async function getBurrowRegistration(accountId) {
+async function getBurrowTokenMetaMap() {
 	try {
-		const result = await viewFunction(
-			"contract.main.burrow.near",
-			"storage_balance_of",
-			{ account_id: accountId },
-		);
-		return { registered: !!result, raw: result };
+		const rows = await viewFunction(BURROW_CONTRACT, "get_assets_paged", {
+			from_index: 0,
+			limit: 200,
+		});
+		const map = new Map();
+		for (const row of rows || []) {
+			const [tokenId, asset] = row;
+			map.set(tokenId, {
+				extraDecimals: asset?.config?.extra_decimals ?? 0,
+				symbol:
+					TOKENS.find((item) => item.contractId === tokenId)?.symbol ||
+					tokenId.slice(0, 10),
+			});
+		}
+		return map;
+	} catch {
+		return new Map();
+	}
+}
+
+function toTokenAmountFromBurrowInner(balanceInner, extraDecimals = 0) {
+	const decimals = 24 - Number(extraDecimals || 0);
+	return formatUnits(balanceInner || "0", Math.max(0, decimals));
+}
+
+async function getBurrowAccount(accountId) {
+	try {
+		const [registration, account, metaMap] = await Promise.all([
+			viewFunction(BURROW_CONTRACT, "storage_balance_of", {
+				account_id: accountId,
+			}),
+			viewFunction(BURROW_CONTRACT, "get_account", { account_id: accountId }),
+			getBurrowTokenMetaMap(),
+		]);
+
+		if (!registration || !account) {
+			return { registered: false, collateral: [], supplied: [], borrowed: [] };
+		}
+
+		const normalizeRows = (rows = []) =>
+			rows.map((row) => {
+				const meta = metaMap.get(row.token_id) || {
+					extraDecimals: 0,
+					symbol: row.token_id,
+				};
+				return {
+					tokenId: row.token_id,
+					symbol: meta.symbol,
+					apr: row.apr,
+					balanceRawInner: row.balance,
+					amount: toTokenAmountFromBurrowInner(row.balance, meta.extraDecimals),
+				};
+			});
+
+		return {
+			registered: true,
+			collateral: normalizeRows(account.collateral),
+			supplied: normalizeRows(account.supplied),
+			borrowed: normalizeRows(account.borrowed),
+		};
 	} catch (error) {
 		return {
 			registered: false,
 			error: error instanceof Error ? error.message : String(error),
+			collateral: [],
+			supplied: [],
+			borrowed: [],
 		};
 	}
 }
@@ -153,12 +212,83 @@ async function getPriceMap() {
 	}
 }
 
+async function findNewestSessionFile() {
+	const entries = await readdir(SESSION_DIR, { withFileTypes: true });
+	const files = entries.filter(
+		(entry) => entry.isFile() && entry.name.endsWith(".jsonl"),
+	);
+	if (files.length === 0) return null;
+	const stats = await Promise.all(
+		files.map(async (file) => {
+			const filePath = path.join(SESSION_DIR, file.name);
+			const info = await stat(filePath);
+			return { filePath, mtimeMs: info.mtimeMs };
+		}),
+	);
+	stats.sort((a, b) => b.mtimeMs - a.mtimeMs);
+	return stats[0]?.filePath || null;
+}
+
+function extractRecentFromSessionLog(rawText, accountId) {
+	const lines = rawText.split("\n").filter(Boolean);
+	const worker = [];
+	const txs = [];
+	for (let i = lines.length - 1; i >= 0; i -= 1) {
+		try {
+			const line = JSON.parse(lines[i]);
+			const msg = line?.message;
+			if (!msg || msg.role !== "toolResult") continue;
+
+			if (msg.toolName === "near_yieldWorkerStatus" && worker.length === 0) {
+				const details = msg.details || {};
+				if (details.accountId === accountId) {
+					worker.push({
+						status: details.status,
+						dryRun: details.dryRun,
+						cycleCount: details.cycleCount,
+						lastCycleAt: details.lastCycleAt,
+						recentLogs: details.recentLogs || [],
+					});
+				}
+			}
+
+			const details = msg.details || {};
+			if (details.txHash && txs.length < 10) {
+				txs.push({
+					tool: msg.toolName,
+					txHash: details.txHash,
+					network: details.network,
+					explorerUrl: details.explorerUrl || null,
+					timestamp: line.timestamp,
+				});
+			}
+
+			if (worker.length > 0 && txs.length >= 10) break;
+		} catch {
+			// ignore parse errors
+		}
+	}
+	return { worker: worker[0] || null, recentTxs: txs };
+}
+
+async function getLocalRuntimeSignals(accountId) {
+	try {
+		const filePath = await findNewestSessionFile();
+		if (!filePath) return { worker: null, recentTxs: [] };
+		const content = await readFile(filePath, "utf8");
+		return extractRecentFromSessionLog(content, accountId);
+	} catch {
+		return { worker: null, recentTxs: [] };
+	}
+}
+
 async function buildSnapshot(accountId) {
-	const [near, ft, burrow, prices] = await Promise.all([
+	const [near, ft, burrow, prices, localSignals] = await Promise.all([
 		getNearBalance(accountId),
 		getFtBalances(accountId),
-		getBurrowRegistration(accountId),
+		getBurrowAccount(accountId),
 		getPriceMap(),
+		getLocalRuntimeSignals(accountId),
 	]);
 
 	const nearUsd = Number.parseFloat(near.available) * (prices.NEAR || 0);
@@ -175,6 +305,8 @@ async function buildSnapshot(accountId) {
 		near: { ...near, usd: Number.isFinite(nearUsd) ? nearUsd : 0 },
 		tokens,
 		burrow,
+		worker: localSignals.worker,
+		recentTxs: localSignals.recentTxs,
 	};
 }
 

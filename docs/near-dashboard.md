@@ -2,11 +2,13 @@
 
 This is a lightweight local dashboard for quick visibility into your account state while running strategies.
 
-## What it shows (MVP)
+## What it shows (current)
 
 - NEAR wallet balance
 - Tracked FT balances (USDt / USDC.e / USDC / wNEAR)
-- Burrow `storage_balance_of` registration status
+- Burrow registration + position rows (`collateral` / `supplied` / `borrowed`)
+- Yield worker status (best-effort from latest local OpenClaw session log)
+- Recent execution tx list (best-effort from latest local OpenClaw session log)
 - Best-effort USD estimates from NEAR Intents token feed
 
 ## Start

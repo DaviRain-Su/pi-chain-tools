@@ -11,105 +11,56 @@
         --card: #151b2d;
         --text: #e8eefc;
         --muted: #96a3c7;
-        --accent: #65d5ff;
       }
-      body {
-        margin: 0;
-        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-        background: var(--bg);
-        color: var(--text);
-      }
-      .wrap {
-        max-width: 980px;
-        margin: 0 auto;
-        padding: 24px;
-      }
-      h1 {
-        margin: 0 0 8px;
-      }
-      .muted {
-        color: var(--muted);
-      }
-      .grid {
-        display: grid;
-        gap: 16px;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      }
-      .card {
-        background: var(--card);
-        border: 1px solid #222b47;
-        border-radius: 12px;
-        padding: 14px;
-      }
-      input,
-      button {
-        border-radius: 8px;
-        border: 1px solid #2d3656;
-        background: #0e1529;
-        color: var(--text);
-        padding: 8px 10px;
-      }
-      button {
-        background: #1a2544;
-        cursor: pointer;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      td,
-      th {
-        padding: 8px 0;
-        border-bottom: 1px solid #232c49;
-        text-align: left;
-      }
-      .ok {
-        color: #8ff0a4;
-      }
-      .warn {
-        color: #ffd27d;
-      }
-      .row {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
+      body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+      .wrap { max-width: 1060px; margin: 0 auto; padding: 24px; }
+      .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+      .card { background: var(--card); border: 1px solid #222b47; border-radius: 12px; padding: 14px; }
+      .muted { color: var(--muted); }
+      input, button { border-radius: 8px; border: 1px solid #2d3656; background: #0e1529; color: var(--text); padding: 8px 10px; }
+      button { cursor: pointer; }
+      table { width: 100%; border-collapse: collapse; }
+      td, th { padding: 8px 0; border-bottom: 1px solid #232c49; text-align: left; }
+      .ok { color: #8ff0a4; }
+      .warn { color: #ffd27d; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      h3 { margin-top: 0; }
     </style>
   </head>
   <body>
     <div class="wrap">
       <h1>NEAR Agent Dashboard</h1>
-      <p class="muted">Quick portfolio + Burrow status view for your account.</p>
-      <div class="row" style="margin-bottom: 16px">
+      <p class="muted">Portfolio + Burrow + worker/runtime status in one page.</p>
+      <div class="row" style="margin-bottom:16px">
         <input id="accountId" size="36" placeholder="account.near" />
         <button id="refresh">Refresh</button>
         <span id="meta" class="muted"></span>
       </div>
 
       <div class="grid">
-        <div class="card">
-          <h3>NEAR Wallet</h3>
-          <div id="near">-</div>
-        </div>
-        <div class="card">
-          <h3>Burrow Registration</h3>
-          <div id="burrow">-</div>
-        </div>
+        <div class="card"><h3>NEAR Wallet</h3><div id="near">-</div></div>
+        <div class="card"><h3>Burrow Registration</h3><div id="burrowReg">-</div></div>
+        <div class="card"><h3>Yield Worker</h3><div id="worker">-</div></div>
       </div>
 
-      <div class="card" style="margin-top: 16px">
+      <div class="card" style="margin-top:16px">
+        <h3>Burrow Positions</h3>
+        <div id="burrowPos" class="muted">-</div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
         <h3>Tracked Token Balances</h3>
         <table>
-          <thead>
-            <tr>
-              <th>Token</th>
-              <th>Balance</th>
-              <th>~USD</th>
-              <th>Status</th>
-            </tr>
-          </thead>
+          <thead><tr><th>Token</th><th>Balance</th><th>~USD</th><th>Status</th></tr></thead>
           <tbody id="tokens"></tbody>
+        </table>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h3>Recent Executions (local session)</h3>
+        <table>
+          <thead><tr><th>Time</th><th>Tool</th><th>Tx Hash</th></tr></thead>
+          <tbody id="txs"></tbody>
         </table>
       </div>
     </div>
@@ -118,34 +69,54 @@
       const accountInput = document.getElementById("accountId");
       const refreshBtn = document.getElementById("refresh");
       const nearEl = document.getElementById("near");
-      const burrowEl = document.getElementById("burrow");
+      const burrowRegEl = document.getElementById("burrowReg");
+      const workerEl = document.getElementById("worker");
+      const burrowPosEl = document.getElementById("burrowPos");
       const metaEl = document.getElementById("meta");
       const tokensEl = document.getElementById("tokens");
+      const txsEl = document.getElementById("txs");
+
+      function rowsToText(rows) {
+        if (!rows || rows.length === 0) return "none";
+        return rows.map((r) => `${r.symbol}: ${r.amount}`).join(" · ");
+      }
 
       async function load() {
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
-        const response = await fetch(`/api/snapshot${query}`);
-        const data = await response.json();
-
-        if (!response.ok) {
+        const res = await fetch(`/api/snapshot${query}`);
+        const data = await res.json();
+        if (!res.ok) {
           metaEl.textContent = `Error: ${data.error || "Unknown"}`;
           return;
         }
 
         accountInput.value = data.accountId;
         metaEl.textContent = `Updated: ${new Date(data.updatedAt).toLocaleString()} · RPC: ${data.rpcUrl}`;
-
         nearEl.innerHTML = `${data.near.available} NEAR <span class="muted">(~$${data.near.usd.toFixed(2)})</span><br/><span class="muted">locked: ${data.near.locked}</span>`;
-        burrowEl.innerHTML = data.burrow.registered
-          ? `<span class="ok">Registered</span>`
-          : `<span class="warn">Not registered</span>`;
+
+        burrowRegEl.innerHTML = data.burrow.registered ? `<span class="ok">Registered</span>` : `<span class="warn">Not registered</span>`;
+        burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
+
+        if (data.worker) {
+          workerEl.innerHTML = `<span class="ok">${data.worker.status}</span> · ${data.worker.dryRun ? "dry-run" : "live"}<br/><span class="muted">cycles: ${data.worker.cycleCount} · last: ${data.worker.lastCycleAt || "-"}</span>`;
+        } else {
+          workerEl.innerHTML = `<span class="warn">No worker status found in local session log</span>`;
+        }
 
         tokensEl.innerHTML = "";
         for (const row of data.tokens) {
           const tr = document.createElement("tr");
           tr.innerHTML = `<td>${row.symbol}</td><td>${row.amount}</td><td>$${(row.usd || 0).toFixed(2)}</td><td>${row.error ? `<span class="warn">${row.error}</span>` : "ok"}</td>`;
           tokensEl.appendChild(tr);
+        }
+
+        txsEl.innerHTML = "";
+        for (const tx of data.recentTxs || []) {
+          const tr = document.createElement("tr");
+          const hash = tx.explorerUrl ? `<a href="${tx.explorerUrl}" target="_blank" rel="noreferrer">${tx.txHash}</a>` : tx.txHash;
+          tr.innerHTML = `<td>${new Date(tx.timestamp).toLocaleString()}</td><td>${tx.tool}</td><td>${hash}</td>`;
+          txsEl.appendChild(tr);
         }
       }
 
