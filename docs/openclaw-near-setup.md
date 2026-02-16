@@ -53,7 +53,11 @@ cp .env.near.example .env.near.local
 Recommended minimum explicit settings:
 
 - `NEAR_ACCOUNT_ID` (optional if auto-discovery already resolves correctly)
-- `NEAR_RPC_URL` (optional; defaults exist)
+- `NEAR_RPC_URL` or `NEAR_RPC_URLS` (optional; defaults exist)
+
+For RPC stability under public endpoint throttling, prefer a fallback list:
+
+- `NEAR_MAINNET_RPC_URLS=https://1rpc.io/near,https://rpc.mainnet.near.org,https://near-mainnet.public.blastapi.io`
 
 For execute/sign flows, set one signer source explicitly when possible:
 
@@ -97,6 +101,7 @@ Before any execute tools (`near_transferNear`, `near_swapRef`, `near_supplyBurro
 - Verify signer source (`NEAR_PRIVATE_KEY` or `NEAR_CREDENTIALS_DIR`)
 - Ensure key matches the account on selected network
 
-### RPC/network mismatch
-- Set explicit `NEAR_RPC_URL` for intended network
+### RPC/network mismatch / 429 throttling
+- Set explicit `NEAR_RPC_URL` for intended network, or preferably `NEAR_RPC_URLS`
+- For network-specific priority use `NEAR_MAINNET_RPC_URLS` / `NEAR_TESTNET_RPC_URLS`
 - Re-check contract ids if using non-default deployments
