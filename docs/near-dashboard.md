@@ -9,6 +9,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Burrow registration + position rows (`collateral` / `supplied` / `borrowed`)
 - Yield worker status (best-effort from latest local OpenClaw session log)
 - Recent execution tx list (best-effort from latest local OpenClaw session log)
+- Strategy view: current stable collateral APR ranking + quick recommendation
 - Best-effort USD estimates from NEAR Intents token feed
 
 ## Start

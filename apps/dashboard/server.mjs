@@ -31,6 +31,11 @@ const TOKENS = [
 			"17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
 		decimals: 6,
 	},
+	{
+		symbol: "DAI",
+		contractId: "6b175474e89094c44da98b954eedeac495271d0f.factory.bridge.near",
+		decimals: 18,
+	},
 	{ symbol: "wNEAR", contractId: "wrap.near", decimals: 24 },
 ];
 
@@ -149,6 +154,11 @@ function toTokenAmountFromBurrowInner(balanceInner, extraDecimals = 0) {
 	return formatUnits(balanceInner || "0", Math.max(0, decimals));
 }
 
+function stableSymbol(tokenId) {
+	const match = TOKENS.find((item) => item.contractId === tokenId);
+	return match?.symbol || tokenId;
+}
+
 async function getBurrowAccount(accountId) {
 	try {
 		const [registration, account, metaMap] = await Promise.all([
@@ -209,6 +219,32 @@ async function getPriceMap() {
 		return map;
 	} catch {
 		return {};
+	}
+}
+
+async function getStableAprStrategy(accountId) {
+	try {
+		const burrow = await getBurrowAccount(accountId);
+		const currentStableCollateral = (burrow.collateral || []).filter((row) =>
+			["USDT", "USDC", "USDC.E", "DAI", "USDT.E", "USDT"].includes(
+				String(row.symbol).toUpperCase(),
+			),
+		);
+		const ranked = [...currentStableCollateral].sort(
+			(a, b) => Number(b.apr || 0) - Number(a.apr || 0),
+		);
+		return {
+			currentStableCollateral: ranked,
+			recommendation:
+				ranked.length > 0
+					? `Current best stable APR in your collateral: ${ranked[0].symbol} ${(Number(ranked[0].apr || 0) * 100).toFixed(2)}%`
+					: "No stable collateral yet. Consider NEAR -> stable -> Burrow supply",
+		};
+	} catch (error) {
+		return {
+			currentStableCollateral: [],
+			recommendation: `Strategy scan error: ${error instanceof Error ? error.message : String(error)}`,
+		};
 	}
 }
 
@@ -283,12 +319,13 @@ async function getLocalRuntimeSignals(accountId) {
 }
 
 async function buildSnapshot(accountId) {
-	const [near, ft, burrow, prices, localSignals] = await Promise.all([
+	const [near, ft, burrow, prices, localSignals, strategy] = await Promise.all([
 		getNearBalance(accountId),
 		getFtBalances(accountId),
 		getBurrowAccount(accountId),
 		getPriceMap(),
 		getLocalRuntimeSignals(accountId),
+		getStableAprStrategy(accountId),
 	]);
 
 	const nearUsd = Number.parseFloat(near.available) * (prices.NEAR || 0);
@@ -305,6 +342,7 @@ async function buildSnapshot(accountId) {
 		near: { ...near, usd: Number.isFinite(nearUsd) ? nearUsd : 0 },
 		tokens,
 		burrow,
+		strategy,
 		worker: localSignals.worker,
 		recentTxs: localSignals.recentTxs,
 	};

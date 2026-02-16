@@ -44,6 +44,11 @@
       </div>
 
       <div class="card" style="margin-top:16px">
+        <h3>Strategy View</h3>
+        <div id="strategy" class="muted">-</div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
         <h3>Burrow Positions</h3>
         <div id="burrowPos" class="muted">-</div>
       </div>
@@ -71,6 +76,7 @@
       const nearEl = document.getElementById("near");
       const burrowRegEl = document.getElementById("burrowReg");
       const workerEl = document.getElementById("worker");
+      const strategyEl = document.getElementById("strategy");
       const burrowPosEl = document.getElementById("burrowPos");
       const metaEl = document.getElementById("meta");
       const tokensEl = document.getElementById("tokens");
@@ -102,6 +108,15 @@
           workerEl.innerHTML = `<span class="ok">${data.worker.status}</span> · ${data.worker.dryRun ? "dry-run" : "live"}<br/><span class="muted">cycles: ${data.worker.cycleCount} · last: ${data.worker.lastCycleAt || "-"}</span>`;
         } else {
           workerEl.innerHTML = `<span class="warn">No worker status found in local session log</span>`;
+        }
+
+        if (data.strategy) {
+          const rows = (data.strategy.currentStableCollateral || [])
+            .map((r) => `${r.symbol}: ${r.amount} (APR ${(Number(r.apr || 0) * 100).toFixed(2)}%)`)
+            .join("<br/>");
+          strategyEl.innerHTML = `${data.strategy.recommendation}<br/><br/><span class="muted">Stable collateral APR ranking</span><br/>${rows || "none"}`;
+        } else {
+          strategyEl.innerHTML = `<span class="warn">No strategy data</span>`;
         }
 
         tokensEl.innerHTML = "";
