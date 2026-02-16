@@ -74,6 +74,7 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 				arbitrum: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
 				optimism: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
 				bsc: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+				monad: "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
 			},
 		},
 		USDT: {
@@ -85,6 +86,7 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 				arbitrum: "0xFd086bC7CD5C481DCC9C85EBE478A1C0b69FCbb9",
 				optimism: "0x94b008Aa00579c1307B0EF2c499aD98a8ce58e58",
 				bsc: "0x55d398326f99059fF775485246999027B3197955",
+				monad: "0xe7cd86e13AC4309349F30B3435a9d337750fC82D",
 			},
 		},
 		DAI: {
@@ -106,6 +108,7 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 				arbitrum: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
 				optimism: "0x4200000000000000000000000000000000000006",
 				bsc: "0x2170Ed0880ac9A755fd29B2688956BD959F933f8",
+				monad: "0xEE8c0E9f1BFFb4Eb878d8f15f368A02a35481242",
 			},
 		},
 		WBTC: {
@@ -115,6 +118,7 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 				polygon: "0x1bfd67037b42cf73acf2047067bd4f2c47d9bfd6",
 				arbitrum: "0x2f2a2543B76A4166549F7AaB2e75Bef0aefC5B0f",
 				optimism: "0x68f180fcce6836688e9084f035309e29bf0a2095",
+				monad: "0x0555E30da8f98308EdB960aa94C0Db47230d2B9c",
 			},
 		},
 		WBNB: {
@@ -144,8 +148,7 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 		WMON: {
 			decimals: 18,
 			addresses: {
-				// Monad mainnet WMON — set via EVM_TRANSFER_TOKEN_MAP_MONAD
-				// or configure directly once the canonical WMON address is confirmed
+				monad: "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A",
 			},
 		},
 	};
