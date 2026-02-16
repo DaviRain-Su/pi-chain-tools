@@ -4,6 +4,7 @@ import { createEvmComposeTools } from "./tools/compose.js";
 import { createEvmExecuteTools } from "./tools/execute.js";
 import { createLifiExecuteTools } from "./tools/lifi-execute.js";
 import { createLifiReadTools } from "./tools/lifi-read.js";
+import { createLtvDecisionTools } from "./tools/ltv-decision-tool.js";
 import { createMorphoExecuteTools } from "./tools/morpho-execute.js";
 import { createMorphoReadTools } from "./tools/morpho-read.js";
 import { createPrivyPolicyTools } from "./tools/privy-policy.js";
@@ -33,6 +34,7 @@ export function createEvmToolset(): ChainToolset {
 					...createLifiReadTools(),
 					...createMorphoReadTools(),
 					...createVaultReadTools(),
+					...createLtvDecisionTools(),
 					...createPrivyPolicyTools(),
 				],
 			},

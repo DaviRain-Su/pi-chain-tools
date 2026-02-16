@@ -34,7 +34,8 @@ const MORPHO_PROTOCOL_ID = "morpho-blue";
 /** Morpho Blue deployment addresses by network. */
 const MORPHO_DEPLOYMENTS: Partial<Record<EvmNetwork, string>> = {
 	monad: "0xD5D960E8C380B724a48AC59E2DfF1b2CB4a1eAee",
-	// ethereum: "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb", // mainnet Morpho Blue
+	ethereum: "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
+	base: "0xBBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb",
 };
 
 const MORPHO_API_URL = "https://blue-api.morpho.org/graphql";
@@ -163,7 +164,7 @@ async function queryMorphoApi<T>(query: string): Promise<T> {
 }
 
 function chainIdForNetwork(network: EvmNetwork): number {
-	const map: Partial<Record<EvmNetwork, number>> = {
+	const map: Record<string, number> = {
 		monad: 143,
 		ethereum: 1,
 		base: 8453,
