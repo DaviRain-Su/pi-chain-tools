@@ -294,3 +294,98 @@ describe("agentWorkerStatus", () => {
 		expect(logs.length).toBeLessThanOrEqual(1);
 	});
 });
+
+// -----------------------------------------------------------------------
+// Webhook notifications
+// -----------------------------------------------------------------------
+describe("webhook notifications", () => {
+	it("includes webhookUrl in start details when provided", async () => {
+		mockEmptyPosition();
+
+		const tool = findTool("agentWorkerStart");
+		const result = await tool.execute("wh1", {
+			network: "bsc",
+			account: ACCOUNT,
+			webhookUrl: "https://hooks.example.com/agent",
+		});
+
+		const d = result.details as Record<string, unknown>;
+		expect(d.webhookUrl).toBe("https://hooks.example.com/agent");
+	});
+
+	it("returns null webhookUrl when not configured", async () => {
+		mockEmptyPosition();
+
+		const tool = findTool("agentWorkerStart");
+		const result = await tool.execute("wh2", {
+			network: "bsc",
+			account: ACCOUNT,
+		});
+
+		const d = result.details as Record<string, unknown>;
+		expect(d.webhookUrl).toBeNull();
+	});
+
+	it("fires webhook on worker stop", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockResolvedValue(new Response("ok", { status: 200 }));
+
+		mockEmptyPosition();
+
+		const startTool = findTool("agentWorkerStart");
+		await startTool.execute("wh3a", {
+			network: "bsc",
+			account: ACCOUNT,
+			webhookUrl: "https://hooks.example.com/stop-test",
+		});
+
+		// Wait for first cycle
+		await new Promise((r) => setTimeout(r, 50));
+
+		const stopTool = findTool("agentWorkerStop");
+		await stopTool.execute("wh3b", {
+			workerId: `bsc:${ACCOUNT.toLowerCase()}`,
+		});
+
+		// Wait for async webhook fire
+		await new Promise((r) => setTimeout(r, 50));
+
+		const webhookCalls = fetchSpy.mock.calls.filter(
+			(c) => String(c[0]) === "https://hooks.example.com/stop-test",
+		);
+		expect(webhookCalls.length).toBeGreaterThanOrEqual(1);
+
+		const lastCall = webhookCalls[webhookCalls.length - 1];
+		const body = JSON.parse((lastCall[1] as RequestInit).body as string);
+		expect(body.event).toBe("worker_stopped");
+		expect(body.workerId).toContain("bsc:");
+		expect(body.data.reason).toBe("manual_stop");
+
+		fetchSpy.mockRestore();
+	});
+
+	it("webhook failure does not throw", async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, "fetch")
+			.mockRejectedValue(new Error("network error"));
+
+		mockEmptyPosition();
+
+		const startTool = findTool("agentWorkerStart");
+		// Should not throw despite webhook failure
+		await startTool.execute("wh4", {
+			network: "bsc",
+			account: ACCOUNT,
+			webhookUrl: "https://hooks.example.com/fail-test",
+		});
+
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Worker should still be running
+		const state = getWorkerState(`bsc:${ACCOUNT.toLowerCase()}`);
+		expect(state?.status).toBe("running");
+
+		fetchSpy.mockRestore();
+	});
+});

@@ -1,7 +1,7 @@
 /**
  * Agent Worker Loop — continuous autonomous DeFi position management.
  *
- * Cycle: read position → LTV decision → execute action → log → wait → repeat
+ * Cycle: read position → LTV decision → execute action → log → notify → wait → repeat
  *
  * The worker is protocol-agnostic: it takes a `LendingProtocolAdapter` +
  * `EvmSignerProvider` and manages any lending position on any EVM chain.
@@ -10,6 +10,13 @@
  * - `evm_agentWorkerStart`:  start a worker loop (returns immediately)
  * - `evm_agentWorkerStop`:   stop a running worker
  * - `evm_agentWorkerStatus`: read current worker state + audit log
+ *
+ * Notifications:
+ * - Webhook callback (POST JSON to configured URL) — use with OpenClaw or any
+ *   external orchestrator. Set `webhookUrl` on worker start, or env
+ *   `AGENT_WORKER_WEBHOOK_URL`. Fires on: action executed, error-pause, stop.
+ * - No built-in Telegram/Slack — OpenClaw handles channel routing via webhook
+ *   payload. This keeps the worker a pure data producer.
  *
  * Safety:
  * - paused flag (immediate halt)
@@ -68,10 +75,54 @@ export type WorkerState = {
 	recentLogs: WorkerCycleLog[];
 };
 
+// ---------------------------------------------------------------------------
+// Webhook notification (channel-agnostic — OpenClaw routes to Telegram/Slack/etc)
+// ---------------------------------------------------------------------------
+
+export type WebhookEvent =
+	| "action_executed"
+	| "error_pause"
+	| "worker_stopped"
+	| "ltv_critical";
+
+export type WebhookPayload = {
+	event: WebhookEvent;
+	workerId: string;
+	network: string;
+	account: string;
+	timestamp: string;
+	cycleNumber: number;
+	data: Record<string, unknown>;
+};
+
+/**
+ * Fire-and-forget POST to configured webhook URL.
+ * Never throws — webhook failure must not disrupt the worker cycle.
+ */
+async function fireWebhook(
+	url: string | undefined,
+	payload: WebhookPayload,
+): Promise<void> {
+	if (!url?.trim()) return;
+	try {
+		await fetch(url.trim(), {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(payload),
+			signal: AbortSignal.timeout(5_000),
+		});
+	} catch {
+		// Intentional: webhook failure is non-fatal
+	}
+}
+
 // In-memory worker registry
 const workers = new Map<
 	string,
-	WorkerState & { timer: ReturnType<typeof setTimeout> | null }
+	WorkerState & {
+		timer: ReturnType<typeof setTimeout> | null;
+		webhookUrl?: string;
+	}
 >();
 
 // ---------------------------------------------------------------------------
@@ -143,7 +194,10 @@ function buildLtvInput(
 // ---------------------------------------------------------------------------
 
 async function runCycle(
-	worker: WorkerState & { timer: ReturnType<typeof setTimeout> | null },
+	worker: WorkerState & {
+		timer: ReturnType<typeof setTimeout> | null;
+		webhookUrl?: string;
+	},
 	adapter: LendingProtocolAdapter,
 	signer: EvmSignerProvider | null,
 ): Promise<void> {
@@ -175,6 +229,24 @@ async function runCycle(
 		const ltvInput = buildLtvInput(position, markets, worker.config);
 		const decision = decideLtvAction(ltvInput);
 		log.action = decision;
+
+		// 2b. Critical LTV alert (fires even in dryRun)
+		if (decision.currentLTV > worker.config.maxLTV * 0.95) {
+			fireWebhook(worker.webhookUrl, {
+				event: "ltv_critical",
+				workerId: worker.id,
+				network: worker.network,
+				account: worker.account,
+				timestamp: new Date().toISOString(),
+				cycleNumber: worker.cycleCount,
+				data: {
+					currentLTV: decision.currentLTV,
+					maxLTV: worker.config.maxLTV,
+					action: decision.action,
+					reason: decision.reason,
+				},
+			});
+		}
 
 		// 3. Execute (if not dryRun and not hold)
 		if (!worker.dryRun && decision.action !== "hold" && signer) {
@@ -234,6 +306,20 @@ async function runCycle(
 				log.executed = txHashes.length > 0;
 				if (txHashes.length > 0) {
 					log.executionResult = { txHashes };
+					// Notify: action executed
+					fireWebhook(worker.webhookUrl, {
+						event: "action_executed",
+						workerId: worker.id,
+						network: worker.network,
+						account: worker.account,
+						timestamp: new Date().toISOString(),
+						cycleNumber: worker.cycleCount,
+						data: {
+							action: decision.action,
+							currentLTV: decision.currentLTV,
+							txHashes,
+						},
+					});
 				}
 			} catch (execErr) {
 				log.executionResult = {
@@ -259,6 +345,19 @@ async function runCycle(
 				clearTimeout(worker.timer);
 				worker.timer = null;
 			}
+			// Notify: error-pause
+			fireWebhook(worker.webhookUrl, {
+				event: "error_pause",
+				workerId: worker.id,
+				network: worker.network,
+				account: worker.account,
+				timestamp: new Date().toISOString(),
+				cycleNumber: worker.cycleCount,
+				data: {
+					consecutiveErrors: worker.consecutiveErrors,
+					lastError: err instanceof Error ? err.message : String(err),
+				},
+			});
 		}
 	}
 
@@ -385,6 +484,12 @@ export function createAgentWorkerTools() {
 						description: "Auto-pause after N consecutive errors (default 5)",
 					}),
 				),
+				webhookUrl: Type.Optional(
+					Type.String({
+						description:
+							"Webhook URL for event notifications (action_executed, error_pause, ltv_critical). OpenClaw routes to Telegram/Slack/etc. Falls back to AGENT_WORKER_WEBHOOK_URL env.",
+					}),
+				),
 				fromPrivateKey: Type.Optional(Type.String()),
 				...configParams,
 			}),
@@ -420,8 +525,14 @@ export function createAgentWorkerTools() {
 
 				const adapter = createVenusAdapter();
 
+				const webhookUrl =
+					params.webhookUrl?.trim() ||
+					process.env.AGENT_WORKER_WEBHOOK_URL?.trim() ||
+					undefined;
+
 				const worker: WorkerState & {
 					timer: ReturnType<typeof setTimeout> | null;
+					webhookUrl?: string;
 				} = {
 					id: workerId,
 					network,
@@ -438,6 +549,7 @@ export function createAgentWorkerTools() {
 					lastCycleAt: null,
 					recentLogs: [],
 					timer: null,
+					webhookUrl,
 				};
 
 				workers.set(workerId, worker);
@@ -462,6 +574,7 @@ export function createAgentWorkerTools() {
 						maxConsecutiveErrors,
 						config,
 						signerBackend: signer?.id ?? "none (dry-run)",
+						webhookUrl: webhookUrl ?? null,
 					},
 				};
 			},
@@ -493,6 +606,15 @@ export function createAgentWorkerTools() {
 						clearTimeout(w.timer);
 						w.timer = null;
 					}
+					fireWebhook(w.webhookUrl, {
+						event: "worker_stopped",
+						workerId: w.id,
+						network: w.network,
+						account: w.account,
+						timestamp: new Date().toISOString(),
+						cycleNumber: w.cycleCount,
+						data: { reason: "manual_stop" },
+					});
 					return {
 						content: [
 							{ type: "text", text: `Worker ${params.workerId} stopped.` },
