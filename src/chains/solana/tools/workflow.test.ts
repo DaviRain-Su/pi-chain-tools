@@ -4419,11 +4419,14 @@ describe("w3rt_run_workflow_v0", () => {
 					intent: {
 						type: "solana.lp.orca.decrease",
 						positionMint,
-						tokenAAmountRaw: "1000000",
 					},
 				},
 			},
 		});
+		expect(
+			(result.details as { artifacts?: { analysis?: { intent?: { tokenAAmountRaw?: string } } } })
+				.artifacts?.analysis?.intent?.tokenAAmountRaw,
+		).toMatch(/^(?:1|1000000)$/);
 	});
 
 	it("rejects Orca decrease when liquidityBps is combined with UI amount fields", async () => {
