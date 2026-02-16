@@ -4,6 +4,7 @@ import { createEvmComposeTools } from "./tools/compose.js";
 import { createEvmExecuteTools } from "./tools/execute.js";
 import { createLifiExecuteTools } from "./tools/lifi-execute.js";
 import { createLifiReadTools } from "./tools/lifi-read.js";
+import { createPrivyPolicyTools } from "./tools/privy-policy.js";
 import { createEvmReadTools } from "./tools/read.js";
 import { createEvmRpcTools } from "./tools/rpc.js";
 import { createEvmSwapWorkflowTools } from "./tools/swap-workflow.js";
@@ -24,6 +25,7 @@ export function createEvmToolset(): ChainToolset {
 					...createEvmReadTools(),
 					...createVenusReadTools(),
 					...createLifiReadTools(),
+					...createPrivyPolicyTools(),
 				],
 			},
 			{ name: "compose", tools: createEvmComposeTools() },
