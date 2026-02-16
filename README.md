@@ -199,6 +199,7 @@ export EVM_TRANSFER_TOKEN_DECIMALS='{"USDC":6,"USDT":6}'
 - `execute`: `near_addLiquidityRef` (Ref LP add-liquidity, includes optional auto register + token deposit to Ref exchange; supports auto pool selection by token pair when `poolId` is omitted)
 - `execute`: `near_removeLiquidityRef` (Ref LP remove-liquidity; supports auto pool selection by token pair when `poolId` is omitted, plus `autoWithdraw=true` to auto-withdraw pool tokens)
 - `workflow`: `w3rt_run_near_workflow_v0` (analysis/compose/simulate/execute + deterministic mainnet confirmToken; compose/workflow intents include `near.transfer.near` / `near.transfer.ft` / `near.swap.ref` / `near.ref.withdraw` / `near.swap.intents` / `near.lp.ref.add` / `near.lp.ref.remove` / `near.lend.burrow.supply` / `near.lend.burrow.borrow` / `near.lend.burrow.repay` / `near.lend.burrow.withdraw`; simulate includes balance + storage-registration prechecks plus Burrow market/position prechecks and conservative risk statuses like `insufficient_collateral` / `risk_check_required`; mainnet Burrow borrow/withdraw execute now runs a risk precheck and blocks `warning/critical` unless `confirmRisk=true` or intent text includes risk confirmation phrases like `我接受风险继续执行` / `accept risk`; execute summary now includes `riskEngine/hf/liqDistance` for quick risk readability; intents execute accepts either `txHash` or `signedTxBase64` and can auto-broadcast first; `swapType=ANY_INPUT` execute also attempts `/v0/any-input/withdrawals` and returns readable withdrawal artifacts)
+- `workflow:stable-yield`: `near.defi.stableYieldPlan` now uses a proposal-first execute handoff (simulate `→` stable-yield execution artifacts). `runMode=simulate` must return `executionApproval` with `stableYieldPlanId` + `stableYieldApprovalToken`; `runMode=execute` must pass the exact same fields (plus optional `stableYieldActionId`) and receives `near.defi.stableYieldProposalExecution.v1` with `status=ready/no-op` and `requiredApprovals.type=agent-wallet`.
 - `workflow phase summary`: NEAR workflow analysis/simulate/execute artifacts include `summaryLine` for concise one-line replay in PI/OpenClaw
 - `workflow execute summary`: NEAR workflow execute artifacts include `summaryLine` for concise one-line replay in PI/OpenClaw (all intents)
 - `intents execute summary`: `near.swap.intents` execute artifact now includes `summaryLine` for one-line natural-language replay in PI/OpenClaw
@@ -241,6 +242,11 @@ export EVM_TRANSFER_TOKEN_DECIMALS='{"USDC":6,"USDT":6}'
   - `帮我查一下 NEAR 主网 Burrow 借贷市场`
 - Stable Yield Planner (read):
   - `帮我分析一下 NEAR 主网稳定币供应策略，先分析`
+- Stable Yield Planner (handoff execute flow):
+  - `先模拟：先分析 NEAR 主网稳定币供应策略`
+  - execute requires `stableYieldPlanId` + `stableYieldApprovalToken` from simulate output, for example:
+    - `runMode: "execute", intentType: "near.defi.stableYieldPlan", runId: "wf-xxx", stableYieldPlanId: "near.stable-yield....", stableYieldApprovalToken: "near.defi.stableYieldProposalApproval.v1:...", confirmMainnet: true`
+  - optional `stableYieldActionId` can pin which action to execute (e.g. `near.stable-yield....supply`), otherwise defaults to first proposed action
 - Burrow Positions (read):
   - `帮我查一下 NEAR 主网 Burrow 我的借贷仓位`
 - Burrow Supply (execute):

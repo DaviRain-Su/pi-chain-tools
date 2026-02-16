@@ -4322,17 +4322,830 @@ describe("w3rt_run_near_workflow_v0", () => {
 		).rejects.toThrow("read-only");
 	});
 
-	it("does not support execute for stable yield plan in workflow", async () => {
+	it("supports execute for hold stable-yield proposals", async () => {
+		const tool = getTool();
+		const simulateResult = await tool.execute(
+			"near-wf-stable-yield-hold-exec",
+			{
+				runId: "wf-near-stable-yield-hold-01",
+				runMode: "simulate",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+			},
+		);
+
+		const simulateArtifact = (
+			simulateResult.details as {
+				artifacts: { simulate: Record<string, unknown> };
+			}
+		).artifacts.simulate;
+		const executionApproval = simulateArtifact.executionApproval as
+			| { planId?: string; approvalToken?: string }
+			| undefined;
+		if (executionApproval == null) {
+			throw new Error("executionApproval missing");
+		}
+
+		const executeResult = await tool.execute("near-wf-stable-yield-hold-exec", {
+			runId: "wf-near-stable-yield-hold-01",
+			runMode: "execute",
+			network: "mainnet",
+			intentType: "near.defi.stableYieldPlan",
+			confirmMainnet: true,
+			stableYieldPlanId: executionApproval.planId,
+			stableYieldApprovalToken: executionApproval.approvalToken,
+		});
+
+		const executeArtifact = (
+			executeResult.details as {
+				artifacts: { execute: Record<string, unknown> };
+			}
+		).artifacts.execute;
+		expect(executeArtifact.schema).toBe(
+			"near.defi.stableYieldProposalExecution.v1",
+		);
+		expect(executeArtifact.status).toBe("ready-no-op");
+		expect(executeArtifact.mode).toBe("agent-wallet");
+		expect(executeArtifact.requiredApprovals).toMatchObject({
+			type: "agent-wallet",
+			planId: executionApproval.planId,
+		});
+	});
+
+	it("rejects stable-yield execute when stableYieldActionId references a runId that does not match any cached session", async () => {
+		const tool = getTool();
+		const simulateResult = await tool.execute(
+			"near-wf-stable-yield-runid-binding",
+			{
+				runId: "wf-near-stable-yield-runid-binding-01",
+				runMode: "simulate",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+			},
+		);
+
+		const simulateArtifact = (
+			simulateResult.details as {
+				artifacts: { simulate: Record<string, unknown> };
+			}
+		).artifacts.simulate;
+		const executionApproval = simulateArtifact.executionApproval as
+			| { planId?: string; approvalToken?: string }
+			| undefined;
+		if (executionApproval == null) {
+			throw new Error("executionApproval missing");
+		}
+
+		await expect(
+			tool.execute("near-wf-stable-yield-runid-binding", {
+				runId: "wf-near-stable-yield-runid-binding-bad-01",
+				runMode: "execute",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				stableYieldPlanId: executionApproval.planId,
+				stableYieldApprovalToken: executionApproval.approvalToken,
+			}),
+		).rejects.toThrow(
+			"No cached stable-yield proposal context found for this run. Re-run simulate to regenerate executionApproval.",
+		);
+	});
+
+	it("supports execute for supply stable-yield proposals with agent-wallet adapter intent", async () => {
+		const tool = getTool();
+		readMocks.getStableYieldPlan.mockResolvedValueOnce({
+			content: [{ type: "text", text: "stable yield supply plan ok" }],
+			details: {
+				schema: "near.defi.stableYieldPlan.v1",
+				rpcEndpoint: "https://rpc.mainnet.near.org",
+				burrowContractId: "contract.main.burrow.near",
+				protocol: "Burrow",
+				generatedAt: new Date("2025-01-01T00:00:00.000Z").toISOString(),
+				stableSymbols: ["USDC"],
+				network: "mainnet",
+				topN: 1,
+				includeDisabled: false,
+				status: "ready",
+				planId: "near.stable-yield.supply-planid",
+				candidates: [],
+				selected: null,
+				executionPlan: {
+					planId: "near.stable-yield.supply-planid.supply",
+					mode: "analysis-only",
+					requiresAgentWallet: true,
+					canAutoExecute: false,
+					riskProfile: {
+						riskBand: "low",
+						riskScore: 0.12,
+						rationale: "mock low risk",
+					},
+					reasons: ["mock"],
+					recommendedApproach: "single-best-candidate",
+					proposedActions: [
+						{
+							action: "supply",
+							actionId: "near.stable-yield.supply-planid.supply",
+							protocol: "Burrow",
+							step: 1,
+							tokenId: "usdc.tether-token.near",
+							symbol: "USDC",
+							asCollateral: true,
+							allocationHint: "single-winner",
+							rationale: "supply",
+						},
+					],
+				},
+			},
+		});
+
+		const simulateResult = await tool.execute(
+			"near-wf-stable-yield-supply-exec",
+			{
+				runId: "wf-near-stable-yield-supply-01",
+				runMode: "simulate",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+			},
+		);
+
+		const simulateArtifact = (
+			simulateResult.details as {
+				artifacts: { simulate: Record<string, unknown> };
+			}
+		).artifacts.simulate;
+		const executionApproval = simulateArtifact.executionApproval as
+			| { planId?: string; approvalToken?: string }
+			| undefined;
+		if (executionApproval == null) {
+			throw new Error("executionApproval missing");
+		}
+
+		const executeResult = await tool.execute(
+			"near-wf-stable-yield-supply-exec",
+			{
+				runId: "wf-near-stable-yield-supply-01",
+				runMode: "execute",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				stableYieldPlanId: executionApproval.planId,
+				stableYieldApprovalToken: executionApproval.approvalToken,
+				stableYieldActionId: "near.stable-yield.supply-planid.supply",
+			},
+		);
+
+		const executeArtifact = (
+			executeResult.details as {
+				artifacts: { execute: Record<string, unknown> };
+			}
+		).artifacts.execute;
+		expect(executeArtifact.schema).toBe(
+			"near.defi.stableYieldProposalExecution.v1",
+		);
+		expect(executeArtifact.status).toBe("ready");
+		expect(executeArtifact.mode).toBe("agent-wallet");
+		expect(executeArtifact.adapterIntent).toEqual(
+			expect.objectContaining({
+				intentType: "near.lend.burrow.supply",
+				type: "near_supplyBurrow",
+				tokenId: "usdc.tether-token.near",
+			}),
+		);
+	});
+
+	it("defaults to the first proposed stable-yield action when stableYieldActionId is omitted", async () => {
+		const tool = getTool();
+		readMocks.getStableYieldPlan.mockResolvedValueOnce({
+			content: [{ type: "text", text: "stable yield default action plan ok" }],
+			details: {
+				schema: "near.defi.stableYieldPlan.v1",
+				rpcEndpoint: "https://rpc.mainnet.near.org",
+				burrowContractId: "contract.main.burrow.near",
+				protocol: "Burrow",
+				generatedAt: new Date("2025-01-01T00:00:00.000Z").toISOString(),
+				stableSymbols: ["USDC"],
+				network: "mainnet",
+				topN: 1,
+				includeDisabled: false,
+				status: "ready",
+				planId: "near.stable-yield.default-action-planid",
+				candidates: [],
+				selected: null,
+				executionPlan: {
+					planId: "near.stable-yield.default-action-planid",
+					mode: "analysis-only",
+					requiresAgentWallet: true,
+					canAutoExecute: false,
+					riskProfile: {
+						riskBand: "low",
+						riskScore: 0.08,
+						rationale: "multi-action",
+					},
+					reasons: ["mock"],
+					recommendedApproach: "single-best-candidate",
+					proposedActions: [
+						{
+							action: "withdraw",
+							actionId: "near.stable-yield.default-action-planid.withdraw",
+							protocol: "Burrow",
+							step: 1,
+							tokenId: "usdc.tether-token.near",
+							symbol: "USDC",
+							asCollateral: true,
+							allocationHint: "single-winner",
+							rationale: "withdraw",
+						},
+						{
+							action: "supply",
+							actionId: "near.stable-yield.default-action-planid.supply",
+							protocol: "Burrow",
+							step: 2,
+							tokenId: "usdc.tether-token.near",
+							symbol: "USDC",
+							asCollateral: false,
+							allocationHint: "max-eligible",
+							rationale: "supply",
+						},
+					],
+				},
+			},
+		});
+
+		const simulateResult = await tool.execute(
+			"near-wf-stable-yield-default-action",
+			{
+				runId: "wf-near-stable-yield-default-action-01",
+				runMode: "simulate",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+			},
+		);
+
+		const simulateArtifact = (
+			simulateResult.details as {
+				artifacts: { simulate: Record<string, unknown> };
+			}
+		).artifacts.simulate;
+		const executionApproval = simulateArtifact.executionApproval as
+			| { planId?: string; approvalToken?: string }
+			| undefined;
+		if (executionApproval == null) {
+			throw new Error("executionApproval missing");
+		}
+
+		const executeResult = await tool.execute(
+			"near-wf-stable-yield-default-action",
+			{
+				runId: "wf-near-stable-yield-default-action-01",
+				runMode: "execute",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				stableYieldPlanId: executionApproval.planId,
+				stableYieldApprovalToken: executionApproval.approvalToken,
+			},
+		);
+
+		const executeArtifact = (
+			executeResult.details as {
+				artifacts: { execute: Record<string, unknown> };
+			}
+		).artifacts.execute;
+		expect(executeArtifact.actionId).toBe(
+			"near.stable-yield.default-action-planid.withdraw",
+		);
+		expect(executeArtifact.adapterIntent).toEqual(
+			expect.objectContaining({
+				intentType: "near.lend.burrow.withdraw",
+				type: "near_withdrawBurrow",
+				tokenId: "usdc.tether-token.near",
+			}),
+		);
+	});
+
+	it("rejects stable-yield execute when selected action is missing tokenId", async () => {
+		const tool = getTool();
+		readMocks.getStableYieldPlan.mockResolvedValueOnce({
+			content: [{ type: "text", text: "stable yield missing token plan ok" }],
+			details: {
+				schema: "near.defi.stableYieldPlan.v1",
+				rpcEndpoint: "https://rpc.mainnet.near.org",
+				burrowContractId: "contract.main.burrow.near",
+				protocol: "Burrow",
+				generatedAt: new Date("2025-01-01T00:00:00.000Z").toISOString(),
+				stableSymbols: ["USDC"],
+				network: "mainnet",
+				topN: 1,
+				includeDisabled: false,
+				status: "ready",
+				planId: "near.stable-yield.missing-token-planid",
+				candidates: [],
+				selected: null,
+				executionPlan: {
+					planId: "near.stable-yield.missing-token-planid",
+					mode: "analysis-only",
+					requiresAgentWallet: true,
+					canAutoExecute: false,
+					riskProfile: {
+						riskBand: "low",
+						riskScore: 0.18,
+						rationale: "mock",
+					},
+					reasons: ["mock"],
+					recommendedApproach: "single-best-candidate",
+					proposedActions: [
+						{
+							action: "supply",
+							actionId: "near.stable-yield.missing-token-planid.supply",
+							protocol: "Burrow",
+							step: 1,
+							tokenId: null,
+							symbol: "USDC",
+							asCollateral: true,
+							allocationHint: "max-eligible",
+							rationale: "supply",
+						},
+					],
+				},
+			},
+		});
+
+		const simulateResult = await tool.execute(
+			"near-wf-stable-yield-missing-token",
+			{
+				runId: "wf-near-stable-yield-missing-token-01",
+				runMode: "simulate",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+			},
+		);
+
+		const simulateArtifact = (
+			simulateResult.details as {
+				artifacts: { simulate: Record<string, unknown> };
+			}
+		).artifacts.simulate;
+		const executionApproval = simulateArtifact.executionApproval as
+			| { planId?: string; approvalToken?: string }
+			| undefined;
+		if (executionApproval == null) {
+			throw new Error("executionApproval missing");
+		}
+
+		await expect(
+			tool.execute("near-wf-stable-yield-missing-token", {
+				runId: "wf-near-stable-yield-missing-token-01",
+				runMode: "execute",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				stableYieldPlanId: executionApproval.planId,
+				stableYieldApprovalToken: executionApproval.approvalToken,
+			}),
+		).rejects.toThrow(
+			"Selected stable-yield action is missing tokenId; cannot build agent-wallet payload.",
+		);
+	});
+
+	it("rejects stable-yield execute when no executable actions are available", async () => {
+		const tool = getTool();
+		readMocks.getStableYieldPlan.mockResolvedValueOnce({
+			content: [{ type: "text", text: "stable yield empty actions plan ok" }],
+			details: {
+				schema: "near.defi.stableYieldPlan.v1",
+				rpcEndpoint: "https://rpc.mainnet.near.org",
+				burrowContractId: "contract.main.burrow.near",
+				protocol: "Burrow",
+				generatedAt: new Date("2025-01-01T00:00:00.000Z").toISOString(),
+				stableSymbols: ["USDC"],
+				network: "mainnet",
+				topN: 1,
+				includeDisabled: false,
+				status: "ready",
+				planId: "near.stable-yield.empty-actions-planid",
+				candidates: [],
+				selected: null,
+				executionPlan: {
+					planId: "near.stable-yield.empty-actions-planid",
+					mode: "analysis-only",
+					requiresAgentWallet: true,
+					canAutoExecute: false,
+					riskProfile: {
+						riskBand: "low",
+						riskScore: 0.3,
+						rationale: "mock",
+					},
+					reasons: ["mock"],
+					recommendedApproach: "single-best-candidate",
+					proposedActions: "not-an-array",
+				},
+			},
+		});
+
+		const simulateResult = await tool.execute(
+			"near-wf-stable-yield-no-actions",
+			{
+				runId: "wf-near-stable-yield-no-actions-01",
+				runMode: "simulate",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+			},
+		);
+
+		const simulateArtifact = (
+			simulateResult.details as {
+				artifacts: { simulate: Record<string, unknown> };
+			}
+		).artifacts.simulate;
+		const executionApproval = simulateArtifact.executionApproval as
+			| { planId?: string; approvalToken?: string }
+			| undefined;
+		if (executionApproval == null) {
+			throw new Error("executionApproval missing");
+		}
+
+		await expect(
+			tool.execute("near-wf-stable-yield-no-actions", {
+				runId: "wf-near-stable-yield-no-actions-01",
+				runMode: "execute",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				stableYieldPlanId: executionApproval.planId,
+				stableYieldApprovalToken: executionApproval.approvalToken,
+			}),
+		).rejects.toThrow(
+			"Stable-yield proposal contains no executable actions. Re-run simulate and verify proposal generation.",
+		);
+	});
+
+	it("requires stableYieldPlanId and approval token for stable yield execute", async () => {
 		const tool = getTool();
 		await expect(
-			tool.execute("near-wf-stable-yield-execute", {
+			tool.execute("near-wf-stable-yield-exec-missing", {
 				runMode: "execute",
 				intentType: "near.defi.stableYieldPlan",
 				confirmMainnet: true,
 				network: "mainnet",
-				topN: 3,
-				stableSymbols: ["USDC", "USDT"],
 			}),
-		).rejects.toThrow("read-only");
+		).rejects.toThrow(
+			"near.defi.stableYieldPlan execute requires stableYieldPlanId and stableYieldApprovalToken.",
+		);
+	});
+
+	it("requires fresh stable-yield context when execute does not have execution context", async () => {
+		const tool = getTool();
+		const runId = "wf-near-stable-yield-no-context-01";
+		await tool.execute("near-wf-stable-yield-no-context-prime", {
+			runId,
+			runMode: "simulate",
+			intentType: "near.transfer.near",
+			network: "mainnet",
+			toAccountId: "alice.near",
+			amountYoctoNear: "1000000000000000000",
+			confirmMainnet: true,
+		});
+		await expect(
+			tool.execute("near-wf-stable-yield-no-context", {
+				runId,
+				runMode: "execute",
+				intentType: "near.defi.stableYieldPlan",
+				network: "mainnet",
+				confirmMainnet: true,
+				stableYieldPlanId: "near.stable-yield.missing",
+				stableYieldApprovalToken: "tok-missing",
+			}),
+		).rejects.toThrow(
+			"No cached stable-yield proposal context found for this run. Re-run simulate to regenerate executionApproval.",
+		);
+	});
+
+	it("rejects mismatch approval token or planId for stable yield execute", async () => {
+		const tool = getTool();
+		const simulateResult = await tool.execute("near-wf-stable-yield-mismatch", {
+			runId: "wf-near-stable-yield-mismatch-01",
+			runMode: "simulate",
+			network: "mainnet",
+			intentType: "near.defi.stableYieldPlan",
+			confirmMainnet: true,
+		});
+		const simulateArtifact = (
+			simulateResult.details as {
+				artifacts: { simulate: Record<string, unknown> };
+			}
+		).artifacts.simulate;
+		const executionApproval = simulateArtifact.executionApproval as
+			| { planId?: string; approvalToken?: string }
+			| undefined;
+		if (executionApproval == null) {
+			throw new Error("executionApproval missing");
+		}
+		await expect(
+			tool.execute("near-wf-stable-yield-mismatch", {
+				runId: "wf-near-stable-yield-mismatch-01",
+				runMode: "execute",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				stableYieldPlanId: `${executionApproval.planId}-bad`,
+				stableYieldApprovalToken: executionApproval.approvalToken,
+			}),
+		).rejects.toThrow("Stable-yield plan mismatch:");
+		await expect(
+			tool.execute("near-wf-stable-yield-mismatch", {
+				runId: "wf-near-stable-yield-mismatch-01",
+				runMode: "execute",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				stableYieldPlanId: executionApproval.planId,
+				stableYieldApprovalToken: `${executionApproval.approvalToken}bad`,
+			}),
+		).rejects.toThrow("Stable-yield approvalToken mismatch.");
+	});
+
+	it("rejects unknown stableYieldActionId for stable yield execute", async () => {
+		const tool = getTool();
+		readMocks.getStableYieldPlan.mockResolvedValueOnce({
+			content: [
+				{ type: "text", text: "stable yield action-id mismatch plan ok" },
+			],
+			details: {
+				schema: "near.defi.stableYieldPlan.v1",
+				rpcEndpoint: "https://rpc.mainnet.near.org",
+				burrowContractId: "contract.main.burrow.near",
+				protocol: "Burrow",
+				generatedAt: new Date("2025-01-01T00:00:00.000Z").toISOString(),
+				stableSymbols: ["USDC"],
+				network: "mainnet",
+				topN: 1,
+				includeDisabled: false,
+				status: "ready",
+				planId: "near.stable-yield.multi-action-planid",
+				candidates: [],
+				selected: null,
+				executionPlan: {
+					planId: "near.stable-yield.multi-action-planid.supply",
+					mode: "analysis-only",
+					requiresAgentWallet: true,
+					canAutoExecute: false,
+					riskProfile: {
+						riskBand: "low",
+						riskScore: 0.15,
+						rationale: "mock",
+					},
+					reasons: ["mock"],
+					recommendedApproach: "single-best-candidate",
+					proposedActions: [
+						{
+							action: "withdraw",
+							actionId: "near.stable-yield.multi-action-planid.withdraw",
+							protocol: "Burrow",
+							step: 1,
+							tokenId: "usdc.tether-token.near",
+							symbol: "USDC",
+							asCollateral: true,
+							allocationHint: "single-winner",
+							rationale: "withdraw",
+						},
+						{
+							action: "supply",
+							actionId: "near.stable-yield.multi-action-planid.supply",
+							protocol: "Burrow",
+							step: 2,
+							tokenId: "usdc.tether-token.near",
+							symbol: "USDC",
+							asCollateral: false,
+							allocationHint: "max-eligible",
+							rationale: "supply",
+						},
+					],
+				},
+			},
+		});
+
+		const simulateResult = await tool.execute("near-wf-stable-yield-actionid", {
+			runId: "wf-near-stable-yield-actionid-01",
+			runMode: "simulate",
+			network: "mainnet",
+			intentType: "near.defi.stableYieldPlan",
+			confirmMainnet: true,
+		});
+		const simulateArtifact = (
+			simulateResult.details as {
+				artifacts: { simulate: Record<string, unknown> };
+			}
+		).artifacts.simulate;
+		const executionApproval = simulateArtifact.executionApproval as
+			| { planId?: string; approvalToken?: string }
+			| undefined;
+		if (executionApproval == null) {
+			throw new Error("executionApproval missing");
+		}
+		await expect(
+			tool.execute("near-wf-stable-yield-actionid", {
+				runId: "wf-near-stable-yield-actionid-01",
+				runMode: "execute",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				stableYieldPlanId: executionApproval.planId,
+				stableYieldApprovalToken: executionApproval.approvalToken,
+				stableYieldActionId: "near.stable-yield.multi-action-planid.unknown",
+			}),
+		).rejects.toThrow(
+			"No matching action found for stableYieldActionId=near.stable-yield.multi-action-planid.unknown.",
+		);
+	});
+
+	it("enforces stable-yield proposal expiry and supports replay prevention", async () => {
+		const tool = getTool();
+		readMocks.getStableYieldPlan.mockResolvedValueOnce({
+			content: [{ type: "text", text: "stable yield expired plan ok" }],
+			details: {
+				schema: "near.defi.stableYieldPlan.v1",
+				rpcEndpoint: "https://rpc.mainnet.near.org",
+				burrowContractId: "contract.main.burrow.near",
+				protocol: "Burrow",
+				generatedAt: new Date("2025-01-01T00:00:00.000Z").toISOString(),
+				stableSymbols: ["USDC"],
+				network: "mainnet",
+				topN: 1,
+				includeDisabled: false,
+				status: "ready",
+				planId: "near.stable-yield.supply-planid-expired",
+				candidates: [],
+				selected: null,
+				executionPlan: {
+					planId: "near.stable-yield.supply-planid-expired.supply",
+					mode: "analysis-only",
+					requiresAgentWallet: true,
+					canAutoExecute: false,
+					riskProfile: {
+						riskBand: "low",
+						riskScore: 0.12,
+						rationale: "mock low risk",
+					},
+					expiresAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+					reasons: ["mock"],
+					recommendedApproach: "single-best-candidate",
+					proposedActions: [
+						{
+							action: "supply",
+							actionId: "near.stable-yield.supply-planid-expired.supply",
+							protocol: "Burrow",
+							step: 1,
+							tokenId: "usdc.tether-token.near",
+							symbol: "USDC",
+							asCollateral: true,
+							allocationHint: "single-winner",
+							rationale: "supply",
+						},
+					],
+				},
+			},
+		});
+
+		const simulateResult = await tool.execute("near-wf-stable-yield-expired", {
+			runId: "wf-near-stable-yield-expired-01",
+			runMode: "simulate",
+			network: "mainnet",
+			intentType: "near.defi.stableYieldPlan",
+			confirmMainnet: true,
+		});
+		const simulateArtifact = (
+			simulateResult.details as {
+				artifacts: { simulate: Record<string, unknown> };
+			}
+		).artifacts.simulate;
+		const executionApproval = simulateArtifact.executionApproval as
+			| { planId?: string; approvalToken?: string }
+			| undefined;
+		if (executionApproval == null) {
+			throw new Error("executionApproval missing");
+		}
+		await expect(
+			tool.execute("near-wf-stable-yield-expired", {
+				runId: "wf-near-stable-yield-expired-01",
+				runMode: "execute",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				stableYieldPlanId: executionApproval.planId,
+				stableYieldApprovalToken: executionApproval.approvalToken,
+			}),
+		).rejects.toThrow("Stable-yield execution approval has expired");
+	});
+
+	it("enforces confirmRisk for high-risk stable-yield execute and supports replay prevention", async () => {
+		const tool = getTool();
+		readMocks.getStableYieldPlan.mockResolvedValueOnce({
+			content: [{ type: "text", text: "stable yield risk plan ok" }],
+			details: {
+				schema: "near.defi.stableYieldPlan.v1",
+				rpcEndpoint: "https://rpc.mainnet.near.org",
+				burrowContractId: "contract.main.burrow.near",
+				protocol: "Burrow",
+				generatedAt: new Date("2025-01-01T00:00:00.000Z").toISOString(),
+				stableSymbols: ["USDC"],
+				network: "mainnet",
+				topN: 1,
+				includeDisabled: false,
+				status: "ready",
+				planId: "near.stable-yield.supply-planid-highrisk",
+				candidates: [],
+				selected: null,
+				executionPlan: {
+					planId: "near.stable-yield.supply-planid-highrisk.supply",
+					mode: "analysis-only",
+					requiresAgentWallet: true,
+					canAutoExecute: false,
+					riskProfile: {
+						riskBand: "high",
+						riskScore: 0.95,
+						rationale: "mock high risk",
+					},
+					reasons: ["mock"],
+					recommendedApproach: "single-best-candidate",
+					proposedActions: [
+						{
+							action: "supply",
+							actionId: "near.stable-yield.supply-planid-highrisk.supply",
+							protocol: "Burrow",
+							step: 1,
+							tokenId: "usdc.tether-token.near",
+							symbol: "USDC",
+							asCollateral: true,
+							allocationHint: "single-winner",
+							rationale: "supply",
+						},
+					],
+				},
+			},
+		});
+
+		const simulateResult = await tool.execute("near-wf-stable-yield-risk", {
+			runId: "wf-near-stable-yield-risk-01",
+			runMode: "simulate",
+			network: "mainnet",
+			intentType: "near.defi.stableYieldPlan",
+			confirmMainnet: true,
+		});
+		const simulateArtifact = (
+			simulateResult.details as {
+				artifacts: { simulate: Record<string, unknown> };
+			}
+		).artifacts.simulate;
+		const executionApproval = simulateArtifact.executionApproval as
+			| { planId?: string; approvalToken?: string }
+			| undefined;
+		if (executionApproval == null) {
+			throw new Error("executionApproval missing");
+		}
+		await expect(
+			tool.execute("near-wf-stable-yield-risk", {
+				runId: "wf-near-stable-yield-risk-01",
+				runMode: "execute",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				stableYieldPlanId: executionApproval.planId,
+				stableYieldApprovalToken: executionApproval.approvalToken,
+			}),
+		).rejects.toThrow("Stable-yield proposal risk is high");
+		const firstExecute = await tool.execute("near-wf-stable-yield-risk", {
+			runId: "wf-near-stable-yield-risk-01",
+			runMode: "execute",
+			network: "mainnet",
+			intentType: "near.defi.stableYieldPlan",
+			confirmMainnet: true,
+			confirmRisk: true,
+			stableYieldPlanId: executionApproval.planId,
+			stableYieldApprovalToken: executionApproval.approvalToken,
+		});
+		const first = (
+			firstExecute.details as {
+				artifacts: { execute: Record<string, unknown> };
+			}
+		).artifacts.execute;
+		expect(first.schema).toBe("near.defi.stableYieldProposalExecution.v1");
+		await expect(
+			tool.execute("near-wf-stable-yield-risk", {
+				runId: "wf-near-stable-yield-risk-01",
+				runMode: "execute",
+				network: "mainnet",
+				intentType: "near.defi.stableYieldPlan",
+				confirmMainnet: true,
+				confirmRisk: true,
+				stableYieldPlanId: executionApproval.planId,
+				stableYieldApprovalToken: executionApproval.approvalToken,
+			}),
+		).rejects.toThrow("already executed");
 	});
 });

@@ -290,6 +290,9 @@ type WorkflowParams = {
 	stableSymbols?: string[];
 	topN?: number;
 	includeDisabled?: boolean;
+	stableYieldPlanId?: string;
+	stableYieldApprovalToken?: string;
+	stableYieldActionId?: string;
 };
 
 type ParsedIntentHints = {
@@ -462,12 +465,60 @@ type NearIntentsBadRequest = {
 
 type NearIntentsQueryParams = Record<string, string | undefined>;
 
+type StableYieldExecutionActionSummary = {
+	actionId: string;
+	action: "supply" | "withdraw" | "hold";
+	protocol: "Burrow";
+	step: number;
+	tokenId: string | null;
+	symbol: string | null;
+	asCollateral: boolean;
+	allocationHint: "max-eligible" | "single-winner";
+	rationale: string;
+};
+
+type StableYieldExecutionRiskProfile = {
+	riskScore: number;
+	riskBand: "low" | "medium" | "high";
+	rationale: string;
+};
+
+type StableYieldExecutionPlanSummary = {
+	planId: string;
+	proposalVersion: string;
+	requiresAgentWallet: boolean;
+	canAutoExecute: boolean;
+	riskProfile?: StableYieldExecutionRiskProfile | null;
+	reasons?: string[];
+	proposedActions: StableYieldExecutionActionSummary[];
+	recommendedApproach?: string;
+	expiresAt?: string;
+};
+
+type StableYieldExecutionSessionContext = {
+	planId: string;
+	approvalToken: string;
+	requiresAgentWallet: boolean;
+	canAutoExecute: boolean;
+	tokenSymbol?: string | null;
+	approvedAt: string;
+	expiresAt?: string | null;
+	proposalVersion: string;
+	executionPlan: StableYieldExecutionPlanSummary | null;
+	riskProfile?: StableYieldExecutionRiskProfile | null;
+	schema: "near.defi.stableYieldProposalApproval.v1";
+	lastExecutedPlanId?: string;
+	lastExecutedActionId?: string;
+	lastExecutedAt?: string;
+};
+
 type WorkflowSessionRecord = {
 	runId: string;
 	network: "mainnet" | "testnet";
 	intent: NearWorkflowIntent;
 	confirmToken: string | null;
 	poolCandidates: RefPoolCandidateSummary[];
+	stableYieldExecutionContext?: StableYieldExecutionSessionContext;
 };
 
 type RefPoolCandidateSummary = RefPoolPairCandidate;
@@ -526,7 +577,7 @@ function rememberWorkflowSession(record: WorkflowSessionRecord): void {
 }
 
 function readWorkflowSession(runId?: string): WorkflowSessionRecord | null {
-	if (runId && WORKFLOW_SESSION_BY_RUN_ID.has(runId)) {
+	if (runId) {
 		return WORKFLOW_SESSION_BY_RUN_ID.get(runId) ?? null;
 	}
 	return latestWorkflowSession;
@@ -3694,6 +3745,230 @@ async function runNearStableYieldPlan(params: {
 	return planResult.details;
 }
 
+function isStableYieldReplayReplayViolation(
+	context: StableYieldExecutionSessionContext,
+	actionId: string,
+): boolean {
+	return (
+		context.lastExecutedPlanId === context.planId &&
+		context.lastExecutedActionId === actionId
+	);
+}
+
+async function runNearStableYieldProposalExecute(params: {
+	intent: NearStableYieldPlanIntent;
+	network: ReturnType<typeof parseNearNetwork>;
+	params: WorkflowParams;
+	runId: string;
+	session: WorkflowSessionRecord | null;
+	confirmRisk?: boolean;
+}): Promise<{
+	content: { type: string; text: string }[];
+	details: {
+		runId: string;
+		runMode: string;
+		network: string;
+		intentType: NearWorkflowIntent["type"];
+		intent: NearStableYieldPlanIntent;
+		approvalRequired: boolean;
+		confirmToken: string | null;
+		artifacts: {
+			execute: Record<string, unknown>;
+		};
+	};
+}> {
+	const providedPlanId =
+		typeof params.params.stableYieldPlanId === "string" &&
+		params.params.stableYieldPlanId.trim()
+			? params.params.stableYieldPlanId.trim()
+			: undefined;
+	const providedApprovalToken =
+		typeof params.params.stableYieldApprovalToken === "string" &&
+		params.params.stableYieldApprovalToken.trim()
+			? params.params.stableYieldApprovalToken.trim()
+			: undefined;
+	const providedActionId =
+		typeof params.params.stableYieldActionId === "string" &&
+		params.params.stableYieldActionId.trim()
+			? params.params.stableYieldActionId.trim()
+			: undefined;
+	if (providedPlanId == null || providedApprovalToken == null) {
+		throw new Error(
+			"near.defi.stableYieldPlan execute requires stableYieldPlanId and stableYieldApprovalToken.",
+		);
+	}
+	const sessionContext = readStableYieldExecutionContextFromSession(
+		params.session,
+	);
+	if (sessionContext == null) {
+		throw new Error(
+			"No cached stable-yield proposal context found for this run. Re-run simulate to regenerate executionApproval.",
+		);
+	}
+	if (sessionContext.planId !== providedPlanId) {
+		throw new Error(
+			`Stable-yield plan mismatch: provided ${providedPlanId}, expected ${sessionContext.planId}.`,
+		);
+	}
+	if (sessionContext.approvalToken !== providedApprovalToken) {
+		throw new Error(
+			"Stable-yield approvalToken mismatch. Pass the exact stableYieldApprovalToken from simulation.",
+		);
+	}
+	if (
+		sessionContext.expiresAt != null &&
+		Date.parse(sessionContext.expiresAt) <= Date.now()
+	) {
+		throw new Error(
+			`Stable-yield execution approval has expired at ${sessionContext.expiresAt}. Re-run simulate to refresh.`,
+		);
+	}
+	const proposalActions = sessionContext.executionPlan?.proposedActions ?? [];
+	if (proposalActions.length === 0) {
+		throw new Error(
+			"Stable-yield proposal contains no executable actions. Re-run simulate and verify proposal generation.",
+		);
+	}
+	const action =
+		providedActionId != null
+			? proposalActions.find((entry) => entry.actionId === providedActionId)
+			: proposalActions[0];
+	if (!action) {
+		throw new Error(
+			`No matching action found for stableYieldActionId=${providedActionId ?? "<none>"}.`,
+		);
+	}
+	if (action.action === "hold") {
+		return {
+			content: [
+				{
+					type: "text",
+					text: "Stable-yield proposal selected HOLD action; no execution is required.",
+				},
+			],
+			details: {
+				runId: params.runId,
+				runMode: "execute",
+				network: params.network,
+				intentType: params.intent.type,
+				intent: params.intent,
+				approvalRequired: false,
+				confirmToken: null,
+				artifacts: {
+					execute: {
+						schema: "near.defi.stableYieldProposalExecution.v1",
+						status: "ready-no-op",
+						mode: "agent-wallet",
+						planId: sessionContext.planId,
+						actionId: action.actionId,
+						action,
+						requiredApprovals: {
+							type: "agent-wallet",
+							approvalToken: providedApprovalToken,
+							planId: sessionContext.planId,
+						},
+					},
+				},
+			},
+		};
+	}
+	if (action.action !== "supply" && action.action !== "withdraw") {
+		throw new Error(
+			`Unsupported stable-yield action '${action.action}'. Supported actions are supply/withdraw/hold.`,
+		);
+	}
+	if (
+		(action.action === "supply" || action.action === "withdraw") &&
+		action.tokenId == null
+	) {
+		throw new Error(
+			"Selected stable-yield action is missing tokenId; cannot build agent-wallet payload.",
+		);
+	}
+	if (
+		sessionContext.riskProfile?.riskBand === "high" &&
+		params.confirmRisk !== true
+	) {
+		throw new Error(
+			"Stable-yield proposal risk is high. Pass confirmRisk=true to continue.",
+		);
+	}
+	if (isStableYieldReplayReplayViolation(sessionContext, action.actionId)) {
+		throw new Error(
+			`Stable-yield proposal action ${action.actionId} already executed. Generate a fresh proposal before re-executing.`,
+		);
+	}
+	const now = new Date().toISOString();
+	if (params.session) {
+		params.session.stableYieldExecutionContext = {
+			...sessionContext,
+			lastExecutedPlanId: sessionContext.planId,
+			lastExecutedActionId: action.actionId,
+			lastExecutedAt: now,
+		};
+		rememberWorkflowSession(params.session);
+	}
+	const adapterHint =
+		action.action === "supply"
+			? {
+					intentType: "near.lend.burrow.supply",
+					type: "near_supplyBurrow",
+					tokenId: action.tokenId,
+					asCollateral: action.asCollateral,
+					hint: action.allocationHint,
+				}
+			: {
+					intentType: "near.lend.burrow.withdraw",
+					type: "near_withdrawBurrow",
+					tokenId: action.tokenId,
+					hint: action.allocationHint,
+				};
+	return {
+		content: [
+			{
+				type: "text",
+				text: `Stable-yield proposal ready for agent-wallet execution: actionId=${action.actionId}, type=${action.action}, token=${action.tokenId ?? "n/a"}.`,
+			},
+		],
+		details: {
+			runId: params.runId,
+			runMode: "execute",
+			network: params.network,
+			intentType: params.intent.type,
+			intent: params.intent,
+			approvalRequired: false,
+			confirmToken: null,
+			artifacts: {
+				execute: {
+					schema: "near.defi.stableYieldProposalExecution.v1",
+					status: "ready",
+					mode: "agent-wallet",
+					planId: sessionContext.planId,
+					actionId: action.actionId,
+					action,
+					riskProfile: sessionContext.riskProfile,
+					requiredApprovals: {
+						type: "agent-wallet",
+						approvalToken: providedApprovalToken,
+						planId: sessionContext.planId,
+					},
+					approvalExpiresAt: sessionContext.expiresAt,
+					executionHint: {
+						requiresAgentWallet: sessionContext.requiresAgentWallet,
+						canAutoExecute: sessionContext.canAutoExecute,
+						recommendedApproach:
+							typeof sessionContext.executionPlan?.recommendedApproach ===
+							"string"
+								? sessionContext.executionPlan.recommendedApproach
+								: "single-best-candidate",
+					},
+					adapterIntent: adapterHint,
+				},
+			},
+		},
+	};
+}
+
 async function simulateNearTransfer(params: {
 	intent: NearTransferIntent;
 	network: string;
@@ -6008,6 +6283,11 @@ function attachStableYieldProposalArtifact(params: {
 	if (planId == null) {
 		return artifact;
 	}
+	const riskProfile =
+		typeof executionPlan?.riskProfile === "object" &&
+		executionPlan.riskProfile !== null
+			? executionPlan.riskProfile
+			: null;
 	return {
 		...artifact,
 		executionApproval: {
@@ -6026,9 +6306,7 @@ function attachStableYieldProposalArtifact(params: {
 				typeof executionPlan?.canAutoExecute === "boolean"
 					? executionPlan.canAutoExecute
 					: false,
-			riskProfile: isObjectRecord(executionPlan?.riskProfile)
-				? executionPlan.riskProfile
-				: null,
+			riskProfile: isObjectRecord(riskProfile) ? riskProfile : null,
 			expiresAt:
 				typeof executionPlan?.expiresAt === "string"
 					? executionPlan.expiresAt
@@ -6037,6 +6315,272 @@ function attachStableYieldProposalArtifact(params: {
 			approvalTokenHint:
 				"Attach this token when routing this plan to the approved executor.",
 		},
+	};
+}
+
+function buildStableYieldExecutionActionSummary(
+	artifactExecutionPlan: Record<string, unknown> | null,
+): StableYieldExecutionActionSummary[] {
+	if (!isObjectRecord(artifactExecutionPlan)) return [];
+	const actions =
+		isObjectRecord(artifactExecutionPlan.proposedActions) ||
+		Array.isArray(artifactExecutionPlan.proposedActions)
+			? artifactExecutionPlan.proposedActions
+			: [];
+	if (!Array.isArray(actions)) return [];
+	const summary: StableYieldExecutionActionSummary[] = [];
+	for (const entry of actions) {
+		if (!isObjectRecord(entry)) continue;
+		const actionId =
+			typeof entry.actionId === "string" && entry.actionId.trim()
+				? entry.actionId.trim()
+				: "";
+		if (!actionId) continue;
+		const action =
+			entry.action === "withdraw" ||
+			entry.action === "hold" ||
+			entry.action === "supply"
+				? entry.action
+				: "hold";
+		if (entry.protocol !== "Burrow") continue;
+		const step =
+			typeof entry.step === "number" && Number.isFinite(entry.step)
+				? Math.max(1, Math.floor(entry.step))
+				: 1;
+		const tokenId = typeof entry.tokenId === "string" ? entry.tokenId : null;
+		const symbol = typeof entry.symbol === "string" ? entry.symbol : null;
+		const asCollateral =
+			typeof entry.asCollateral === "boolean" ? entry.asCollateral : true;
+		const allocationHint =
+			typeof entry.allocationHint === "string" &&
+			(entry.allocationHint === "max-eligible" ||
+				entry.allocationHint === "single-winner")
+				? entry.allocationHint
+				: "max-eligible";
+		const rationale =
+			typeof entry.rationale === "string" ? entry.rationale : "No rationale.";
+		summary.push({
+			actionId,
+			action,
+			protocol: "Burrow",
+			step,
+			tokenId,
+			symbol,
+			asCollateral,
+			allocationHint,
+			rationale,
+		});
+	}
+	return summary;
+}
+
+function normalizeStableYieldRiskProfile(
+	value: unknown,
+): StableYieldExecutionRiskProfile | null {
+	if (!isObjectRecord(value)) return null;
+	const riskBandValue = value.riskBand;
+	if (
+		riskBandValue !== "low" &&
+		riskBandValue !== "medium" &&
+		riskBandValue !== "high"
+	) {
+		return null;
+	}
+	const riskScore =
+		typeof value.riskScore === "number" && Number.isFinite(value.riskScore)
+			? value.riskScore
+			: 1;
+	const rationale =
+		typeof value.rationale === "string" ? value.rationale : "No rationale.";
+	return {
+		riskScore,
+		riskBand: riskBandValue,
+		rationale,
+	};
+}
+
+function extractStableYieldExecutionPlanSummary(
+	artifact: Record<string, unknown>,
+): StableYieldExecutionSessionContext | null {
+	if (!isObjectRecord(artifact)) return null;
+	const executionPlan = isObjectRecord(artifact.executionPlan)
+		? artifact.executionPlan
+		: null;
+	const executionApproval = isObjectRecord(artifact.executionApproval)
+		? artifact.executionApproval
+		: null;
+	const planId =
+		typeof artifact.planId === "string"
+			? artifact.planId
+			: typeof executionPlan?.planId === "string"
+				? executionPlan.planId
+				: null;
+	if (planId == null) return null;
+	const approvalToken =
+		typeof executionApproval?.approvalToken === "string"
+			? executionApproval.approvalToken
+			: null;
+	if (approvalToken == null) return null;
+	const canAutoExecute =
+		typeof executionPlan?.canAutoExecute === "boolean"
+			? executionPlan.canAutoExecute
+			: false;
+	const requiresAgentWallet =
+		typeof executionPlan?.requiresAgentWallet === "boolean"
+			? executionPlan.requiresAgentWallet
+			: true;
+	const proposalVersion =
+		typeof executionPlan?.proposalVersion === "string"
+			? executionPlan.proposalVersion
+			: typeof executionApproval?.proposalVersion === "string"
+				? executionApproval.proposalVersion
+				: "v1";
+	const expiresAt =
+		typeof executionPlan?.expiresAt === "string"
+			? executionPlan.expiresAt
+			: typeof executionApproval?.expiresAt === "string"
+				? executionApproval.expiresAt
+				: null;
+	const reasons =
+		Array.isArray(executionPlan?.reasons) && executionPlan.reasons.length > 0
+			? executionPlan.reasons.filter(
+					(entry: unknown): entry is string =>
+						typeof entry === "string" && entry.trim().length > 0,
+				)
+			: [];
+	const recommendedApproach =
+		typeof executionPlan?.recommendedApproach === "string"
+			? executionPlan.recommendedApproach
+			: "single-best-candidate";
+	const riskProfile = normalizeStableYieldRiskProfile(
+		executionPlan?.riskProfile,
+	);
+	const proposedActions = buildStableYieldExecutionActionSummary(executionPlan);
+	return {
+		planId,
+		approvalToken,
+		proposalVersion,
+		requiresAgentWallet,
+		canAutoExecute,
+		expiresAt,
+		approvedAt: new Date().toISOString(),
+		schema: "near.defi.stableYieldProposalApproval.v1",
+		riskProfile,
+		executionPlan: {
+			planId,
+			proposalVersion,
+			requiresAgentWallet,
+			canAutoExecute,
+			riskProfile,
+			proposedActions,
+			reasons,
+			recommendedApproach,
+			expiresAt,
+		},
+	};
+}
+
+function readStableYieldExecutionContextFromSession(
+	session: WorkflowSessionRecord | null,
+): StableYieldExecutionSessionContext | null {
+	if (!session) return null;
+	const contextRecord = isObjectRecord(session.stableYieldExecutionContext)
+		? (session.stableYieldExecutionContext as Record<string, unknown>)
+		: null;
+	if (!contextRecord) return null;
+	const planId =
+		typeof contextRecord.planId === "string" && contextRecord.planId.trim()
+			? contextRecord.planId.trim()
+			: null;
+	if (planId == null) return null;
+	const approvalToken =
+		typeof contextRecord.approvalToken === "string" &&
+		contextRecord.approvalToken.trim()
+			? contextRecord.approvalToken.trim()
+			: null;
+	if (approvalToken == null) return null;
+	const executionPlanRecord = isObjectRecord(contextRecord.executionPlan)
+		? contextRecord.executionPlan
+		: null;
+	const executionPlan = executionPlanRecord
+		? {
+				planId,
+				proposalVersion:
+					typeof executionPlanRecord.proposalVersion === "string"
+						? executionPlanRecord.proposalVersion
+						: "v1",
+				requiresAgentWallet:
+					typeof executionPlanRecord.requiresAgentWallet === "boolean"
+						? executionPlanRecord.requiresAgentWallet
+						: true,
+				canAutoExecute:
+					typeof executionPlanRecord.canAutoExecute === "boolean"
+						? executionPlanRecord.canAutoExecute
+						: false,
+				riskProfile: normalizeStableYieldRiskProfile(
+					executionPlanRecord.riskProfile,
+				),
+				proposedActions:
+					buildStableYieldExecutionActionSummary(executionPlanRecord),
+				reasons: Array.isArray(executionPlanRecord.reasons)
+					? executionPlanRecord.reasons.filter(
+							(entry: unknown): entry is string =>
+								typeof entry === "string" && entry.trim().length > 0,
+						)
+					: [],
+				recommendedApproach:
+					typeof executionPlanRecord.recommendedApproach === "string"
+						? executionPlanRecord.recommendedApproach
+						: "single-best-candidate",
+				expiresAt:
+					typeof executionPlanRecord.expiresAt === "string"
+						? executionPlanRecord.expiresAt
+						: null,
+			}
+		: null;
+	return {
+		planId,
+		approvalToken,
+		requiresAgentWallet:
+			typeof contextRecord.requiresAgentWallet === "boolean"
+				? contextRecord.requiresAgentWallet
+				: (executionPlan?.requiresAgentWallet ?? true),
+		canAutoExecute:
+			typeof contextRecord.canAutoExecute === "boolean"
+				? contextRecord.canAutoExecute
+				: (executionPlan?.canAutoExecute ?? false),
+		expiresAt:
+			typeof contextRecord.expiresAt === "string"
+				? contextRecord.expiresAt
+				: (executionPlan?.expiresAt ?? null),
+		approvedAt:
+			typeof contextRecord.approvedAt === "string" &&
+			contextRecord.approvedAt.trim()
+				? contextRecord.approvedAt
+				: new Date().toISOString(),
+		proposalVersion:
+			typeof contextRecord.proposalVersion === "string" &&
+			contextRecord.proposalVersion.trim()
+				? contextRecord.proposalVersion
+				: (executionPlan?.proposalVersion ?? "v1"),
+		schema: "near.defi.stableYieldProposalApproval.v1",
+		executionPlan,
+		riskProfile: normalizeStableYieldRiskProfile(contextRecord.riskProfile),
+		lastExecutedPlanId:
+			typeof contextRecord.lastExecutedPlanId === "string" &&
+			contextRecord.lastExecutedPlanId.trim()
+				? contextRecord.lastExecutedPlanId
+				: undefined,
+		lastExecutedActionId:
+			typeof contextRecord.lastExecutedActionId === "string" &&
+			contextRecord.lastExecutedActionId.trim()
+				? contextRecord.lastExecutedActionId
+				: undefined,
+		lastExecutedAt:
+			typeof contextRecord.lastExecutedAt === "string" &&
+			contextRecord.lastExecutedAt.trim()
+				? contextRecord.lastExecutedAt
+				: undefined,
 	};
 }
 
@@ -6331,6 +6875,9 @@ export function createNearWorkflowTools() {
 				stableSymbols: Type.Optional(Type.Array(Type.String())),
 				topN: Type.Optional(Type.Number()),
 				includeDisabled: Type.Optional(Type.Boolean()),
+				stableYieldPlanId: Type.Optional(Type.String()),
+				stableYieldApprovalToken: Type.Optional(Type.String()),
+				stableYieldActionId: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as WorkflowParams;
@@ -6863,25 +7410,37 @@ export function createNearWorkflowTools() {
 										.poolCandidates,
 								)
 							: [];
-					rememberWorkflowSession({
-						runId,
-						network,
-						intent: sessionIntent,
-						confirmToken: sessionConfirmToken,
-						poolCandidates: sessionPoolCandidates,
-					});
 					const stableYieldApprovalToken = createConfirmToken({
 						runId,
 						network,
 						intent: sessionIntent,
 					});
-					const simulateArtifactWithSummary =
+					const stablePayload =
 						intent.type === "near.defi.stableYieldPlan"
 							? attachStableYieldProposalArtifact({
 									simulateArtifact,
 									planApprovalToken: stableYieldApprovalToken,
 								})
 							: attachSimulateSummaryLine(intent.type, simulateArtifact);
+					const stableYieldExecutionContext =
+						intent.type === "near.defi.stableYieldPlan"
+							? extractStableYieldExecutionPlanSummary(
+									isObjectRecord(stablePayload) ? stablePayload : {},
+								)
+							: null;
+					const stableYieldExecutionContextPatch =
+						stableYieldExecutionContext == null
+							? {}
+							: { stableYieldExecutionContext };
+					rememberWorkflowSession({
+						runId,
+						network,
+						intent: sessionIntent,
+						confirmToken: sessionConfirmToken,
+						poolCandidates: sessionPoolCandidates,
+						...stableYieldExecutionContextPatch,
+					});
+					const simulateArtifactWithSummary = stablePayload;
 					return {
 						content: [
 							{
@@ -6903,7 +7462,6 @@ export function createNearWorkflowTools() {
 						},
 					};
 				}
-
 				const effectiveConfirmMainnet =
 					typeof params.confirmMainnet === "boolean"
 						? params.confirmMainnet
@@ -7134,9 +7692,14 @@ export function createNearWorkflowTools() {
 				}
 
 				if (intent.type === "near.defi.stableYieldPlan") {
-					throw new Error(
-						"near.defi.stableYieldPlan is read-only; use simulate to generate an executionPlan and route execution through a dedicated runner.",
-					);
+					return runNearStableYieldProposalExecute({
+						intent,
+						network,
+						params,
+						runId,
+						session: session,
+						confirmRisk: effectiveConfirmRisk,
+					});
 				}
 				const executeTool =
 					intent.type === "near.transfer.near"
