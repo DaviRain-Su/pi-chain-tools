@@ -49,6 +49,17 @@
       </div>
 
       <div class="card" style="margin-top:16px">
+        <h3>Target Allocation Alert</h3>
+        <div class="row" style="margin-bottom:8px">
+          <input id="targetUsdt" type="number" min="0" max="100" step="0.1" placeholder="USDt target %" size="14" />
+          <input id="targetUsdce" type="number" min="0" max="100" step="0.1" placeholder="USDC.e target %" size="14" />
+          <input id="targetThreshold" type="number" min="0" max="100" step="0.1" placeholder="Alert threshold %" size="16" />
+          <button id="saveTargets">Save</button>
+        </div>
+        <div id="targetAlert" class="muted">-</div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
         <h3>Strategy View</h3>
         <div id="strategy" class="muted">-</div>
       </div>
@@ -123,6 +134,11 @@
       const workerEl = document.getElementById("worker");
       const yieldHealthEl = document.getElementById("yieldHealth");
       const strategyEl = document.getElementById("strategy");
+      const targetUsdtEl = document.getElementById("targetUsdt");
+      const targetUsdceEl = document.getElementById("targetUsdce");
+      const targetThresholdEl = document.getElementById("targetThreshold");
+      const saveTargetsBtn = document.getElementById("saveTargets");
+      const targetAlertEl = document.getElementById("targetAlert");
       const burrowPosEl = document.getElementById("burrowPos");
       const metaEl = document.getElementById("meta");
       const tokensEl = document.getElementById("tokens");
@@ -150,6 +166,75 @@
       function parseNum(value) {
         const n = Number.parseFloat(String(value || "0"));
         return Number.isFinite(n) ? n : 0;
+      }
+
+      const TARGET_KEY = "near-dashboard-targets-v1";
+
+      function loadTargets() {
+        try {
+          const parsed = JSON.parse(localStorage.getItem(TARGET_KEY) || "{}");
+          return {
+            usdt: parseNum(parsed.usdt) || 70,
+            usdce: parseNum(parsed.usdce) || 30,
+            threshold: parseNum(parsed.threshold) || 10,
+          };
+        } catch {
+          return { usdt: 70, usdce: 30, threshold: 10 };
+        }
+      }
+
+      function saveTargets(targets) {
+        localStorage.setItem(TARGET_KEY, JSON.stringify(targets));
+      }
+
+      function normalizeStableSymbol(symbol) {
+        const s = String(symbol || "").toUpperCase();
+        if (s === "USDT" || s === "USDT.E" || s === "USDT") return "USDT";
+        if (s === "USDC.E") return "USDC.E";
+        if (s === "USDCE") return "USDC.E";
+        return s;
+      }
+
+      function computeTargetAlert(snapshot, targets) {
+        const coll = snapshot?.burrow?.collateral || [];
+        if (coll.length === 0) return "No collateral yet, target tracking pending.";
+
+        const stable = coll.map((r) => ({
+          symbol: normalizeStableSymbol(r.symbol),
+          amount: parseNum(r.amount),
+        }));
+
+        const total = stable.reduce((sum, r) => sum + r.amount, 0);
+        if (total <= 0) return "No stable collateral amount detected.";
+
+        const usdtPct =
+          (stable.filter((r) => r.symbol === "USDT").reduce((s, r) => s + r.amount, 0) /
+            total) *
+          100;
+        const usdcePct =
+          (stable
+            .filter((r) => r.symbol === "USDC.E")
+            .reduce((s, r) => s + r.amount, 0) /
+            total) *
+          100;
+
+        const usdtDelta = usdtPct - targets.usdt;
+        const usdceDelta = usdcePct - targets.usdce;
+        const alert =
+          Math.abs(usdtDelta) > targets.threshold ||
+          Math.abs(usdceDelta) > targets.threshold;
+
+        const status = alert
+          ? `<span class="warn">ALERT</span>`
+          : `<span class="ok">ON TARGET</span>`;
+
+        return `${status} · USDt ${usdtPct.toFixed(1)}% (target ${targets.usdt.toFixed(
+          1,
+        )}%, Δ ${usdtDelta >= 0 ? "+" : ""}${usdtDelta.toFixed(
+          1,
+        )}%) · USDC.e ${usdcePct.toFixed(1)}% (target ${targets.usdce.toFixed(
+          1,
+        )}%, Δ ${usdceDelta >= 0 ? "+" : ""}${usdceDelta.toFixed(1)}%)`;
       }
 
       function computeYieldHealth(snapshot) {
@@ -189,6 +274,10 @@
       }
 
       let lastSnapshot = null;
+      let targetConfig = loadTargets();
+      targetUsdtEl.value = targetConfig.usdt;
+      targetUsdceEl.value = targetConfig.usdce;
+      targetThresholdEl.value = targetConfig.threshold;
 
       async function load() {
         const accountId = accountInput.value.trim();
@@ -208,6 +297,7 @@
         burrowRegEl.innerHTML = data.burrow.registered ? `<span class="ok">Registered</span>` : `<span class="warn">Not registered</span>`;
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
         yieldHealthEl.textContent = computeYieldHealth(data);
+        targetAlertEl.innerHTML = computeTargetAlert(data, targetConfig);
 
         if (data.worker) {
           workerEl.innerHTML = `<span class="ok">${data.worker.status}</span> · ${data.worker.dryRun ? "dry-run" : "live"}<br/><span class="muted">cycles: ${data.worker.cycleCount} · last: ${data.worker.lastCycleAt || "-"}</span>`;
@@ -326,6 +416,23 @@
         a.click();
         URL.revokeObjectURL(url);
         exportMetaEl.textContent = "Exported";
+      });
+
+      saveTargetsBtn.addEventListener("click", () => {
+        targetConfig = {
+          usdt: parseNum(targetUsdtEl.value),
+          usdce: parseNum(targetUsdceEl.value),
+          threshold: parseNum(targetThresholdEl.value),
+        };
+        const totalTarget = targetConfig.usdt + targetConfig.usdce;
+        if (Math.abs(totalTarget - 100) > 0.01) {
+          targetAlertEl.innerHTML = `<span class="warn">Target total should be 100% (current ${totalTarget.toFixed(1)}%)</span>`;
+          return;
+        }
+        saveTargets(targetConfig);
+        if (lastSnapshot) {
+          targetAlertEl.innerHTML = computeTargetAlert(lastSnapshot, targetConfig);
+        }
       });
 
       refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));

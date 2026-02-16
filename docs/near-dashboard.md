@@ -13,6 +13,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Action Console: command builder + optional direct execution for selected actions (requires browser confirm)
 - Action history panel: success/error timeline for dashboard-triggered actions
 - Yield health panel: weighted APR + collateral composition summary
+- Target allocation alert: configurable USDt/USDC.e targets + deviation threshold
 - CSV export for latest snapshot
 - Best-effort USD estimates from NEAR Intents token feed
 
