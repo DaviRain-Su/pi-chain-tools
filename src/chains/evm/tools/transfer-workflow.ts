@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
+import { isMainnetLikeEvmNetwork } from "../policy.js";
 import {
 	EVM_TOOL_PREFIX,
 	type EvmNetwork,
@@ -27,6 +28,7 @@ const EVM_NETWORKS: EvmNetwork[] = [
 	"base",
 	"arbitrum",
 	"optimism",
+	"bsc",
 ];
 
 export const EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK: Record<EvmNetwork, string> =
@@ -37,6 +39,7 @@ export const EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK: Record<EvmNetwork, string> =
 		base: "EVM_TRANSFER_TOKEN_MAP_BASE",
 		arbitrum: "EVM_TRANSFER_TOKEN_MAP_ARBITRUM",
 		optimism: "EVM_TRANSFER_TOKEN_MAP_OPTIMISM",
+		bsc: "EVM_TRANSFER_TOKEN_MAP_BSC",
 	};
 
 export const EVM_TRANSFER_TOKEN_MAP_ENV = "EVM_TRANSFER_TOKEN_MAP";
@@ -62,6 +65,7 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 				polygon: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f",
 				arbitrum: "0xFd086bC7CD5C481DCC9C85EBE478A1C0b69FCbb9",
 				optimism: "0x94b008Aa00579c1307B0EF2c499aD98a8ce58e58",
+				bsc: "0x55d398326f99059fF775485246999027B3197955",
 			},
 		},
 		DAI: {
@@ -82,6 +86,7 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 				base: "0x4200000000000000000000000000000000000006",
 				arbitrum: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
 				optimism: "0x4200000000000000000000000000000000000006",
+				bsc: "0x2170Ed0880ac9A755fd29B2688956BD959F933f8",
 			},
 		},
 		WBTC: {
@@ -202,6 +207,7 @@ function parseEvmNetworkAlias(value: string): EvmNetwork | undefined {
 	if (normalized === "base") return "base";
 	if (normalized === "arbitrum" || normalized === "arb") return "arbitrum";
 	if (normalized === "optimism" || normalized === "op") return "optimism";
+	if (normalized === "bsc" || normalized === "bnb") return "bsc";
 	return undefined;
 }
 
@@ -819,7 +825,7 @@ export function createEvmTransferWorkflowTools() {
 					params.confirmToken?.trim() || parsedHints.confirmToken?.trim();
 				const effectiveConfirmMainnet =
 					params.confirmMainnet === true || parsedHints.confirmMainnet === true;
-				const mainnetGuardRequired = network === "polygon";
+				const mainnetGuardRequired = isMainnetLikeEvmNetwork(network);
 				const executeTool = resolveExecuteTool(resolveExecuteToolName(intent));
 				const effectiveRpcUrl = params.rpcUrl || priorSession?.rpcUrl;
 				const effectivePrivateKey =

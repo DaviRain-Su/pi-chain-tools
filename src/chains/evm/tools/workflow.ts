@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
+import { isMainnetLikeEvmNetwork } from "../policy.js";
 import {
 	type Btc5mTradeGuardEvaluation,
 	evaluateBtc5mTradeGuards,
@@ -1553,7 +1554,7 @@ export function createEvmWorkflowTools() {
 					params.confirmToken?.trim() || parsedHints.confirmToken?.trim();
 				const effectiveConfirmMainnet =
 					params.confirmMainnet === true || parsedHints.confirmMainnet === true;
-				const mainnetGuardRequired = network === "polygon";
+				const mainnetGuardRequired = isMainnetLikeEvmNetwork(network);
 
 				const assertMainnetConfirmation = () => {
 					if (!mainnetGuardRequired) return;
