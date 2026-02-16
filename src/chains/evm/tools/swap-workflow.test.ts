@@ -138,6 +138,20 @@ describe("w3rt_run_evm_swap_workflow_v0", () => {
 		);
 	});
 
+	it("rejects decimal amountOutMinRaw with integer guidance", async () => {
+		const tool = getTool();
+		await expect(
+			tool.execute("wf2c2", {
+				runMode: "simulate",
+				network: "bsc",
+				intentText:
+					"先模拟 amountInRaw=10000 amountOutMinRaw=0.5 从 0x1111111111111111111111111111111111111111 换到 0x2222222222222222222222222222222222222222，收款到 0x000000000000000000000000000000000000dead",
+			}),
+		).rejects.toThrow(
+			"amountOutMinRaw must be an integer raw amount. Decimal values are not accepted by this workflow; convert token amount to raw units yourself.",
+		);
+	});
+
 	it("rejects natural-language input missing recipient and explains toAddress hint", async () => {
 		const tool = getTool();
 		await expect(
@@ -233,6 +247,75 @@ describe("w3rt_run_evm_swap_workflow_v0", () => {
 		).rejects.toThrow("Invalid confirmToken");
 	});
 
+	it("rejects execute with stale runId and reused confirm token", async () => {
+		const tool = getTool();
+		executeMocks.pancakeSwapExecute.mockResolvedValueOnce({
+			content: [{ type: "text", text: "swap preview" }],
+			details: {
+				dryRun: true,
+				pairAddress: "0xcccccccccccccccccccccccccccccccccccccccc",
+				amountOutRaw: "4960",
+			},
+		});
+
+		const simulated = await tool.execute("wf-stale", {
+			runMode: "simulate",
+			network: "bsc",
+			tokenInAddress: "0x1111111111111111111111111111111111111111",
+			tokenOutAddress: "0x2222222222222222222222222222222222222222",
+			amountInRaw: "10000",
+			toAddress: "0x000000000000000000000000000000000000dead",
+		});
+
+		await expect(
+			tool.execute("wf-stale-exec", {
+				runId: "wf-stale-other",
+				runMode: "execute",
+				network: "bsc",
+				confirmMainnet: true,
+				confirmToken: (simulated.details as { confirmToken: string })
+					.confirmToken,
+				tokenInAddress: "0x1111111111111111111111111111111111111111",
+				tokenOutAddress: "0x2222222222222222222222222222222222222222",
+				amountInRaw: "10000",
+				toAddress: "0x000000000000000000000000000000000000dead",
+			}),
+		).rejects.toThrow("Invalid confirmToken");
+	});
+
+	it("rejects execute when intent changes without fresh confirmation", async () => {
+		const tool = getTool();
+		executeMocks.pancakeSwapExecute.mockResolvedValueOnce({
+			content: [{ type: "text", text: "swap preview" }],
+			details: {
+				dryRun: true,
+				pairAddress: "0xcccccccccccccccccccccccccccccccccccccccc",
+				amountOutRaw: "4960",
+			},
+		});
+
+		await tool.execute("wf-intent", {
+			runMode: "simulate",
+			network: "bsc",
+			tokenInAddress: "0x1111111111111111111111111111111111111111",
+			tokenOutAddress: "0x2222222222222222222222222222222222222222",
+			amountInRaw: "10000",
+			toAddress: "0x000000000000000000000000000000000000dead",
+		});
+
+		await expect(
+			tool.execute("wf-intent", {
+				runMode: "execute",
+				network: "bsc",
+				confirmMainnet: true,
+				amountInRaw: "20000",
+				tokenInAddress: "0x1111111111111111111111111111111111111111",
+				tokenOutAddress: "0x2222222222222222222222222222222222222222",
+				toAddress: "0x000000000000000000000000000000000000dead",
+			}),
+		).rejects.toThrow("Invalid confirmToken");
+	});
+
 	it("executes swap with confirm token", async () => {
 		const tool = getTool();
 		executeMocks.pancakeSwapExecute.mockResolvedValueOnce({
@@ -292,6 +375,53 @@ describe("w3rt_run_evm_swap_workflow_v0", () => {
 				},
 			},
 		});
+	});
+
+	it("accepts confirmToken from intent text in execute phase", async () => {
+		const tool = getTool();
+		executeMocks.pancakeSwapExecute.mockResolvedValueOnce({
+			content: [{ type: "text", text: "swap preview" }],
+			details: {
+				dryRun: true,
+				pairAddress: "0xcccccccccccccccccccccccccccccccccccccccc",
+				amountOutRaw: "4960",
+			},
+		});
+		executeMocks.pancakeSwapExecute.mockResolvedValueOnce({
+			content: [{ type: "text", text: "swap submitted" }],
+			details: {
+				dryRun: false,
+				txHash: `0x${"2".repeat(64)}`,
+			},
+		});
+
+		const simulated = await tool.execute("wf5t", {
+			runId: "wf5t",
+			runMode: "simulate",
+			network: "bsc",
+			tokenInAddress: "0x1111111111111111111111111111111111111111",
+			tokenOutAddress: "0x2222222222222222222222222222222222222222",
+			amountInRaw: "10000",
+			toAddress: "0x000000000000000000000000000000000000dead",
+		});
+		const details = simulated.details as { confirmToken: string };
+
+		await tool.execute("wf5t", {
+			runId: "wf5t",
+			runMode: "execute",
+			network: "bsc",
+			confirmMainnet: true,
+			intentText: `继续执行，确认主网执行，确认码: ${details.confirmToken}`,
+		});
+
+		expect(executeMocks.pancakeSwapExecute).toHaveBeenCalledTimes(2);
+		expect(executeMocks.pancakeSwapExecute).toHaveBeenLastCalledWith(
+			"wf-evm-swap-execute",
+			expect.objectContaining({
+				confirmMainnet: true,
+				network: "bsc",
+			}),
+		);
 	});
 
 	it("supports follow-up execute intent text continuation", async () => {
