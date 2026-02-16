@@ -616,14 +616,15 @@ GET https://li.quest/v1/quote
 - [x] `ltv-manager.ts` — 链无关 LTV 决策引擎
 - [x] `ltv-manager.test.ts` — 22 个测试
 
-### Phase 1.5：Signer Provider 抽象 ⏱ 1 天 ★ NEW
-- [ ] `signer-types.ts` — `EvmSignerProvider` 接口定义
-- [ ] `signer-local.ts` — `LocalKeySigner`（封装现有 `ethers.Wallet` + `resolveEvmPrivateKey()` 逻辑）
-- [ ] `signer-privy.ts` — `PrivyEvmSigner`（`@privy-io/node` SDK 封装）
-- [ ] Workflow 层重构：execute 路径从直接 `new Wallet(privateKey)` 改为 `signerProvider.signAndSend()`
-- [ ] 向后兼容：`fromPrivateKey` 参数仍可用（自动选择 `LocalKeySigner`）
-- [ ] `PRIVY_APP_ID` + `PRIVY_APP_SECRET` + `PRIVY_WALLET_ID` env 配置
-- [ ] 测试（mock Privy API）
+### Phase 1.5：Signer Provider 抽象 ⏱ 1 天 ★ NEW ✅
+- [x] `signer-types.ts` — `EvmSignerProvider` 接口 + `resolveSignerBackend()` 优先级解析
+- [x] `signer-local.ts` — `LocalKeySigner`（封装 `ethers.Wallet` + nonce/gas 自动解析）
+- [x] `signer-privy.ts` — `PrivyEvmSigner`（`@privy-io/node` 动态导入 + CAIP-2 多链）
+- [x] `signer-resolve.ts` — `resolveEvmSigner()` 自动选择后端（Local > Privy）
+- [x] `src/types/privy-io-node.d.ts` — 可选依赖类型 stub
+- [x] 向后兼容：`fromPrivateKey` / `EVM_PRIVATE_KEY` → LocalKey；`PRIVY_*` → Privy
+- [x] 测试 — 16 tests（后端解析 7 + LocalKey 3 + Privy 3 + 集成 3）
+- [ ] Workflow 层重构：execute 路径从直接 `new Wallet(privateKey)` 改为 `signerProvider.signAndSend()`（Phase 5 Worker Loop 集成时完成）
 
 ### Phase 2：Venus Execute Tools + Workflow ⏱ 2-3 天 ✅
 - [x] `venus-read.ts` — `evm_venusGetMarkets` / `evm_venusGetPosition`（MCP 工具）— 4 tests
