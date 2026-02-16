@@ -25,6 +25,11 @@ const SESSION_DIR =
 		process.env.HOME || "/home/davirain",
 		".openclaw/agents/main/sessions",
 	);
+const ALERT_WEBHOOK_URL = process.env.NEAR_REBAL_ALERT_WEBHOOK_URL || "";
+const ALERT_TELEGRAM_BOT_TOKEN =
+	process.env.NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN || "";
+const ALERT_TELEGRAM_CHAT_ID =
+	process.env.NEAR_REBAL_ALERT_TELEGRAM_CHAT_ID || "";
 
 const ACTION_HISTORY = [];
 const TOKEN_DECIMALS_CACHE = new Map();
@@ -492,6 +497,46 @@ function nearExplorerUrl(txHash) {
 	return `https://explorer.near.org/transactions/${txHash}`;
 }
 
+async function sendAlert(params) {
+	const payload = {
+		timestamp: new Date().toISOString(),
+		...params,
+	};
+	const tasks = [];
+	if (ALERT_WEBHOOK_URL) {
+		tasks.push(
+			fetch(ALERT_WEBHOOK_URL, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(payload),
+			}).catch(() => null),
+		);
+	}
+	if (ALERT_TELEGRAM_BOT_TOKEN && ALERT_TELEGRAM_CHAT_ID) {
+		const text = [
+			`[NEAR Rebalance][${params.level || "info"}] ${params.title || "event"}`,
+			params.message || "",
+		].join("\n");
+		tasks.push(
+			fetch(
+				`https://api.telegram.org/bot${ALERT_TELEGRAM_BOT_TOKEN}/sendMessage`,
+				{
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						chat_id: ALERT_TELEGRAM_CHAT_ID,
+						text,
+						disable_web_page_preview: true,
+					}),
+				},
+			).catch(() => null),
+		);
+	}
+	if (tasks.length > 0) {
+		await Promise.allSettled(tasks);
+	}
+}
+
 async function snapshotRebalanceState(accountId) {
 	const [walletUsdtRaw, walletUsdcRaw, burrow] = await Promise.all([
 		viewFunction("usdt.tether-token.near", "ft_balance_of", {
@@ -951,6 +996,11 @@ async function executeAction(payload) {
 						txHash: rollbackTx,
 						explorerUrl: nearExplorerUrl(rollbackTx),
 					});
+					await sendAlert({
+						level: "warn",
+						title: "Rebalance rollback",
+						message: `runId=${runId} step2 failed, rollback executed. rollbackTx=${rollbackTx || "n/a"}`,
+					});
 					throw new Error(
 						`step2 swap failed and rollback completed: ${error instanceof Error ? error.message : String(error)}`,
 					);
@@ -1031,6 +1081,13 @@ async function executeAction(payload) {
 						? "reconciliation passed (wallet residuals near zero)"
 						: `reconciliation warning: wallet residuals usdt=${stateAfter.walletUsdtRaw} usdc=${stateAfter.walletUsdcRaw}`,
 				});
+				if (!reconciled) {
+					await sendAlert({
+						level: "warn",
+						title: "Rebalance reconciliation warning",
+						message: `runId=${runId} residual wallet balances usdt=${stateAfter.walletUsdtRaw} usdc=${stateAfter.walletUsdcRaw}`,
+					});
+				}
 
 				return {
 					ok: true,
@@ -1053,8 +1110,14 @@ async function executeAction(payload) {
 					},
 				};
 			} catch (error) {
+				const msg = error instanceof Error ? error.message : String(error);
 				endRebalanceRun(runId, "failed", {
-					error: error instanceof Error ? error.message : String(error),
+					error: msg,
+				});
+				await sendAlert({
+					level: "error",
+					title: "Rebalance failed",
+					message: `runId=${runId} error=${msg}`,
 				});
 				throw error;
 			}
