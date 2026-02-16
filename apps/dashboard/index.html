@@ -65,6 +65,7 @@
           <button id="buildRebalanceDraft">Build execution draft</button>
           <button id="copyRebalanceDraft">Copy draft</button>
           <button id="fillActionConsole">Fill Action Console</button>
+          <button id="execRebalanceTxn">Execute Rebalance Txn (auto rollback)</button>
           <span id="rebalanceMeta" class="muted"></span>
         </div>
       </div>
@@ -165,6 +166,7 @@
       const buildRebalanceDraftBtn = document.getElementById("buildRebalanceDraft");
       const copyRebalanceDraftBtn = document.getElementById("copyRebalanceDraft");
       const fillActionConsoleBtn = document.getElementById("fillActionConsole");
+      const execRebalanceTxnBtn = document.getElementById("execRebalanceTxn");
       const rebalanceMetaEl = document.getElementById("rebalanceMeta");
       const burrowPosEl = document.getElementById("burrowPos");
       const metaEl = document.getElementById("meta");
@@ -603,6 +605,25 @@
       fillActionConsoleBtn.addEventListener("click", () => {
         cmdOutEl.value = buildActionConsoleFromPlan(lastRebalancePlan);
         cmdMetaEl.textContent = "Filled from rebalance plan";
+      });
+
+      execRebalanceTxnBtn.addEventListener("click", () => {
+        const p = getPlanTokensAndRaw(lastRebalancePlan);
+        if (!p) {
+          rebalanceMetaEl.textContent = "No executable rebalance plan";
+          return;
+        }
+        if (p.fromToken !== "usdt.tether-token.near" || p.toToken !== "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near") {
+          rebalanceMetaEl.textContent = "One-click tx currently supports USDt -> USDC.e only";
+          return;
+        }
+        executeAction({
+          action: "rebalance_usdt_to_usdce_txn",
+          amountRaw: p.raw,
+          slippageBps: 50,
+          poolId: 3725,
+          step: (execStepTagEl.value || "rebalance").trim() || "rebalance",
+        });
       });
 
       function getPlanTokensAndRaw(plan) {

@@ -21,6 +21,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Step2 parser helper: paste swap result text and auto-extract output raw for Step3
 - Action History now supports optional `step` tag for execution traceability (e.g. step1/step2/step3)
 - Action History includes txHash + explorer link when parsed from execution output
+- One-click transactional rebalance action (`USDt -> USDC.e`): step1 withdraw -> step2 swap -> step3 supply, with automatic rollback (resupply USDt) when step2 fails
 - CSV export for latest snapshot
 - Best-effort USD estimates from NEAR Intents token feed
 
