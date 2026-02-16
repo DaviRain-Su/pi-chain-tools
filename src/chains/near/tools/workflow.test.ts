@@ -308,14 +308,38 @@ beforeEach(() => {
 			schema: "near.defi.stableYieldPlan.v1",
 			rpcEndpoint: "https://rpc.mainnet.near.org",
 			burrowContractId: "contract.main.burrow.near",
-			protocol: "Kamino",
+			protocol: "Burrow",
 			generatedAt: new Date("2025-01-01T00:00:00.000Z").toISOString(),
 			stableSymbols: ["USDC", "USDT"],
 			network: "mainnet",
 			topN: 3,
 			includeDisabled: false,
+			status: "ready",
 			candidates: [],
 			selected: null,
+			executionPlan: {
+				mode: "analysis-only",
+				requiresAgentWallet: true,
+				canAutoExecute: false,
+				reasons: ["mock"],
+				guardrails: {
+					maxProtocols: 1,
+					cooldownSeconds: 3600,
+				},
+				proposedActions: [
+					{
+						action: "hold",
+						protocol: "Burrow",
+						step: 1,
+						tokenId: null,
+						symbol: null,
+						asCollateral: true,
+						allocationHint: "max-eligible",
+						rationale: "No action",
+					},
+				],
+				recommendedApproach: "single-best-candidate",
+			},
 		},
 	});
 	runtimeMocks.resolveNearAccountId.mockImplementation(
@@ -4110,6 +4134,13 @@ describe("w3rt_run_near_workflow_v0", () => {
 			},
 			artifacts: {
 				simulate: {
+					schema: "near.defi.stableYieldPlan.v1",
+					protocol: "Burrow",
+					executionPlan: {
+						canAutoExecute: false,
+						requiresAgentWallet: true,
+						recommendedApproach: "single-best-candidate",
+					},
 					summary: {
 						schema: "w3rt.workflow.summary.v1",
 						phase: "simulate",

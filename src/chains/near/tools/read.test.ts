@@ -1063,9 +1063,100 @@ describe("near_getStableYieldPlan", () => {
 			schema: "near.defi.stableYieldPlan.v1",
 			network: "mainnet",
 			protocol: "Burrow",
+			status: "ready",
 			selected: {
 				tokenId: "usdc.tether-token.near",
 				symbol: "USDC",
+			},
+			executionPlan: {
+				mode: "analysis-only",
+				requiresAgentWallet: true,
+				canAutoExecute: false,
+				recommendedApproach: "single-best-candidate",
+				proposedActions: [
+					{
+						action: "supply",
+						protocol: "Burrow",
+						step: 1,
+						tokenId: "usdc.tether-token.near",
+						symbol: "USDC",
+						asCollateral: true,
+					},
+				],
+			},
+		});
+	});
+
+	it("returns hold proposal when no eligible stable candidate exists", async () => {
+		burrowMocks.fetchBurrowAssetsPagedDetailed.mockResolvedValue([
+			{
+				token_id: "not-stable.near",
+				supplied: { shares: "1", balance: "1" },
+				borrowed: { shares: "0", balance: "0" },
+				config: {
+					extra_decimals: 0,
+					can_deposit: true,
+					can_withdraw: false,
+					can_borrow: false,
+					can_use_as_collateral: true,
+				},
+				supply_apr: "0.10",
+				borrow_apr: "0.0",
+			},
+		]);
+		runtimeMocks.callNearRpc.mockImplementation(
+			(args: { params: { method_name?: string; account_id?: string } }) => {
+				if (args.params.method_name === "ft_metadata") {
+					if (args.params.account_id === "not-stable.near") {
+						return Promise.resolve({
+							block_hash: "meta-3",
+							block_height: 3,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "NOT",
+								decimals: 18,
+							}),
+						});
+					}
+				}
+				throw new Error(
+					"unexpected callNearRpc in stable yield hold-plan test",
+				);
+			},
+		);
+		burrowMocks.fromBurrowInnerAmount.mockImplementation(
+			(value: string) => value,
+		);
+
+		const tool = getTool("near_getStableYieldPlan");
+		const result = await tool.execute("near-read-stable-yield-2", {
+			network: "mainnet",
+			topN: 3,
+			includeDisabled: false,
+			stableSymbols: ["USDC", "USDT"],
+		});
+
+		expect(result.details).toMatchObject({
+			schema: "near.defi.stableYieldPlan.v1",
+			protocol: "Burrow",
+			topN: 3,
+			stableSymbols: ["USDC", "USDT"],
+			status: "ready",
+			executionPlan: {
+				mode: "analysis-only",
+				requiresAgentWallet: true,
+				canAutoExecute: false,
+				proposedActions: [
+					{
+						action: "hold",
+						protocol: "Burrow",
+						step: 1,
+						tokenId: null,
+						symbol: null,
+						asCollateral: true,
+						allocationHint: "max-eligible",
+					},
+				],
 			},
 		});
 	});

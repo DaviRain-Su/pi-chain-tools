@@ -187,6 +187,32 @@ type NearStableYieldCandidate = {
 	borrowedUi: string | null;
 };
 
+type NearStableYieldExecutionAction = {
+	action: "supply" | "withdraw" | "hold";
+	protocol: "Burrow";
+	step: number;
+	tokenId: string | null;
+	symbol: string | null;
+	asCollateral: boolean;
+	allocationHint: "max-eligible" | "single-winner";
+	rationale: string;
+};
+
+type NearStableYieldExecutionPlan = {
+	mode: "analysis-only";
+	requiresAgentWallet: true;
+	canAutoExecute: boolean;
+	reasons: string[];
+	guardrails: {
+		maxProtocols: number;
+		maxSlippageBps?: number;
+		minimumAprDelta?: number;
+		cooldownSeconds: number;
+	};
+	proposedActions: NearStableYieldExecutionAction[];
+	recommendedApproach: "single-best-candidate";
+};
+
 type NearStableYieldPlan = {
 	network: string;
 	protocol: "Burrow";
@@ -194,12 +220,14 @@ type NearStableYieldPlan = {
 	topN: number;
 	stableSymbols: string[];
 	includeDisabled: boolean;
+	status: "ready";
 	candidates: NearStableYieldCandidate[];
 	allocationHint: {
 		tokenId: string;
 		symbol: string;
 		asCollateral: boolean;
 	} | null;
+	executionPlan: NearStableYieldExecutionPlan;
 };
 
 type NearBurrowPositionAssetRow = {
@@ -2544,16 +2572,15 @@ const DEFAULT_STABLE_YIELD_SYMBOLS = [
 	"USDC",
 	"USDT",
 	"DAI",
+	"USDD",
 	"BUSD",
-	"TUSD",
 	"FRAX",
 	"LUSD",
-	"UST",
+	"TUSD",
 	"PYUSD",
-	"sUSD",
-	"USDN",
-	"USDx",
-	"USDB",
+	"GUSD",
+	"USDE",
+	"SUSD",
 ];
 
 function normalizeStableSymbol(value: string): string {
@@ -2621,6 +2648,70 @@ function pickStableYieldCandidates(params: {
 	}));
 }
 
+function buildStableYieldExecutionPlan(params: {
+	selected: NearStableYieldCandidate | null;
+	topN: number;
+}): NearStableYieldExecutionPlan {
+	if (params.selected == null) {
+		return {
+			mode: "analysis-only",
+			requiresAgentWallet: true,
+			canAutoExecute: false,
+			reasons: [
+				"No eligible stablecoin candidate found with current scan filters.",
+			],
+			guardrails: {
+				maxProtocols: 1,
+				cooldownSeconds: 3600,
+			},
+			proposedActions: [
+				{
+					action: "hold",
+					protocol: "Burrow",
+					step: 1,
+					tokenId: null,
+					symbol: null,
+					asCollateral: true,
+					allocationHint: "max-eligible",
+					rationale:
+						"No action can be proposed until a stable candidate is available.",
+				},
+			],
+			recommendedApproach: "single-best-candidate",
+		};
+	}
+
+	const aprText = params.selected.supplyApr ?? "n/a";
+	return {
+		mode: "analysis-only",
+		requiresAgentWallet: true,
+		canAutoExecute: false,
+		reasons: [
+			"Execution requires dedicated Agent Wallet/Vault, direct private-key signing disabled in workflow.",
+			"Stable-yield plan is optimized for strategy review before execution.",
+		],
+		guardrails: {
+			maxProtocols: 1,
+			maxSlippageBps: 50,
+			minimumAprDelta: 0.1,
+			cooldownSeconds: 3600,
+		},
+		proposedActions: [
+			{
+				action: "supply",
+				protocol: "Burrow",
+				step: 1,
+				tokenId: params.selected.tokenId,
+				symbol: params.selected.symbol,
+				asCollateral: true,
+				allocationHint: "single-winner",
+				rationale: `Top-${params.topN} scan winner with highest APR (${aprText}).`,
+			},
+		],
+		recommendedApproach: "single-best-candidate",
+	};
+}
+
 async function resolveStableYieldPlan(params: {
 	network: string;
 	rpcUrl?: string;
@@ -2657,6 +2748,7 @@ async function resolveStableYieldPlan(params: {
 		topN: params.topN,
 		stableSymbols: params.stableSymbols,
 		includeDisabled: params.includeDisabled,
+		status: "ready",
 		candidates,
 		selected,
 		allocationHint: selected
@@ -2666,6 +2758,10 @@ async function resolveStableYieldPlan(params: {
 					asCollateral: true,
 				}
 			: null,
+		executionPlan: buildStableYieldExecutionPlan({
+			selected,
+			topN: params.topN,
+		}),
 	};
 }
 
@@ -3797,7 +3893,7 @@ export function createNearReadTools() {
 			name: `${NEAR_TOOL_PREFIX}getStableYieldPlan`,
 			label: "NEAR Stable Yield Plan",
 			description:
-				"Analyse stablecoins with highest supply APR on supported lending markets and return a ready-to-execute allocation plan.",
+				"Analyse stablecoins with highest supply APR on supported lending markets and return a strategy plan for review/execution readiness.",
 			parameters: Type.Object({
 				burrowContractId: Type.Optional(
 					Type.String({
@@ -3863,6 +3959,19 @@ export function createNearReadTools() {
 					lines.push(
 						`${candidate.rank}. ${candidate.symbol} (${candidate.tokenId}) supplyAPR=${candidate.supplyApr ?? "n/a"} deposit=${candidate.canDeposit ? "yes" : "no"}`,
 					);
+				}
+				if (plan.executionPlan.canAutoExecute === false) {
+					lines.push(
+						`Execution mode: ${plan.executionPlan.mode} (requires vault: ${plan.executionPlan.requiresAgentWallet ? "yes" : "no"})`,
+					);
+					for (const reason of plan.executionPlan.reasons) {
+						lines.push(`- ${reason}`);
+					}
+					for (const action of plan.executionPlan.proposedActions) {
+						lines.push(
+							`Action ${action.step}: ${action.action} ${action.symbol ?? "asset"} protocol=${action.protocol}`,
+						);
+					}
 				}
 
 				return {
