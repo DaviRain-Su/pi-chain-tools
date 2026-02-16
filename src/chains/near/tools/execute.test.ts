@@ -9,6 +9,7 @@ const runtimeMocks = vi.hoisted(() => ({
 		(txHash: string) => `https://nearblocks.io/txns/${txHash}`,
 	),
 	getNearRpcEndpoint: vi.fn(() => "https://rpc.mainnet.near.org"),
+	getNearRpcEndpoints: vi.fn(() => ["https://rpc.mainnet.near.org"]),
 	nearNetworkSchema: vi.fn(),
 	parseNearNetwork: vi.fn(() => "mainnet"),
 	resolveNearSigner: vi.fn(() => ({
@@ -76,6 +77,7 @@ vi.mock("../runtime.js", async () => {
 		formatNearAmount: runtimeMocks.formatNearAmount,
 		getNearExplorerTransactionUrl: runtimeMocks.getNearExplorerTransactionUrl,
 		getNearRpcEndpoint: runtimeMocks.getNearRpcEndpoint,
+		getNearRpcEndpoints: runtimeMocks.getNearRpcEndpoints,
 		nearNetworkSchema: runtimeMocks.nearNetworkSchema,
 		parseNearNetwork: runtimeMocks.parseNearNetwork,
 		resolveNearSigner: runtimeMocks.resolveNearSigner,
@@ -389,7 +391,7 @@ describe("near_swapRef", () => {
 		expect(runtimeMocks.callNearRpc).toHaveBeenCalledWith({
 			method: "query",
 			network: "mainnet",
-			rpcUrl: undefined,
+			rpcUrl: "https://rpc.mainnet.near.org",
 			params: {
 				request_type: "call_function",
 				account_id: "usdc.fakes.near",

@@ -26,6 +26,7 @@ import {
 	formatNearAmount,
 	getNearExplorerTransactionUrl,
 	getNearRpcEndpoint,
+	getNearRpcEndpoints,
 	nearNetworkSchema,
 	parseNearNetwork,
 	resolveNearSigner,
@@ -1393,6 +1394,67 @@ function assertMainnetExecutionConfirmed(
 	}
 }
 
+function isTransientNearExecutionError(error: unknown): boolean {
+	const message = extractErrorText(error).toLowerCase();
+	return (
+		message.includes("429") ||
+		message.includes("too many requests") ||
+		message.includes("fetch failed") ||
+		message.includes("timeout") ||
+		message.includes("temporar") ||
+		message.includes("503")
+	);
+}
+
+async function callWithRpcFallback<T>(params: {
+	network: string;
+	rpcUrl?: string;
+	invoke: (ctx: {
+		account: Account;
+		endpoint: string;
+		signerAccountId: string;
+	}) => Promise<T>;
+	accountId?: string;
+	privateKey?: string;
+}): Promise<{
+	result: T;
+	endpoint: string;
+	signerAccountId: string;
+}> {
+	const endpoints = getNearRpcEndpoints(params.network, params.rpcUrl);
+	let lastError: unknown;
+	for (const endpoint of endpoints) {
+		try {
+			const { account, signerAccountId } = createNearAccountClient({
+				accountId: params.accountId,
+				privateKey: params.privateKey,
+				network: params.network,
+				rpcUrl: endpoint,
+			});
+			const result = await params.invoke({
+				account,
+				endpoint,
+				signerAccountId,
+			});
+			return {
+				result,
+				endpoint,
+				signerAccountId,
+			};
+		} catch (error) {
+			lastError = error;
+			if (!isTransientNearExecutionError(error)) {
+				throw error;
+			}
+		}
+	}
+	throw lastError instanceof Error
+		? new Error(
+				`Execution failed across ${endpoints.length} RPC endpoint(s): ${lastError.message}`,
+			)
+		: new Error("Execution failed across RPC endpoints");
+}
+
 function createNearAccountClient(params: {
 	accountId?: string;
 	privateKey?: string;
@@ -1693,13 +1755,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 				const gas = resolveRefSwapGas(params.gas);
 				const deposit = resolveAttachedDeposit(params.attachedDepositYoctoNear);
 				const autoRegisterOutput = params.autoRegisterOutput !== false;
-				const { account, network, endpoint, signerAccountId } =
-					createNearAccountClient({
-						accountId: params.fromAccountId,
-						privateKey: params.privateKey,
-						network: params.network,
-						rpcUrl: params.rpcUrl,
-					});
+				const network = parseNearNetwork(params.network);
 				assertMainnetExecutionConfirmed(network, params.confirmMainnet);
 
 				const refContractId = getRefContractId(network, params.refContractId);
@@ -1740,16 +1796,6 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					quoteAmountOutRaw: quote.amountOutRaw,
 					quoteMinAmountOutRaw: quote.minAmountOutRaw,
 				});
-				const storageRegistration =
-					autoRegisterOutput === true
-						? await ensureFtStorageRegistered({
-								account,
-								network,
-								rpcUrl: params.rpcUrl,
-								ftContractId: tokenOutId,
-								accountId: signerAccountId,
-							})
-						: null;
 				const swapActionsPayload = quoteActions.map((action, index) => {
 					const tokenIn = normalizeReceiverAccountId(action.tokenInId);
 					const tokenOut = normalizeReceiverAccountId(action.tokenOutId);
@@ -1764,22 +1810,45 @@ export function createNearExecuteTools(): RegisteredTool[] {
 					};
 				});
 
-				const tx = await account.callFunction({
-					contractId: tokenInId,
-					methodName: "ft_transfer_call",
-					args: {
-						receiver_id: refContractId,
-						amount: amountInRaw.toString(),
-						msg: JSON.stringify({
-							force: 0,
-							actions: swapActionsPayload,
-						}),
+				const execution = await callWithRpcFallback({
+					network,
+					rpcUrl: params.rpcUrl,
+					accountId: params.fromAccountId,
+					privateKey: params.privateKey,
+					invoke: async ({ account, endpoint, signerAccountId }) => {
+						const storageRegistration =
+							autoRegisterOutput === true
+								? await ensureFtStorageRegistered({
+										account,
+										network,
+										rpcUrl: endpoint,
+										ftContractId: tokenOutId,
+										accountId: signerAccountId,
+									})
+								: null;
+						const tx = await account.callFunction({
+							contractId: tokenInId,
+							methodName: "ft_transfer_call",
+							args: {
+								receiver_id: refContractId,
+								amount: amountInRaw.toString(),
+								msg: JSON.stringify({
+									force: 0,
+									actions: swapActionsPayload,
+								}),
+							},
+							deposit,
+							gas,
+						});
+						return {
+							tx,
+							storageRegistration,
+							signerAccountId,
+						};
 					},
-					deposit,
-					gas,
 				});
 
-				const txHash = extractTxHash(tx);
+				const txHash = extractTxHash(execution.result.tx);
 				const explorerUrl = txHash
 					? getNearExplorerTransactionUrl(txHash, network)
 					: null;
@@ -1796,18 +1865,18 @@ export function createNearExecuteTools(): RegisteredTool[] {
 						attachedDepositYoctoNear: deposit.toString(),
 						autoRegisterOutput,
 						explorerUrl,
-						fromAccountId: signerAccountId,
+						fromAccountId: execution.signerAccountId,
 						gas: gas.toString(),
 						minAmountOutRaw,
 						network,
 						poolId: quote.poolId,
 						routeActions: quoteActions,
-						rawResult: tx,
+						rawResult: execution.result.tx,
 						refContractId,
-						rpcEndpoint: endpoint,
+						rpcEndpoint: execution.endpoint,
 						slippageBps,
 						source: quote.source,
-						storageRegistration,
+						storageRegistration: execution.result.storageRegistration,
 						tokenInId,
 						tokenOutId,
 						txHash,

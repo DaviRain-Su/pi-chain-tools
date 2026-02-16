@@ -24,9 +24,13 @@ const NEAR_RPC_URLS_ENV_BY_NETWORK: Record<NearNetwork, string> = {
 	testnet: "NEAR_TESTNET_RPC_URLS",
 };
 
-const NEAR_DEFAULT_RPC_BY_NETWORK: Record<NearNetwork, string> = {
-	mainnet: "https://rpc.mainnet.near.org",
-	testnet: "https://rpc.testnet.near.org",
+const NEAR_DEFAULT_RPCS_BY_NETWORK: Record<NearNetwork, string[]> = {
+	mainnet: [
+		"https://1rpc.io/near",
+		"https://rpc.mainnet.near.org",
+		"https://near-mainnet.public.blastapi.io",
+	],
+	testnet: ["https://rpc.testnet.near.org"],
 };
 
 const NEAR_EXPLORER_ORIGIN_BY_NETWORK: Record<NearNetwork, string> = {
@@ -111,7 +115,7 @@ export function getNearRpcEndpoints(
 		return [fallbackEnv];
 	}
 
-	return [NEAR_DEFAULT_RPC_BY_NETWORK[parsedNetwork]];
+	return NEAR_DEFAULT_RPCS_BY_NETWORK[parsedNetwork];
 }
 
 export function getNearRpcEndpoint(network?: string, rpcUrl?: string): string {
