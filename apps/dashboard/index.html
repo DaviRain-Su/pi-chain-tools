@@ -169,6 +169,11 @@
       </div>
 
       <div class="card" style="margin-top:16px">
+        <h3>Execution Quality</h3>
+        <div id="execQuality" class="muted">-</div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
         <h3>Target Allocation Alert</h3>
         <div class="row" style="margin-bottom:8px">
           <input id="targetUsdt" type="number" min="0" max="100" step="0.1" placeholder="USDt target %" size="14" />
@@ -276,6 +281,7 @@
       const burrowRegEl = document.getElementById("burrowReg");
       const workerEl = document.getElementById("worker");
       const yieldHealthEl = document.getElementById("yieldHealth");
+      const execQualityEl = document.getElementById("execQuality");
       const strategyEl = document.getElementById("strategy");
       const targetUsdtEl = document.getElementById("targetUsdt");
       const targetUsdceEl = document.getElementById("targetUsdce");
@@ -453,6 +459,22 @@
         return `Estimated weighted APR: ${weightedApr.toFixed(2)}% · Collateral total: ${total.toFixed(6)} · ${composition}`;
       }
 
+      function computeExecutionQuality(snapshot) {
+        const m = snapshot?.rebalanceMetrics;
+        if (!m) return "No execution metrics yet.";
+        const total = Number(m.totalRuns || 0);
+        const success = Number(m.successRuns || 0);
+        const failed = Number(m.failedRuns || 0);
+        const rollback = Number(m.rollbackRuns || 0);
+        const reconcileWarn = Number(m.reconcileWarnings || 0);
+        const successRate = total > 0 ? (success / total) * 100 : 0;
+        const latest = (m.recent || [])[0] || null;
+        const latestText = latest
+          ? `Latest: ${latest.status} · runId=${latest.runId || "-"}`
+          : "Latest: -";
+        return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText}`;
+      }
+
       function toCsv(snapshot) {
         const lines = [
           ["section", "key", "value"],
@@ -495,6 +517,7 @@
         burrowRegEl.innerHTML = data.burrow.registered ? `<span class="ok">Registered</span>` : `<span class="warn">Not registered</span>`;
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
         yieldHealthEl.textContent = computeYieldHealth(data);
+        execQualityEl.textContent = computeExecutionQuality(data);
         targetAlertEl.innerHTML = computeTargetAlert(data, targetConfig);
         const plan = computeRebalancePlan(data, targetConfig);
         lastRebalancePlan = plan;

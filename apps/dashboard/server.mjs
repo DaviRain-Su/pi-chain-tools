@@ -47,6 +47,14 @@ const REBALANCE_STATE = {
 	recentRuns: new Map(),
 };
 const ALERT_DEDUPE_CACHE = new Map();
+const REBALANCE_METRICS = {
+	totalRuns: 0,
+	successRuns: 0,
+	failedRuns: 0,
+	rollbackRuns: 0,
+	reconcileWarnings: 0,
+	recent: [],
+};
 
 const TOKENS = [
 	{ symbol: "USDt", contractId: "usdt.tether-token.near", decimals: 6 },
@@ -428,6 +436,10 @@ async function buildSnapshot(accountId) {
 		worker: localSignals.worker,
 		recentTxs: localSignals.recentTxs,
 		actionHistory: ACTION_HISTORY,
+		rebalanceMetrics: {
+			...REBALANCE_METRICS,
+			recent: REBALANCE_METRICS.recent,
+		},
 	};
 }
 
@@ -733,6 +745,16 @@ function endRebalanceRun(runId, status, details = {}) {
 	}
 }
 
+function recordRebalanceMetric(entry) {
+	REBALANCE_METRICS.recent.unshift({
+		timestamp: new Date().toISOString(),
+		...entry,
+	});
+	if (REBALANCE_METRICS.recent.length > 30) {
+		REBALANCE_METRICS.recent.length = 30;
+	}
+}
+
 async function executeAction(payload) {
 	const accountId = String(payload.accountId || ACCOUNT_ID).trim();
 	const nearBin = "near";
@@ -839,6 +861,7 @@ async function executeAction(payload) {
 			const stepBase = String(payload.step || "rebalance").trim();
 			const runId = String(payload.runId || `run-${Date.now()}`).trim();
 			beginRebalanceRun(runId);
+			REBALANCE_METRICS.totalRuns += 1;
 			try {
 				const amountRaw = parsePositiveRaw(payload.amountRaw, "amountRaw");
 				const stateBefore = await snapshotRebalanceState(accountId);
@@ -1021,6 +1044,13 @@ async function executeAction(payload) {
 						txHash: rollbackTx,
 						explorerUrl: nearExplorerUrl(rollbackTx),
 					});
+					REBALANCE_METRICS.rollbackRuns += 1;
+					recordRebalanceMetric({
+						runId,
+						status: "rollback",
+						amountRaw,
+						rollbackTx,
+					});
 					await sendAlert({
 						level: "warn",
 						title: "Rebalance rollback",
@@ -1090,6 +1120,33 @@ async function executeAction(payload) {
 				const walletUsdtAfter = BigInt(stateAfter.walletUsdtRaw || "0");
 				const walletUsdcAfter = BigInt(stateAfter.walletUsdcRaw || "0");
 				const reconciled = walletUsdtAfter <= 10n && walletUsdcAfter <= 10n;
+				const quoteRate = Number(refQuoteOutRaw) / Number(amountRaw);
+				const execRate = Number(supplyOutRaw) / Number(amountRaw);
+				const slippageUsedBps =
+					Number(refQuoteOutRaw) > 0
+						? Math.max(
+								0,
+								((Number(refQuoteOutRaw) - Number(supplyOutRaw)) /
+									Number(refQuoteOutRaw)) *
+									10000,
+							)
+						: null;
+				REBALANCE_METRICS.successRuns += 1;
+				if (!reconciled) REBALANCE_METRICS.reconcileWarnings += 1;
+				recordRebalanceMetric({
+					runId,
+					status: "success",
+					amountRaw,
+					suppliedRaw: supplyOutRaw,
+					quoteRate: Number.isFinite(quoteRate) ? quoteRate : null,
+					execRate: Number.isFinite(execRate) ? execRate : null,
+					slippageUsedBps:
+						typeof slippageUsedBps === "number" &&
+						Number.isFinite(slippageUsedBps)
+							? slippageUsedBps
+							: null,
+					reconciled,
+				});
 				markRebalanceExecuted();
 				endRebalanceRun(runId, "success", {
 					step1Tx,
@@ -1141,6 +1198,12 @@ async function executeAction(payload) {
 				};
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
+				REBALANCE_METRICS.failedRuns += 1;
+				recordRebalanceMetric({
+					runId,
+					status: "failed",
+					error: msg,
+				});
 				endRebalanceRun(runId, "failed", {
 					error: msg,
 				});

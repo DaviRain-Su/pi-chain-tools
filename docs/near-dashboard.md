@@ -24,6 +24,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - One-click transactional rebalance action (`USDt -> USDC.e`): step1 withdraw -> step2 swap -> step3 supply, with automatic rollback (resupply USDt) when step2 fails
 - Idempotency/state guard: optional `runId` support, duplicate run rejection, and single active rebalance lock
 - Post-execution reconciliation: compares wallet residual USDt/USDC.e after step3 and records a reconcile entry in Action History
+- Execution Quality panel: success/failure/rollback/reconcile-warning counters + recent run summary
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`
