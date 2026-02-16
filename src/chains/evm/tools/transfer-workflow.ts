@@ -22,7 +22,9 @@ export type KnownTokenSymbol =
 	| "WETH"
 	| "WBTC"
 	| "WBNB"
-	| "BTCB";
+	| "BTCB"
+	| "WBERA"
+	| "HONEY";
 export type TokenSymbolMetadata = {
 	decimals: number;
 	/** Per-network decimals override (e.g. BSC Binance-Peg USDC is 18, not 6). */
@@ -38,6 +40,7 @@ const EVM_NETWORKS: EvmNetwork[] = [
 	"arbitrum",
 	"optimism",
 	"bsc",
+	"berachain",
 ];
 
 export const EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK: Record<EvmNetwork, string> =
@@ -49,6 +52,7 @@ export const EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK: Record<EvmNetwork, string> =
 		arbitrum: "EVM_TRANSFER_TOKEN_MAP_ARBITRUM",
 		optimism: "EVM_TRANSFER_TOKEN_MAP_OPTIMISM",
 		bsc: "EVM_TRANSFER_TOKEN_MAP_BSC",
+		berachain: "EVM_TRANSFER_TOKEN_MAP_BERACHAIN",
 	};
 
 export const EVM_TRANSFER_TOKEN_MAP_ENV = "EVM_TRANSFER_TOKEN_MAP";
@@ -120,6 +124,18 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 			decimals: 18,
 			addresses: {
 				bsc: "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",
+			},
+		},
+		WBERA: {
+			decimals: 18,
+			addresses: {
+				berachain: "0x7507c1dc16935B82698e4C63f2746A2fCf994dF8",
+			},
+		},
+		HONEY: {
+			decimals: 18,
+			addresses: {
+				berachain: "0x0E4aaF1351de4c0264C5c7056Ef3777b41BD8e03",
 			},
 		},
 	};
@@ -207,6 +223,8 @@ function parseKnownTokenSymbol(value?: string): KnownTokenSymbol | undefined {
 	if (normalized === "WBTC") return "WBTC";
 	if (normalized === "WBNB" || normalized === "BNB") return "WBNB";
 	if (normalized === "BTCB") return "BTCB";
+	if (normalized === "WBERA" || normalized === "BERA") return "WBERA";
+	if (normalized === "HONEY") return "HONEY";
 	return undefined;
 }
 
@@ -234,6 +252,12 @@ function parseEvmNetworkAlias(value: string): EvmNetwork | undefined {
 	if (normalized === "arbitrum" || normalized === "arb") return "arbitrum";
 	if (normalized === "optimism" || normalized === "op") return "optimism";
 	if (normalized === "bsc" || normalized === "bnb") return "bsc";
+	if (
+		normalized === "berachain" ||
+		normalized === "bera" ||
+		normalized === "bartio"
+	)
+		return "berachain";
 	return undefined;
 }
 
@@ -379,6 +403,14 @@ function copyDefaultTokenMetadata(): Record<
 		BTCB: {
 			decimals: TOKEN_METADATA_BY_SYMBOL.BTCB.decimals,
 			addresses: { ...TOKEN_METADATA_BY_SYMBOL.BTCB.addresses },
+		},
+		WBERA: {
+			decimals: TOKEN_METADATA_BY_SYMBOL.WBERA.decimals,
+			addresses: { ...TOKEN_METADATA_BY_SYMBOL.WBERA.addresses },
+		},
+		HONEY: {
+			decimals: TOKEN_METADATA_BY_SYMBOL.HONEY.decimals,
+			addresses: { ...TOKEN_METADATA_BY_SYMBOL.HONEY.addresses },
 		},
 	};
 }
@@ -533,7 +565,9 @@ function parseIntentText(text?: string): ParsedIntentHints {
 		undefined;
 	const tokenSymbolMatch =
 		text.match(/\btoken(?:Symbol)?\s*[:= ]\s*([A-Za-z0-9._-]{2,16})\b/i)?.[1] ??
-		text.match(/\b(USDC(?:\.E)?|USDT|DAI|WETH|WBTC|WBNB|BTCB)\b/i)?.[1] ??
+		text.match(
+			/\b(USDC(?:\.E)?|USDT|DAI|WETH|WBTC|WBNB|BTCB|WBERA|BERA|HONEY)\b/i,
+		)?.[1] ??
 		undefined;
 	const toAddressMatch =
 		text.match(
@@ -550,7 +584,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	const amountTokenMatch =
 		text.match(/\bamount(?:Token)?\s*[:= ]\s*(\d+(?:\.\d+)?)\b/i)?.[1] ??
 		text.match(
-			/(\d+(?:\.\d+)?)\s*(?:USDC(?:\.E)?|USDT|DAI|WETH|WBTC|WBNB|BTCB)\b/i,
+			/(\d+(?:\.\d+)?)\s*(?:USDC(?:\.E)?|USDT|DAI|WETH|WBTC|WBNB|BTCB|WBERA|BERA|HONEY)\b/i,
 		)?.[1] ??
 		undefined;
 	const amountNativeMatch =
@@ -638,7 +672,7 @@ function normalizeIntent(
 				);
 			}
 			throw new Error(
-				"Provide tokenAddress (or known tokenSymbol like USDC/USDT/DAI/WETH/WBTC/WBNB/BTCB with configured map)",
+				"Provide tokenAddress (or known tokenSymbol like USDC/USDT/DAI/WETH/WBTC/WBNB/BTCB/WBERA/HONEY with configured map)",
 			);
 		}
 		const tokenAddress = parseEvmAddress(tokenAddressInput, "tokenAddress");
