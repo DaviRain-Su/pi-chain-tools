@@ -60,6 +60,8 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `read`: `evm_polymarketGetOrderbook` (CLOB orderbook snapshot by tokenId)
 - `read`: `evm_polymarketGetBtc5mAdvice` (AI-style explainable side recommendation)
 - `read`: `evm_polymarketGetGeoblock` (geoblock status check)
+- `read`: `evm_dexscreenerPairs` (DexScreener query by keyword, filter by network/dex; BSC PancakeSwap pairs included when `chainId=bsc`)
+- `read`: `evm_dexscreenerTokenPairs` (DexScreener token endpoint lookup for token pair discovery)
 - `read`: `evm_getTransferTokenMap` (inspect effective transfer token symbol mapping/decimals including env overrides)
 - `compose`: `evm_polymarketBuildBtc5mOrder` (unsigned order intent builder)
 - `execute`: `evm_polymarketPlaceOrder` (CLOB order submit, default `dryRun=true`)

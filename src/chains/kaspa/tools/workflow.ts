@@ -344,24 +344,24 @@ function resolveKaspaWalletNetworkAlias(
 }
 
 const KASPA_WALLET_QUICK_DEFAULT_PATH_BY_NETWORK = {
-  mainnet: [
-    "~/.kaspa/mainnet.private_key",
-    "~/.kaspa/mainnet.wallet",
-    "~/.kaspa/mainnet.kpk",
-    "~/.kaspa/wallet",
-  ],
-  testnet10: [
-    "~/.kaspa/testnet10.private_key",
-    "~/.kaspa/testnet10.wallet",
-    "~/.kaspa/testnet10.kpk",
-    "~/.kaspa/wallet",
-  ],
-  testnet11: [
-    "~/.kaspa/testnet11.private_key",
-    "~/.kaspa/testnet11.wallet",
-    "~/.kaspa/testnet11.kpk",
-    "~/.kaspa/wallet",
-  ],
+	mainnet: [
+		"~/.kaspa/mainnet.private_key",
+		"~/.kaspa/mainnet.wallet",
+		"~/.kaspa/mainnet.kpk",
+		"~/.kaspa/wallet",
+	],
+	testnet10: [
+		"~/.kaspa/testnet10.private_key",
+		"~/.kaspa/testnet10.wallet",
+		"~/.kaspa/testnet10.kpk",
+		"~/.kaspa/wallet",
+	],
+	testnet11: [
+		"~/.kaspa/testnet11.private_key",
+		"~/.kaspa/testnet11.wallet",
+		"~/.kaspa/testnet11.kpk",
+		"~/.kaspa/wallet",
+	],
 } as const;
 
 const KASPA_WALLET_PATH_FROM_TEXT_REGEX =
@@ -789,7 +789,8 @@ async function runKaspaWalletQuickWorkflow(
 	const networks = requestNetworks
 		? [resolveKaspaWalletNetworkAlias(requestNetworks)]
 		: undefined;
-	let info: Awaited<ReturnType<typeof resolveKaspaPrivateKeyInfo>> | null = null;
+	let info: Awaited<ReturnType<typeof resolveKaspaPrivateKeyInfo>> | null =
+		null;
 	let resolvedPrivateKeyFile: string | null = null;
 	let lastFailure: Error | null = null;
 	let lastBinaryFailure: Error | null = null;
@@ -818,7 +819,6 @@ async function runKaspaWalletQuickWorkflow(
 				/Kaspa wallet binary file format detected/i.test(parsedError.message)
 			) {
 				lastBinaryFailure = parsedError;
-				continue;
 			}
 		}
 	}

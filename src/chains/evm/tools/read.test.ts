@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const ORIGINAL_FETCH = global.fetch;
+
 const TRANSFER_MAP_ENV_KEYS = [
 	"EVM_TRANSFER_TOKEN_MAP",
 	"EVM_TRANSFER_TOKEN_DECIMALS",
@@ -33,6 +35,19 @@ vi.mock("../polymarket.js", () => ({
 	getPolymarketGeoblockStatus: polymarketMocks.getPolymarketGeoblockStatus,
 }));
 
+function mockJsonFetch(payload: unknown) {
+	const fetchMock = vi.fn(async () => {
+		return {
+			ok: true,
+			status: 200,
+			statusText: "OK",
+			text: async () => JSON.stringify(payload),
+		} as unknown as Response;
+	});
+	global.fetch = fetchMock as unknown as typeof fetch;
+	return fetchMock;
+}
+
 import { createEvmReadTools } from "./read.js";
 
 type ReadTool = {
@@ -49,6 +64,7 @@ function getTool(name: string): ReadTool {
 }
 
 beforeEach(() => {
+	global.fetch = ORIGINAL_FETCH;
 	for (const key of TRANSFER_MAP_ENV_KEYS) {
 		Reflect.deleteProperty(process.env, key);
 	}
@@ -92,6 +108,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	global.fetch = ORIGINAL_FETCH;
 	for (const key of TRANSFER_MAP_ENV_KEYS) {
 		const value = TRANSFER_MAP_ENV_SNAPSHOT[key];
 		if (value == null) {
@@ -193,6 +210,88 @@ describe("evm read tools", () => {
 				recommendedSide: "up",
 				confidence: 0.72,
 			},
+		});
+	});
+
+	it("discovers BSC dexscreener pairs with dex filter", async () => {
+		mockJsonFetch({
+			pairs: [
+				{
+					chainId: "bsc",
+					pairAddress: "0xpair1",
+					dexId: "pancakeswap",
+					url: "https://dexscreener.com/bsc/0xpair1",
+					baseToken: { symbol: "WBNB", address: "0xwbnb" },
+					quoteToken: { symbol: "USDT", address: "0xusdt" },
+					priceUsd: "0.5",
+					liquidity: { usd: "1200000" },
+					volume: { h24: "3400000" },
+				},
+				{
+					chainId: "ethereum",
+					pairAddress: "0xpair2",
+					dexId: "pancakeswap",
+					baseToken: { symbol: "WETH", address: "0xweth" },
+					quoteToken: { symbol: "USDT", address: "0xusdt" },
+				},
+			],
+		});
+		const tool = getTool("evm_dexscreenerPairs");
+		const result = await tool.execute("t4", {
+			query: "WBNB",
+			network: "bsc",
+			dexId: "pancakeswap",
+		});
+		expect(result.content[0]?.text).toContain(
+			"DexScreener pairs (bsc dexId=pancakeswap):",
+		);
+		expect(result.content[0]?.text).toContain("WBNB/USDT");
+		expect(result.details).toMatchObject({
+			network: "bsc",
+			dexId: "pancakeswap",
+			pairCount: 1,
+		});
+	});
+
+	it("resolves token pairs on BSC from dexscreener token endpoint", async () => {
+		mockJsonFetch({
+			pairs: [
+				{
+					chainId: "bsc",
+					pairAddress: "0xpair3",
+					dexId: "pancakeswap",
+					url: "https://dexscreener.com/bsc/0xpair3",
+					baseToken: { symbol: "WBNB", address: "0xwbnb" },
+					quoteToken: { symbol: "USDT", address: "0xUSDTADDRESS" },
+					priceUsd: "0.4",
+					liquidity: { usd: 860000 },
+				},
+				{
+					chainId: "bsc",
+					pairAddress: "0xpair4",
+					dexId: "biswap",
+					baseToken: { symbol: "DOGE", address: "0xdoge" },
+					quoteToken: { symbol: "CAKE", address: "0xcake" },
+				},
+			],
+		});
+		const tool = getTool("evm_dexscreenerTokenPairs");
+		const result = await tool.execute("t5", {
+			tokenAddress: "0xUSDTADDRESS",
+			network: "bsc",
+		});
+		expect(result.content[0]?.text).toContain("DexScreener token pairs (bsc):");
+		const details = result.details as {
+			pairs?: unknown[];
+			network: string;
+			tokenAddress: string;
+			pairCount: number;
+		};
+		expect(details.pairs).toHaveLength(1);
+		expect(details).toMatchObject({
+			network: "bsc",
+			tokenAddress: "0xUSDTADDRESS",
+			pairCount: 1,
 		});
 	});
 });

@@ -246,8 +246,8 @@ function resolveKaspaPrivateKeyFromFile(rawFilePath: string): string | null {
 	try {
 		const raw = readFileSync(resolvedPath);
 		if (
-			raw.slice(0, 4).toString("utf8") === "KASW"
-			&& !raw.toString("utf8").trim().startsWith("{")
+			raw.slice(0, 4).toString("utf8") === "KASW" &&
+			!raw.toString("utf8").trim().startsWith("{")
 		) {
 			throw new Error(
 				`Kaspa wallet binary file format detected at ${resolvedPath}; this tool doesn't directly parse official CLI wallet files. Export mnemonic/private key to a supported text format first.`,

@@ -11,6 +11,7 @@ import {
 import {
 	EVM_TOOL_PREFIX,
 	type EvmNetwork,
+	evmHttpJson,
 	evmNetworkSchema,
 	parseEvmNetwork,
 } from "../runtime.js";
@@ -25,6 +26,194 @@ import {
 function shortId(value: string): string {
 	if (value.length <= 16) return value;
 	return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function toOptionalString(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const normalized = value.trim();
+	return normalized.length > 0 ? normalized : undefined;
+}
+
+function toNormalizedAddress(value: string): string {
+	return value.trim().toLowerCase();
+}
+
+function toOptionalNumber(value: unknown): number | undefined {
+	if (typeof value === "number" && Number.isFinite(value)) return value;
+	if (typeof value === "string") {
+		const parsed = Number.parseFloat(value.trim());
+		return Number.isFinite(parsed) ? parsed : undefined;
+	}
+	return undefined;
+}
+
+type DexscreenerToken = {
+	address?: string;
+	symbol?: string;
+	name?: string;
+};
+
+type DexscreenerPair = {
+	chainId: string;
+	pairAddress: string;
+	dexId?: string;
+	url?: string;
+	labels?: string[];
+	baseToken?: DexscreenerToken;
+	quoteToken?: DexscreenerToken;
+	priceNative?: string;
+	priceUsd?: string;
+	liquidity?: { usd?: string | number };
+	volume?: {
+		h24?: string | number;
+		h6?: string | number;
+		h1?: string | number;
+		m5?: string | number;
+	};
+};
+
+function parseDexscreenerPair(value: unknown): DexscreenerPair | null {
+	if (!isRecord(value)) return null;
+	const chainId = toOptionalString(value.chainId);
+	const pairAddress = toOptionalString(value.pairAddress);
+	if (!chainId || !pairAddress) return null;
+	const baseToken = isRecord(value.baseToken)
+		? {
+				address: toOptionalString(value.baseToken.address),
+				symbol: toOptionalString(value.baseToken.symbol),
+				name: toOptionalString(value.baseToken.name),
+			}
+		: undefined;
+	const quoteToken = isRecord(value.quoteToken)
+		? {
+				address: toOptionalString(value.quoteToken.address),
+				symbol: toOptionalString(value.quoteToken.symbol),
+				name: toOptionalString(value.quoteToken.name),
+			}
+		: undefined;
+	return {
+		chainId,
+		pairAddress,
+		dexId: toOptionalString(value.dexId),
+		url: toOptionalString(value.url),
+		labels: Array.isArray(value.labels)
+			? value.labels
+					.filter((entry): entry is string => typeof entry === "string")
+					.map((entry) => entry.trim())
+					.filter(Boolean)
+			: undefined,
+		baseToken,
+		quoteToken,
+		priceNative: toOptionalString(value.priceNative),
+		priceUsd: toOptionalString(value.priceUsd),
+		liquidity: isRecord(value.liquidity)
+			? {
+					usd: value.liquidity.usd as string | number | undefined,
+				}
+			: undefined,
+		volume: isRecord(value.volume)
+			? {
+					h24: value.volume.h24 as string | number | undefined,
+					h6: value.volume.h6 as string | number | undefined,
+					h1: value.volume.h1 as string | number | undefined,
+					m5: value.volume.m5 as string | number | undefined,
+				}
+			: undefined,
+	};
+}
+
+function extractDexscreenerPairs(value: unknown): DexscreenerPair[] {
+	if (!isRecord(value)) return [];
+	const rawPairs = value.pairs;
+	if (!Array.isArray(rawPairs)) return [];
+	const parsed: DexscreenerPair[] = [];
+	for (const rawPair of rawPairs) {
+		const pair = parseDexscreenerPair(rawPair);
+		if (pair) parsed.push(pair);
+	}
+	return parsed;
+}
+
+function dexscreenerPairLiquidity(pair: DexscreenerPair): number {
+	return toOptionalNumber(pair.liquidity?.usd) ?? 0;
+}
+
+function matchesAddressInPair(
+	pair: DexscreenerPair,
+	normalizedToken: string,
+): boolean {
+	const baseAddress = toOptionalString(pair.baseToken?.address);
+	const quoteAddress = toOptionalString(pair.quoteToken?.address);
+	return (
+		(baseAddress != null &&
+			toNormalizedAddress(baseAddress) === normalizedToken) ||
+		(quoteAddress != null &&
+			toNormalizedAddress(quoteAddress) === normalizedToken)
+	);
+}
+
+function summarizeDexscreenerPairsText(params: {
+	network: string;
+	query: string;
+	pairs: DexscreenerPair[];
+	dexId?: string;
+	limit: number;
+}): string {
+	const dexText = params.dexId ? ` dexId=${params.dexId}` : "";
+	const lines = [
+		`DexScreener pairs (${params.network}${dexText}): query="${params.query}", shown=${params.pairs.length}`,
+	];
+	if (params.pairs.length === 0) {
+		lines.push("No matching pair found.");
+		return lines.join("\n");
+	}
+	for (const [index, pair] of params.pairs.entries()) {
+		const pairLabel =
+			pair.baseToken?.symbol && pair.quoteToken?.symbol
+				? `${pair.baseToken.symbol}/${pair.quoteToken.symbol}`
+				: pair.pairAddress;
+		lines.push(
+			`${index + 1}. ${pairLabel} @ ${pair.dexId ?? "dex"} (${pair.chainId}) liq=${pair.liquidity?.usd ?? "n/a"} usd=${pair.priceUsd ?? "n/a"} vol24h=${pair.volume?.h24 ?? "n/a"} ${pair.url ?? pair.pairAddress}`,
+		);
+	}
+	if (params.pairs.length > params.limit) {
+		lines.push(`... truncated to ${params.limit}`);
+	}
+	return lines.join("\n");
+}
+
+function summarizeDexscreenerTokenPairsText(params: {
+	network: string;
+	tokenAddress: string;
+	pairs: DexscreenerPair[];
+	dexId?: string;
+	limit: number;
+}): string {
+	const dexText = params.dexId ? ` dexId=${params.dexId}` : "";
+	const lines = [
+		`DexScreener token pairs (${params.network}${dexText}): token=${params.tokenAddress}, shown=${params.pairs.length}`,
+	];
+	if (params.pairs.length === 0) {
+		lines.push("No matching pair found.");
+		return lines.join("\n");
+	}
+	for (const [index, pair] of params.pairs.entries()) {
+		const pairLabel =
+			pair.baseToken?.symbol && pair.quoteToken?.symbol
+				? `${pair.baseToken.symbol}/${pair.quoteToken.symbol}`
+				: pair.pairAddress;
+		lines.push(
+			`${index + 1}. ${pairLabel} @ ${pair.dexId ?? "dex"} (${pair.chainId}) liq=${pair.liquidity?.usd ?? "n/a"} usd=${pair.priceUsd ?? "n/a"} ${pair.url ?? pair.pairAddress}`,
+		);
+	}
+	if (params.pairs.length > params.limit) {
+		lines.push(`... truncated to ${params.limit}`);
+	}
+	return lines.join("\n");
 }
 
 function summarizeBtc5mMarketsText(
@@ -387,6 +576,149 @@ export function createEvmReadTools() {
 					details: {
 						network,
 						...status,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${EVM_TOOL_PREFIX}dexscreenerPairs`,
+			label: "EVM DexScreener Pair Search",
+			description:
+				"Search DexScreener pairs by query and optional dex/network filters.",
+			parameters: Type.Object({
+				network: evmNetworkSchema(),
+				query: Type.String({
+					description: "Search text, token symbol, or pair/address keywords.",
+				}),
+				dexId: Type.Optional(
+					Type.String({
+						description:
+							"Optional DEX ID filter, e.g. pancakeswap, uniswap, raydium.",
+					}),
+				),
+				limit: Type.Optional(
+					Type.Number({
+						minimum: 1,
+						maximum: 50,
+						default: 10,
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseEvmNetwork(params.network ?? "bsc");
+				const query = params.query.trim();
+				if (!query) throw new Error("query is required");
+				const url = `https://api.dexscreener.com/latest/dex/search/?q=${encodeURIComponent(query)}`;
+				const payload = await evmHttpJson<unknown>({
+					url,
+					timeoutMs: 15_000,
+				});
+				const allPairs = extractDexscreenerPairs(payload);
+				const lowerDexId = toOptionalString(params.dexId)?.toLowerCase();
+				const limit = params.limit ?? 10;
+				const filtered = allPairs
+					.filter(
+						(pair) =>
+							pair.chainId === network &&
+							(!lowerDexId || pair.dexId?.toLowerCase() === lowerDexId),
+					)
+					.sort(
+						(a, b) => dexscreenerPairLiquidity(b) - dexscreenerPairLiquidity(a),
+					)
+					.slice(0, limit);
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeDexscreenerPairsText({
+								network,
+								query,
+								pairs: filtered,
+								dexId: lowerDexId,
+								limit,
+							}),
+						},
+					],
+					details: {
+						network,
+						query,
+						dexId: lowerDexId,
+						pairCount: filtered.length,
+						pairs: filtered,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${EVM_TOOL_PREFIX}dexscreenerTokenPairs`,
+			label: "EVM DexScreener Token Pairs",
+			description:
+				"Lookup DexScreener pairs for a BSC/ERC token address and optional dex/network filter.",
+			parameters: Type.Object({
+				network: evmNetworkSchema(),
+				tokenAddress: Type.String({
+					description:
+						"Token address in 0x... format (mainly BSC/ERC-20 style).",
+				}),
+				dexId: Type.Optional(
+					Type.String({
+						description: "Optional DEX ID filter, e.g. pancakeswap",
+					}),
+				),
+				limit: Type.Optional(
+					Type.Number({
+						minimum: 1,
+						maximum: 50,
+						default: 10,
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseEvmNetwork(params.network ?? "bsc");
+				const tokenAddress = params.tokenAddress.trim();
+				const normalizedToken = toNormalizedAddress(tokenAddress);
+				if (!normalizedToken.startsWith("0x") || normalizedToken.length < 10) {
+					throw new Error("tokenAddress must be a valid 0x-style address");
+				}
+				const url = `https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(tokenAddress)}`;
+				const payload = await evmHttpJson<unknown>({
+					url,
+					timeoutMs: 15_000,
+				});
+				const allPairs = extractDexscreenerPairs(payload);
+				const lowerDexId = toOptionalString(params.dexId)?.toLowerCase();
+				const limit = params.limit ?? 10;
+				const filtered = allPairs
+					.filter(
+						(pair) =>
+							pair.chainId === network &&
+							(!lowerDexId || pair.dexId?.toLowerCase() === lowerDexId) &&
+							matchesAddressInPair(pair, normalizedToken),
+					)
+					.sort(
+						(a, b) => dexscreenerPairLiquidity(b) - dexscreenerPairLiquidity(a),
+					)
+					.slice(0, limit);
+				return {
+					content: [
+						{
+							type: "text",
+							text: summarizeDexscreenerTokenPairsText({
+								network,
+								tokenAddress,
+								pairs: filtered,
+								dexId: lowerDexId,
+								limit,
+							}),
+						},
+					],
+					details: {
+						network,
+						tokenAddress,
+						dexId: lowerDexId,
+						pairCount: filtered.length,
+						pairs: filtered,
 					},
 				};
 			},
