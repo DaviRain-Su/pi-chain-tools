@@ -35,6 +35,8 @@ export type LendingMarket = {
 	isCollateral: boolean;
 	/** Whether this market is actively listed */
 	isListed: boolean;
+	/** Protocol-specific metadata (e.g. Morpho MarketParams, Venus exchange rates) */
+	extra?: Record<string, unknown>;
 };
 
 // ---------------------------------------------------------------------------

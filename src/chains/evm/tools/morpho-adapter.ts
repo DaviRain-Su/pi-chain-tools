@@ -172,6 +172,109 @@ function chainIdForNetwork(network: EvmNetwork): number {
 }
 
 // ---------------------------------------------------------------------------
+// MarketParams resolution
+// ---------------------------------------------------------------------------
+
+export type MorphoMarketParams = {
+	loanToken: string;
+	collateralToken: string;
+	oracle: string;
+	irm: string;
+	lltv: string;
+};
+
+/**
+ * Resolve full MarketParams from Morpho API by market uniqueKey + chainId.
+ * This is required for all Morpho Blue on-chain operations.
+ */
+async function resolveMarketParams(
+	network: EvmNetwork,
+	marketId: string,
+): Promise<MorphoMarketParams> {
+	const chainId = chainIdForNetwork(network);
+	const data = await queryMorphoApi<{
+		market: MorphoApiMarket | null;
+	}>(`{
+		market(uniqueKey: "${marketId}", chainId: ${chainId}) {
+			uniqueKey
+			loanAsset { address }
+			collateralAsset { address }
+			oracleAddress
+			irmAddress
+			lltv
+		}
+	}`);
+
+	if (!data.market) {
+		throw new Error(
+			`Morpho market not found: uniqueKey=${marketId} on chain ${chainId}`,
+		);
+	}
+
+	const m = data.market;
+	return {
+		loanToken: m.loanAsset.address,
+		collateralToken:
+			m.collateralAsset?.address ??
+			"0x0000000000000000000000000000000000000000",
+		oracle: m.oracleAddress ?? "0x0000000000000000000000000000000000000000",
+		irm: m.irmAddress ?? "0x0000000000000000000000000000000000000000",
+		lltv: m.lltv,
+	};
+}
+
+/**
+ * Resolve MarketParams for the highest-TVL market that uses the given token as loanToken.
+ * Used by supply/repay/withdraw which receive tokenAddress but not marketId.
+ */
+async function resolveMarketParamsForToken(
+	network: EvmNetwork,
+	tokenAddress: string,
+): Promise<MorphoMarketParams> {
+	const chainId = chainIdForNetwork(network);
+	const data = await queryMorphoApi<{
+		markets: { items: MorphoApiMarket[] };
+	}>(`{
+		markets(
+			where: {
+				chainId_in: [${chainId}]
+				loanAssetAddress_in: ["${tokenAddress.toLowerCase()}"]
+				supplyAssetsUsd_gte: 100
+			}
+			first: 1
+			orderBy: SupplyAssetsUsd
+			orderDirection: Desc
+		) {
+			items {
+				uniqueKey
+				loanAsset { address }
+				collateralAsset { address }
+				oracleAddress
+				irmAddress
+				lltv
+			}
+		}
+	}`);
+
+	const m = data.markets.items[0];
+	if (!m) {
+		throw new Error(
+			`No Morpho market found for loanToken=${tokenAddress} on chain ${chainId}`,
+		);
+	}
+
+	return {
+		loanToken: m.loanAsset.address,
+		collateralToken:
+			m.collateralAsset?.address ??
+			"0x0000000000000000000000000000000000000000",
+		oracle: m.oracleAddress ?? "0x0000000000000000000000000000000000000000",
+		irm: m.irmAddress ?? "0x0000000000000000000000000000000000000000",
+		lltv: m.lltv,
+	};
+}
+
+// ---------------------------------------------------------------------------
 // Network guard
 // ---------------------------------------------------------------------------
 
@@ -198,6 +301,7 @@ export {
 	encodeMarketParams,
 	chainIdForNetwork,
 	getMorphoAddress,
+	resolveMarketParams,
 };
 
 export function createMorphoAdapter(): LendingProtocolAdapter {
@@ -366,6 +470,12 @@ export function createMorphoAdapter(): LendingProtocolAdapter {
 
 		async buildSupplyCalldata(params: SupplyParams): Promise<EvmCallData[]> {
 			const morpho = getMorphoAddress(params.network);
+			// SupplyParams doesn't have marketId — look up by tokenAddress as loanToken
+			// For Morpho, caller should set tokenAddress = loanToken address
+			const mp = await resolveMarketParamsForToken(
+				params.network,
+				params.tokenAddress,
+			);
 			const calldata: EvmCallData[] = [];
 
 			// ERC-20 approve for loan token
@@ -376,15 +486,21 @@ export function createMorphoAdapter(): LendingProtocolAdapter {
 				description: `Approve Morpho Blue to spend ${params.tokenAddress}`,
 			});
 
-			// For supply, we need MarketParams — typically passed via extra metadata
-			// For now, encode a basic supply with the market params from the first matching market
-			// In production, marketAddress should contain the uniqueKey which maps to MarketParams
-			const supplyData = `${SEL.supply}${padAddress(params.tokenAddress)}${padAddress("0x0000000000000000000000000000000000000000")}${padAddress("0x0000000000000000000000000000000000000000")}${padAddress("0x0000000000000000000000000000000000000000")}${padUint256("0")}${padUint256(params.amountRaw)}${padUint256("0")}${padAddress(params.account)}0000000000000000000000000000000000000000000000000000000000000000`; // callback data offset
+			const mpEncoded = encodeMarketParams(mp);
+			// supply(MarketParams,uint256 assets,uint256 shares,address onBehalf,bytes data)
+			// Dynamic bytes `data` requires ABI offset pointer
+			const supplyData =
+				`${SEL.supply}${mpEncoded}` +
+				`${padUint256(params.amountRaw)}` + // assets
+				`${padUint256("0")}` + // shares (0 = use assets)
+				`${padAddress(params.account)}` + // onBehalf
+				`${padUint256("224")}` + // offset to bytes data (7 * 32 = 224)
+				`${padUint256("0")}`; // bytes length = 0
 
 			calldata.push({
 				to: morpho,
 				data: supplyData,
-				description: `Supply ${params.amountRaw} to Morpho Blue`,
+				description: `Supply ${params.amountRaw} to Morpho Blue market ${mp.loanToken.slice(0, 10)}...`,
 			});
 
 			return calldata;
@@ -392,18 +508,33 @@ export function createMorphoAdapter(): LendingProtocolAdapter {
 
 		async buildBorrowCalldata(params: BorrowParams): Promise<EvmCallData> {
 			const morpho = getMorphoAddress(params.network);
+			const mp = await resolveMarketParams(
+				params.network,
+				params.marketAddress,
+			);
 
-			const borrowData = `${SEL.borrow}${padAddress("0x0000000000000000000000000000000000000000")}${padAddress("0x0000000000000000000000000000000000000000")}${padAddress("0x0000000000000000000000000000000000000000")}${padAddress("0x0000000000000000000000000000000000000000")}${padUint256("0")}${padUint256(params.amountRaw)}${padUint256("0")}${padAddress(params.account)}${padAddress(params.account)}`; // receiver
+			const mpEncoded = encodeMarketParams(mp);
+			// borrow(MarketParams,uint256 assets,uint256 shares,address onBehalf,address receiver)
+			const borrowData =
+				`${SEL.borrow}${mpEncoded}` +
+				`${padUint256(params.amountRaw)}` + // assets
+				`${padUint256("0")}` + // shares
+				`${padAddress(params.account)}` + // onBehalf
+				`${padAddress(params.account)}`; // receiver
 
 			return {
 				to: morpho,
 				data: borrowData,
-				description: `Borrow ${params.amountRaw} from Morpho Blue`,
+				description: `Borrow ${params.amountRaw} from Morpho Blue market ${mp.loanToken.slice(0, 10)}...`,
 			};
 		},
 
 		async buildRepayCalldata(params: RepayParams): Promise<EvmCallData[]> {
 			const morpho = getMorphoAddress(params.network);
+			const mp = await resolveMarketParamsForToken(
+				params.network,
+				params.tokenAddress,
+			);
 			const calldata: EvmCallData[] = [];
 
 			// Approve
@@ -414,12 +545,20 @@ export function createMorphoAdapter(): LendingProtocolAdapter {
 				description: `Approve Morpho Blue to spend ${params.tokenAddress}`,
 			});
 
-			const repayData = `${SEL.repay}${padAddress(params.tokenAddress)}${padAddress("0x0000000000000000000000000000000000000000")}${padAddress("0x0000000000000000000000000000000000000000")}${padAddress("0x0000000000000000000000000000000000000000")}${padUint256("0")}${padUint256(params.amountRaw)}${padUint256("0")}${padAddress(params.account)}0000000000000000000000000000000000000000000000000000000000000000`; // callback data offset
+			const mpEncoded = encodeMarketParams(mp);
+			// repay(MarketParams,uint256 assets,uint256 shares,address onBehalf,bytes data)
+			const repayData =
+				`${SEL.repay}${mpEncoded}` +
+				`${padUint256(params.amountRaw)}` + // assets
+				`${padUint256("0")}` + // shares
+				`${padAddress(params.account)}` + // onBehalf
+				`${padUint256("224")}` + // offset to bytes data
+				`${padUint256("0")}`; // bytes length = 0
 
 			calldata.push({
 				to: morpho,
 				data: repayData,
-				description: `Repay ${params.amountRaw} to Morpho Blue`,
+				description: `Repay ${params.amountRaw} to Morpho Blue market ${mp.loanToken.slice(0, 10)}...`,
 			});
 
 			return calldata;
@@ -427,21 +566,116 @@ export function createMorphoAdapter(): LendingProtocolAdapter {
 
 		async buildWithdrawCalldata(params: WithdrawParams): Promise<EvmCallData> {
 			const morpho = getMorphoAddress(params.network);
+			const mp = await resolveMarketParamsForToken(
+				params.network,
+				params.tokenAddress,
+			);
 
-			const withdrawData = `${SEL.withdraw}${padAddress("0x0000000000000000000000000000000000000000")}${padAddress("0x0000000000000000000000000000000000000000")}${padAddress("0x0000000000000000000000000000000000000000")}${padAddress("0x0000000000000000000000000000000000000000")}${padUint256("0")}${padUint256(params.amountRaw)}${padUint256("0")}${padAddress(params.account)}${padAddress(params.account)}`; // receiver
+			const mpEncoded = encodeMarketParams(mp);
+			// withdraw(MarketParams,uint256 assets,uint256 shares,address onBehalf,address receiver)
+			const withdrawData =
+				`${SEL.withdraw}${mpEncoded}` +
+				`${padUint256(params.amountRaw)}` + // assets
+				`${padUint256("0")}` + // shares
+				`${padAddress(params.account)}` + // onBehalf
+				`${padAddress(params.account)}`; // receiver
 
 			return {
 				to: morpho,
 				data: withdrawData,
-				description: `Withdraw ${params.amountRaw} from Morpho Blue`,
+				description: `Withdraw ${params.amountRaw} from Morpho Blue market ${mp.loanToken.slice(0, 10)}...`,
 			};
 		},
 
 		async buildEnterMarketCalldata(): Promise<EvmCallData> {
-			// Morpho Blue doesn't have explicit enterMarkets — collateral is per-market
 			throw new Error(
 				"Morpho Blue does not have enterMarkets. Collateral is managed per-market via supplyCollateral.",
 			);
 		},
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Morpho-specific operations (beyond LendingProtocolAdapter)
+// ---------------------------------------------------------------------------
+
+export type MorphoSupplyCollateralParams = {
+	network: EvmNetwork;
+	account: string;
+	/** Morpho market uniqueKey */
+	marketId: string;
+	/** Collateral token address */
+	collateralTokenAddress: string;
+	/** Amount in raw units */
+	amountRaw: string;
+};
+
+/**
+ * Build calldata to supply collateral to a Morpho Blue market.
+ * This is separate from `supply` — in Morpho, supply = lending, supplyCollateral = posting collateral.
+ */
+export async function buildMorphoSupplyCollateralCalldata(
+	params: MorphoSupplyCollateralParams,
+): Promise<EvmCallData[]> {
+	const morpho = getMorphoAddress(params.network);
+	const mp = await resolveMarketParams(params.network, params.marketId);
+	const calldata: EvmCallData[] = [];
+
+	// Approve collateral token
+	const approveData = `${SEL.approve}${padAddress(morpho)}${MAX_UINT256_PADDED}`;
+	calldata.push({
+		to: params.collateralTokenAddress,
+		data: approveData,
+		description: `Approve Morpho Blue to spend collateral ${params.collateralTokenAddress}`,
+	});
+
+	const mpEncoded = encodeMarketParams(mp);
+	// supplyCollateral(MarketParams,uint256 assets,address onBehalf,bytes data)
+	const supplyCollData =
+		`${SEL.supplyCollateral}${mpEncoded}` +
+		`${padUint256(params.amountRaw)}` + // assets
+		`${padAddress(params.account)}` + // onBehalf
+		`${padUint256("192")}` + // offset to bytes data (6 * 32 = 192)
+		`${padUint256("0")}`; // bytes length = 0
+
+	calldata.push({
+		to: morpho,
+		data: supplyCollData,
+		description: `Supply ${params.amountRaw} collateral to Morpho Blue market`,
+	});
+
+	return calldata;
+}
+
+export type MorphoWithdrawCollateralParams = {
+	network: EvmNetwork;
+	account: string;
+	/** Morpho market uniqueKey */
+	marketId: string;
+	/** Amount in raw units */
+	amountRaw: string;
+};
+
+/**
+ * Build calldata to withdraw collateral from a Morpho Blue market.
+ */
+export async function buildMorphoWithdrawCollateralCalldata(
+	params: MorphoWithdrawCollateralParams,
+): Promise<EvmCallData> {
+	const morpho = getMorphoAddress(params.network);
+	const mp = await resolveMarketParams(params.network, params.marketId);
+
+	const mpEncoded = encodeMarketParams(mp);
+	// withdrawCollateral(MarketParams,uint256 assets,address onBehalf,address receiver)
+	const withdrawCollData =
+		`${SEL.withdrawCollateral}${mpEncoded}` +
+		`${padUint256(params.amountRaw)}` + // assets
+		`${padAddress(params.account)}` + // onBehalf
+		`${padAddress(params.account)}`; // receiver
+
+	return {
+		to: morpho,
+		data: withdrawCollData,
+		description: `Withdraw ${params.amountRaw} collateral from Morpho Blue market`,
 	};
 }

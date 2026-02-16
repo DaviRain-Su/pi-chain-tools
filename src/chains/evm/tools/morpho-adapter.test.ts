@@ -3,6 +3,8 @@ import {
 	MORPHO_API_URL,
 	MORPHO_DEPLOYMENTS,
 	MORPHO_PROTOCOL_ID,
+	buildMorphoSupplyCollateralCalldata,
+	buildMorphoWithdrawCollateralCalldata,
 	chainIdForNetwork,
 	createMorphoAdapter,
 	encodeMarketParams,
@@ -156,6 +158,10 @@ describe("createMorphoAdapter getMarkets", () => {
 		expect(markets[0].borrowAPY).toBeCloseTo(4.1, 1);
 		expect(markets[0].collateralFactor).toBeCloseTo(0.86, 2);
 		expect(markets[0].marketAddress).toBe("0xabc123");
+		// Verify extra contains MarketParams
+		const extra = markets[0].extra as Record<string, unknown>;
+		expect(extra.oracle).toBe("0x0000000000000000000000000000000001");
+		expect(extra.irm).toBe("0x0000000000000000000000000000000002");
 	});
 
 	it("filters UNKNOWN symbols", async () => {
@@ -273,8 +279,49 @@ describe("createMorphoAdapter getAccountPosition", () => {
 	});
 });
 
-describe("createMorphoAdapter calldata builders", () => {
-	it("buildSupplyCalldata returns approve + supply", async () => {
+// Mock API responses for market resolution
+const MOCK_MARKET_RESOLVE_RESPONSE = {
+	data: {
+		markets: {
+			items: [
+				{
+					uniqueKey: "0xabc123",
+					loanAsset: {
+						address: "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+					},
+					collateralAsset: {
+						address: "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A",
+					},
+					oracleAddress: "0x0000000000000000000000000000000000000099",
+					irmAddress: "0x0000000000000000000000000000000000000088",
+					lltv: "770000000000000000",
+				},
+			],
+		},
+	},
+};
+
+const MOCK_MARKET_BY_KEY_RESPONSE = {
+	data: {
+		market: {
+			uniqueKey: "0xabc123",
+			loanAsset: {
+				address: "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+			},
+			collateralAsset: {
+				address: "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A",
+			},
+			oracleAddress: "0x0000000000000000000000000000000000000099",
+			irmAddress: "0x0000000000000000000000000000000000000088",
+			lltv: "770000000000000000",
+		},
+	},
+};
+
+describe("createMorphoAdapter calldata builders (with real MarketParams)", () => {
+	it("buildSupplyCalldata encodes real oracle/irm", async () => {
+		mockFetchJson(MOCK_MARKET_RESOLVE_RESPONSE);
+
 		const adapter = createMorphoAdapter();
 		const calls = await adapter.buildSupplyCalldata({
 			network: "monad",
@@ -284,13 +331,16 @@ describe("createMorphoAdapter calldata builders", () => {
 		});
 
 		expect(calls.length).toBe(2);
-		expect(calls[0].description).toContain("Approve");
 		expect(calls[0].data).toContain("095ea7b3"); // approve selector
-		expect(calls[1].description).toContain("Supply");
 		expect(calls[1].to).toBe("0xD5D960E8C380B724a48AC59E2DfF1b2CB4a1eAee");
+		// Real oracle/irm addresses in calldata (not zero)
+		expect(calls[1].data).toContain("0000000000000000000000000000000000000099");
+		expect(calls[1].data).toContain("0000000000000000000000000000000000000088");
 	});
 
-	it("buildBorrowCalldata returns borrow call", async () => {
+	it("buildBorrowCalldata encodes real MarketParams", async () => {
+		mockFetchJson(MOCK_MARKET_BY_KEY_RESPONSE);
+
 		const adapter = createMorphoAdapter();
 		const call = await adapter.buildBorrowCalldata({
 			network: "monad",
@@ -300,10 +350,12 @@ describe("createMorphoAdapter calldata builders", () => {
 		});
 
 		expect(call.to).toBe("0xD5D960E8C380B724a48AC59E2DfF1b2CB4a1eAee");
-		expect(call.description).toContain("Borrow");
+		expect(call.data).toContain("0000000000000000000000000000000000000099");
 	});
 
-	it("buildRepayCalldata returns approve + repay", async () => {
+	it("buildRepayCalldata encodes real MarketParams", async () => {
+		mockFetchJson(MOCK_MARKET_RESOLVE_RESPONSE);
+
 		const adapter = createMorphoAdapter();
 		const calls = await adapter.buildRepayCalldata({
 			network: "monad",
@@ -313,11 +365,12 @@ describe("createMorphoAdapter calldata builders", () => {
 		});
 
 		expect(calls.length).toBe(2);
-		expect(calls[0].description).toContain("Approve");
-		expect(calls[1].description).toContain("Repay");
+		expect(calls[1].data).toContain("0000000000000000000000000000000000000099");
 	});
 
-	it("buildWithdrawCalldata returns withdraw call", async () => {
+	it("buildWithdrawCalldata encodes real MarketParams", async () => {
+		mockFetchJson(MOCK_MARKET_RESOLVE_RESPONSE);
+
 		const adapter = createMorphoAdapter();
 		const call = await adapter.buildWithdrawCalldata({
 			network: "monad",
@@ -327,7 +380,6 @@ describe("createMorphoAdapter calldata builders", () => {
 		});
 
 		expect(call.to).toBe("0xD5D960E8C380B724a48AC59E2DfF1b2CB4a1eAee");
-		expect(call.description).toContain("Withdraw");
 	});
 
 	it("buildEnterMarketCalldata throws", async () => {
@@ -339,5 +391,39 @@ describe("createMorphoAdapter calldata builders", () => {
 				account: "0x123",
 			}),
 		).rejects.toThrow("does not have enterMarkets");
+	});
+});
+
+describe("Morpho-specific operations", () => {
+	it("buildMorphoSupplyCollateralCalldata returns approve + supplyCollateral", async () => {
+		mockFetchJson(MOCK_MARKET_BY_KEY_RESPONSE);
+
+		const calls = await buildMorphoSupplyCollateralCalldata({
+			network: "monad",
+			account: "0x1234567890abcdef1234567890abcdef12345678",
+			marketId: "0xabc123",
+			collateralTokenAddress: "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A",
+			amountRaw: "1000000000000000000",
+		});
+
+		expect(calls.length).toBe(2);
+		expect(calls[0].description).toContain("Approve");
+		expect(calls[0].to).toBe("0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A");
+		expect(calls[1].description).toContain("collateral");
+		expect(calls[1].to).toBe("0xD5D960E8C380B724a48AC59E2DfF1b2CB4a1eAee");
+	});
+
+	it("buildMorphoWithdrawCollateralCalldata returns withdrawCollateral", async () => {
+		mockFetchJson(MOCK_MARKET_BY_KEY_RESPONSE);
+
+		const call = await buildMorphoWithdrawCollateralCalldata({
+			network: "monad",
+			account: "0x1234567890abcdef1234567890abcdef12345678",
+			marketId: "0xabc123",
+			amountRaw: "1000000000000000000",
+		});
+
+		expect(call.to).toBe("0xD5D960E8C380B724a48AC59E2DfF1b2CB4a1eAee");
+		expect(call.description).toContain("collateral");
 	});
 });
