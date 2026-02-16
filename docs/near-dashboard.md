@@ -26,6 +26,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `NEAR_REBAL_MAX_AMOUNT_RAW` (default `5000000`)
   - `NEAR_REBAL_MIN_QUOTE_OUT_RAW` (default `500000`)
   - `NEAR_REBAL_MAX_SLIPPAGE_BPS` (default `100`)
+  - `NEAR_REBAL_MIN_EFFECTIVE_RATE` (default `0.5`, blocks poor quote quality)
   - `NEAR_REBAL_COOLDOWN_SECONDS` (default `120`)
   - `NEAR_REBAL_DAILY_MAX` (default `6`)
 - CSV export for latest snapshot

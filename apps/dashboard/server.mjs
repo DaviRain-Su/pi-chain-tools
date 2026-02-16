@@ -516,7 +516,12 @@ function currentDayKey() {
 	return new Date().toISOString().slice(0, 10);
 }
 
-function enforceRebalanceGuards({ amountRaw, quoteOutRaw, slippageBps }) {
+function enforceRebalanceGuards({
+	amountRaw,
+	quoteOutRaw,
+	minAmountOutRaw,
+	slippageBps,
+}) {
 	const maxAmountRaw = BigInt(
 		process.env.NEAR_REBAL_MAX_AMOUNT_RAW || "5000000",
 	);
@@ -532,9 +537,13 @@ function enforceRebalanceGuards({ amountRaw, quoteOutRaw, slippageBps }) {
 		120,
 	);
 	const dailyMax = parsePositiveInt(process.env.NEAR_REBAL_DAILY_MAX, 6);
+	const minEffectiveRate = Number.parseFloat(
+		process.env.NEAR_REBAL_MIN_EFFECTIVE_RATE || "0.5",
+	);
 
 	const amount = BigInt(amountRaw);
 	const quoteOut = BigInt(quoteOutRaw);
+	const minOut = BigInt(minAmountOutRaw);
 	if (amount > maxAmountRaw) {
 		throw new Error(
 			`risk guard: amountRaw ${amountRaw} exceeds max ${maxAmountRaw.toString()}`,
@@ -549,6 +558,17 @@ function enforceRebalanceGuards({ amountRaw, quoteOutRaw, slippageBps }) {
 		throw new Error(
 			`risk guard: slippageBps ${slippageBps} exceeds max ${maxSlippageBps}`,
 		);
+	}
+	if (minOut <= 0n || minOut > quoteOut) {
+		throw new Error("quote guard: invalid minAmountOutRaw boundary");
+	}
+	if (Number.isFinite(minEffectiveRate) && minEffectiveRate > 0) {
+		const rate = Number(quoteOut) / Number(amount);
+		if (Number.isFinite(rate) && rate < minEffectiveRate) {
+			throw new Error(
+				`quote guard: effective rate ${rate.toFixed(4)} below minimum ${minEffectiveRate.toFixed(4)}`,
+			);
+		}
 	}
 
 	const now = Date.now();
@@ -762,6 +782,7 @@ async function executeAction(payload) {
 			enforceRebalanceGuards({
 				amountRaw,
 				quoteOutRaw: refQuoteOutRaw,
+				minAmountOutRaw,
 				slippageBps,
 			});
 
