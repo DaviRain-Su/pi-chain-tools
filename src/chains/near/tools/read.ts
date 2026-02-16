@@ -1924,6 +1924,49 @@ function resolveNearIntentsTokenByAssetId(
 	return tokens.find((token) => token.assetId === assetId) ?? null;
 }
 
+function resolveIntentsRecipientOrThrow(params: {
+	explicitRecipient?: string;
+	fallbackNearAccountId: string;
+	destinationToken: NearIntentsToken | null;
+	recipientType: "DESTINATION_CHAIN" | "INTENTS";
+}): string {
+	const explicit = params.explicitRecipient?.trim();
+	if (explicit) return explicit;
+	if (params.recipientType === "INTENTS") {
+		return params.fallbackNearAccountId;
+	}
+	const destinationBlockchain =
+		params.destinationToken?.blockchain?.trim().toLowerCase() ?? "near";
+	if (destinationBlockchain === "near") {
+		return params.fallbackNearAccountId;
+	}
+	throw new Error(
+		`recipient is required for destination chain '${destinationBlockchain}'. Pass recipient explicitly or use recipientType=INTENTS.`,
+	);
+}
+
+function resolveIntentsRefundToOrThrow(params: {
+	explicitRefundTo?: string;
+	fallbackNearAccountId: string;
+	originToken: NearIntentsToken | null;
+	refundType: "ORIGIN_CHAIN" | "INTENTS";
+	recipient: string;
+}): string {
+	const explicit = params.explicitRefundTo?.trim();
+	if (explicit) return explicit;
+	if (params.refundType === "INTENTS") {
+		return params.fallbackNearAccountId;
+	}
+	const originBlockchain =
+		params.originToken?.blockchain?.trim().toLowerCase() ?? "near";
+	if (originBlockchain === "near") {
+		return params.recipient || params.fallbackNearAccountId;
+	}
+	throw new Error(
+		`refundTo is required for origin chain '${originBlockchain}'. Pass refundTo explicitly or use refundType=INTENTS.`,
+	);
+}
+
 async function queryNearPortfolioValuationTokens(params: {
 	baseUrl: string;
 	headers: Record<string, string>;
@@ -5286,8 +5329,25 @@ export function createNearReadTools() {
 					params.accountId,
 					network,
 				);
-				const recipient = params.recipient?.trim() || fallbackAccountId;
-				const refundTo = params.refundTo?.trim() || recipient;
+				const originToken =
+					resolveNearIntentsTokenByAssetId(originAssetId, tokens) ?? null;
+				const destinationToken =
+					resolveNearIntentsTokenByAssetId(destinationAssetId, tokens) ?? null;
+				const recipientType = params.recipientType ?? "DESTINATION_CHAIN";
+				const refundType = params.refundType ?? "ORIGIN_CHAIN";
+				const recipient = resolveIntentsRecipientOrThrow({
+					explicitRecipient: params.recipient,
+					fallbackNearAccountId: fallbackAccountId,
+					destinationToken,
+					recipientType,
+				});
+				const refundTo = resolveIntentsRefundToOrThrow({
+					explicitRefundTo: params.refundTo,
+					fallbackNearAccountId: fallbackAccountId,
+					originToken,
+					refundType,
+					recipient,
+				});
 				const quoteWaitingTimeMs = parseIntentsQuoteWaitingTimeMs(
 					params.quoteWaitingTimeMs,
 				);
@@ -5302,9 +5362,9 @@ export function createNearReadTools() {
 					destinationAsset: destinationAssetId,
 					amount,
 					refundTo,
-					refundType: params.refundType ?? "ORIGIN_CHAIN",
+					refundType,
 					recipient,
-					recipientType: params.recipientType ?? "DESTINATION_CHAIN",
+					recipientType,
 					deadline: parseIntentsDeadline(params.deadline),
 					depositMode: params.depositMode ?? "SIMPLE",
 					...(quoteWaitingTimeMs != null
@@ -5321,10 +5381,6 @@ export function createNearReadTools() {
 						headers: authHeaders,
 						body: quoteRequest as unknown as Record<string, unknown>,
 					});
-				const originToken =
-					resolveNearIntentsTokenByAssetId(originAssetId, tokens) ?? null;
-				const destinationToken =
-					resolveNearIntentsTokenByAssetId(destinationAssetId, tokens) ?? null;
 				const originSymbol = originToken?.symbol || originAssetId;
 				const destinationSymbol =
 					destinationToken?.symbol || destinationAssetId;
