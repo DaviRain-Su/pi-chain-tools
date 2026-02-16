@@ -269,7 +269,7 @@ describe("w3rt_run_evm_swap_workflow_v0", () => {
 				intentText: "先模拟",
 			}),
 		).rejects.toThrow(
-			"Missing required fields for evm.swap.pancakeV2: tokenInAddress",
+			/Missing required fields for evm\.swap\.pancakeV2: .*tokenInAddress.*fromAddress.*tokenOutAddress.*outputToken.*toAddress.*recipientAddress.*amountInRaw/s,
 		);
 	});
 

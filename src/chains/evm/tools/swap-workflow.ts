@@ -263,16 +263,18 @@ function buildMissingSwapFieldError(input: {
 }): string | undefined {
 	const missing: string[] = [];
 	if (!input.tokenInAddressInput) {
-		missing.push("tokenInAddress (use 'tokenInAddress' / 'from' / 'tokenIn=')");
+		missing.push(
+			"tokenInAddress (use 'tokenInAddress' / 'from' / 'fromAddress' / 'fromToken' / 'inputToken' / 'tokenIn=')",
+		);
 	}
 	if (!input.tokenOutAddressInput) {
 		missing.push(
-			"tokenOutAddress (use 'tokenOutAddress' / 'toToken' / 'tokenOut=')",
+			"tokenOutAddress (use 'tokenOutAddress' / 'toToken' / 'outputToken' / 'tokenOut=')",
 		);
 	}
 	if (!input.toAddressInput) {
 		missing.push(
-			"toAddress (use 'toAddress', '给 ...', '转给 ...', '收款到 ...')",
+			"toAddress (use 'toAddress' / 'recipient' / 'recipientAddress' / 'receiver' / 'receiverAddress' / '给 ...', '转给 ...', '收款到 ...')",
 		);
 	}
 	if (!input.amountInRawInput) {
