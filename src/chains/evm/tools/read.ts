@@ -16,6 +16,10 @@ import {
 	parseEvmNetwork,
 } from "../runtime.js";
 import {
+	type PancakeV2ConfigStatus,
+	getPancakeV2ConfigStatus,
+} from "./execute.js";
+import {
 	EVM_TRANSFER_TOKEN_DECIMALS_ENV,
 	EVM_TRANSFER_TOKEN_MAP_ENV,
 	EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK,
@@ -50,6 +54,31 @@ function toOptionalNumber(value: unknown): number | undefined {
 	}
 	return undefined;
 }
+
+function maskAddress(value: string): string {
+	if (value.length <= 12) return value;
+	return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+function summarizePancakeV2ConfigText(status: PancakeV2ConfigStatus): string {
+	const cfg = status.config;
+	const chainId = cfg?.chainId ?? "n/a";
+	if (cfg) {
+		return `PancakeV2 config ${status.network}: source=${status.source} configured=yes chainId=${chainId} factory=${maskAddress(cfg.factoryAddress)} router=${maskAddress(cfg.routerAddress)} wrappedNative=${maskAddress(cfg.wrappedNativeAddress)}`;
+	}
+	const issue = status.issues[0] ?? "not configured";
+	return `PancakeV2 config ${status.network}: source=${status.source} configured=no issue=${issue}`;
+}
+
+const EVM_NETWORKS_FOR_CONFIG_CHECK: EvmNetwork[] = [
+	"ethereum",
+	"sepolia",
+	"polygon",
+	"base",
+	"arbitrum",
+	"optimism",
+	"bsc",
+];
 
 type DexscreenerToken = {
 	address?: string;
@@ -330,6 +359,43 @@ function filterTokenMapEntries(params: {
 
 export function createEvmReadTools() {
 	return [
+		defineTool({
+			name: `${EVM_TOOL_PREFIX}getPancakeV2Config`,
+			label: "EVM Get PancakeV2 Config",
+			description:
+				"Read PancakeSwap V2 routing config resolution status for one or all EVM networks (env override or built-in fallback).",
+			parameters: Type.Object({
+				network: Type.Optional(evmNetworkSchema()),
+				all: Type.Optional(
+					Type.Boolean({
+						description:
+							"Return all known network statuses when true or when network is omitted; default false means only requested network.",
+					}),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const requestedNetwork = params.network
+					? parseEvmNetwork(params.network)
+					: undefined;
+				const includeAll = Boolean(params.all) || !requestedNetwork;
+				const targetNetworks = includeAll
+					? EVM_NETWORKS_FOR_CONFIG_CHECK
+					: [requestedNetwork];
+				const statuses = targetNetworks.map((network) =>
+					getPancakeV2ConfigStatus(network),
+				);
+				const text = statuses.map(summarizePancakeV2ConfigText).join("\n");
+				return {
+					content: [{ type: "text", text }],
+					details: {
+						schema: "evm.pancakev2.config.v1",
+						networks: statuses,
+						allRequested: includeAll,
+						targetNetwork: requestedNetwork ?? null,
+					},
+				};
+			},
+		}),
 		defineTool({
 			name: `${EVM_TOOL_PREFIX}getTransferTokenMap`,
 			label: "EVM Get Transfer Token Map",

@@ -70,9 +70,9 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `execute`: `evm_polymarketCancelOrder` (cancel by orderId(s)/token scope/cancel-all, supports stale filters `maxAgeMinutes` / `maxFillRatio`, default `dryRun=true`)
 - `execute`: `evm_transferNative` (native token transfer, default `dryRun=true`, execute requires `confirmMainnet=true`)
 - `execute`: `evm_transferErc20` (ERC20 transfer by `tokenAddress + amountRaw`, default `dryRun=true`, execute requires `confirmMainnet=true`)
-- `execute`: `evm_pancakeV2Swap` (BSC PancakeSwap V2 exact-input swap quote + unsigned/sign execution; supports direct pair swaps with raw amounts)
+- `execute`: `evm_pancakeV2Swap` (PancakeSwap V2 exact-input swap quote + unsigned/sign execution; defaults configured for BSC; non-BSC requires per-network env config, still supports direct pair swaps with raw amounts)
 - `workflow`: `w3rt_run_evm_polymarket_workflow_v0` (analysis/simulate/execute + deterministic mainnet confirmToken)
-- `workflow`: `w3rt_run_evm_swap_workflow_v0` (BSC PancakeSwap V2 direct pair swap workflow with analysis/simulate/execute + deterministic mainnet confirmToken)
+- `workflow`: `w3rt_run_evm_swap_workflow_v0` (PancakeSwap V2 swap workflow with analysis/simulate/execute + deterministic mainnet confirmToken; network config is resolved from `EVM_PANCAKE_V2_*` env vars when set)
 - `workflow`: `w3rt_run_evm_transfer_workflow_v0` (native/ERC20 transfer workflow with analysis/simulate/execute + deterministic mainnet confirmToken; supports `tokenSymbol + amountToken` for mapped tokens)
 - `workflow cancel intent`: supports `evm.polymarket.btc5m.cancel` (analysis/simulate/execute + deterministic mainnet confirmToken)
 - `mainnet guard`: workflow execute on polygon requires `confirmMainnet=true` + correct `confirmToken`
@@ -86,6 +86,32 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `transfer symbol map override`: configurable via `EVM_TRANSFER_TOKEN_MAP` (global JSON by symbol->network->address) and `EVM_TRANSFER_TOKEN_MAP_<NETWORK>` (per-network JSON by symbol->address, e.g. `EVM_TRANSFER_TOKEN_MAP_BASE`)
 - `transfer symbol decimals override`: configurable via `EVM_TRANSFER_TOKEN_DECIMALS` (JSON by symbol->decimals, used when converting `amountToken` to `amountRaw`)
 - `ai assist`: workflow/read can auto-pick side (`up/down`) with explainable reasons, confidence, and risk-aware fallback (`avoid`)
+
+### EVM Swap (PancakeV2) OpenClaw-ready config
+
+To use `evm_pancakeV2Swap` / `w3rt_run_evm_swap_workflow_v0` on non-BSC chains, set these env vars:
+
+```bash
+export EVM_PANCAKE_V2_FACTORY_<NETWORK_UPPER>=<factory-address>
+export EVM_PANCAKE_V2_ROUTER_<NETWORK_UPPER>=<router-address>
+export EVM_PANCAKE_V2_WRAPPED_NATIVE_<NETWORK_UPPER>=<wrapped-native-address>
+# optional
+export EVM_PANCAKE_V2_CHAIN_ID_<NETWORK_UPPER>=<chain-id>
+```
+
+Example for Polygon:
+
+```bash
+export EVM_PANCAKE_V2_FACTORY_POLYGON=0x...factory
+export EVM_PANCAKE_V2_ROUTER_POLYGON=0x...router
+export EVM_PANCAKE_V2_WRAPPED_NATIVE_POLYGON=0x...WETH
+export EVM_PANCAKE_V2_CHAIN_ID_POLYGON=137
+```
+
+Before first run, OpenClaw can preflight this with:
+`evm_getPancakeV2Config` (read tool, optional `network` or `all: true`).
+
+Run with `runMode=analysis -> simulate -> execute` and pass back `confirmToken` exactly like transfer workflows.
 
 ### EVM Polymarket NL Examples (Pi/OpenClaw)
 
@@ -106,6 +132,13 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `帮我查一下 EVM 转账 token symbol 映射（base）`
 - `给 0x... 转 0.001 MATIC，先分析`
 - `继续执行刚才这笔转账，确认主网执行，confirmToken EVM-XXXX`
+
+### Stablecoin Yield AI Agent (Plan-first Examples)
+
+- `检查我在 Solana 的 USDC/USDT/DAI 持仓，给我一版风险分级的稳定币收益再平衡计划。`
+- `先分析：把我可用 USDC 的 30% 转到收益更高但风险较低的稳定币借贷池，剩余保留 70% 现金。`
+- `对比当前 DeFi 稳定币利率，给我一版自动化再平衡的执行建议（含风险提示）。`
+- `继续上一条，先模拟迁移步骤，并输出清算与波动风险说明。`
 
 EVM symbol-map override example:
 
@@ -129,6 +162,7 @@ export EVM_TRANSFER_TOKEN_DECIMALS='{"USDC":6,"USDT":6}'
 - `portfolio valuation freshness`: output includes latest valuation price timestamp and structured `priceUpdatedAtLatest/Oldest`
 - `portfolio defi panel`: `near_getPortfolio` now includes Ref/Burrow quantity rows and USD totals (`wallet/ref/burrowSupplied/burrowBorrowed/net`) in both readable text and structured `details.defiBreakdown`
 - `read`: `near_getLendingMarketsBurrow` (Burrow lending market list with capability flags + supply/borrow APR + readable amounts)
+- `read`: `near_getStableYieldPlan` (multi-symbol stablecoin supply APR planner on Burrow, ranked candidates + recommended allocation target)
 - `read`: `near_getLendingPositionsBurrow` (Burrow account supplied/collateral/borrowed snapshot with readable token rows + risk summary + USD valuation/borrow-collateral ratio + configurable warning/critical thresholds)
 - `workflow`: Burrow borrow/withdraw `analysis/simulate` summary line now includes risk policy + risk band (`safe/warning/critical/unknown`) + `riskEngine`/`hf` fields for faster natural-language follow-up decisions
 - `workflow`: Burrow borrow/withdraw simulate/execute summaries now include a short readable risk hint (e.g. `风险提示：高风险（critical）...`) to reduce pure-JSON style output
@@ -205,6 +239,8 @@ export EVM_TRANSFER_TOKEN_DECIMALS='{"USDC":6,"USDT":6}'
   - `intentText: "在 Ref 把 USDC 全部提回钱包，先分析"`
 - Burrow Markets (read):
   - `帮我查一下 NEAR 主网 Burrow 借贷市场`
+- Stable Yield Planner (read):
+  - `帮我分析一下 NEAR 主网稳定币供应策略，先分析`
 - Burrow Positions (read):
   - `帮我查一下 NEAR 主网 Burrow 我的借贷仓位`
 - Burrow Supply (execute):

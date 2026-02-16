@@ -41,6 +41,7 @@ describe("nearExtension", () => {
 			"near_getPortfolio",
 			"near_getRefDeposits",
 			"near_getRefLpPositions",
+			"near_getStableYieldPlan",
 			"near_getSwapQuoteRef",
 			"near_removeLiquidityRef",
 			"near_repayBurrow",

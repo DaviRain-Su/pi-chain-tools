@@ -960,6 +960,116 @@ describe("near_getLendingMarketsBurrow", () => {
 		});
 	});
 });
+describe("near_getStableYieldPlan", () => {
+	it("recommends highest-APR stable candidates", async () => {
+		burrowMocks.fetchBurrowAssetsPagedDetailed.mockResolvedValue([
+			{
+				token_id: "wrap.near",
+				supplied: { shares: "1000", balance: "1000" },
+				borrowed: { shares: "200", balance: "200" },
+				config: {
+					extra_decimals: 0,
+					can_deposit: true,
+					can_withdraw: true,
+					can_borrow: true,
+					can_use_as_collateral: true,
+				},
+				supply_apr: "0.0123",
+				borrow_apr: "0.0456",
+			},
+			{
+				token_id: "usdc.tether-token.near",
+				supplied: { shares: "5000", balance: "5000" },
+				borrowed: { shares: "0", balance: "0" },
+				config: {
+					extra_decimals: 0,
+					can_deposit: true,
+					can_withdraw: true,
+					can_borrow: false,
+					can_use_as_collateral: true,
+				},
+				supply_apr: "0.0456",
+				borrow_apr: "0.0",
+			},
+			{
+				token_id: "not-stable.near",
+				supplied: { shares: "10", balance: "10" },
+				borrowed: { shares: "0", balance: "0" },
+				config: {
+					extra_decimals: 0,
+					can_deposit: true,
+					can_withdraw: false,
+					can_borrow: false,
+					can_use_as_collateral: true,
+				},
+				supply_apr: "0.10",
+				borrow_apr: "0.0",
+			},
+		]);
+		runtimeMocks.callNearRpc.mockImplementation(
+			(args: { params: { method_name?: string; account_id?: string } }) => {
+				if (args.params.method_name === "ft_metadata") {
+					if (args.params.account_id === "usdc.tether-token.near") {
+						return Promise.resolve({
+							block_hash: "meta-1",
+							block_height: 1,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "USDC",
+								decimals: 6,
+							}),
+						});
+					}
+					if (args.params.account_id === "wrap.near") {
+						return Promise.resolve({
+							block_hash: "meta-2",
+							block_height: 2,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "WNEAR",
+								decimals: 24,
+							}),
+						});
+					}
+					if (args.params.account_id === "not-stable.near") {
+						return Promise.resolve({
+							block_hash: "meta-3",
+							block_height: 3,
+							logs: [],
+							result: encodeJsonResult({
+								symbol: "NOT",
+								decimals: 18,
+							}),
+						});
+					}
+				}
+				throw new Error("unexpected callNearRpc in stable yield plan test");
+			},
+		);
+		burrowMocks.fromBurrowInnerAmount.mockImplementation(
+			(value: string) => value,
+		);
+
+		const tool = getTool("near_getStableYieldPlan");
+		const result = await tool.execute("near-read-stable-yield-1", {
+			network: "mainnet",
+			topN: 3,
+		});
+
+		expect(result.content[0]?.text).toContain("NEAR stable yield plan");
+		expect(result.content[0]?.text).toContain("USDC");
+		expect(result.content[0]?.text).toContain("Recommended: #1 USDC");
+		expect(result.details).toMatchObject({
+			schema: "near.defi.stableYieldPlan.v1",
+			network: "mainnet",
+			protocol: "Burrow",
+			selected: {
+				tokenId: "usdc.tether-token.near",
+				symbol: "USDC",
+			},
+		});
+	});
+});
 
 describe("near_getLendingPositionsBurrow", () => {
 	it("returns Burrow supplied/collateral/borrowed snapshot", async () => {

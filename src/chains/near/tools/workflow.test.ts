@@ -41,6 +41,10 @@ const composeMocks = vi.hoisted(() => ({
 	buildWithdrawBurrowCompose: vi.fn(),
 }));
 
+const readMocks = vi.hoisted(() => ({
+	getStableYieldPlan: vi.fn(),
+}));
+
 const fetchMock = vi.hoisted(() => vi.fn());
 
 const refMocks = vi.hoisted(() => ({
@@ -64,6 +68,18 @@ vi.mock("../runtime.js", async () => {
 		toYoctoNear: runtimeMocks.toYoctoNear,
 	};
 });
+
+vi.mock("./read.js", () => ({
+	createNearReadTools: () => [
+		{
+			name: "near_getStableYieldPlan",
+			label: "stable yield plan",
+			description: "stable yield plan",
+			parameters: {},
+			execute: readMocks.getStableYieldPlan,
+		},
+	],
+}));
 
 vi.mock("./execute.js", () => ({
 	createNearExecuteTools: () => [
@@ -286,6 +302,22 @@ beforeEach(() => {
 	vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 	Reflect.deleteProperty(process.env, "NEAR_SWAP_MAX_SLIPPAGE_BPS");
 	runtimeMocks.parseNearNetwork.mockReturnValue("mainnet");
+	readMocks.getStableYieldPlan.mockResolvedValue({
+		content: [{ type: "text", text: "stable yield plan ok" }],
+		details: {
+			schema: "near.defi.stableYieldPlan.v1",
+			rpcEndpoint: "https://rpc.mainnet.near.org",
+			burrowContractId: "contract.main.burrow.near",
+			protocol: "Kamino",
+			generatedAt: new Date("2025-01-01T00:00:00.000Z").toISOString(),
+			stableSymbols: ["USDC", "USDT"],
+			network: "mainnet",
+			topN: 3,
+			includeDisabled: false,
+			candidates: [],
+			selected: null,
+		},
+	});
 	runtimeMocks.resolveNearAccountId.mockImplementation(
 		(accountId?: string) => accountId ?? "alice.near",
 	);
@@ -4044,5 +4076,136 @@ describe("w3rt_run_near_workflow_v0", () => {
 				confirmMainnet: true,
 			}),
 		);
+	});
+
+	it("infers near.defi.stableYieldPlan from natural language and reads plan in simulate", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-stable-yield-sim", {
+			runId: "wf-near-stable-yield-01",
+			runMode: "simulate",
+			network: "mainnet",
+			intentText:
+				"帮我给 NEAR 稳定币 yield 方案做排行，top 3，币种 USDC USDT，包含停用",
+			confirmMainnet: true,
+		});
+
+		expect(readMocks.getStableYieldPlan).toHaveBeenCalledWith(
+			"near-wf-stable-yield-plan",
+			expect.objectContaining({
+				network: "mainnet",
+				rpcUrl: undefined,
+				topN: 3,
+				stableSymbols: ["USDC", "USDT"],
+				includeDisabled: true,
+				burrowContractId: undefined,
+			}),
+		);
+		expect(result.details).toMatchObject({
+			intentType: "near.defi.stableYieldPlan",
+			intent: {
+				type: "near.defi.stableYieldPlan",
+				topN: 3,
+				stableSymbols: ["USDC", "USDT"],
+				includeDisabled: true,
+			},
+			artifacts: {
+				simulate: {
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "simulate",
+						intentType: "near.defi.stableYieldPlan",
+					},
+				},
+			},
+		});
+	});
+
+	it("supports chinese ranking phrases like 第3名 in stable yield intent", async () => {
+		const tool = getTool();
+		await tool.execute("near-wf-stable-yield-cn-rank", {
+			runMode: "simulate",
+			network: "mainnet",
+			intentText: "给我做 NEAR 稳定币收益排行，第3名，USDC/USDT，包含停用",
+			confirmMainnet: true,
+		});
+
+		expect(readMocks.getStableYieldPlan).toHaveBeenLastCalledWith(
+			"near-wf-stable-yield-plan",
+			expect.objectContaining({ topN: 3 }),
+		);
+		expect(readMocks.getStableYieldPlan).toHaveBeenLastCalledWith(
+			"near-wf-stable-yield-plan",
+			expect.objectContaining({
+				stableSymbols: ["USDC", "USDT"],
+				includeDisabled: true,
+			}),
+		);
+	});
+
+	it("prefers stable yield plan over transfer-like words", async () => {
+		const tool = getTool();
+		const result = (await tool.execute("near-wf-stable-yield-pref", {
+			runMode: "simulate",
+			network: "mainnet",
+			intentText: "帮我把 NEAR 稳定币 yield 排行排第2给我看，币种 DAI USDT",
+			confirmMainnet: true,
+		})) as {
+			details: {
+				intent: {
+					type: string;
+					topN?: number;
+					stableSymbols?: string[];
+				};
+			};
+		};
+
+		expect(readMocks.getStableYieldPlan).toHaveBeenCalledWith(
+			"near-wf-stable-yield-plan",
+			expect.objectContaining({
+				topN: 2,
+				stableSymbols: expect.arrayContaining(["DAI", "USDT"]),
+				includeDisabled: false,
+			}),
+		);
+		expect(result.details.intent).toMatchObject({
+			type: "near.defi.stableYieldPlan",
+			topN: 2,
+			stableSymbols: expect.arrayContaining(["DAI"]),
+		});
+	});
+
+	it("supports stable yield plan with explicit params", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-stable-yield-explicit", {
+			runId: "wf-near-stable-yield-02",
+			runMode: "analysis",
+			intentType: "near.defi.stableYieldPlan",
+			network: "mainnet",
+			stableSymbols: ["DAI", "USDT"],
+			topN: 2,
+			includeDisabled: false,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.defi.stableYieldPlan",
+			intent: {
+				type: "near.defi.stableYieldPlan",
+				stableSymbols: ["DAI", "USDT"],
+				topN: 2,
+				includeDisabled: false,
+			},
+			runMode: "analysis",
+		});
+	});
+
+	it("does not support compose for stable yield plan in workflow", async () => {
+		const tool = getTool();
+		await expect(
+			tool.execute("near-wf-stable-yield-compose", {
+				runMode: "compose",
+				intentType: "near.defi.stableYieldPlan",
+				network: "mainnet",
+			}),
+		).rejects.toThrow("read-only");
 	});
 });

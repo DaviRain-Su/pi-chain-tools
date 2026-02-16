@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const executeMocks = vi.hoisted(() => ({
 	pancakeSwapExecute: vi.fn(),
+	getPancakeV2ConfigStatus: vi.fn(),
 }));
 
 vi.mock("./execute.js", () => ({
@@ -14,6 +15,7 @@ vi.mock("./execute.js", () => ({
 			execute: executeMocks.pancakeSwapExecute,
 		},
 	],
+	getPancakeV2ConfigStatus: executeMocks.getPancakeV2ConfigStatus,
 }));
 
 import { createEvmSwapWorkflowTools } from "./swap-workflow.js";
@@ -35,6 +37,18 @@ function getTool(): WorkflowTool {
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	executeMocks.getPancakeV2ConfigStatus.mockReturnValue({
+		network: "bsc",
+		source: "builtin",
+		configured: true,
+		issues: [],
+		config: {
+			chainId: 56,
+			factoryAddress: "0xca143ce32fe78f1f7019d7d551a6402fc5350c73",
+			routerAddress: "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+			wrappedNativeAddress: "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+		},
+	});
 	executeMocks.pancakeSwapExecute.mockResolvedValue({
 		content: [{ type: "text", text: "swap preview" }],
 		details: {
@@ -64,6 +78,43 @@ describe("w3rt_run_evm_swap_workflow_v0", () => {
 			intentType: "evm.swap.pancakeV2",
 			needsMainnetConfirmation: true,
 			confirmToken: expect.stringMatching(/^EVM-/),
+			pancakeV2Config: {
+				config: { configured: true, source: "builtin" },
+			},
+		});
+	});
+
+	it("analysis can report PancakeV2 config blockers without touching execute", async () => {
+		executeMocks.getPancakeV2ConfigStatus.mockReturnValueOnce({
+			network: "polygon",
+			source: "missing",
+			configured: false,
+			issues: [
+				"PancakeSwap v2 execution is not configured for network=polygon.",
+			],
+			config: null,
+		});
+		const tool = getTool();
+		const result = await tool.execute("wf1-b", {
+			runMode: "analysis",
+			network: "polygon",
+			tokenInAddress: "0x1111111111111111111111111111111111111111",
+			tokenOutAddress: "0x2222222222222222222222222222222222222222",
+			amountInRaw: "10000",
+			toAddress: "0x000000000000000000000000000000000000dead",
+		});
+		expect(result.details).toMatchObject({
+			pancakeV2Config: {
+				config: { configured: false, source: "missing" },
+			},
+			artifacts: {
+				analysis: {
+					precheck: {
+						status: "blocked",
+						ready: false,
+					},
+				},
+			},
 		});
 	});
 
@@ -101,6 +152,32 @@ describe("w3rt_run_evm_swap_workflow_v0", () => {
 				},
 			},
 		});
+	});
+
+	it("blocks simulate when PancakeV2 config is not prepared for polygon", async () => {
+		executeMocks.getPancakeV2ConfigStatus.mockReturnValueOnce({
+			network: "polygon",
+			source: "missing",
+			configured: false,
+			issues: [
+				"PancakeSwap v2 execution is not configured for network=polygon.",
+			],
+			config: null,
+		});
+		const tool = getTool();
+		await expect(
+			tool.execute("wf2-missing", {
+				runMode: "simulate",
+				network: "polygon",
+				tokenInAddress: "0x1111111111111111111111111111111111111111",
+				tokenOutAddress: "0x2222222222222222222222222222222222222222",
+				amountInRaw: "10000",
+				toAddress: "0x000000000000000000000000000000000000dead",
+			}),
+		).rejects.toThrow(
+			"PancakeSwap v2 execution is not configured for network=polygon",
+		);
+		expect(executeMocks.pancakeSwapExecute).not.toHaveBeenCalled();
 	});
 
 	it("simulates from natural-language text without explicit amount field", async () => {

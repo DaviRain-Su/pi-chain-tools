@@ -256,6 +256,14 @@ beforeEach(() => {
 	process.env.POLYMARKET_FUNDER = "0x0000000000000000000000000000000000000001";
 	process.env.EVM_PRIVATE_KEY =
 		"0x59c6995e998f97a5a0044976f6b5d8f8a3dfcc5f4f2f72f5f6f4f0f6f8f9f0a1";
+	process.env.EVM_PANCAKE_V2_FACTORY_POLYGON = undefined;
+	process.env.EVM_PANCAKE_V2_ROUTER_POLYGON = undefined;
+	process.env.EVM_PANCAKE_V2_WRAPPED_NATIVE_POLYGON = undefined;
+	process.env.EVM_PANCAKE_V2_CHAIN_ID_POLYGON = undefined;
+	process.env.EVM_PANCAKE_V2_FACTORY_BSC = undefined;
+	process.env.EVM_PANCAKE_V2_ROUTER_BSC = undefined;
+	process.env.EVM_PANCAKE_V2_WRAPPED_NATIVE_BSC = undefined;
+	process.env.EVM_PANCAKE_V2_CHAIN_ID_BSC = undefined;
 	clobMocks.createOrDeriveApiKey.mockResolvedValue({
 		key: "k",
 		secret: "s",
@@ -325,6 +333,14 @@ afterEach(() => {
 	process.env.EVM_PRIVATE_KEY = undefined;
 	process.env.POLYMARKET_PRIVATE_KEY = undefined;
 	process.env.POLYMARKET_FUNDER = undefined;
+	process.env.EVM_PANCAKE_V2_FACTORY_POLYGON = undefined;
+	process.env.EVM_PANCAKE_V2_ROUTER_POLYGON = undefined;
+	process.env.EVM_PANCAKE_V2_WRAPPED_NATIVE_POLYGON = undefined;
+	process.env.EVM_PANCAKE_V2_CHAIN_ID_POLYGON = undefined;
+	process.env.EVM_PANCAKE_V2_FACTORY_BSC = undefined;
+	process.env.EVM_PANCAKE_V2_ROUTER_BSC = undefined;
+	process.env.EVM_PANCAKE_V2_WRAPPED_NATIVE_BSC = undefined;
+	process.env.EVM_PANCAKE_V2_CHAIN_ID_BSC = undefined;
 });
 
 describe("evm execute tools", () => {
@@ -758,7 +774,7 @@ describe("evm execute tools", () => {
 		expect(methods).toContain("eth_sendRawTransaction");
 	});
 
-	it("rejects PancakeSwap V2 swap on unsupported network", async () => {
+	it("rejects PancakeSwap V2 swap on unsupported network config", async () => {
 		const { tokenIn, tokenOut } = mockJsonRpcPancakeSwapFetch();
 		const tool = getTool("evm_pancakeV2Swap");
 		await expect(
@@ -770,6 +786,85 @@ describe("evm execute tools", () => {
 				toAddress: "0x000000000000000000000000000000000000dEaD",
 				dryRun: true,
 			}),
-		).rejects.toThrow("pancakeV2Swap currently supports BSC network only");
+		).rejects.toThrow(
+			"PancakeSwap v2 execution is not configured for network=polygon. Configure EVM_PANCAKE_V2_FACTORY_POLYGON",
+		);
+	});
+
+	it("falls back to built-in config when env values are literal 'undefined'", async () => {
+		process.env.EVM_PANCAKE_V2_FACTORY_BSC = "undefined";
+		process.env.EVM_PANCAKE_V2_ROUTER_BSC = "undefined";
+		process.env.EVM_PANCAKE_V2_WRAPPED_NATIVE_BSC = "undefined";
+		const { fetchMock, tokenIn, tokenOut } = mockJsonRpcPancakeSwapFetch();
+		const tool = getTool("evm_pancakeV2Swap");
+		const result = await tool.execute("swap-legacy-fallback-bsc", {
+			network: "bsc",
+			tokenInAddress: tokenIn,
+			tokenOutAddress: tokenOut,
+			amountInRaw: "10000",
+			toAddress: "0x000000000000000000000000000000000000dEaD",
+			slippageBps: 50,
+			dryRun: true,
+		});
+		expect(result.content[0]?.text).toContain("PancakeSwap V2 swap preview");
+		expect(result.details).toMatchObject({
+			dryRun: true,
+			network: "bsc",
+			tx: {
+				toAddress: PANCAKE_TEST_DATA.routerAddress,
+			},
+		});
+		if (typeof result.details === "object" && result.details !== null) {
+			expect((result.details as { amountOutRaw?: string }).amountOutRaw).toBe(
+				"4960",
+			);
+		}
+		const methods = fetchMock.mock.calls.map((call) => {
+			const body = JSON.parse(String(call[1]?.body ?? "{}")) as {
+				method?: string;
+			};
+			return body.method;
+		});
+		expect(methods).toContain("eth_call");
+	});
+
+	it("previews PancakeSwap V2 swap on configured non-BSC network", async () => {
+		process.env.EVM_PANCAKE_V2_FACTORY_POLYGON =
+			"0x1111111111111111111111111111111111111111";
+		process.env.EVM_PANCAKE_V2_ROUTER_POLYGON =
+			"0x2222222222222222222222222222222222222222";
+		process.env.EVM_PANCAKE_V2_WRAPPED_NATIVE_POLYGON =
+			"0x3333333333333333333333333333333333333333";
+		const { fetchMock, tokenIn, tokenOut } = mockJsonRpcPancakeSwapFetch();
+		const tool = getTool("evm_pancakeV2Swap");
+		const result = await tool.execute("swap-preview-configured", {
+			network: "polygon",
+			tokenInAddress: tokenIn,
+			tokenOutAddress: tokenOut,
+			amountInRaw: "10000",
+			toAddress: "0x000000000000000000000000000000000000dEaD",
+			slippageBps: 50,
+			dryRun: true,
+		});
+		expect(result.content[0]?.text).toContain("PancakeSwap V2 swap preview");
+		expect(result.details).toMatchObject({
+			dryRun: true,
+			network: "polygon",
+			tx: {
+				toAddress: "0x2222222222222222222222222222222222222222",
+			},
+		});
+		if (typeof result.details === "object" && result.details !== null) {
+			expect((result.details as { amountOutRaw?: string }).amountOutRaw).toBe(
+				"4960",
+			);
+		}
+		const methods = fetchMock.mock.calls.map((call) => {
+			const body = JSON.parse(String(call[1]?.body ?? "{}")) as {
+				method?: string;
+			};
+			return body.method;
+		});
+		expect(methods).toContain("eth_call");
 	});
 });

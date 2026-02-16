@@ -33,6 +33,7 @@ import {
 } from "../runtime.js";
 import { createNearComposeTools } from "./compose.js";
 import { createNearExecuteTools } from "./execute.js";
+import { createNearReadTools } from "./read.js";
 
 type WorkflowRunMode = "analysis" | "compose" | "simulate" | "execute";
 
@@ -189,6 +190,14 @@ type NearBurrowWithdrawIntent = {
 	attachedDepositYoctoNear?: string;
 };
 
+type NearStableYieldPlanIntent = {
+	type: "near.defi.stableYieldPlan";
+	topN?: number;
+	stableSymbols: string[];
+	includeDisabled: boolean;
+	burrowContractId?: string;
+};
+
 type NearWorkflowIntent =
 	| NearTransferIntent
 	| NearFtTransferIntent
@@ -200,7 +209,8 @@ type NearWorkflowIntent =
 	| NearBurrowSupplyIntent
 	| NearBurrowBorrowIntent
 	| NearBurrowRepayIntent
-	| NearBurrowWithdrawIntent;
+	| NearBurrowWithdrawIntent
+	| NearStableYieldPlanIntent;
 
 type WorkflowParams = {
 	runId?: string;
@@ -277,6 +287,9 @@ type WorkflowParams = {
 	confirmRisk?: boolean;
 	publicKey?: string;
 	privateKey?: string;
+	stableSymbols?: string[];
+	topN?: number;
+	includeDisabled?: boolean;
 };
 
 type ParsedIntentHints = {
@@ -323,6 +336,9 @@ type ParsedIntentHints = {
 	asCollateral?: boolean;
 	withdrawToWallet?: boolean;
 	recipientId?: string;
+	stableSymbols?: string[];
+	topN?: number;
+	includeDisabled?: boolean;
 };
 
 type NearAccountQueryResult = {
@@ -458,6 +474,7 @@ type RefPoolCandidateSummary = RefPoolPairCandidate;
 
 type WorkflowTool = ReturnType<typeof createNearExecuteTools>[number];
 type WorkflowComposeTool = ReturnType<typeof createNearComposeTools>[number];
+type WorkflowReadTool = ReturnType<typeof createNearReadTools>[number];
 
 type NearIntentsOutcomeCategory =
 	| "success"
@@ -754,6 +771,43 @@ function parseOptionalSlippageBps(
 		);
 	}
 	return normalized;
+}
+
+function parseTopNForStableYield(
+	value: number | undefined,
+): number | undefined {
+	if (value == null) return undefined;
+	if (!Number.isInteger(value) || value <= 0) {
+		throw new Error("topN must be a positive integer");
+	}
+	return value;
+}
+
+function normalizeStableYieldSymbols(
+	value: string[] | undefined,
+	fieldName: string,
+): string[] {
+	if (value == null) return [];
+	if (!Array.isArray(value)) {
+		throw new Error(`${fieldName} must be an array of symbols`);
+	}
+	const normalized = value
+		.map((item) => (typeof item === "string" ? item.trim() : ""))
+		.filter((item) => item.length > 0)
+		.map((item) => item.toUpperCase())
+		.filter((item) => item.length <= 12);
+	const unique = Array.from(new Set(normalized));
+	return unique;
+}
+
+function resolveNearReadTool(
+	name: "near_getStableYieldPlan",
+): WorkflowReadTool {
+	const tool = createNearReadTools().find((entry) => entry.name === name);
+	if (!tool) {
+		throw new Error(`Read tool not found: ${name}`);
+	}
+	return tool;
 }
 
 function resolveNearSwapSlippageLimitBps(): number {
@@ -1832,7 +1886,62 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 		}
 	}
 
+	const stableSymbolCandidates = [
+		"USDC",
+		"USDT",
+		"DAI",
+		"USDD",
+		"BUSD",
+		"FRAX",
+		"LUSD",
+		"TUSD",
+		"PYUSD",
+		"GUSD",
+		"USDE",
+		"SUSD",
+	];
 	if (
+		((lower.includes("stable") ||
+			lower.includes("稳定币") ||
+			lower.includes("stablecoin")) &&
+			(lower.includes("yield") ||
+				lower.includes("apr") ||
+				lower.includes("收益") ||
+				lower.includes("推荐") ||
+				lower.includes("plan") ||
+				lower.includes("排行") ||
+				lower.includes("排名"))) ||
+		lower.includes("stable yield")
+	) {
+		hints.intentType = "near.defi.stableYieldPlan";
+		const topNMatch = lower.match(
+			/top\s*n?\s*[:：]?\s*(\d{1,3})|前(\d{1,3})(?:个|种|名)?|第(\d{1,3})(?:个|名)?/i,
+		);
+		const topNRaw = topNMatch?.[1] ?? topNMatch?.[2] ?? topNMatch?.[3];
+		if (topNRaw) {
+			const parsed = Number(topNRaw);
+			if (Number.isInteger(parsed) && parsed > 0) {
+				hints.topN = parsed;
+			}
+		}
+		const detectedSymbols = stableSymbolCandidates.filter((symbol) =>
+			lower.includes(symbol.toLowerCase()),
+		);
+		if (detectedSymbols.length > 0) {
+			hints.stableSymbols = detectedSymbols;
+		}
+		if (
+			lower.includes("include disabled") ||
+			lower.includes("包含停用") ||
+			lower.includes("包含暂停") ||
+			lower.includes("包含禁用")
+		) {
+			hints.includeDisabled = true;
+		}
+	}
+
+	if (
+		hints.intentType !== "near.defi.stableYieldPlan" &&
 		likelyLpRemove &&
 		(hints.poolId != null ||
 			(typeof hints.shares === "string" && hints.shares.trim().length > 0) ||
@@ -1843,6 +1952,7 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	}
 
 	if (
+		hints.intentType !== "near.defi.stableYieldPlan" &&
 		likelyLpAdd &&
 		(hints.poolId != null ||
 			typeof hints.amountARaw === "string" ||
@@ -1855,6 +1965,7 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	}
 
 	if (
+		hints.intentType !== "near.defi.stableYieldPlan" &&
 		likelyRefWithdraw &&
 		!hasLpKeyword &&
 		(hints.tokenId || hints.ftContractId)
@@ -1864,6 +1975,7 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	}
 
 	if (
+		hints.intentType !== "near.defi.stableYieldPlan" &&
 		hasBurrowKeyword &&
 		(hints.tokenId ||
 			hints.ftContractId ||
@@ -1904,6 +2016,13 @@ function parseIntentHints(intentText?: string): ParsedIntentHints {
 	return hints;
 }
 
+function workflowRequiresMainnetApproval(
+	intentType: NearWorkflowIntent["type"],
+	network: string,
+): boolean {
+	return network === "mainnet" && intentType !== "near.defi.stableYieldPlan";
+}
+
 function inferIntentType(
 	params: WorkflowParams,
 	hints: ParsedIntentHints,
@@ -1920,6 +2039,15 @@ function inferIntentType(
 	if (params.intentType === "near.swap.ref") return params.intentType;
 	if (params.intentType === "near.transfer.near") return params.intentType;
 	if (params.intentType === "near.transfer.ft") return params.intentType;
+	if (params.intentType === "near.defi.stableYieldPlan")
+		return params.intentType;
+	if (
+		params.stableSymbols != null ||
+		params.topN != null ||
+		params.includeDisabled != null
+	) {
+		return "near.defi.stableYieldPlan";
+	}
 	if (hints.intentType) return hints.intentType;
 	if (
 		params.burrowContractId ||
@@ -2013,6 +2141,34 @@ function normalizeIntent(params: WorkflowParams): NearWorkflowIntent {
 		typeof params.fromAccountId === "string" && params.fromAccountId.trim()
 			? normalizeAccountId(params.fromAccountId, "fromAccountId")
 			: undefined;
+
+	if (intentType === "near.defi.stableYieldPlan") {
+		const hintsTopN =
+			typeof hints.topN === "number" && Number.isInteger(hints.topN)
+				? hints.topN
+				: undefined;
+		const topN = parseTopNForStableYield(
+			(typeof params.topN === "string" ? Number(params.topN) : params.topN) ??
+				hintsTopN,
+		);
+		const stableSymbols = normalizeStableYieldSymbols(
+			params.stableSymbols ?? hints.stableSymbols,
+			"stableSymbols",
+		);
+		const includeDisabled = params.includeDisabled ?? !!hints.includeDisabled;
+		const burrowContractId =
+			typeof params.burrowContractId === "string" &&
+			params.burrowContractId.trim()
+				? normalizeAccountId(params.burrowContractId, "burrowContractId")
+				: undefined;
+		return {
+			type: "near.defi.stableYieldPlan",
+			topN,
+			stableSymbols,
+			includeDisabled,
+			burrowContractId,
+		};
+	}
 
 	if (intentType === "near.transfer.near") {
 		const toAccountId = normalizeAccountId(
@@ -2766,7 +2922,10 @@ function hasIntentInputs(params: WorkflowParams): boolean {
 		params.autoWithdraw != null ||
 		params.autoRegisterReceiver != null ||
 		params.autoRegisterOutput != null ||
-		params.burrowContractId
+		params.burrowContractId ||
+		(params.stableSymbols != null && params.stableSymbols.length > 0) ||
+		params.topN != null ||
+		params.includeDisabled != null
 	) {
 		return true;
 	}
@@ -2824,7 +2983,10 @@ function hasCoreIntentInputs(params: WorkflowParams): boolean {
 		params.autoWithdraw != null ||
 		params.autoRegisterReceiver != null ||
 		params.autoRegisterOutput != null ||
-		params.burrowContractId
+		params.burrowContractId ||
+		(params.stableSymbols != null && params.stableSymbols.length > 0) ||
+		params.topN != null ||
+		params.includeDisabled != null
 	) {
 		return true;
 	}
@@ -2865,7 +3027,10 @@ function hintsContainActionableIntentFields(hints: ParsedIntentHints): boolean {
 			hints.autoWithdraw != null ||
 			hints.asCollateral != null ||
 			hints.withdrawToWallet != null ||
-			hints.recipientId,
+			hints.recipientId ||
+			(hints.stableSymbols != null && hints.stableSymbols.length > 0) ||
+			hints.topN != null ||
+			hints.includeDisabled != null,
 	);
 }
 
@@ -3449,6 +3614,33 @@ async function evaluateBurrowWorkflowHealth(params: {
 			riskBand: "unknown",
 		};
 	}
+}
+
+async function runNearStableYieldPlan(params: {
+	intent: NearStableYieldPlanIntent;
+	network: ReturnType<typeof parseNearNetwork>;
+	rpcUrl?: string;
+}): Promise<unknown> {
+	const readTool = resolveNearReadTool("near_getStableYieldPlan");
+	const readExecute = readTool.execute as (
+		toolCallId: string,
+		params: Record<string, unknown>,
+	) => Promise<{
+		content: { type: string; text: string }[];
+		details?: unknown;
+	}>;
+	const planResult = await readExecute("near-wf-stable-yield-plan", {
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		topN: params.intent.topN,
+		stableSymbols:
+			params.intent.stableSymbols.length > 0
+				? params.intent.stableSymbols
+				: undefined,
+		includeDisabled: params.intent.includeDisabled,
+		burrowContractId: params.intent.burrowContractId,
+	});
+	return planResult.details;
 }
 
 async function simulateNearTransfer(params: {
@@ -5922,7 +6114,7 @@ export function createNearWorkflowTools() {
 			name: "w3rt_run_near_workflow_v0",
 			label: "W3RT NEAR Workflow",
 			description:
-				"Run NEAR workflow in phases: analysis -> compose/simulate -> execute for native transfer, FT transfer, Ref swap/withdraw/LP, Burrow lend (supply/borrow/repay/withdraw), and NEAR Intents swap.",
+				"Run NEAR workflow in phases: analysis -> compose/simulate -> execute for native transfer, FT transfer, Ref swap/withdraw/LP, Burrow lend (supply/borrow/repay/withdraw), NEAR Intents swap, and stable-yield planning.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: workflowRunModeSchema(),
@@ -5939,6 +6131,7 @@ export function createNearWorkflowTools() {
 						Type.Literal("near.lend.burrow.borrow"),
 						Type.Literal("near.lend.burrow.repay"),
 						Type.Literal("near.lend.burrow.withdraw"),
+						Type.Literal("near.defi.stableYieldPlan"),
 					]),
 				),
 				intentText: Type.Optional(Type.String()),
@@ -6032,6 +6225,9 @@ export function createNearWorkflowTools() {
 				confirmRisk: Type.Optional(Type.Boolean()),
 				publicKey: Type.Optional(Type.String()),
 				privateKey: Type.Optional(Type.String()),
+				stableSymbols: Type.Optional(Type.Array(Type.String())),
+				topN: Type.Optional(Type.Number()),
+				includeDisabled: Type.Optional(Type.Boolean()),
 			}),
 			async execute(_toolCallId, rawParams) {
 				const params = rawParams as WorkflowParams;
@@ -6301,6 +6497,10 @@ export function createNearWorkflowTools() {
 							fromAccountId: intent.fromAccountId ?? params.fromAccountId,
 							publicKey: params.publicKey,
 						});
+					} else if (intent.type === "near.defi.stableYieldPlan") {
+						throw new Error(
+							"near.defi.stableYieldPlan is read-only; use runMode=analysis/simulate to get the plan details.",
+						);
 					} else {
 						throw new Error(
 							"compose supports near.transfer.near / near.transfer.ft / near.swap.ref / near.swap.intents / near.lp.ref.add / near.lp.ref.remove / near.ref.withdraw / near.lend.burrow.supply / near.lend.burrow.borrow / near.lend.burrow.repay / near.lend.burrow.withdraw.",
@@ -6336,7 +6536,10 @@ export function createNearWorkflowTools() {
 					};
 				}
 
-				const approvalRequired = network === "mainnet";
+				const approvalRequired = workflowRequiresMainnetApproval(
+					intent.type,
+					network,
+				);
 				const confirmToken = approvalRequired
 					? createConfirmToken({
 							runId,
@@ -6382,89 +6585,95 @@ export function createNearWorkflowTools() {
 
 				if (runMode === "simulate") {
 					const simulateArtifact =
-						intent.type === "near.transfer.near"
-							? await simulateNearTransfer({
+						intent.type === "near.defi.stableYieldPlan"
+							? await runNearStableYieldPlan({
 									intent,
 									network,
 									rpcUrl: params.rpcUrl,
-									fromAccountId: params.fromAccountId,
 								})
-							: intent.type === "near.transfer.ft"
-								? await simulateFtTransfer({
+							: intent.type === "near.transfer.near"
+								? await simulateNearTransfer({
 										intent,
 										network,
 										rpcUrl: params.rpcUrl,
 										fromAccountId: params.fromAccountId,
 									})
-								: intent.type === "near.swap.ref"
-									? await simulateRefSwap({
+								: intent.type === "near.transfer.ft"
+									? await simulateFtTransfer({
 											intent,
 											network,
 											rpcUrl: params.rpcUrl,
 											fromAccountId: params.fromAccountId,
 										})
-									: intent.type === "near.swap.intents"
-										? await simulateNearIntentsSwap({
+									: intent.type === "near.swap.ref"
+										? await simulateRefSwap({
 												intent,
 												network,
+												rpcUrl: params.rpcUrl,
 												fromAccountId: params.fromAccountId,
-												apiKey: params.apiKey,
-												jwt: params.jwt,
 											})
-										: intent.type === "near.lend.burrow.supply"
-											? await simulateBurrowSupply({
+										: intent.type === "near.swap.intents"
+											? await simulateNearIntentsSwap({
 													intent,
 													network,
-													rpcUrl: params.rpcUrl,
 													fromAccountId: params.fromAccountId,
+													apiKey: params.apiKey,
+													jwt: params.jwt,
 												})
-											: intent.type === "near.lend.burrow.borrow"
-												? await simulateBurrowBorrow({
+											: intent.type === "near.lend.burrow.supply"
+												? await simulateBurrowSupply({
 														intent,
 														network,
 														rpcUrl: params.rpcUrl,
 														fromAccountId: params.fromAccountId,
-														apiBaseUrl: params.apiBaseUrl,
-														apiKey: params.apiKey,
-														jwt: params.jwt,
 													})
-												: intent.type === "near.lend.burrow.repay"
-													? await simulateBurrowRepay({
+												: intent.type === "near.lend.burrow.borrow"
+													? await simulateBurrowBorrow({
 															intent,
 															network,
 															rpcUrl: params.rpcUrl,
 															fromAccountId: params.fromAccountId,
+															apiBaseUrl: params.apiBaseUrl,
+															apiKey: params.apiKey,
+															jwt: params.jwt,
 														})
-													: intent.type === "near.lend.burrow.withdraw"
-														? await simulateBurrowWithdraw({
+													: intent.type === "near.lend.burrow.repay"
+														? await simulateBurrowRepay({
 																intent,
 																network,
 																rpcUrl: params.rpcUrl,
 																fromAccountId: params.fromAccountId,
-																apiBaseUrl: params.apiBaseUrl,
-																apiKey: params.apiKey,
-																jwt: params.jwt,
 															})
-														: intent.type === "near.lp.ref.add"
-															? await simulateRefAddLiquidity({
+														: intent.type === "near.lend.burrow.withdraw"
+															? await simulateBurrowWithdraw({
 																	intent,
 																	network,
 																	rpcUrl: params.rpcUrl,
 																	fromAccountId: params.fromAccountId,
+																	apiBaseUrl: params.apiBaseUrl,
+																	apiKey: params.apiKey,
+																	jwt: params.jwt,
 																})
-															: intent.type === "near.ref.withdraw"
-																? await simulateRefWithdraw({
+															: intent.type === "near.lp.ref.add"
+																? await simulateRefAddLiquidity({
 																		intent,
 																		network,
 																		rpcUrl: params.rpcUrl,
 																		fromAccountId: params.fromAccountId,
 																	})
-																: await simulateRefRemoveLiquidity({
-																		intent,
-																		network,
-																		rpcUrl: params.rpcUrl,
-																		fromAccountId: params.fromAccountId,
-																	});
+																: intent.type === "near.ref.withdraw"
+																	? await simulateRefWithdraw({
+																			intent,
+																			network,
+																			rpcUrl: params.rpcUrl,
+																			fromAccountId: params.fromAccountId,
+																		})
+																	: await simulateRefRemoveLiquidity({
+																			intent,
+																			network,
+																			rpcUrl: params.rpcUrl,
+																			fromAccountId: params.fromAccountId,
+																		});
 					const sessionIntent: NearWorkflowIntent =
 						(intent.type === "near.lp.ref.add" ||
 							intent.type === "near.lp.ref.remove") &&
@@ -6813,6 +7022,41 @@ export function createNearWorkflowTools() {
 					}
 				}
 
+				if (intent.type === "near.defi.stableYieldPlan") {
+					const executeArtifact = await runNearStableYieldPlan({
+						intent,
+						network,
+						rpcUrl: params.rpcUrl,
+					});
+					const executeArtifactWithSummary = attachExecuteSummaryLine(
+						intent.type,
+						executeArtifact,
+					);
+					rememberWorkflowSession({
+						runId,
+						network,
+						intent,
+						confirmToken: null,
+						poolCandidates: [],
+					});
+					return {
+						content: [
+							{ type: "text", text: `Workflow executed: ${intent.type}` },
+						],
+						details: {
+							runId,
+							runMode,
+							network,
+							intentType: intent.type,
+							intent,
+							approvalRequired,
+							confirmToken: null,
+							artifacts: {
+								execute: executeArtifactWithSummary,
+							},
+						},
+					};
+				}
 				const executeTool =
 					intent.type === "near.transfer.near"
 						? resolveExecuteTool("near_transferNear")

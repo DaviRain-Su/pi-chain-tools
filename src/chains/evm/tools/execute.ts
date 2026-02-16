@@ -121,11 +121,21 @@ type ClobClientAuthParams = {
 	signatureType?: number;
 };
 
-type PancakeV2SwapRouteConfig = {
+export type PancakeV2ConfigSource = "env" | "builtin" | "missing";
+
+export type PancakeV2SwapRouteConfig = {
 	chainId: number;
 	factoryAddress: string;
 	routerAddress: string;
 	wrappedNativeAddress: string;
+};
+
+export type PancakeV2ConfigStatus = {
+	network: EvmNetwork;
+	source: PancakeV2ConfigSource;
+	configured: boolean;
+	issues: string[];
+	config: PancakeV2SwapRouteConfig | null;
 };
 
 const PANCAKE_V2_NETWORK_CONFIG: Partial<
@@ -135,11 +145,171 @@ const PANCAKE_V2_NETWORK_CONFIG: Partial<
 		chainId: 56,
 		factoryAddress: "0xca143ce32fe78f1f7019d7d551a6402fc5350c73",
 		routerAddress: "0x10ed43c718714eb63d5aa57b78b54704e256024e",
-		wrappedNativeAddress: "0xbb4cdb9cbd36b01bd1cbaeBF2de08d9173bc095c",
+		wrappedNativeAddress: "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
 	},
 };
 
 const PANCAKE_V2_SELECTOR_GET_PAIR = "0xe6a43905";
+
+function sanitizeEnvValue(value: string | undefined): string | undefined {
+	const normalized = value?.trim();
+	if (!normalized) {
+		return undefined;
+	}
+	const lowered = normalized.toLowerCase();
+	if (lowered === "undefined" || lowered === "null") {
+		return undefined;
+	}
+	return normalized;
+}
+
+function parsePancakeV2ConfigAddress(
+	value: string | undefined,
+	field: string,
+): string {
+	if (!value) {
+		throw new Error(`${field} is required for PancakeSwap V2 config`);
+	}
+	if (!/^0x[a-fA-F0-9]{40}$/.test(value)) {
+		throw new Error(
+			`${field} must be a valid EVM address for PancakeSwap V2 config`,
+		);
+	}
+	return value;
+}
+
+function parsePancakeV2ConfigChainId(value: string | undefined): number {
+	if (!value?.trim()) return 0;
+	if (!/^\d+$/.test(value)) {
+		throw new Error("Invalid chainId in PancakeSwap V2 config");
+	}
+	const parsed = Number.parseInt(value, 10);
+	if (!Number.isFinite(parsed) || parsed < 1) {
+		throw new Error("Invalid chainId in PancakeSwap V2 config");
+	}
+	return parsed;
+}
+
+function getPancakeV2ConfigSuffix(network: EvmNetwork): string {
+	return network.toUpperCase();
+}
+
+function buildPancakeV2IncompleteConfigMessage(network: EvmNetwork): string {
+	const suffix = getPancakeV2ConfigSuffix(network);
+	return `PancakeSwap V2 env config for ${network} is incomplete. Set EVM_PANCAKE_V2_FACTORY_${suffix}, EVM_PANCAKE_V2_ROUTER_${suffix}, and EVM_PANCAKE_V2_WRAPPED_NATIVE_${suffix}.`;
+}
+
+function buildPancakeV2MissingConfigMessage(network: EvmNetwork): string {
+	const suffix = getPancakeV2ConfigSuffix(network);
+	return `PancakeSwap v2 execution is not configured for network=${network}. Configure EVM_PANCAKE_V2_FACTORY_${suffix}, EVM_PANCAKE_V2_ROUTER_${suffix}, and EVM_PANCAKE_V2_WRAPPED_NATIVE_${suffix} (and optional EVM_PANCAKE_V2_CHAIN_ID_${suffix}).`;
+}
+
+export function getPancakeV2ConfigStatus(
+	network: EvmNetwork,
+): PancakeV2ConfigStatus {
+	const suffix = getPancakeV2ConfigSuffix(network);
+	const envFactory = sanitizeEnvValue(
+		process.env[`EVM_PANCAKE_V2_FACTORY_${suffix}`],
+	);
+	const envRouter = sanitizeEnvValue(
+		process.env[`EVM_PANCAKE_V2_ROUTER_${suffix}`],
+	);
+	const envWrappedNative = sanitizeEnvValue(
+		process.env[`EVM_PANCAKE_V2_WRAPPED_NATIVE_${suffix}`],
+	);
+	const providedEnvCount = [envFactory, envRouter, envWrappedNative].filter(
+		(value) => value != null,
+	).length;
+	if (providedEnvCount === 0) {
+		const builtin = PANCAKE_V2_NETWORK_CONFIG[network];
+		if (!builtin) {
+			return {
+				network,
+				source: "missing",
+				configured: false,
+				issues: [buildPancakeV2MissingConfigMessage(network)],
+				config: null,
+			};
+		}
+		return {
+			network,
+			source: "builtin",
+			configured: true,
+			issues: [],
+			config: builtin,
+		};
+	}
+	if (envFactory == null || envRouter == null || envWrappedNative == null) {
+		return {
+			network,
+			source: "env",
+			configured: false,
+			issues: [buildPancakeV2IncompleteConfigMessage(network)],
+			config: null,
+		};
+	}
+	const issues: string[] = [];
+	let chainIdOverride = 0;
+	try {
+		chainIdOverride = parsePancakeV2ConfigChainId(
+			sanitizeEnvValue(process.env[`EVM_PANCAKE_V2_CHAIN_ID_${suffix}`]),
+		);
+	} catch (error) {
+		issues.push(
+			error instanceof Error
+				? error.message
+				: "Invalid chainId in PancakeSwap V2 config",
+		);
+	}
+	if (issues.length > 0) {
+		return {
+			network,
+			source: "env",
+			configured: false,
+			issues,
+			config: null,
+		};
+	}
+	let factoryAddress = "";
+	let routerAddress = "";
+	let wrappedNativeAddress = "";
+	try {
+		factoryAddress = parsePancakeV2ConfigAddress(envFactory, "factoryAddress");
+		routerAddress = parsePancakeV2ConfigAddress(envRouter, "routerAddress");
+		wrappedNativeAddress = parsePancakeV2ConfigAddress(
+			envWrappedNative,
+			"wrappedNativeAddress",
+		);
+	} catch (error) {
+		issues.push(
+			error instanceof Error
+				? error.message
+				: "Invalid PancakeSwap V2 config for env values",
+		);
+	}
+	if (issues.length > 0) {
+		return {
+			network,
+			source: "env",
+			configured: false,
+			issues,
+			config: null,
+		};
+	}
+	return {
+		network,
+		source: "env",
+		configured: true,
+		issues: [],
+		config: {
+			chainId: chainIdOverride > 0 ? chainIdOverride : getEvmChainId(network),
+			factoryAddress,
+			routerAddress,
+			wrappedNativeAddress,
+		},
+	};
+}
+
 const PANCAKE_V2_SELECTOR_TOKEN0 = "0x0dfe1681";
 const PANCAKE_V2_SELECTOR_TOKEN1 = "0xd21220a7";
 const PANCAKE_V2_SELECTOR_GET_RESERVES = "0x0902f1ac";
@@ -148,13 +318,14 @@ const PANCAKE_V2_SELECTOR_SWAP_EXACT_ETH_FOR_TOKENS = "0x7ff36ab5";
 const PANCAKE_V2_SELECTOR_SWAP_EXACT_TOKENS_FOR_ETH = "0x18cbafe5";
 
 function resolvePancakeV2Config(network: EvmNetwork): PancakeV2SwapRouteConfig {
-	const config = PANCAKE_V2_NETWORK_CONFIG[network];
-	if (!config) {
-		throw new Error(
-			`PancakeSwap v2 execution is only supported on BSC in this toolset. Current network=${network}`,
-		);
+	const status = getPancakeV2ConfigStatus(network);
+	if (status.configured && status.config) {
+		return status.config;
 	}
-	return config;
+	if (status.issues.length > 0) {
+		throw new Error(status.issues[0]);
+	}
+	throw new Error(buildPancakeV2MissingConfigMessage(network));
 }
 
 function toNormalizedAddress(address: string): string {
@@ -1722,7 +1893,7 @@ export function createEvmExecuteTools() {
 			name: `${EVM_TOOL_PREFIX}pancakeV2Swap`,
 			label: "EVM PancakeSwap v2 Swap",
 			description:
-				"Build/submit exact-input PancakeSwap V2 swaps on BSC (single-hop pair only). Defaults to dryRun=true.",
+				"Build/submit exact-input PancakeSwap V2 swaps (single-hop pair only). Defaults to dryRun=true. Chain support depends on configured PancakeV2 factory/router addresses.",
 			parameters: Type.Object({
 				network: evmNetworkSchema(),
 				tokenInAddress: Type.String(),
@@ -1744,9 +1915,6 @@ export function createEvmExecuteTools() {
 			}),
 			async execute(_toolCallId, params) {
 				const network = parseEvmNetwork(params.network);
-				if (network !== "bsc") {
-					throw new Error("pancakeV2Swap currently supports BSC network only.");
-				}
 				const mainnetLike = isMainnetLikeEvmNetwork(network);
 				const dryRun = params.dryRun !== false;
 				if (!dryRun && mainnetLike && params.confirmMainnet !== true) {

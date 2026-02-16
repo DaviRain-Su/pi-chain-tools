@@ -69,7 +69,14 @@ Inspect effective mapping in agent:
 
 - tool: `evm_getTransferTokenMap` (example params: `{"network":"base"}`)
 
-## 4) First workflows
+## 4) Runtime preflight (recommended)
+
+Before first execution, OpenClaw can do light read-only preflight:
+
+- `evm_getTransferTokenMap` (check symbol map, optional network override)
+- `evm_getPancakeV2Config` (verify env routing config for swap on `bsc`/`polygon`/other target network)
+
+## 5) First workflows
 
 ### Polymarket BTC 5m (trade + optional stale-requote)
 
@@ -205,6 +212,67 @@ If you already have order IDs, you can replace `marketSlug` with:
 }
 ```
 
+### EVM PancakeV2 swap (analysis -> simulate -> execute)
+
+Unlike transfer, swap still requires explicit ERC20 token addresses in current tooling (`tokenInAddress` and `tokenOutAddress` as raw 0x values). To enable non-BSC networks, set protocol config env vars for that chain:
+
+```bash
+export EVM_PANCAKE_V2_FACTORY_POLYGON=<polygon pancake factory>
+export EVM_PANCAKE_V2_ROUTER_POLYGON=<polygon pancake router>
+export EVM_PANCAKE_V2_WRAPPED_NATIVE_POLYGON=<wrapped native (WETH) on polygon>
+# optional
+export EVM_PANCAKE_V2_CHAIN_ID_POLYGON=137
+```
+
+1) Analysis (or direct JSON with raw amount):
+
+```json
+{
+  "runMode": "analysis",
+  "runId": "wf-evm-swap-01",
+  "network": "polygon",
+  "intentType": "evm.swap.pancakeV2",
+  "tokenInAddress": "0x....",
+  "tokenOutAddress": "0x....",
+  "amountInRaw": "1000000",
+  "toAddress": "0x000000000000000000000000000000000000dEaD",
+  "slippageBps": 50
+}
+```
+
+2) Simulate:
+
+```json
+{
+  "runMode": "simulate",
+  "runId": "wf-evm-swap-01",
+  "network": "polygon"
+}
+```
+
+3) Execute:
+
+```json
+{
+  "runMode": "execute",
+  "runId": "wf-evm-swap-01",
+  "network": "polygon",
+  "confirmMainnet": true,
+  "confirmToken": "EVM-..."
+}
+```
+
+If addresses are unknown in NL, use structured params or pass `intentText` with exact addresses, e.g.:
+
+```json
+{
+  "runMode": "analysis",
+  "runId": "wf-evm-swap-nl-01",
+  "network": "polygon",
+  "intentText": "swap tokenIn=0x... tokenOut=0x... amountInRaw 1000000，给 0x000000000000000000000000000000000000dEaD"
+}
+```
+
 ## 5) Natural-language prompts
 
 - `帮我分析 BTC 5m，建议买涨还是买跌`
@@ -321,7 +389,48 @@ Use this template in an OpenClaw system workflow or playbook engine:
 }
 ```
 
-### 4. Playbook run rules
+### 4. PancakeV2 swap playbook
+
+```json
+{
+  "steps": [
+    {
+      "tool": "w3rt_run_evm_swap_workflow_v0",
+      "params": {
+        "runMode": "analysis",
+        "runId": "wf-evm-swap-01",
+        "network": "polygon",
+        "intentType": "evm.swap.pancakeV2",
+        "tokenInAddress": "0x...in",
+        "tokenOutAddress": "0x...out",
+        "amountInRaw": "1000000",
+        "toAddress": "0x000000000000000000000000000000000000dEaD",
+        "slippageBps": 50
+      }
+    },
+    {
+      "tool": "w3rt_run_evm_swap_workflow_v0",
+      "params": {
+        "runMode": "simulate",
+        "runId": "wf-evm-swap-01",
+        "network": "polygon"
+      }
+    },
+    {
+      "tool": "w3rt_run_evm_swap_workflow_v0",
+      "params": {
+        "runMode": "execute",
+        "runId": "wf-evm-swap-01",
+        "network": "polygon",
+        "confirmMainnet": true,
+        "confirmToken": "${analysis.confirmToken}"
+      }
+    }
+  ]
+}
+```
+
+### 5. Playbook run rules
 
 - If `runMode:analysis` or `runMode:simulate` fails guard (`guard_blocked` / `no_liquidity` / `price_too_high`), stop and notify operator, do not execute.
 - Read from artifact JSON paths:

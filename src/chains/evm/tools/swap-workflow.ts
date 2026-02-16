@@ -7,13 +7,14 @@ import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
 import { isMainnetLikeEvmNetwork } from "../policy.js";
 import {
 	EVM_TOOL_PREFIX,
+	type EvmNetwork,
 	evmNetworkSchema,
 	parseEvmNetwork,
 	parsePositiveIntegerString,
 	parsePositiveNumber,
 	stringifyUnknown,
 } from "../runtime.js";
-import { createEvmExecuteTools } from "./execute.js";
+import { createEvmExecuteTools, getPancakeV2ConfigStatus } from "./execute.js";
 
 type WorkflowRunMode = "analysis" | "simulate" | "execute";
 
@@ -102,6 +103,34 @@ function resolveExecuteTool(name: string): ExecuteTool {
 		throw new Error(`${name} tool not found`);
 	}
 	return tool as unknown as ExecuteTool;
+}
+
+function getPancakeV2ConfigPrecheck(network: EvmNetwork) {
+	const status = getPancakeV2ConfigStatus(network);
+	return {
+		schema: "w3rt.workflow.pancakev2.precheck.v1",
+		ready: status.configured,
+		status: status.configured ? "ready" : "blocked",
+		network: status.network,
+		config: {
+			source: status.source,
+			configured: status.configured,
+			issues: status.issues,
+			config: status.config,
+		},
+		reason: status.configured
+			? undefined
+			: (status.issues[0] ?? "PancakeSwap V2 config is not ready."),
+	};
+}
+
+function assertPancakeV2ConfigReady(precheck: {
+	ready: boolean;
+	reason?: string;
+}): void {
+	if (!precheck.ready) {
+		throw new Error(precheck.reason);
+	}
 }
 
 function extractConfirmTokenFromText(text?: string): string | undefined {
@@ -502,7 +531,7 @@ export function createEvmSwapWorkflowTools() {
 			name: "w3rt_run_evm_swap_workflow_v0",
 			label: "w3rt Run EVM Swap Workflow v0",
 			description:
-				"Deterministic EVM swap workflow entrypoint for BSC PancakeSwap V2 swaps: analysis -> simulate -> execute.",
+				"Deterministic EVM swap workflow entrypoint for PancakeSwap V2 swaps: analysis -> simulate -> execute.",
 			parameters: Type.Object({
 				runId: Type.Optional(Type.String()),
 				runMode: Type.Optional(
@@ -549,11 +578,6 @@ export function createEvmSwapWorkflowTools() {
 					params.network ||
 						(runMode === "execute" ? priorSession?.network : undefined),
 				);
-				if (network !== "bsc") {
-					throw new Error(
-						"w3rt_run_evm_swap_workflow_v0 currently supports BSC only.",
-					);
-				}
 				const resolved =
 					runMode === "execute" &&
 					!hasIntentInput(params) &&
@@ -580,21 +604,31 @@ export function createEvmSwapWorkflowTools() {
 				const executeTool = resolveExecuteTool(
 					`${EVM_TOOL_PREFIX}pancakeV2Swap`,
 				);
+				const precheck = getPancakeV2ConfigPrecheck(network);
+				const precheckSummary = {
+					schema: precheck.schema,
+					status: precheck.status,
+					ready: precheck.ready,
+					network: precheck.network,
+				};
 
 				if (runMode === "analysis") {
+					const analysisStatus = precheck.ready ? "ready" : "config_blocked";
 					const summaryLine = buildSummaryLine({
 						intent,
 						phase: "analysis",
-						status: "ready",
+						status: analysisStatus,
 						confirmToken: mainnetGuardRequired ? confirmToken : undefined,
 					});
-					rememberSession({
-						runId,
-						network,
-						intent,
-						rpcUrl: effectiveRpcUrl,
-						fromPrivateKey: effectivePrivateKey,
-					});
+					if (precheck.ready) {
+						rememberSession({
+							runId,
+							network,
+							intent,
+							rpcUrl: effectiveRpcUrl,
+							fromPrivateKey: effectivePrivateKey,
+						});
+					}
 					return {
 						content: [
 							{ type: "text", text: `Workflow analyzed: ${intent.type}` },
@@ -607,14 +641,16 @@ export function createEvmSwapWorkflowTools() {
 							intent,
 							needsMainnetConfirmation: mainnetGuardRequired,
 							confirmToken,
+							pancakeV2Config: precheck,
 							artifacts: {
 								analysis: {
 									intent,
 									summaryLine,
+									precheck: precheckSummary,
 									summary: {
 										schema: "w3rt.workflow.summary.v1",
 										phase: "analysis",
-										status: "ready",
+										status: analysisStatus,
 										intentType: intent.type,
 										line: summaryLine,
 									},
@@ -625,6 +661,7 @@ export function createEvmSwapWorkflowTools() {
 				}
 
 				if (runMode === "simulate") {
+					assertPancakeV2ConfigReady(precheck);
 					let simulateResult: unknown = null;
 					let status = "ready";
 					try {
@@ -671,10 +708,12 @@ export function createEvmSwapWorkflowTools() {
 							intent,
 							needsMainnetConfirmation: mainnetGuardRequired,
 							confirmToken,
+							pancakeV2Config: precheck,
 							artifacts: {
 								simulate: {
 									status,
 									preview: simulateResult,
+									precheck: precheckSummary,
 									summaryLine,
 									summary: {
 										schema: "w3rt.workflow.summary.v1",
@@ -688,6 +727,8 @@ export function createEvmSwapWorkflowTools() {
 						},
 					};
 				}
+
+				assertPancakeV2ConfigReady(precheck);
 
 				if (mainnetGuardRequired) {
 					if (!effectiveConfirmMainnet) {
@@ -747,11 +788,13 @@ export function createEvmSwapWorkflowTools() {
 						intent,
 						needsMainnetConfirmation: mainnetGuardRequired,
 						confirmToken,
+						pancakeV2Config: precheck,
 						artifacts: {
 							execute: {
 								status: "submitted",
 								txHash,
 								result: executeResult.details ?? null,
+								precheck: precheckSummary,
 								summaryLine,
 								summary: {
 									schema: "w3rt.workflow.summary.v1",

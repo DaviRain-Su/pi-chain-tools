@@ -175,6 +175,33 @@ type NearBurrowMarketRow = {
 	borrowApr: string | null;
 };
 
+type NearStableYieldCandidate = {
+	protocol: "Burrow";
+	rank: number;
+	tokenId: string;
+	symbol: string;
+	supplyApr: string | null;
+	canDeposit: boolean;
+	canWithdraw: boolean;
+	suppliedUi: string | null;
+	borrowedUi: string | null;
+};
+
+type NearStableYieldPlan = {
+	network: string;
+	protocol: "Burrow";
+	selected: NearStableYieldCandidate | null;
+	topN: number;
+	stableSymbols: string[];
+	includeDisabled: boolean;
+	candidates: NearStableYieldCandidate[];
+	allocationHint: {
+		tokenId: string;
+		symbol: string;
+		asCollateral: boolean;
+	} | null;
+};
+
 type NearBurrowPositionAssetRow = {
 	tokenId: string;
 	symbol: string;
@@ -2513,6 +2540,135 @@ async function resolveBurrowMarketRows(params: {
 	return rows;
 }
 
+const DEFAULT_STABLE_YIELD_SYMBOLS = [
+	"USDC",
+	"USDT",
+	"DAI",
+	"BUSD",
+	"TUSD",
+	"FRAX",
+	"LUSD",
+	"UST",
+	"PYUSD",
+	"sUSD",
+	"USDN",
+	"USDx",
+	"USDB",
+];
+
+function normalizeStableSymbol(value: string): string {
+	return value.trim().toUpperCase();
+}
+
+function parseStableSymbolHints(values?: string[]): string[] {
+	const merged = values?.length
+		? values.map(normalizeStableSymbol).filter(Boolean)
+		: DEFAULT_STABLE_YIELD_SYMBOLS;
+	const seen = new Set<string>();
+	for (const symbol of merged) {
+		if (symbol) seen.add(symbol);
+	}
+	return [...seen];
+}
+
+function parseTopN(value?: number): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) return 3;
+	const rounded = Math.floor(value);
+	if (rounded <= 0) return 1;
+	if (rounded > 20) return 20;
+	return rounded;
+}
+
+function parseApr(value: string | null): number | null {
+	if (!value) return null;
+	const normalized = value.trim();
+	if (!normalized) return null;
+	const parsed = Number.parseFloat(normalized);
+	if (!Number.isFinite(parsed)) return null;
+	return parsed;
+}
+
+function pickStableYieldCandidates(params: {
+	markets: NearBurrowMarketRow[];
+	stableSymbols: string[];
+	includeDisabled: boolean;
+	topN: number;
+}): NearStableYieldCandidate[] {
+	const stableSet = new Set(params.stableSymbols.map(normalizeStableSymbol));
+	const eligible = params.markets.filter((market) => {
+		if (!params.includeDisabled && !market.canDeposit) return false;
+		if (!market.symbol) return false;
+		return stableSet.has(normalizeStableSymbol(market.symbol));
+	});
+
+	const ranked = [...eligible].sort((left, right) => {
+		const leftApr = parseApr(left.supplyApr) ?? Number.NEGATIVE_INFINITY;
+		const rightApr = parseApr(right.supplyApr) ?? Number.NEGATIVE_INFINITY;
+		if (rightApr !== leftApr) return rightApr - leftApr;
+		return left.symbol.localeCompare(right.symbol);
+	});
+
+	return ranked.slice(0, params.topN).map((entry, index) => ({
+		protocol: "Burrow",
+		rank: index + 1,
+		tokenId: entry.tokenId,
+		symbol: entry.symbol,
+		supplyApr: entry.supplyApr,
+		canDeposit: entry.canDeposit,
+		canWithdraw: entry.canWithdraw,
+		suppliedUi: entry.suppliedUi,
+		borrowedUi: entry.borrowedUi,
+	}));
+}
+
+async function resolveStableYieldPlan(params: {
+	network: string;
+	rpcUrl?: string;
+	burrowContractId: string;
+	topN: number;
+	stableSymbols: string[];
+	includeDisabled: boolean;
+}): Promise<NearStableYieldPlan> {
+	const markets = await fetchBurrowAssetsPagedDetailed({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		burrowContractId: params.burrowContractId,
+		fromIndex: 0,
+		limit: 200,
+	});
+	const normalizedMarkets = markets
+		.map(normalizeBurrowMarketAsset)
+		.filter((entry): entry is BurrowAssetDetailedView => entry != null);
+	const rows = await resolveBurrowMarketRows({
+		network: params.network,
+		rpcUrl: params.rpcUrl,
+		markets: normalizedMarkets,
+	});
+	const candidates = pickStableYieldCandidates({
+		markets: rows,
+		stableSymbols: params.stableSymbols,
+		includeDisabled: params.includeDisabled,
+		topN: params.topN,
+	});
+	const selected = candidates[0] ?? null;
+	return {
+		network: params.network,
+		protocol: "Burrow",
+		topN: params.topN,
+		stableSymbols: params.stableSymbols,
+		includeDisabled: params.includeDisabled,
+		candidates,
+		selected,
+		allocationHint: selected
+			? {
+					tokenId: selected.tokenId,
+					symbol: selected.symbol,
+					asCollateral: true,
+				}
+			: null,
+	};
+}
+
 async function resolveBurrowPositionAssetRows(params: {
 	network: string;
 	rpcUrl?: string;
@@ -3633,6 +3789,89 @@ export function createNearReadTools() {
 						includeDisabled,
 						markets: rows,
 						fetchedCount: rowsAll.length,
+					},
+				};
+			},
+		}),
+		defineTool({
+			name: `${NEAR_TOOL_PREFIX}getStableYieldPlan`,
+			label: "NEAR Stable Yield Plan",
+			description:
+				"Analyse stablecoins with highest supply APR on supported lending markets and return a ready-to-execute allocation plan.",
+			parameters: Type.Object({
+				burrowContractId: Type.Optional(
+					Type.String({
+						description:
+							"Burrow contract id override (default contract.main.burrow.near).",
+					}),
+				),
+				stableSymbols: Type.Optional(
+					Type.Array(
+						Type.String({
+							description: "Optional stablecoin symbols to consider.",
+						}),
+					),
+				),
+				topN: Type.Optional(
+					Type.Number({
+						minimum: 1,
+						maximum: 20,
+						default: 3,
+					}),
+				),
+				includeDisabled: Type.Optional(
+					Type.Boolean({
+						description:
+							"Include non-deposit-capable entries in scan (default false).",
+					}),
+				),
+				network: nearNetworkSchema(),
+				rpcUrl: Type.Optional(
+					Type.String({ description: "Override NEAR JSON-RPC endpoint URL" }),
+				),
+			}),
+			async execute(_toolCallId, params) {
+				const network = parseNearNetwork(params.network);
+				const endpoint = getNearRpcEndpoint(network, params.rpcUrl);
+				const burrowContractId = getBurrowContractId(
+					network,
+					params.burrowContractId,
+				);
+				const topN = parseTopN(params.topN);
+				const stableSymbols = parseStableSymbolHints(params.stableSymbols);
+				const includeDisabled = params.includeDisabled === true;
+				const plan = await resolveStableYieldPlan({
+					network,
+					rpcUrl: params.rpcUrl,
+					burrowContractId,
+					topN,
+					stableSymbols,
+					includeDisabled,
+				});
+				const lines = [
+					`NEAR stable yield plan (${network}): protocol=${plan.protocol} contract=${burrowContractId}`,
+					`stableSymbols=${plan.stableSymbols.join(",")} includeDisabled=${includeDisabled} topN=${topN}`,
+				];
+				if (plan.selected == null) {
+					lines.push("No eligible stablecoin markets found.");
+				} else {
+					lines.push(
+						`Recommended: #${plan.selected.rank} ${plan.selected.symbol} (${plan.selected.tokenId}) supplyAPR=${plan.selected.supplyApr ?? "n/a"}`,
+					);
+				}
+				for (const candidate of plan.candidates) {
+					lines.push(
+						`${candidate.rank}. ${candidate.symbol} (${candidate.tokenId}) supplyAPR=${candidate.supplyApr ?? "n/a"} deposit=${candidate.canDeposit ? "yes" : "no"}`,
+					);
+				}
+
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: {
+						schema: "near.defi.stableYieldPlan.v1",
+						rpcEndpoint: endpoint,
+						burrowContractId,
+						...plan,
 					},
 				};
 			},

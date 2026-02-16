@@ -13,9 +13,24 @@ const TRANSFER_MAP_ENV_KEYS = [
 	"EVM_TRANSFER_TOKEN_MAP_OPTIMISM",
 ] as const;
 
+const PANCAKE_V2_ENV_KEYS = [
+	"EVM_PANCAKE_V2_FACTORY_BSC",
+	"EVM_PANCAKE_V2_ROUTER_BSC",
+	"EVM_PANCAKE_V2_WRAPPED_NATIVE_BSC",
+	"EVM_PANCAKE_V2_CHAIN_ID_BSC",
+	"EVM_PANCAKE_V2_FACTORY_POLYGON",
+	"EVM_PANCAKE_V2_ROUTER_POLYGON",
+	"EVM_PANCAKE_V2_WRAPPED_NATIVE_POLYGON",
+	"EVM_PANCAKE_V2_CHAIN_ID_POLYGON",
+] as const;
+
 const TRANSFER_MAP_ENV_SNAPSHOT = Object.fromEntries(
 	TRANSFER_MAP_ENV_KEYS.map((key) => [key, process.env[key]]),
 ) as Record<(typeof TRANSFER_MAP_ENV_KEYS)[number], string | undefined>;
+
+const PANCAKE_V2_ENV_SNAPSHOT = Object.fromEntries(
+	PANCAKE_V2_ENV_KEYS.map((key) => [key, process.env[key]]),
+) as Record<(typeof PANCAKE_V2_ENV_KEYS)[number], string | undefined>;
 
 const polymarketMocks = vi.hoisted(() => ({
 	searchPolymarketEvents: vi.fn(),
@@ -68,6 +83,9 @@ beforeEach(() => {
 	for (const key of TRANSFER_MAP_ENV_KEYS) {
 		Reflect.deleteProperty(process.env, key);
 	}
+	for (const key of PANCAKE_V2_ENV_KEYS) {
+		Reflect.deleteProperty(process.env, key);
+	}
 	vi.clearAllMocks();
 	polymarketMocks.searchPolymarketEvents.mockResolvedValue([]);
 	polymarketMocks.getPolymarketMarketBySlug.mockResolvedValue({
@@ -117,6 +135,14 @@ afterEach(() => {
 			process.env[key] = value;
 		}
 	}
+	for (const key of PANCAKE_V2_ENV_KEYS) {
+		const value = PANCAKE_V2_ENV_SNAPSHOT[key];
+		if (value == null) {
+			Reflect.deleteProperty(process.env, key);
+		} else {
+			process.env[key] = value;
+		}
+	}
 });
 
 describe("evm read tools", () => {
@@ -134,6 +160,66 @@ describe("evm read tools", () => {
 				globalMapKey: "EVM_TRANSFER_TOKEN_MAP",
 				decimalsKey: "EVM_TRANSFER_TOKEN_DECIMALS",
 			},
+		});
+	});
+
+	it("reads builtin PancakeV2 config when env is unset", async () => {
+		const tool = getTool("evm_getPancakeV2Config");
+		const result = await tool.execute("t0b", {
+			network: "bsc",
+		});
+		expect(result.content[0]?.text).toContain("PancakeV2 config bsc");
+		expect(result.content[0]?.text).toContain("source=builtin");
+		expect(result.content[0]?.text).toContain("configured=yes");
+		expect(result.details).toMatchObject({
+			schema: "evm.pancakev2.config.v1",
+			targetNetwork: "bsc",
+			allRequested: false,
+			networks: [
+				{
+					network: "bsc",
+					source: "builtin",
+					configured: true,
+					config: {
+						factoryAddress: "0xca143ce32fe78f1f7019d7d551a6402fc5350c73",
+						routerAddress: "0x10ed43c718714eb63d5aa57b78b54704e256024e",
+						wrappedNativeAddress: "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
+					},
+				},
+			],
+		});
+	});
+
+	it("validates configured non-BSC PancakeV2 config in read tool", async () => {
+		process.env.EVM_PANCAKE_V2_FACTORY_POLYGON =
+			"0x1111111111111111111111111111111111111111";
+		process.env.EVM_PANCAKE_V2_ROUTER_POLYGON =
+			"0x2222222222222222222222222222222222222222";
+		process.env.EVM_PANCAKE_V2_WRAPPED_NATIVE_POLYGON =
+			"0x3333333333333333333333333333333333333333";
+		const tool = getTool("evm_getPancakeV2Config");
+		const result = await tool.execute("t0c", {
+			network: "polygon",
+		});
+		expect(result.content[0]?.text).toContain("PancakeV2 config polygon");
+		expect(result.content[0]?.text).toContain("source=env");
+		expect(result.content[0]?.text).toContain("configured=yes");
+		expect(result.details).toMatchObject({
+			schema: "evm.pancakev2.config.v1",
+			targetNetwork: "polygon",
+			allRequested: false,
+			networks: [
+				{
+					network: "polygon",
+					source: "env",
+					configured: true,
+					config: {
+						factoryAddress: "0x1111111111111111111111111111111111111111",
+						routerAddress: "0x2222222222222222222222222222222222222222",
+						wrappedNativeAddress: "0x3333333333333333333333333333333333333333",
+					},
+				},
+			],
 		});
 	});
 
@@ -293,5 +379,39 @@ describe("evm read tools", () => {
 			tokenAddress: "0xUSDTADDRESS",
 			pairCount: 1,
 		});
+	});
+
+	it("can inspect all PancakeV2 network configs in one call", async () => {
+		process.env.EVM_PANCAKE_V2_FACTORY_POLYGON =
+			"0x1111111111111111111111111111111111111111";
+		process.env.EVM_PANCAKE_V2_ROUTER_POLYGON =
+			"0x2222222222222222222222222222222222222222";
+		process.env.EVM_PANCAKE_V2_WRAPPED_NATIVE_POLYGON =
+			"0x3333333333333333333333333333333333333333";
+		process.env.EVM_PANCAKE_V2_FACTORY_BSC = "undefined";
+		const tool = getTool("evm_getPancakeV2Config");
+		const result = await tool.execute("t0-all", {
+			all: true,
+		});
+		expect(result.content[0]?.text).toContain("PancakeV2 config bsc");
+		expect(result.content[0]?.text).toContain("PancakeV2 config polygon");
+		expect(result.content[0]?.text).toContain("source=builtin");
+		expect(result.content[0]?.text).toContain("source=env");
+		expect(
+			Array.isArray((result.details as { networks: unknown[] }).networks),
+		).toBe(true);
+		expect(
+			(
+				result.details as {
+					networks: { network: string; configured: boolean }[];
+				}
+			).networks,
+		).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ network: "bsc" }),
+				expect.objectContaining({ network: "polygon" }),
+				expect.objectContaining({ network: "ethereum" }),
+			]),
+		);
 	});
 });
