@@ -428,6 +428,7 @@ async function executeAction(payload) {
 			const result = { ok: true, action: payload.action, output: out };
 			pushActionHistory({
 				action: payload.action,
+				step: payload.step || null,
 				accountId,
 				status: "success",
 				summary: `wrapped ${amountNear} NEAR`,
@@ -476,6 +477,7 @@ async function executeAction(payload) {
 			const result = { ok: true, action: payload.action, output: out };
 			pushActionHistory({
 				action: payload.action,
+				step: payload.step || null,
 				accountId,
 				status: "success",
 				summary: `supplied ${amountRaw} raw USDt`,
@@ -486,6 +488,7 @@ async function executeAction(payload) {
 	} catch (error) {
 		pushActionHistory({
 			action: payload.action,
+			step: payload.step || null,
 			accountId,
 			status: "error",
 			summary: error instanceof Error ? error.message : String(error),

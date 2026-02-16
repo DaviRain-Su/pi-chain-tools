@@ -102,7 +102,7 @@
       <div class="card" style="margin-top:16px">
         <h3>Action History</h3>
         <table>
-          <thead><tr><th>Time</th><th>Action</th><th>Status</th><th>Summary</th></tr></thead>
+          <thead><tr><th>Time</th><th>Action</th><th>Step</th><th>Status</th><th>Summary</th></tr></thead>
           <tbody id="actions"></tbody>
         </table>
       </div>
@@ -121,6 +121,7 @@
         <div class="row" style="margin-top:8px">
           <button id="execWrap">Execute wrap (confirmed)</button>
           <button id="execSupply">Execute supply USDt (confirmed)</button>
+          <input id="execStepTag" placeholder="step tag (e.g. step1)" size="16" />
         </div>
         <div class="row" style="margin-top:8px">
           <button id="buildWorkerDry">Build worker dry-run start</button>
@@ -186,6 +187,7 @@
       const parseStep2RawBtn = document.getElementById("parseStep2Raw");
       const execWrapBtn = document.getElementById("execWrap");
       const execSupplyBtn = document.getElementById("execSupply");
+      const execStepTagEl = document.getElementById("execStepTag");
       const cmdOutEl = document.getElementById("cmdOut");
       const copyCmdBtn = document.getElementById("copyCmd");
       const cmdMetaEl = document.getElementById("cmdMeta");
@@ -408,7 +410,7 @@
         for (const row of data.actionHistory || []) {
           const tr = document.createElement("tr");
           const status = row.status === "success" ? `<span class="ok">success</span>` : `<span class="warn">error</span>`;
-          tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.action}</td><td>${status}</td><td>${row.summary || ""}</td>`;
+          tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.action}</td><td>${row.step || "-"}</td><td>${status}</td><td>${row.summary || ""}</td>`;
           actionsEl.appendChild(tr);
         }
       }
@@ -470,11 +472,19 @@
       }
 
       execWrapBtn.addEventListener("click", () => {
-        executeAction({ action: "wrap_near", amountNear: (wrapAmountEl.value || "1").trim() });
+        executeAction({
+          action: "wrap_near",
+          amountNear: (wrapAmountEl.value || "1").trim(),
+          step: (execStepTagEl.value || "").trim() || null,
+        });
       });
 
       execSupplyBtn.addEventListener("click", () => {
-        executeAction({ action: "supply_usdt_collateral", amountRaw: (supplyRawEl.value || "1000000").trim() });
+        executeAction({
+          action: "supply_usdt_collateral",
+          amountRaw: (supplyRawEl.value || "1000000").trim(),
+          step: (execStepTagEl.value || "").trim() || null,
+        });
       });
 
       exportCsvBtn.addEventListener("click", () => {

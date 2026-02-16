@@ -19,6 +19,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - One-click fill Action Console from latest rebalance plan (with pre-execution checklist)
 - Step runner helper: build Step1/Step2/Step3 commands and feed Step2 output raw into Step3 template
 - Step2 parser helper: paste swap result text and auto-extract output raw for Step3
+- Action History now supports optional `step` tag for execution traceability (e.g. step1/step2/step3)
 - CSV export for latest snapshot
 - Best-effort USD estimates from NEAR Intents token feed
 
