@@ -24,7 +24,8 @@ export type KnownTokenSymbol =
 	| "WBNB"
 	| "BTCB"
 	| "WBERA"
-	| "HONEY";
+	| "HONEY"
+	| "WMON";
 export type TokenSymbolMetadata = {
 	decimals: number;
 	/** Per-network decimals override (e.g. BSC Binance-Peg USDC is 18, not 6). */
@@ -41,6 +42,7 @@ const EVM_NETWORKS: EvmNetwork[] = [
 	"optimism",
 	"bsc",
 	"berachain",
+	"monad",
 ];
 
 export const EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK: Record<EvmNetwork, string> =
@@ -53,6 +55,7 @@ export const EVM_TRANSFER_TOKEN_MAP_ENV_BY_NETWORK: Record<EvmNetwork, string> =
 		optimism: "EVM_TRANSFER_TOKEN_MAP_OPTIMISM",
 		bsc: "EVM_TRANSFER_TOKEN_MAP_BSC",
 		berachain: "EVM_TRANSFER_TOKEN_MAP_BERACHAIN",
+		monad: "EVM_TRANSFER_TOKEN_MAP_MONAD",
 	};
 
 export const EVM_TRANSFER_TOKEN_MAP_ENV = "EVM_TRANSFER_TOKEN_MAP";
@@ -136,6 +139,13 @@ const TOKEN_METADATA_BY_SYMBOL: Record<KnownTokenSymbol, TokenSymbolMetadata> =
 			decimals: 18,
 			addresses: {
 				berachain: "0x0E4aaF1351de4c0264C5c7056Ef3777b41BD8e03",
+			},
+		},
+		WMON: {
+			decimals: 18,
+			addresses: {
+				// Monad mainnet WMON — set via EVM_TRANSFER_TOKEN_MAP_MONAD
+				// or configure directly once the canonical WMON address is confirmed
 			},
 		},
 	};
@@ -225,6 +235,7 @@ function parseKnownTokenSymbol(value?: string): KnownTokenSymbol | undefined {
 	if (normalized === "BTCB") return "BTCB";
 	if (normalized === "WBERA" || normalized === "BERA") return "WBERA";
 	if (normalized === "HONEY") return "HONEY";
+	if (normalized === "WMON" || normalized === "MON") return "WMON";
 	return undefined;
 }
 
@@ -258,6 +269,7 @@ function parseEvmNetworkAlias(value: string): EvmNetwork | undefined {
 		normalized === "bartio"
 	)
 		return "berachain";
+	if (normalized === "monad" || normalized === "mon") return "monad";
 	return undefined;
 }
 
@@ -411,6 +423,10 @@ function copyDefaultTokenMetadata(): Record<
 		HONEY: {
 			decimals: TOKEN_METADATA_BY_SYMBOL.HONEY.decimals,
 			addresses: { ...TOKEN_METADATA_BY_SYMBOL.HONEY.addresses },
+		},
+		WMON: {
+			decimals: TOKEN_METADATA_BY_SYMBOL.WMON.decimals,
+			addresses: { ...TOKEN_METADATA_BY_SYMBOL.WMON.addresses },
 		},
 	};
 }
@@ -566,7 +582,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	const tokenSymbolMatch =
 		text.match(/\btoken(?:Symbol)?\s*[:= ]\s*([A-Za-z0-9._-]{2,16})\b/i)?.[1] ??
 		text.match(
-			/\b(USDC(?:\.E)?|USDT|DAI|WETH|WBTC|WBNB|BTCB|WBERA|BERA|HONEY)\b/i,
+			/\b(USDC(?:\.E)?|USDT|DAI|WETH|WBTC|WBNB|BTCB|WBERA|BERA|HONEY|WMON|MON)\b/i,
 		)?.[1] ??
 		undefined;
 	const toAddressMatch =
@@ -584,7 +600,7 @@ function parseIntentText(text?: string): ParsedIntentHints {
 	const amountTokenMatch =
 		text.match(/\bamount(?:Token)?\s*[:= ]\s*(\d+(?:\.\d+)?)\b/i)?.[1] ??
 		text.match(
-			/(\d+(?:\.\d+)?)\s*(?:USDC(?:\.E)?|USDT|DAI|WETH|WBTC|WBNB|BTCB|WBERA|BERA|HONEY)\b/i,
+			/(\d+(?:\.\d+)?)\s*(?:USDC(?:\.E)?|USDT|DAI|WETH|WBTC|WBNB|BTCB|WBERA|BERA|HONEY|WMON|MON)\b/i,
 		)?.[1] ??
 		undefined;
 	const amountNativeMatch =
@@ -672,7 +688,7 @@ function normalizeIntent(
 				);
 			}
 			throw new Error(
-				"Provide tokenAddress (or known tokenSymbol like USDC/USDT/DAI/WETH/WBTC/WBNB/BTCB/WBERA/HONEY with configured map)",
+				"Provide tokenAddress (or known tokenSymbol like USDC/USDT/DAI/WETH/WBTC/WBNB/BTCB/WBERA/HONEY/WMON with configured map)",
 			);
 		}
 		const tokenAddress = parseEvmAddress(tokenAddressInput, "tokenAddress");

@@ -8,7 +8,8 @@ export type EvmNetwork =
 	| "arbitrum"
 	| "optimism"
 	| "bsc"
-	| "berachain";
+	| "berachain"
+	| "monad";
 
 export type EvmHttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
@@ -51,6 +52,7 @@ const EVM_RPC_ENDPOINTS: Record<EvmNetwork, string> = {
 	optimism: "https://optimism.publicnode.com",
 	bsc: "https://bsc.publicnode.com",
 	berachain: "https://rpc.berachain.com",
+	monad: "https://rpc.monad.xyz",
 };
 
 const EVM_CHAIN_IDS: Record<EvmNetwork, number> = {
@@ -62,6 +64,7 @@ const EVM_CHAIN_IDS: Record<EvmNetwork, number> = {
 	optimism: 10,
 	bsc: 56,
 	berachain: 80094,
+	monad: 143,
 };
 
 export const EVM_TOOL_PREFIX = "evm_";
@@ -77,6 +80,7 @@ export function evmNetworkSchema() {
 			Type.Literal("optimism"),
 			Type.Literal("bsc"),
 			Type.Literal("berachain"),
+			Type.Literal("monad"),
 		]),
 	);
 }
@@ -90,7 +94,8 @@ export function parseEvmNetwork(value?: string): EvmNetwork {
 		value === "arbitrum" ||
 		value === "optimism" ||
 		value === "bsc" ||
-		value === "berachain"
+		value === "berachain" ||
+		value === "monad"
 	) {
 		return value;
 	}
