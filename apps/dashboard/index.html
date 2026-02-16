@@ -64,6 +64,7 @@
         <div class="row" style="margin-top:8px">
           <button id="buildRebalanceDraft">Build execution draft</button>
           <button id="copyRebalanceDraft">Copy draft</button>
+          <button id="fillActionConsole">Fill Action Console</button>
           <span id="rebalanceMeta" class="muted"></span>
         </div>
       </div>
@@ -152,6 +153,7 @@
       const rebalanceDraftEl = document.getElementById("rebalanceDraft");
       const buildRebalanceDraftBtn = document.getElementById("buildRebalanceDraft");
       const copyRebalanceDraftBtn = document.getElementById("copyRebalanceDraft");
+      const fillActionConsoleBtn = document.getElementById("fillActionConsole");
       const rebalanceMetaEl = document.getElementById("rebalanceMeta");
       const burrowPosEl = document.getElementById("burrowPos");
       const metaEl = document.getElementById("meta");
@@ -327,6 +329,7 @@
       }
 
       let lastSnapshot = null;
+      let lastRebalancePlan = null;
       let targetConfig = loadTargets();
       targetUsdtEl.value = targetConfig.usdt;
       targetUsdceEl.value = targetConfig.usdce;
@@ -352,6 +355,7 @@
         yieldHealthEl.textContent = computeYieldHealth(data);
         targetAlertEl.innerHTML = computeTargetAlert(data, targetConfig);
         const plan = computeRebalancePlan(data, targetConfig);
+        lastRebalancePlan = plan;
         targetPlanEl.textContent = plan.text;
 
         if (data.worker) {
@@ -488,6 +492,7 @@
         if (lastSnapshot) {
           targetAlertEl.innerHTML = computeTargetAlert(lastSnapshot, targetConfig);
           const plan = computeRebalancePlan(lastSnapshot, targetConfig);
+          lastRebalancePlan = plan;
           targetPlanEl.textContent = plan.text;
         }
       });
@@ -496,22 +501,51 @@
         return String(Math.max(0, Math.round(parseNum(uiAmount) * 1_000_000)));
       }
 
+      function tokenIdFromSymbol(symbol) {
+        return symbol === "USDt"
+          ? "usdt.tether-token.near"
+          : "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
+      }
+
       function buildRebalanceDraft(snapshot, targets) {
         const plan = computeRebalancePlan(snapshot, targets);
         if (!plan.from || !plan.to || plan.amount <= 0) {
-          return "# No executable rebalance draft\n# Reason: " + plan.text;
+          return { plan, text: "# No executable rebalance draft\n# Reason: " + plan.text };
         }
 
-        const fromToken = plan.from === "USDt" ? "usdt.tether-token.near" : "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
-        const toToken = plan.to === "USDt" ? "usdt.tether-token.near" : "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
+        const fromToken = tokenIdFromSymbol(plan.from);
+        const toToken = tokenIdFromSymbol(plan.to);
         const raw = toRaw6(plan.amount);
 
+        return {
+          plan,
+          text: [
+            `# Rebalance draft (${plan.from} -> ${plan.to})`,
+            `# Estimated move amount: ${plan.amount.toFixed(6)} (${raw} raw)`,
+            `1) Withdraw from Burrow: near_withdrawBurrow network=mainnet tokenId=${fromToken} amountRaw=${raw} confirmMainnet=true`,
+            `2) Swap on Ref: near_swapRef network=mainnet tokenInId=${fromToken} tokenOutId=${toToken} amountInRaw=${raw} slippageBps=50 confirmMainnet=true`,
+            `3) Supply to Burrow: near_supplyBurrow network=mainnet tokenId=${toToken} amountRaw=<use swap output raw> asCollateral=true confirmMainnet=true`,
+          ].join("\n"),
+        };
+      }
+
+      function buildActionConsoleFromPlan(plan) {
+        if (!plan || !plan.from || !plan.to || plan.amount <= 0) {
+          return "# No executable plan to fill\n# Refresh snapshot and confirm target settings.";
+        }
+        const fromToken = tokenIdFromSymbol(plan.from);
+        const toToken = tokenIdFromSymbol(plan.to);
+        const raw = toRaw6(plan.amount);
         return [
-          `# Rebalance draft (${plan.from} -> ${plan.to})`,
-          `# Estimated move amount: ${plan.amount.toFixed(6)} (${raw} raw)`,
-          `1) Withdraw from Burrow: near_withdrawBurrow network=mainnet tokenId=${fromToken} amountRaw=${raw} confirmMainnet=true`,
-          `2) Swap on Ref: near_swapRef network=mainnet tokenInId=${fromToken} tokenOutId=${toToken} amountInRaw=${raw} slippageBps=50 confirmMainnet=true`,
-          `3) Supply to Burrow: near_supplyBurrow network=mainnet tokenId=${toToken} amountRaw=<use swap output raw> asCollateral=true confirmMainnet=true`,
+          `# Checklist`,
+          `# 1) account: ${currentAccount()}`,
+          `# 2) network: mainnet`,
+          `# 3) amount: ${plan.amount.toFixed(6)} (${raw} raw)`,
+          `# 4) confirm before each execute`,
+          ``,
+          `near_withdrawBurrow network=mainnet tokenId=${fromToken} amountRaw=${raw} confirmMainnet=true`,
+          `near_swapRef network=mainnet tokenInId=${fromToken} tokenOutId=${toToken} amountInRaw=${raw} slippageBps=50 confirmMainnet=true`,
+          `near_supplyBurrow network=mainnet tokenId=${toToken} amountRaw=<use swap output raw> asCollateral=true confirmMainnet=true`,
         ].join("\n");
       }
 
@@ -520,7 +554,9 @@
           rebalanceMetaEl.textContent = "No snapshot loaded";
           return;
         }
-        rebalanceDraftEl.value = buildRebalanceDraft(lastSnapshot, targetConfig);
+        const draft = buildRebalanceDraft(lastSnapshot, targetConfig);
+        lastRebalancePlan = draft.plan;
+        rebalanceDraftEl.value = draft.text;
         rebalanceMetaEl.textContent = "Draft built";
       });
 
@@ -531,6 +567,11 @@
         } catch {
           rebalanceMetaEl.textContent = "Copy failed";
         }
+      });
+
+      fillActionConsoleBtn.addEventListener("click", () => {
+        cmdOutEl.value = buildActionConsoleFromPlan(lastRebalancePlan);
+        cmdMetaEl.textContent = "Filled from rebalance plan";
       });
 
       refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));
