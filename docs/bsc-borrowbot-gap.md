@@ -675,9 +675,18 @@ GET https://li.quest/v1/quote
 - [x] Privy 签名零改动（caip2=eip155:80094）
 - [ ] Berachain LendingProtocolAdapter（待 Dolomite/BeraBorrow 稳定）
 - [x] Monad 注册（chainId 143，RPC `https://rpc.monad.xyz`）
-  - WMON token（地址待确认，可通过 `EVM_TRANSFER_TOKEN_MAP_MONAD` 配置）
+  - WMON `0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A` (18 dec)
+  - USDC `0x754704Bc059F8C67012fEd69BC8A327a5aafb603` (6 dec)
+  - USDT `0xe7cd86e13AC4309349F30B3435a9d337750fC82D` (6 dec)
+  - WETH `0xEE8c0E9f1BFFb4Eb878d8f15f368A02a35481242` (18 dec)
+  - WBTC `0x0555E30da8f98308EdB960aa94C0Db47230d2B9c` (8 dec)
   - 网络别名：monad/mon
   - Privy caip2=eip155:143
+- [x] Morpho Blue adapter（Monad mainnet `0xD5D960E8C380B724a48AC59E2DfF1b2CB4a1eAee`）
+  - GraphQL API 读取市场/仓位（blue-api.morpho.org）
+  - getMarkets / getAccountPosition / buildSupply/Borrow/Repay/Withdraw
+  - MCP 工具：evm_morphoGetMarkets, evm_morphoGetPosition
+  - $66M+ TVL，18+ 活跃市场
 
 ---
 
