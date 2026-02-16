@@ -12,6 +12,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Strategy view: current stable collateral APR ranking + quick recommendation
 - Action Console: command builder + optional direct execution for selected actions (requires browser confirm)
 - Action history panel: success/error timeline for dashboard-triggered actions
+- Yield health panel: weighted APR + collateral composition summary
+- CSV export for latest snapshot
 - Best-effort USD estimates from NEAR Intents token feed
 
 ## Start

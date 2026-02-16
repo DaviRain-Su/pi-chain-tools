@@ -44,6 +44,11 @@
       </div>
 
       <div class="card" style="margin-top:16px">
+        <h3>Yield Health</h3>
+        <div id="yieldHealth" class="muted">-</div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
         <h3>Strategy View</h3>
         <div id="strategy" class="muted">-</div>
       </div>
@@ -63,6 +68,10 @@
 
       <div class="card" style="margin-top:16px">
         <h3>Recent Executions (local session)</h3>
+        <div class="row" style="margin-bottom:8px">
+          <button id="exportCsv">Export snapshot CSV</button>
+          <span id="exportMeta" class="muted"></span>
+        </div>
         <table>
           <thead><tr><th>Time</th><th>Tool</th><th>Tx Hash</th></tr></thead>
           <tbody id="txs"></tbody>
@@ -112,11 +121,14 @@
       const nearEl = document.getElementById("near");
       const burrowRegEl = document.getElementById("burrowReg");
       const workerEl = document.getElementById("worker");
+      const yieldHealthEl = document.getElementById("yieldHealth");
       const strategyEl = document.getElementById("strategy");
       const burrowPosEl = document.getElementById("burrowPos");
       const metaEl = document.getElementById("meta");
       const tokensEl = document.getElementById("tokens");
       const txsEl = document.getElementById("txs");
+      const exportCsvBtn = document.getElementById("exportCsv");
+      const exportMetaEl = document.getElementById("exportMeta");
       const actionsEl = document.getElementById("actions");
       const wrapAmountEl = document.getElementById("wrapAmount");
       const supplyRawEl = document.getElementById("supplyRaw");
@@ -135,6 +147,49 @@
         return rows.map((r) => `${r.symbol}: ${r.amount}`).join(" · ");
       }
 
+      function parseNum(value) {
+        const n = Number.parseFloat(String(value || "0"));
+        return Number.isFinite(n) ? n : 0;
+      }
+
+      function computeYieldHealth(snapshot) {
+        const coll = snapshot?.burrow?.collateral || [];
+        if (coll.length === 0) {
+          return "No stable collateral yet.";
+        }
+        const rows = coll.map((r) => ({
+          symbol: r.symbol,
+          amount: parseNum(r.amount),
+          apr: parseNum(r.apr) * 100,
+        }));
+        const total = rows.reduce((sum, r) => sum + r.amount, 0);
+        const weightedApr = total > 0 ? rows.reduce((sum, r) => sum + r.amount * r.apr, 0) / total : 0;
+        const composition = rows
+          .sort((a, b) => b.amount - a.amount)
+          .map((r) => `${r.symbol} ${(total > 0 ? (r.amount / total) * 100 : 0).toFixed(1)}% @ ${r.apr.toFixed(2)}%`)
+          .join(" · ");
+        return `Estimated weighted APR: ${weightedApr.toFixed(2)}% · Collateral total: ${total.toFixed(6)} · ${composition}`;
+      }
+
+      function toCsv(snapshot) {
+        const lines = [
+          ["section", "key", "value"],
+          ["meta", "accountId", snapshot.accountId],
+          ["meta", "updatedAt", snapshot.updatedAt],
+          ["near", "available", snapshot.near.available],
+          ["near", "locked", snapshot.near.locked],
+        ];
+        for (const row of snapshot.tokens || []) {
+          lines.push(["token", row.symbol, row.amount]);
+        }
+        for (const row of snapshot.burrow?.collateral || []) {
+          lines.push(["burrow_collateral", row.symbol, row.amount]);
+        }
+        return lines.map((cols) => cols.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(",")).join("\n");
+      }
+
+      let lastSnapshot = null;
+
       async function load() {
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
@@ -145,12 +200,14 @@
           return;
         }
 
+        lastSnapshot = data;
         accountInput.value = data.accountId;
         metaEl.textContent = `Updated: ${new Date(data.updatedAt).toLocaleString()} · RPC: ${data.rpcUrl}`;
         nearEl.innerHTML = `${data.near.available} NEAR <span class="muted">(~$${data.near.usd.toFixed(2)})</span><br/><span class="muted">locked: ${data.near.locked}</span>`;
 
         burrowRegEl.innerHTML = data.burrow.registered ? `<span class="ok">Registered</span>` : `<span class="warn">Not registered</span>`;
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
+        yieldHealthEl.textContent = computeYieldHealth(data);
 
         if (data.worker) {
           workerEl.innerHTML = `<span class="ok">${data.worker.status}</span> · ${data.worker.dryRun ? "dry-run" : "live"}<br/><span class="muted">cycles: ${data.worker.cycleCount} · last: ${data.worker.lastCycleAt || "-"}</span>`;
@@ -253,6 +310,22 @@
 
       execSupplyBtn.addEventListener("click", () => {
         executeAction({ action: "supply_usdt_collateral", amountRaw: (supplyRawEl.value || "1000000").trim() });
+      });
+
+      exportCsvBtn.addEventListener("click", () => {
+        if (!lastSnapshot) {
+          exportMetaEl.textContent = "No snapshot to export";
+          return;
+        }
+        const csv = toCsv(lastSnapshot);
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `near-dashboard-${lastSnapshot.accountId}-${Date.now()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        exportMetaEl.textContent = "Exported";
       });
 
       refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));
