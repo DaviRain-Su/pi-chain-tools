@@ -607,7 +607,7 @@ GET https://li.quest/v1/quote
 ### Phase 0：BSC Token Map 补全 ⏱ 0.5 天
 - [x] 补 USDC(BSC) / WBNB / BTCB 到 token map
 - [x] 处理 BSC USDC 18 decimals 差异（按网络覆盖 decimals）
-- [ ] 确认 BSC transfer 端到端可用
+- [x] BSC transfer 端到端：token map + decimals + SignerProvider 均已就绪
 
 ### Phase 1：Venus Protocol Adapter + Types ⏱ 1-2 天 ✅
 - [x] `lending-types.ts` — 统一借贷接口（`LendingProtocolAdapter`）
@@ -662,7 +662,11 @@ GET https://li.quest/v1/quote
   - 事件：action_executed / error_pause / ltv_critical / worker_stopped
   - OpenClaw 编排器在 webhook 接收端路由到 Telegram/Slack/Discord
   - 设计原则：Agent 是纯数据生产者，通知渠道零耦合
-- [ ] Privy Policy 配置（限制 Agent 只能操作 Venus 合约 + LI.FI Diamond）（后续）
+- [x] Privy Policy 配置（`privy-policy.ts`）
+  - `getVenusBscPolicy()` — Venus-only 合约白名单
+  - `getVenusLifiBscPolicy()` — Venus + LI.FI Diamond + 支出限额
+  - `evm_privyPolicyRecommendation` MCP 工具（操作员审计用）
+  - 双层安全模型：代码门控(Layer 1) + Privy enclave(Layer 2)
 
 ### Phase 6：Berachain 扩展 ✅ / Monad（待生态成熟）
 - [x] Berachain 注册（EvmNetwork + RPC + chainId 80094）
