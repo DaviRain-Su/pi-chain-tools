@@ -57,6 +57,7 @@
           <button id="saveTargets">Save</button>
         </div>
         <div id="targetAlert" class="muted">-</div>
+        <div id="targetPlan" class="muted" style="margin-top:8px">-</div>
       </div>
 
       <div class="card" style="margin-top:16px">
@@ -139,6 +140,7 @@
       const targetThresholdEl = document.getElementById("targetThreshold");
       const saveTargetsBtn = document.getElementById("saveTargets");
       const targetAlertEl = document.getElementById("targetAlert");
+      const targetPlanEl = document.getElementById("targetPlan");
       const burrowPosEl = document.getElementById("burrowPos");
       const metaEl = document.getElementById("meta");
       const tokensEl = document.getElementById("tokens");
@@ -195,28 +197,24 @@
         return s;
       }
 
-      function computeTargetAlert(snapshot, targets) {
+      function getStableMix(snapshot) {
         const coll = snapshot?.burrow?.collateral || [];
-        if (coll.length === 0) return "No collateral yet, target tracking pending.";
-
         const stable = coll.map((r) => ({
           symbol: normalizeStableSymbol(r.symbol),
           amount: parseNum(r.amount),
         }));
-
         const total = stable.reduce((sum, r) => sum + r.amount, 0);
-        if (total <= 0) return "No stable collateral amount detected.";
+        const usdt = stable.filter((r) => r.symbol === "USDT").reduce((s, r) => s + r.amount, 0);
+        const usdce = stable.filter((r) => r.symbol === "USDC.E").reduce((s, r) => s + r.amount, 0);
+        return { total, usdt, usdce };
+      }
 
-        const usdtPct =
-          (stable.filter((r) => r.symbol === "USDT").reduce((s, r) => s + r.amount, 0) /
-            total) *
-          100;
-        const usdcePct =
-          (stable
-            .filter((r) => r.symbol === "USDC.E")
-            .reduce((s, r) => s + r.amount, 0) /
-            total) *
-          100;
+      function computeTargetAlert(snapshot, targets) {
+        const mix = getStableMix(snapshot);
+        if (mix.total <= 0) return "No collateral yet, target tracking pending.";
+
+        const usdtPct = (mix.usdt / mix.total) * 100;
+        const usdcePct = (mix.usdce / mix.total) * 100;
 
         const usdtDelta = usdtPct - targets.usdt;
         const usdceDelta = usdcePct - targets.usdce;
@@ -235,6 +233,30 @@
         )}%) · USDC.e ${usdcePct.toFixed(1)}% (target ${targets.usdce.toFixed(
           1,
         )}%, Δ ${usdceDelta >= 0 ? "+" : ""}${usdceDelta.toFixed(1)}%)`;
+      }
+
+      function computeRebalancePlan(snapshot, targets) {
+        const mix = getStableMix(snapshot);
+        if (mix.total <= 0) return "No rebalance plan: stable collateral is empty.";
+
+        const targetUsdtAmount = (targets.usdt / 100) * mix.total;
+        const targetUsdceAmount = (targets.usdce / 100) * mix.total;
+        const usdtGap = targetUsdtAmount - mix.usdt;
+        const usdceGap = targetUsdceAmount - mix.usdce;
+
+        if (Math.abs(usdtGap) < 0.000001 && Math.abs(usdceGap) < 0.000001) {
+          return "Rebalance plan: already at target.";
+        }
+
+        if (usdtGap > 0 && usdceGap < 0) {
+          return `Suggestion: move ${Math.min(usdtGap, -usdceGap).toFixed(6)} from USDC.e -> USDt.`;
+        }
+
+        if (usdceGap > 0 && usdtGap < 0) {
+          return `Suggestion: move ${Math.min(usdceGap, -usdtGap).toFixed(6)} from USDt -> USDC.e.`;
+        }
+
+        return `Suggestion: adjust composition manually (USDt gap ${usdtGap.toFixed(6)}, USDC.e gap ${usdceGap.toFixed(6)}).`;
       }
 
       function computeYieldHealth(snapshot) {
@@ -298,6 +320,7 @@
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
         yieldHealthEl.textContent = computeYieldHealth(data);
         targetAlertEl.innerHTML = computeTargetAlert(data, targetConfig);
+        targetPlanEl.textContent = computeRebalancePlan(data, targetConfig);
 
         if (data.worker) {
           workerEl.innerHTML = `<span class="ok">${data.worker.status}</span> · ${data.worker.dryRun ? "dry-run" : "live"}<br/><span class="muted">cycles: ${data.worker.cycleCount} · last: ${data.worker.lastCycleAt || "-"}</span>`;
@@ -432,6 +455,7 @@
         saveTargets(targetConfig);
         if (lastSnapshot) {
           targetAlertEl.innerHTML = computeTargetAlert(lastSnapshot, targetConfig);
+          targetPlanEl.textContent = computeRebalancePlan(lastSnapshot, targetConfig);
         }
       });
 
