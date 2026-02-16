@@ -492,6 +492,35 @@ function nearExplorerUrl(txHash) {
 	return `https://explorer.near.org/transactions/${txHash}`;
 }
 
+async function snapshotRebalanceState(accountId) {
+	const [walletUsdtRaw, walletUsdcRaw, burrow] = await Promise.all([
+		viewFunction("usdt.tether-token.near", "ft_balance_of", {
+			account_id: accountId,
+		}).catch(() => "0"),
+		viewFunction(
+			"a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
+			"ft_balance_of",
+			{ account_id: accountId },
+		).catch(() => "0"),
+		getBurrowAccount(accountId).catch(() => ({ collateral: [] })),
+	]);
+	const coll = burrow?.collateral || [];
+	const cUsdt = coll.find(
+		(row) => String(row.tokenId) === "usdt.tether-token.near",
+	);
+	const cUsdc = coll.find(
+		(row) =>
+			String(row.tokenId) ===
+			"a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near",
+	);
+	return {
+		walletUsdtRaw: String(walletUsdtRaw || "0"),
+		walletUsdcRaw: String(walletUsdcRaw || "0"),
+		collateralUsdtRaw: String(cUsdt?.balanceRawInner || "0"),
+		collateralUsdcRaw: String(cUsdc?.balanceRawInner || "0"),
+	};
+}
+
 function applySlippage(rawAmount, slippageBps) {
 	const bps = BigInt(Number(slippageBps || 50));
 	const base = 10_000n;
@@ -742,6 +771,7 @@ async function executeAction(payload) {
 			beginRebalanceRun(runId);
 			try {
 				const amountRaw = parsePositiveRaw(payload.amountRaw, "amountRaw");
+				const stateBefore = await snapshotRebalanceState(accountId);
 				const poolId = Number.parseInt(String(payload.poolId || "3725"), 10);
 				const slippageBps = Number.parseInt(
 					String(payload.slippageBps || "50"),
@@ -981,11 +1011,25 @@ async function executeAction(payload) {
 					txHash: step3Tx,
 					explorerUrl: nearExplorerUrl(step3Tx),
 				});
+				const stateAfter = await snapshotRebalanceState(accountId);
+				const walletUsdtAfter = BigInt(stateAfter.walletUsdtRaw || "0");
+				const walletUsdcAfter = BigInt(stateAfter.walletUsdcRaw || "0");
+				const reconciled = walletUsdtAfter <= 10n && walletUsdcAfter <= 10n;
 				markRebalanceExecuted();
 				endRebalanceRun(runId, "success", {
 					step1Tx,
 					step2Tx,
 					step3Tx,
+					reconciled,
+				});
+				pushActionHistory({
+					action: payload.action,
+					step: `${stepBase}-reconcile`,
+					accountId,
+					status: reconciled ? "success" : "error",
+					summary: reconciled
+						? "reconciliation passed (wallet residuals near zero)"
+						: `reconciliation warning: wallet residuals usdt=${stateAfter.walletUsdtRaw} usdc=${stateAfter.walletUsdcRaw}`,
 				});
 
 				return {
@@ -1001,6 +1045,11 @@ async function executeAction(payload) {
 						step1Tx,
 						step2Tx,
 						step3Tx,
+						reconciliation: {
+							reconciled,
+							before: stateBefore,
+							after: stateAfter,
+						},
 					},
 				};
 			} catch (error) {
