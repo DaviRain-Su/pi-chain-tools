@@ -2107,7 +2107,7 @@ describe("near_getIntentsExplorerTransactions", () => {
 		expect(result.content[0]?.text).toContain(
 			"Status summary: PROCESSING=1 | SUCCESS=1",
 		);
-		expect(result.content[0]?.text).toContain("USD in/out: $0.03 / $0.01");
+		expect(result.content[0]?.text).toContain("USD in/out: US$0.03 / US$0.01");
 		expect(result.content[0]?.text).toContain("Top routes:");
 		expect(result.content[0]?.text).toContain("[SUCCESS]");
 		expect(result.content[0]?.text).toContain("[PROCESSING]");
