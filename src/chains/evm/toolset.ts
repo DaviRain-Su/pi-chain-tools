@@ -5,6 +5,7 @@ import { createEvmReadTools } from "./tools/read.js";
 import { createEvmRpcTools } from "./tools/rpc.js";
 import { createEvmSwapWorkflowTools } from "./tools/swap-workflow.js";
 import { createEvmTransferWorkflowTools } from "./tools/transfer-workflow.js";
+import { createVenusAgentTools } from "./tools/venus-agent.js";
 import { createVenusExecuteTools } from "./tools/venus-execute.js";
 import { createVenusReadTools } from "./tools/venus-read.js";
 import { createVenusWorkflowTools } from "./tools/venus-workflow.js";
@@ -28,6 +29,7 @@ export function createEvmToolset(): ChainToolset {
 					...createEvmTransferWorkflowTools(),
 					...createVenusExecuteTools(),
 					...createVenusWorkflowTools(),
+					...createVenusAgentTools(),
 				],
 			},
 			{ name: "rpc", tools: createEvmRpcTools() },
