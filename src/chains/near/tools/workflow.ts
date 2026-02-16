@@ -492,7 +492,7 @@ type StableYieldExecutionPlanSummary = {
 	reasons?: string[];
 	proposedActions: StableYieldExecutionActionSummary[];
 	recommendedApproach?: string;
-	expiresAt?: string;
+	expiresAt?: string | null;
 };
 
 type StableYieldExecutionSessionContext = {
