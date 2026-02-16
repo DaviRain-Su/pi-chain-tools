@@ -4266,6 +4266,44 @@ describe("w3rt_run_near_workflow_v0", () => {
 		});
 	});
 
+	it("returns execution plan proposal in simulate result", async () => {
+		const tool = getTool();
+		const result = await tool.execute("near-wf-stable-yield-plan-proposal", {
+			runMode: "simulate",
+			network: "mainnet",
+			intentText: "stable yield plan top3 币种 USDC USDT no action simulation",
+			confirmMainnet: true,
+		});
+
+		expect(result.details).toMatchObject({
+			intentType: "near.defi.stableYieldPlan",
+			artifacts: {
+				simulate: {
+					schema: "near.defi.stableYieldPlan.v1",
+					protocol: "Burrow",
+					executionPlan: {
+						canAutoExecute: false,
+						requiresAgentWallet: true,
+						recommendedApproach: "single-best-candidate",
+						proposedActions: expect.any(Array),
+					},
+					summary: {
+						schema: "w3rt.workflow.summary.v1",
+						phase: "simulate",
+						intentType: "near.defi.stableYieldPlan",
+					},
+				},
+			},
+		});
+		expect(readMocks.getStableYieldPlan).toHaveBeenCalledWith(
+			"near-wf-stable-yield-plan",
+			expect.objectContaining({
+				topN: 3,
+				stableSymbols: ["USDC", "USDT"],
+			}),
+		);
+	});
+
 	it("does not support compose for stable yield plan in workflow", async () => {
 		const tool = getTool();
 		await expect(
