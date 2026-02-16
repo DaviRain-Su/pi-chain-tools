@@ -786,6 +786,11 @@ openclaw plugins enable pi-chain-tools
 openclaw gateway restart
 ```
 
+Quick references:
+
+- Setup guide: `docs/openclaw-near-setup.md`
+- Env template: `.env.near.example`
+
 ## PR Required Checks
 
 To enforce CI as merge-gate on `main`:
