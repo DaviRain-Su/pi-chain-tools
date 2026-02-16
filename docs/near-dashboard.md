@@ -27,7 +27,8 @@ Open:
 ## Optional environment variables
 
 - `NEAR_ACCOUNT_ID` - default account loaded in UI (fallback: `davirain8.near`)
-- `NEAR_RPC_URL` - JSON-RPC endpoint (fallback: `https://1rpc.io/near`)
+- `NEAR_RPC_URL` - single JSON-RPC endpoint
+- `NEAR_RPC_URLS` - comma-separated RPC list with automatic 429 fallback (recommended)
 - `NEAR_DASHBOARD_PORT` - web port (fallback: `4173`)
 
 Example:

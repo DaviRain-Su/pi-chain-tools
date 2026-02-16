@@ -8,9 +8,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number.parseInt(process.env.NEAR_DASHBOARD_PORT || "4173", 10);
-const RPC_URL = process.env.NEAR_RPC_URL || "https://1rpc.io/near";
 const ACCOUNT_ID = process.env.NEAR_ACCOUNT_ID || "davirain8.near";
 const BURROW_CONTRACT = "contract.main.burrow.near";
+const RPC_ENDPOINTS = (
+	process.env.NEAR_RPC_URLS ||
+	process.env.NEAR_RPC_URL ||
+	"https://1rpc.io/near,https://rpc.mainnet.near.org"
+)
+	.split(",")
+	.map((value) => value.trim())
+	.filter(Boolean);
 const SESSION_DIR =
 	process.env.OPENCLAW_SESSION_DIR ||
 	path.join(
@@ -61,24 +68,40 @@ function formatUnits(raw, decimals) {
 }
 
 async function nearRpc(method, params) {
-	const response = await fetch(RPC_URL, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({
-			jsonrpc: "2.0",
-			id: "near-dashboard",
-			method,
-			params,
-		}),
-	});
-	if (!response.ok) throw new Error(`RPC HTTP ${response.status}`);
-	const payload = await response.json();
-	if (payload.error) throw new Error(payload.error?.message || "RPC error");
-	return payload.result;
+	let lastError = null;
+	for (const endpoint of RPC_ENDPOINTS) {
+		try {
+			const response = await fetch(endpoint, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: "near-dashboard",
+					method,
+					params,
+				}),
+			});
+			if (!response.ok) {
+				if (response.status === 429) {
+					lastError = new Error(`RPC HTTP 429 at ${endpoint}`);
+					continue;
+				}
+				throw new Error(`RPC HTTP ${response.status} at ${endpoint}`);
+			}
+			const payload = await response.json();
+			if (payload.error) {
+				throw new Error(payload.error?.message || `RPC error at ${endpoint}`);
+			}
+			return { result: payload.result, endpoint };
+		} catch (error) {
+			lastError = error instanceof Error ? error : new Error(String(error));
+		}
+	}
+	throw lastError || new Error("All RPC endpoints failed");
 }
 
 async function viewFunction(contractId, methodName, args = {}) {
-	const result = await nearRpc("query", {
+	const { result } = await nearRpc("query", {
 		request_type: "call_function",
 		finality: "final",
 		account_id: contractId,
@@ -90,7 +113,7 @@ async function viewFunction(contractId, methodName, args = {}) {
 }
 
 async function getNearBalance(accountId) {
-	const state = await nearRpc("query", {
+	const { result: state, endpoint } = await nearRpc("query", {
 		request_type: "view_account",
 		finality: "final",
 		account_id: accountId,
@@ -100,6 +123,7 @@ async function getNearBalance(accountId) {
 		available: formatUnits(state.amount, 24),
 		lockedRaw: state.locked,
 		locked: formatUnits(state.locked, 24),
+		rpcEndpoint: endpoint,
 	};
 }
 
@@ -337,7 +361,8 @@ async function buildSnapshot(accountId) {
 
 	return {
 		accountId,
-		rpcUrl: RPC_URL,
+		rpcUrl: near.rpcEndpoint,
+		rpcCandidates: RPC_ENDPOINTS,
 		updatedAt: new Date().toISOString(),
 		near: { ...near, usd: Number.isFinite(nearUsd) ? nearUsd : 0 },
 		tokens,
@@ -355,7 +380,7 @@ const server = http.createServer(async (req, res) => {
 		if (url.pathname === "/api/health") {
 			return json(res, 200, {
 				ok: true,
-				rpcUrl: RPC_URL,
+				rpcCandidates: RPC_ENDPOINTS,
 				accountId: ACCOUNT_ID,
 			});
 		}

@@ -810,7 +810,8 @@ Open in browser:
 Optional env overrides:
 
 - `NEAR_ACCOUNT_ID` (default account shown on first load)
-- `NEAR_RPC_URL` (default `https://1rpc.io/near`)
+- `NEAR_RPC_URL` (single endpoint override)
+- `NEAR_RPC_URLS` (comma-separated endpoints, auto-fallback on 429)
 - `NEAR_DASHBOARD_PORT` (default `4173`)
 
 ## PR Required Checks
