@@ -13,7 +13,7 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - `src/chains/solana`: Solana runtime + grouped tools
 - `src/chains/sui`: Sui runtime + grouped tools
 - `src/chains/near`: NEAR runtime + grouped tools
-- `src/chains/evm`: EVM runtime + Polymarket BTC 5m grouped tools
+- `src/chains/evm`: shared EVM runtime/tool stack (Polymarket BTC 5m + transfer/read/compose/execute), with configurable multi-network support (including `bsc`) and mainnet-guard policy reuse
 - `src/pi`: Pi-specific adapter entrypoints
 - Workflow artifact summaries use a stable schema: `summaryLine` (string) + `summary` (`schema = w3rt.workflow.summary.v1`)
 - Pi extension registration now prefers workflow `summary.line` as first response line for `w3rt_run_*` tools.
@@ -50,6 +50,9 @@ Gradience is a multi-chain-ready toolset library for Pi extensions. Solana is im
 - Raydium auto-priority-fee integration and multi-transaction swap execution
 
 ## EVM (Polymarket BTC 5m)
+
+> Architecture note: Polymarket is currently implemented as an EVM application capability under the shared `evm` toolset, not a separate chain module. BSC has been added to shared EVM network support so cross-network expansion stays centralized.
+> See [`docs/evm-integration-architecture-notes.md`](docs/evm-integration-architecture-notes.md) for the design rationale.
 
 - `read`: `evm_polymarketSearchMarkets` (Gamma public-search event/market scan)
 - `read`: `evm_polymarketGetMarket` (market detail by slug: outcomes/price/tokenId)
