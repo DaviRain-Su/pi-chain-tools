@@ -161,11 +161,24 @@ Open:
 The dashboard now supports a single JSON config file for non-sensitive settings:
 
 - Default path: `apps/dashboard/config/dashboard.config.json`
+- Example template: `apps/dashboard/config/dashboard.config.example.json`
 - Override path: `NEAR_DASHBOARD_CONFIG_PATH=/abs/path/to/dashboard.config.json`
 - Precedence: `env > config file > built-in defaults`
+- Quick start: copy example, edit values, keep secrets in `.env`
 
 Keep secrets in `.env` (or your secret manager), for example:
 `*_PRIVATE_KEY`, `PAYMENT_WEBHOOK_SECRET`, telegram bot token, etc.
+
+Common mapping examples:
+- `near.accountId` ↔ `NEAR_ACCOUNT_ID`
+- `near.rpcUrls` ↔ `NEAR_RPC_URLS`
+- `server.port` ↔ `NEAR_DASHBOARD_PORT`
+- `bsc.execute.enabled` ↔ `BSC_EXECUTE_ENABLED`
+- `bsc.yield.minAprDeltaBps` ↔ `BSC_YIELD_MIN_APR_DELTA_BPS`
+- `bsc.aave.enabled` ↔ `BSC_AAVE_EXECUTE_ENABLED`
+- `bsc.aave.maxAmountRaw` ↔ `BSC_AAVE_MAX_AMOUNT_RAW`
+- `acp.dismissedPurge.enabled` ↔ `ACP_DISMISSED_PURGE_ENABLED`
+- `payments.webhookProvider` ↔ `PAYMENT_WEBHOOK_PROVIDER`
 
 ## Optional environment variables
 
