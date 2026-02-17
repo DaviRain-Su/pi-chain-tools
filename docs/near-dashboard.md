@@ -181,6 +181,7 @@ Open:
 - `BSC_APR_CACHE_TTL_MS` - APR compare cache TTL (default: `60000`)
 - `BSC_AAVE_EXECUTE_ENABLED` - allow BSC yield execute path to proceed when `executionProtocol=aave` (default: `false`, safety-gated)
 - `BSC_AAVE_EXECUTE_COMMAND` - command template for optional post-swap Aave supply action in aave execution mode (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`)
+  - required placeholders: `{amountRaw}`, `{runId}` (missing placeholders block execution)
 - `BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT` - default execution protocol for BSC yield plan/worker (`venus|aave`, default: `venus`)
 - Worker runtime options (request payload, not env): `dryRun`, `intervalMs`, `targetUsdcBps`, `minDriftBps`, `minAprDeltaBps`, `maxStepUsd`
 - `ACP_DISMISSED_PURGE_ENABLED` - enable automatic dismissed-archive purge scheduler (`true|false`, default: `false`)

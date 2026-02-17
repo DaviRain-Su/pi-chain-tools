@@ -1277,6 +1277,14 @@ async function executeBscAaveSupplyViaCommand(params) {
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_execute_command_missing",
 		);
 	}
+	const requiredPlaceholders = ["{amountRaw}", "{runId}"];
+	for (const token of requiredPlaceholders) {
+		if (!BSC_AAVE_EXECUTE_COMMAND.includes(token)) {
+			throw new Error(
+				`BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_execute_command_missing_placeholder_${token}`,
+			);
+		}
+	}
 	const replacements = {
 		"{amountRaw}": String(params.amountRaw || ""),
 		"{token}": String(params.token || BSC_USDC || ""),
@@ -1925,6 +1933,8 @@ function classifyAcpErrorType(error) {
 	if (text.includes("poolid must be a non-negative integer"))
 		return "invalid_pool_id";
 	if (text.includes("bsc_execute_config")) return "bsc_execute_config";
+	if (text.includes("bsc_aave_post_action_failed"))
+		return "bsc_aave_post_action_failed";
 	if (text.includes("bsc_execute_failed")) return "bsc_execute_failed";
 	if (text.includes("429") || text.includes("too many requests"))
 		return "rpc_429";
@@ -1938,7 +1948,13 @@ function isAcpRetryableError(error) {
 	const text = String(error?.message || error || "").toLowerCase();
 	if (text.includes("retryable=true")) return true;
 	const type = classifyAcpErrorType(error);
-	return ["rpc_429", "timeout", "rpc_503", "bsc_execute_failed"].includes(type);
+	return [
+		"rpc_429",
+		"timeout",
+		"rpc_503",
+		"bsc_execute_failed",
+		"bsc_aave_post_action_failed",
+	].includes(type);
 }
 
 async function processAcpAsyncQueue() {
@@ -4314,6 +4330,21 @@ const server = http.createServer(async (req, res) => {
 						ok: false,
 						reason: "aave_supply_amount_unavailable",
 					};
+				}
+				pushActionHistory({
+					action: "bsc_aave_supply",
+					step: payload.step || "bsc-stable-yield-post-action",
+					accountId: payload.account || null,
+					status: postAction?.ok ? "success" : "error",
+					summary: postAction?.ok
+						? "aave post-swap supply executed"
+						: `aave post-swap supply failed: ${postAction?.reason || "unknown"}`,
+					txHash: postAction?.txHash || null,
+				});
+				if (!postAction?.ok) {
+					throw new Error(
+						`BSC_AAVE_POST_ACTION_FAILED retryable=true message=${postAction?.reason || "unknown"}`,
+					);
 				}
 			}
 			return json(res, 200, {
