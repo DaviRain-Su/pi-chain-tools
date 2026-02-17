@@ -72,7 +72,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `GET /api/acp/jobs/summary` -> status distribution + queue status breakdown + daily execution counters/limit
   - execute mode applies policy daily guard `constraints.maxDailyRebalanceRuns`
 - Unified multi-chain portfolio bootstrap:
-  - `GET /api/portfolio/unified` -> aggregates NEAR execution portfolio + ACP identity layer + BSC wallet/yield/market compare snapshot (active when `BSC_EXECUTE_RECIPIENT` is configured)
+  - `GET /api/portfolio/unified` -> aggregates NEAR execution portfolio + ACP identity layer + BSC wallet/yield/market compare/protocol positions snapshot (active when `BSC_EXECUTE_RECIPIENT` is configured)
 - Portfolio policy center (cross-chain target + constraints):
   - `GET /api/policy` -> current policy
   - `POST /api/policy` (`confirm=true`) -> patch `targetAllocation` / `constraints` / `monetization` and persist to disk
@@ -190,6 +190,10 @@ Open:
 - `BSC_AAVE_POOL` - Aave Pool contract address (required for native mode)
 - `BSC_AAVE_EXECUTE_PRIVATE_KEY` - signer private key for native Aave supply (fallback: `BSC_EXECUTE_PRIVATE_KEY`)
 - `BSC_AAVE_REFERRAL_CODE` - Aave referral code for `supply` (default: `0`)
+- `BSC_AAVE_ATOKEN_USDC` - optional Aave aToken address for USDC position read in unified portfolio
+- `BSC_AAVE_ATOKEN_USDT` - optional Aave aToken address for USDT position read in unified portfolio
+- `BSC_VENUS_VTOKEN_USDC` - optional Venus vToken address for USDC position read in unified portfolio
+- `BSC_VENUS_VTOKEN_USDT` - optional Venus vToken address for USDT position read in unified portfolio
 - `BSC_AAVE_EXECUTE_COMMAND` - command template for optional post-swap Aave supply action in aave execution mode (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`)
   - required placeholders: `{amountRaw}`, `{runId}` (missing placeholders block execution)
 - `BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT` - default execution protocol for BSC yield plan/worker (`venus|aave`, default: `venus`)

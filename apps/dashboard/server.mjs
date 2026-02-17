@@ -150,6 +150,18 @@ const BSC_AAVE_REFERRAL_CODE = Math.max(
 	0,
 	Number.parseInt(process.env.BSC_AAVE_REFERRAL_CODE || "0", 10) || 0,
 );
+const BSC_AAVE_ATOKEN_USDC = String(
+	process.env.BSC_AAVE_ATOKEN_USDC || "",
+).trim();
+const BSC_AAVE_ATOKEN_USDT = String(
+	process.env.BSC_AAVE_ATOKEN_USDT || "",
+).trim();
+const BSC_VENUS_VTOKEN_USDC = String(
+	process.env.BSC_VENUS_VTOKEN_USDC || "",
+).trim();
+const BSC_VENUS_VTOKEN_USDT = String(
+	process.env.BSC_VENUS_VTOKEN_USDT || "",
+).trim();
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
 	"true";
@@ -1015,20 +1027,25 @@ async function buildUnifiedPortfolio(accountId) {
 	};
 	if (bscAccount) {
 		try {
-			const [balances, marketCompare, yieldPlan] = await Promise.all([
-				getBscWalletStableBalances(bscAccount),
-				getBscLendingMarketCompare(),
-				computeBscYieldPlan({ account: bscAccount }),
-			]);
+			const [balances, marketCompare, yieldPlan, protocolPositions] =
+				await Promise.all([
+					getBscWalletStableBalances(bscAccount),
+					getBscLendingMarketCompare(),
+					computeBscYieldPlan({ account: bscAccount }),
+					getBscProtocolPositions(bscAccount),
+				]);
 			const bscWalletUsd =
 				Number(balances?.usdtUi || 0) + Number(balances?.usdcUi || 0);
+			const bscTotalUsd =
+				bscWalletUsd + Number(protocolPositions?.totalUsdApprox || 0);
 			bscLayer = {
 				chain: "bsc",
 				status: "active",
 				account: bscAccount,
-				portfolioUsd: bscWalletUsd,
+				portfolioUsd: bscTotalUsd,
 				positions: {
 					wallet: balances,
+					protocols: protocolPositions,
 					yield: {
 						plan: yieldPlan?.plan || null,
 						executionProtocol: yieldPlan?.executionProtocol || "venus",
@@ -2644,6 +2661,46 @@ async function getBscWalletStableBalances(account) {
 		usdcRaw,
 		usdtUi: rawToUi(usdtRaw, BSC_USDT_DECIMALS),
 		usdcUi: rawToUi(usdcRaw, BSC_USDC_DECIMALS),
+	};
+}
+
+async function getBscProtocolPositions(account) {
+	const owner = String(account || "").trim();
+	if (!owner) return { aave: {}, venus: {}, totalUsdApprox: 0 };
+	const provider = new JsonRpcProvider(BSC_RPC_URL, {
+		name: "bsc",
+		chainId: BSC_CHAIN_ID,
+	});
+	const erc20Iface = new Interface([
+		"function balanceOf(address owner) view returns (uint256)",
+	]);
+	const readMaybe = async (token, decimals) => {
+		if (!token) return null;
+		try {
+			const data = erc20Iface.encodeFunctionData("balanceOf", [owner]);
+			const raw = await provider.call({ to: token, data });
+			const bal = erc20Iface
+				.decodeFunctionResult("balanceOf", raw)[0]
+				.toString();
+			return { token, balanceRaw: bal, balanceUi: rawToUi(bal, decimals) };
+		} catch {
+			return { token, error: "read_failed" };
+		}
+	};
+	const [aaveUsdc, aaveUsdt, venusUsdc, venusUsdt] = await Promise.all([
+		readMaybe(BSC_AAVE_ATOKEN_USDC, BSC_USDC_DECIMALS),
+		readMaybe(BSC_AAVE_ATOKEN_USDT, BSC_USDT_DECIMALS),
+		readMaybe(BSC_VENUS_VTOKEN_USDC, BSC_USDC_DECIMALS),
+		readMaybe(BSC_VENUS_VTOKEN_USDT, BSC_USDT_DECIMALS),
+	]);
+	const totalUsdApprox = [aaveUsdc, aaveUsdt, venusUsdc, venusUsdt].reduce(
+		(acc, row) => acc + Number(row?.balanceUi || 0),
+		0,
+	);
+	return {
+		aave: { usdc: aaveUsdc, usdt: aaveUsdt },
+		venus: { usdc: venusUsdc, usdt: venusUsdt },
+		totalUsdApprox,
 	};
 }
 
