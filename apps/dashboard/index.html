@@ -690,7 +690,10 @@
                 ? `https://bscscan.com/tx/${detailTxHash}`
                 : ""
             : "";
-          detailTd.innerHTML = `<div class="row" style="margin-bottom:6px"><button data-copy-json="1">Copy JSON</button><button data-copy-run="1">Copy runId/jobId</button><button data-copy-tx="1">Copy txHash</button><button data-open-explorer="1">Open explorer</button><span class="muted" data-copy-meta="1"></span></div><pre class="muted" style="white-space:pre-wrap;margin:0">${detailJson}</pre>`;
+          const detailReceipt = row.receipt ? JSON.stringify(row.receipt, null, 2) : "-";
+          const detailResult = row.result ? JSON.stringify(row.result, null, 2) : "-";
+          const detailError = row.error ? JSON.stringify(row.error, null, 2) : "-";
+          detailTd.innerHTML = `<div class="row" style="margin-bottom:6px"><button data-copy-json="1">Copy JSON</button><button data-copy-run="1">Copy runId/jobId</button><button data-copy-tx="1">Copy txHash</button><button data-open-explorer="1">Open explorer</button><span class="muted" data-copy-meta="1"></span></div><details style="margin:4px 0"><summary>receipt</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailReceipt}</pre></details><details style="margin:4px 0"><summary>result</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailResult}</pre></details><details style="margin:4px 0"><summary>error</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailError}</pre></details><details style="margin:4px 0"><summary>raw</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailJson}</pre></details>`;
           detailTr.appendChild(detailTd);
 
           const copyJsonBtn = detailTd.querySelector('[data-copy-json="1"]');
