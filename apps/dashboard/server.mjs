@@ -135,6 +135,7 @@ let ACP_ASYNC_WORKER_ACTIVE = false;
 const STRATEGY_CATALOG = [];
 const STRATEGY_PURCHASES = [];
 const STRATEGY_ENTITLEMENTS = [];
+const STRATEGY_PAYMENTS = [];
 const PORTFOLIO_POLICY = {
 	targetAllocation: { near: 0.6, bsc: 0.4 },
 	constraints: {
@@ -293,6 +294,7 @@ async function saveMarketplaceToDisk() {
 					strategies: STRATEGY_CATALOG,
 					purchases: STRATEGY_PURCHASES,
 					entitlements: STRATEGY_ENTITLEMENTS,
+					payments: STRATEGY_PAYMENTS,
 				},
 				null,
 				2,
@@ -311,6 +313,7 @@ async function loadMarketplaceFromDisk() {
 		STRATEGY_CATALOG.length = 0;
 		STRATEGY_PURCHASES.length = 0;
 		STRATEGY_ENTITLEMENTS.length = 0;
+		STRATEGY_PAYMENTS.length = 0;
 		if (Array.isArray(parsed.strategies)) {
 			STRATEGY_CATALOG.push(...parsed.strategies.slice(0, 200));
 		}
@@ -319,6 +322,9 @@ async function loadMarketplaceFromDisk() {
 		}
 		if (Array.isArray(parsed.entitlements)) {
 			STRATEGY_ENTITLEMENTS.push(...parsed.entitlements.slice(0, 1000));
+		}
+		if (Array.isArray(parsed.payments)) {
+			STRATEGY_PAYMENTS.push(...parsed.payments.slice(0, 1000));
 		}
 	} catch {
 		// ignore missing/corrupt marketplace file
@@ -1034,6 +1040,12 @@ function consumeStrategyEntitlement(entitlement) {
 		updatedAt: new Date().toISOString(),
 	};
 	return STRATEGY_ENTITLEMENTS[idx];
+}
+
+function findPaymentById(paymentId) {
+	return STRATEGY_PAYMENTS.find(
+		(row) => String(row?.paymentId || "") === String(paymentId || ""),
+	);
 }
 
 async function executeAcpJob(payload) {
@@ -2378,6 +2390,103 @@ const server = http.createServer(async (req, res) => {
 				await saveMarketplaceToDisk();
 				return json(res, 200, { ok: true, strategy: row });
 			}
+		}
+
+		if (url.pathname === "/api/payments/create" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const strategyId = String(payload.strategyId || "").trim();
+			const buyer = String(payload.buyer || "").trim() || "anonymous";
+			const strategy = STRATEGY_CATALOG.find((x) => x.id === strategyId);
+			if (!strategy) {
+				return json(res, 404, {
+					ok: false,
+					error: `strategy '${strategyId}' not found`,
+				});
+			}
+			const paymentId = String(payload.paymentId || `pay-${Date.now()}`).trim();
+			const payment = {
+				paymentId,
+				strategyId,
+				strategyName: strategy.name,
+				buyer,
+				amountUsd: Number(strategy.priceUsd || 0),
+				currency: PORTFOLIO_POLICY?.monetization?.settlementToken || "USDC",
+				status: "pending",
+				provider: payload.provider || "manual",
+				createdAt: new Date().toISOString(),
+				updatedAt: new Date().toISOString(),
+			};
+			STRATEGY_PAYMENTS.unshift(payment);
+			if (STRATEGY_PAYMENTS.length > 1000) STRATEGY_PAYMENTS.length = 1000;
+			await saveMarketplaceToDisk();
+			return json(res, 200, { ok: true, payment });
+		}
+
+		if (url.pathname === "/api/payments/confirm" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const paymentId = String(payload.paymentId || "").trim();
+			const payment = findPaymentById(paymentId);
+			if (!payment) {
+				return json(res, 404, {
+					ok: false,
+					error: `payment '${paymentId}' not found`,
+				});
+			}
+			if (payment.status === "paid") {
+				return json(res, 200, {
+					ok: true,
+					payment,
+					entitlementGranted: false,
+					reason: "already_paid",
+				});
+			}
+			payment.status = payload.paid === false ? "failed" : "paid";
+			payment.txRef = payload.txRef || payment.txRef || null;
+			payment.updatedAt = new Date().toISOString();
+			let entitlement = null;
+			if (payment.status === "paid") {
+				const entitlementUses = Math.max(
+					1,
+					Number.parseInt(String(payload.entitlementUses || 30), 10) || 30,
+				);
+				const entitlementDays = Math.max(
+					1,
+					Number.parseInt(String(payload.entitlementDays || 30), 10) || 30,
+				);
+				const expiresAt = new Date(
+					Date.now() + entitlementDays * 24 * 60 * 60 * 1000,
+				).toISOString();
+				entitlement = grantStrategyEntitlement({
+					strategyId: payment.strategyId,
+					buyer: payment.buyer,
+					uses: entitlementUses,
+					expiresAt,
+					sourceReceiptId: payment.paymentId,
+				});
+			}
+			await saveMarketplaceToDisk();
+			return json(res, 200, {
+				ok: true,
+				payment,
+				entitlementGranted: Boolean(entitlement),
+				entitlement,
+			});
+		}
+
+		if (url.pathname === "/api/payments") {
+			return json(res, 200, { ok: true, payments: STRATEGY_PAYMENTS });
 		}
 
 		if (url.pathname === "/api/strategies/purchase" && req.method === "POST") {

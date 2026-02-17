@@ -70,7 +70,10 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - preferred: submit `dsl` object (validated against `docs/schemas/strategy-dsl.v1.schema.json` and policy semantics)
     - compatible: legacy top-level fields (`id/name/creator/priceUsd/...`) are auto-mapped into DSL v1 then validated
     - semantic checks include policy-aligned amount floor/limit (`minRebalanceUsd`, `maxDailyRebalanceRuns`), chain-intent compatibility, and execution risk warnings
-  - `POST /api/strategies/purchase` (`confirm=true`) -> simulate paid purchase + compute platform fee and creator payout; grants entitlement (`entitlementUses`, `entitlementDays` configurable, default 30/30)
+  - `POST /api/strategies/purchase` (`confirm=true`) -> direct purchase path (legacy simulation) + entitlement grant (`entitlementUses`, `entitlementDays`, default 30/30)
+  - `POST /api/payments/create` (`confirm=true`) -> create pending payment intent for `strategyId + buyer`
+  - `POST /api/payments/confirm` (`confirm=true`) -> confirm payment status (`paid|failed`), and grant entitlement only when paid
+  - `GET /api/payments` -> payment records (pending/paid/failed)
   - `GET /api/strategies/purchases` -> recent purchase receipts
   - `GET /api/strategies/entitlements?buyer=...&strategyId=...` -> entitlement snapshots (remaining uses + expiry)
 - Metrics persistence: rebalance + rpc reliability metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
