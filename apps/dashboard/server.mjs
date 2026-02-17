@@ -136,6 +136,23 @@ const ALERT_DEDUPE_WINDOW_MS =
 		),
 		10,
 	) || 300000;
+const ALERT_BSC_NORMALIZATION_ENABLED =
+	String(
+		envOrCfg(
+			"NEAR_REBAL_ALERT_BSC_NORMALIZATION",
+			"alerts.bscNormalizationEnabled",
+			"true",
+		),
+	).toLowerCase() === "true";
+const ALERT_BSC_NORMALIZATION_MIN_BAND = String(
+	envOrCfg(
+		"NEAR_REBAL_ALERT_BSC_NORMALIZATION_MIN_BAND",
+		"alerts.bscNormalizationMinBand",
+		"medium",
+	),
+)
+	.trim()
+	.toLowerCase();
 const BSC_CHAIN_ID = Number.parseInt(
 	String(envOrCfg("BSC_CHAIN_ID", "bsc.chainId", "56")),
 	10,
@@ -1420,6 +1437,24 @@ async function buildUnifiedPortfolio(accountId) {
 				bscWalletUsd + Number(protocolPositions?.totalUsdApprox || 0);
 			const normalizationHealth =
 				evaluateNormalizationHealth(protocolPositions);
+			if (ALERT_BSC_NORMALIZATION_ENABLED) {
+				const minBandRank = getRiskBandRank(ALERT_BSC_NORMALIZATION_MIN_BAND);
+				const currentBandRank = getRiskBandRank(normalizationHealth?.band);
+				if (
+					currentBandRank >= minBandRank &&
+					normalizationHealth?.status !== "ok"
+				) {
+					await sendAlert({
+						level: "warn",
+						title: "BSC normalization health warning",
+						message: `account=${bscAccount} status=${normalizationHealth.status} band=${normalizationHealth.band} maxRisk=${normalizationHealth.maxRiskScore} stale=${normalizationHealth.staleCount} unknown=${normalizationHealth.unknownCount}`,
+						meta: {
+							normalizationHealth,
+							thresholdBand: ALERT_BSC_NORMALIZATION_MIN_BAND,
+						},
+					});
+				}
+			}
 			bscLayer = {
 				chain: "bsc",
 				status: "active",
@@ -1481,6 +1516,13 @@ async function buildUnifiedPortfolio(accountId) {
 			},
 		},
 	};
+}
+
+function getRiskBandRank(band) {
+	const b = String(band || "low").toLowerCase();
+	if (b === "high") return 3;
+	if (b === "medium") return 2;
+	return 1;
 }
 
 function evaluateNormalizationHealth(protocolPositions) {

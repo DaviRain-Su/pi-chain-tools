@@ -93,7 +93,9 @@
 	},
 	"alerts": {
 		"successEnabled": false,
-		"dedupeWindowMs": 300000
+		"dedupeWindowMs": 300000,
+		"bscNormalizationEnabled": true,
+		"bscNormalizationMinBand": "medium"
 	},
 	"payments": {
 		"webhookProvider": "generic"

@@ -135,6 +135,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `NEAR_REBAL_ALERT_TELEGRAM_CHAT_ID`
   - `NEAR_REBAL_ALERT_SUCCESS=true` (send success/info alerts)
   - `NEAR_REBAL_ALERT_DEDUPE_MS=300000` (same-alert dedupe window)
+  - `NEAR_REBAL_ALERT_BSC_NORMALIZATION=true` (enable normalization risk alerts)
+  - `NEAR_REBAL_ALERT_BSC_NORMALIZATION_MIN_BAND=medium` (trigger threshold: `low|medium|high`)
 - Dashboard alert test endpoint/button:
   - API: `POST /api/alerts/test` (requires `confirm=true`)
   - UI: `Action Console -> Test alerts`
@@ -194,6 +196,8 @@ Common mapping examples:
 - `bsc.positions.wombatRateApiUrl` ↔ `BSC_WOMBAT_POSITION_RATE_API_URL`
 - `bsc.positions.rateCacheTtlMs` ↔ `BSC_POSITION_RATE_CACHE_TTL_MS`
 - `bsc.aave.maxAmountRaw` ↔ `BSC_AAVE_MAX_AMOUNT_RAW`
+- `alerts.bscNormalizationEnabled` ↔ `NEAR_REBAL_ALERT_BSC_NORMALIZATION`
+- `alerts.bscNormalizationMinBand` ↔ `NEAR_REBAL_ALERT_BSC_NORMALIZATION_MIN_BAND`
 - `acp.dismissedPurge.enabled` ↔ `ACP_DISMISSED_PURGE_ENABLED`
 - `payments.webhookProvider` ↔ `PAYMENT_WEBHOOK_PROVIDER`
 
