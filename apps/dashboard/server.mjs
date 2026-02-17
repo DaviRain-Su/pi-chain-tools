@@ -110,7 +110,17 @@ const REBALANCE_METRICS = {
 async function saveMetricsToDisk() {
 	try {
 		await mkdir(path.dirname(METRICS_PATH), { recursive: true });
-		await writeFile(METRICS_PATH, JSON.stringify(REBALANCE_METRICS, null, 2));
+		await writeFile(
+			METRICS_PATH,
+			JSON.stringify(
+				{
+					rebalanceMetrics: REBALANCE_METRICS,
+					rpcMetrics: RPC_METRICS,
+				},
+				null,
+				2,
+			),
+		);
 	} catch {
 		// best-effort persistence
 	}
@@ -121,17 +131,43 @@ async function loadMetricsFromDisk() {
 		const raw = await readFile(METRICS_PATH, "utf8");
 		const parsed = JSON.parse(raw);
 		if (!parsed || typeof parsed !== "object") return;
-		REBALANCE_METRICS.totalRuns = Number(parsed.totalRuns || 0);
-		REBALANCE_METRICS.successRuns = Number(parsed.successRuns || 0);
-		REBALANCE_METRICS.failedRuns = Number(parsed.failedRuns || 0);
-		REBALANCE_METRICS.rollbackRuns = Number(parsed.rollbackRuns || 0);
-		REBALANCE_METRICS.reconcileWarnings = Number(parsed.reconcileWarnings || 0);
-		REBALANCE_METRICS.recent = Array.isArray(parsed.recent)
-			? parsed.recent.slice(0, 30)
+		const rebalance = parsed.rebalanceMetrics || parsed;
+		REBALANCE_METRICS.totalRuns = Number(rebalance.totalRuns || 0);
+		REBALANCE_METRICS.successRuns = Number(rebalance.successRuns || 0);
+		REBALANCE_METRICS.failedRuns = Number(rebalance.failedRuns || 0);
+		REBALANCE_METRICS.rollbackRuns = Number(rebalance.rollbackRuns || 0);
+		REBALANCE_METRICS.reconcileWarnings = Number(
+			rebalance.reconcileWarnings || 0,
+		);
+		REBALANCE_METRICS.recent = Array.isArray(rebalance.recent)
+			? rebalance.recent.slice(0, 30)
 			: [];
-		REBALANCE_METRICS.pnlSeries = Array.isArray(parsed.pnlSeries)
-			? parsed.pnlSeries.slice(0, 100)
+		REBALANCE_METRICS.pnlSeries = Array.isArray(rebalance.pnlSeries)
+			? rebalance.pnlSeries.slice(0, 100)
 			: [];
+
+		const rpc = parsed.rpcMetrics;
+		if (rpc && typeof rpc === "object") {
+			RPC_METRICS.totalCalls = Number(rpc.totalCalls || 0);
+			RPC_METRICS.totalAttempts = Number(rpc.totalAttempts || 0);
+			RPC_METRICS.totalRetries = Number(rpc.totalRetries || 0);
+			RPC_METRICS.http429 = Number(rpc.http429 || 0);
+			RPC_METRICS.http5xx = Number(rpc.http5xx || 0);
+			RPC_METRICS.lastSuccessEndpoint = rpc.lastSuccessEndpoint || null;
+			RPC_METRICS.lastError = rpc.lastError || null;
+			if (rpc.endpointStats && typeof rpc.endpointStats === "object") {
+				for (const endpoint of RPC_ENDPOINTS) {
+					const v = rpc.endpointStats[endpoint] || {};
+					RPC_METRICS.endpointStats[endpoint] = {
+						attempts: Number(v.attempts || 0),
+						success: Number(v.success || 0),
+						errors: Number(v.errors || 0),
+						http429: Number(v.http429 || 0),
+						http5xx: Number(v.http5xx || 0),
+					};
+				}
+			}
+		}
 	} catch {
 		// ignore missing/corrupt metrics file
 	}
@@ -581,6 +617,7 @@ async function buildSnapshot(accountId) {
 			message: `retryRate=${(retryRate * 100).toFixed(1)}% attempts=${RPC_METRICS.totalAttempts} retries=${RPC_METRICS.totalRetries} 429=${RPC_METRICS.http429}`,
 		});
 	}
+	void saveMetricsToDisk();
 	const tokens = ft.map((row) => {
 		const usd =
 			Number.parseFloat(row.amount) * (prices[row.symbol.toUpperCase()] || 0);

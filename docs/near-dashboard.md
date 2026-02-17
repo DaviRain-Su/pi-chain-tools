@@ -27,7 +27,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Execution Quality panel: success/failure/rollback/reconcile-warning counters + recent run summary
 - Execution Quality now also includes RPC reliability counters (attempts/retries/retryRate/HTTP 429/5xx), last successful endpoint / latest error snippet, and a basic endpoint health ranking (`score`) to indicate the currently best-performing RPC
 - Adaptive RPC routing: request loop prefers currently best-scored endpoint first (based on live endpoint health stats)
-- Metrics persistence: rebalance metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
+- Metrics persistence: rebalance + rpc reliability metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
 - BSC mode now supports a backend **plan-only** action (`rebalance_usdt_to_usdce_txn` with `chain=bsc`) that returns route config placeholders (RPC/router/token addresses/slippage) plus a quote/minOut estimate (`quotedOutRaw`, `minAmountOutRaw`, quote source) but does not execute onchain yet
