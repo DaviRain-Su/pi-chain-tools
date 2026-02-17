@@ -28,6 +28,9 @@ const SESSION_DIR =
 const METRICS_PATH =
 	process.env.NEAR_DASHBOARD_METRICS_PATH ||
 	path.join(__dirname, "data", "rebalance-metrics.json");
+const POLICY_PATH =
+	process.env.NEAR_DASHBOARD_POLICY_PATH ||
+	path.join(__dirname, "data", "portfolio-policy.json");
 const ALERT_WEBHOOK_URL = process.env.NEAR_REBAL_ALERT_WEBHOOK_URL || "";
 const ALERT_TELEGRAM_BOT_TOKEN =
 	process.env.NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN || "";
@@ -113,6 +116,16 @@ const REBALANCE_METRICS = {
 	recent: [],
 	pnlSeries: [],
 };
+const PORTFOLIO_POLICY = {
+	targetAllocation: { near: 0.6, bsc: 0.4 },
+	constraints: {
+		maxChainExposure: { near: 0.8, bsc: 0.8 },
+		maxSingleTokenExposure: 0.5,
+		minRebalanceUsd: 50,
+		maxDailyRebalanceRuns: 10,
+	},
+	updatedAt: null,
+};
 
 async function saveMetricsToDisk() {
 	try {
@@ -177,6 +190,42 @@ async function loadMetricsFromDisk() {
 		}
 	} catch {
 		// ignore missing/corrupt metrics file
+	}
+}
+
+async function savePolicyToDisk() {
+	try {
+		await mkdir(path.dirname(POLICY_PATH), { recursive: true });
+		PORTFOLIO_POLICY.updatedAt = new Date().toISOString();
+		await writeFile(POLICY_PATH, JSON.stringify(PORTFOLIO_POLICY, null, 2));
+	} catch {
+		// best-effort persistence
+	}
+}
+
+async function loadPolicyFromDisk() {
+	try {
+		const raw = await readFile(POLICY_PATH, "utf8");
+		const parsed = JSON.parse(raw);
+		if (!parsed || typeof parsed !== "object") return;
+		if (
+			parsed.targetAllocation &&
+			typeof parsed.targetAllocation === "object"
+		) {
+			PORTFOLIO_POLICY.targetAllocation = {
+				...PORTFOLIO_POLICY.targetAllocation,
+				...parsed.targetAllocation,
+			};
+		}
+		if (parsed.constraints && typeof parsed.constraints === "object") {
+			PORTFOLIO_POLICY.constraints = {
+				...PORTFOLIO_POLICY.constraints,
+				...parsed.constraints,
+			};
+		}
+		PORTFOLIO_POLICY.updatedAt = parsed.updatedAt || null;
+	} catch {
+		// ignore missing/corrupt policy file
 	}
 }
 
@@ -699,6 +748,7 @@ async function buildUnifiedPortfolio(accountId) {
 
 	return {
 		updatedAt: new Date().toISOString(),
+		policy: PORTFOLIO_POLICY,
 		identityLayer: {
 			chain: "base",
 			provider: "virtual-acp",
@@ -1769,6 +1819,38 @@ const server = http.createServer(async (req, res) => {
 			});
 		}
 
+		if (url.pathname === "/api/policy") {
+			if (req.method === "GET") {
+				return json(res, 200, { ok: true, policy: PORTFOLIO_POLICY });
+			}
+			if (req.method === "POST") {
+				const chunks = [];
+				for await (const chunk of req) chunks.push(chunk);
+				const text = Buffer.concat(chunks).toString("utf8") || "{}";
+				const payload = JSON.parse(text);
+				if (payload.confirm !== true) {
+					return json(res, 400, { ok: false, error: "Missing confirm=true" });
+				}
+				if (
+					payload.targetAllocation &&
+					typeof payload.targetAllocation === "object"
+				) {
+					PORTFOLIO_POLICY.targetAllocation = {
+						...PORTFOLIO_POLICY.targetAllocation,
+						...payload.targetAllocation,
+					};
+				}
+				if (payload.constraints && typeof payload.constraints === "object") {
+					PORTFOLIO_POLICY.constraints = {
+						...PORTFOLIO_POLICY.constraints,
+						...payload.constraints,
+					};
+				}
+				await savePolicyToDisk();
+				return json(res, 200, { ok: true, policy: PORTFOLIO_POLICY });
+			}
+		}
+
 		if (url.pathname === "/api/acp/route-preview" && req.method === "POST") {
 			const chunks = [];
 			for await (const chunk of req) chunks.push(chunk);
@@ -1836,7 +1918,7 @@ const server = http.createServer(async (req, res) => {
 	}
 });
 
-loadMetricsFromDisk().finally(() => {
+Promise.all([loadMetricsFromDisk(), loadPolicyFromDisk()]).finally(() => {
 	server.listen(PORT, () => {
 		console.log(`NEAR dashboard listening on http://127.0.0.1:${PORT}`);
 	});

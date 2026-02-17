@@ -32,6 +32,9 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `POST /api/acp/route-preview` -> returns execution route plan (`targetChain=near|bsc`, `intentType`, `riskProfile`) for router wiring
 - Unified multi-chain portfolio bootstrap:
   - `GET /api/portfolio/unified` -> aggregates current NEAR execution portfolio + ACP identity layer status + BSC scaffold status in one schema
+- Portfolio policy center (cross-chain target + constraints):
+  - `GET /api/policy` -> current policy
+  - `POST /api/policy` (`confirm=true`) -> patch `targetAllocation` / `constraints` and persist to disk
 - Metrics persistence: rebalance + rpc reliability metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
@@ -80,6 +83,8 @@ Open:
 - `NEAR_DASHBOARD_PORT` - web port (fallback: `4173`)
 - `ACP_BIN` - ACP CLI binary name/path (default: `acp`)
 - `ACP_WORKDIR` - working directory to run ACP CLI from (default: current repo root)
+- `NEAR_DASHBOARD_METRICS_PATH` - metrics persistence path (default: `apps/dashboard/data/rebalance-metrics.json`)
+- `NEAR_DASHBOARD_POLICY_PATH` - policy persistence path (default: `apps/dashboard/data/portfolio-policy.json`)
 
 Example:
 
