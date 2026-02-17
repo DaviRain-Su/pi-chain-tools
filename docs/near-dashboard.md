@@ -118,6 +118,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - execute failures are normalized as `BSC_EXECUTE_FAILED retryable=true|false ...` for async retry/dead-letter classification
   - Aave post-action failures are normalized as `BSC_AAVE_POST_ACTION_FAILED ...` and recorded into ACP job history / DLQ type grouping
   - ACP UI now surfaces `executionProtocol` + `postActionStatus` columns and tags dead-letter phase (`main` vs `bsc-aave-post`)
+  - ACP filters include phase selector (`all|main|bsc-aave-post`) for faster incident triage
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`

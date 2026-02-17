@@ -204,6 +204,11 @@
             </select>
             <input id="acpBuyerFilter" placeholder="buyer filter" size="16" />
             <input id="acpStrategyFilter" placeholder="strategyId filter" size="16" />
+            <select id="acpPhaseFilter">
+              <option value="all">phase: all</option>
+              <option value="main">phase: main</option>
+              <option value="bsc-aave-post">phase: bsc-aave-post</option>
+            </select>
             <label class="muted" style="display:flex;align-items:center;gap:4px"><input id="acpOnlyFailed" type="checkbox" />only failed</label>
             <label class="muted" style="display:flex;align-items:center;gap:4px"><input id="acpExpandErrors" type="checkbox" checked />auto-expand errors</label>
             <button id="copyAcpFilterLink">Copy filter link</button>
@@ -357,6 +362,7 @@
       const acpBuyerFilterEl = document.getElementById("acpBuyerFilter");
       const acpStrategyFilterEl = document.getElementById("acpStrategyFilter");
       const acpOnlyFailedEl = document.getElementById("acpOnlyFailed");
+      const acpPhaseFilterEl = document.getElementById("acpPhaseFilter");
       const acpExpandErrorsEl = document.getElementById("acpExpandErrors");
       const copyAcpFilterLinkBtn = document.getElementById("copyAcpFilterLink");
       const resetAcpFiltersBtn = document.getElementById("resetAcpFilters");
@@ -431,6 +437,7 @@
           if (acpBuyerFilterEl && typeof s.acpBuyer === "string") acpBuyerFilterEl.value = s.acpBuyer;
           if (acpStrategyFilterEl && typeof s.acpStrategy === "string") acpStrategyFilterEl.value = s.acpStrategy;
           if (acpOnlyFailedEl) acpOnlyFailedEl.checked = s.acpOnlyFailed === true;
+          if (acpPhaseFilterEl && s.acpPhase) acpPhaseFilterEl.value = s.acpPhase;
           if (acpExpandErrorsEl) acpExpandErrorsEl.checked = s.acpExpandErrors !== false;
         } catch {}
       }
@@ -442,6 +449,7 @@
         if (acpBuyerFilterEl && p.get("acpBuyer")) acpBuyerFilterEl.value = p.get("acpBuyer");
         if (acpStrategyFilterEl && p.get("acpStrategy")) acpStrategyFilterEl.value = p.get("acpStrategy");
         if (acpOnlyFailedEl && p.get("acpOnlyFailed")) acpOnlyFailedEl.checked = p.get("acpOnlyFailed") === "1";
+        if (acpPhaseFilterEl && p.get("acpPhase")) acpPhaseFilterEl.value = p.get("acpPhase");
       }
 
       function saveAcpFiltersToStorage() {
@@ -450,6 +458,7 @@
           acpBuyer: acpBuyerFilterEl?.value || "",
           acpStrategy: acpStrategyFilterEl?.value || "",
           acpOnlyFailed: !!acpOnlyFailedEl?.checked,
+          acpPhase: acpPhaseFilterEl?.value || "all",
           acpExpandErrors: !!acpExpandErrorsEl?.checked,
         };
         localStorage.setItem(ACP_FILTERS_KEY, JSON.stringify(payload));
@@ -466,6 +475,7 @@
         setOrDelete("acpBuyer", acpBuyerFilterEl?.value || "");
         setOrDelete("acpStrategy", acpStrategyFilterEl?.value || "");
         setOrDelete("acpOnlyFailed", acpOnlyFailedEl?.checked ? "1" : "");
+        setOrDelete("acpPhase", acpPhaseFilterEl?.value || "all");
         const next = `${window.location.pathname}?${qp.toString()}`.replace(/\?$/, "");
         window.history.replaceState(null, "", next);
       }
@@ -475,6 +485,7 @@
         if (acpBuyerFilterEl) acpBuyerFilterEl.value = "";
         if (acpStrategyFilterEl) acpStrategyFilterEl.value = "";
         if (acpOnlyFailedEl) acpOnlyFailedEl.checked = false;
+        if (acpPhaseFilterEl) acpPhaseFilterEl.value = "all";
         if (acpExpandErrorsEl) acpExpandErrorsEl.checked = true;
         syncAcpFiltersToUrl();
       }
@@ -750,11 +761,20 @@
         const buyerFilter = String(acpBuyerFilterEl?.value || "").trim().toLowerCase();
         const strategyFilter = String(acpStrategyFilterEl?.value || "").trim().toLowerCase();
         const onlyFailed = !!acpOnlyFailedEl?.checked;
+        const phaseFilter = (acpPhaseFilterEl?.value || "all").trim();
+        const detectPhase = (row) => {
+          const p = String(row?.postActionStatus || "").toLowerCase();
+          const it = String(row?.intentType || "").toLowerCase();
+          const err = String(row?.error || "").toLowerCase();
+          if (p === "success" || p === "error" || it.includes("bsc_stable_yield") || err.includes("bsc_aave_post_action_failed")) return "bsc-aave-post";
+          return "main";
+        };
         const filteredJobs = (acpJobs?.jobs || [])
           .filter((row) => statusFilter === "all" || String(row?.status || "") === statusFilter)
           .filter((row) => !buyerFilter || String(row?.buyer || "").toLowerCase().includes(buyerFilter))
           .filter((row) => !strategyFilter || String(row?.strategyId || "").toLowerCase().includes(strategyFilter))
           .filter((row) => !onlyFailed || ["error", "blocked"].includes(String(row?.status || "").toLowerCase()))
+          .filter((row) => phaseFilter === "all" || detectPhase(row) === phaseFilter)
           .slice(0, 20);
         for (const row of filteredJobs) {
           const tr = document.createElement("tr");
@@ -1557,6 +1577,10 @@
         load().catch(() => {});
       });
       acpOnlyFailedEl?.addEventListener("change", () => {
+        syncAcpFiltersToUrl();
+        load().catch(() => {});
+      });
+      acpPhaseFilterEl?.addEventListener("change", () => {
         syncAcpFiltersToUrl();
         load().catch(() => {});
       });
