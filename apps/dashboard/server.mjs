@@ -150,6 +150,15 @@ const BSC_AAVE_REFERRAL_CODE = Math.max(
 	0,
 	Number.parseInt(process.env.BSC_AAVE_REFERRAL_CODE || "0", 10) || 0,
 );
+const BSC_AAVE_MAX_AMOUNT_RAW = String(
+	process.env.BSC_AAVE_MAX_AMOUNT_RAW || "20000000000000000000000",
+).trim();
+const BSC_AAVE_ALLOWED_TOKENS = String(
+	process.env.BSC_AAVE_ALLOWED_TOKENS || `${BSC_USDC},${BSC_USDT}`,
+)
+	.split(",")
+	.map((x) => x.trim().toLowerCase())
+	.filter(Boolean);
 const BSC_AAVE_ATOKEN_USDC = String(
 	process.env.BSC_AAVE_ATOKEN_USDC || "",
 ).trim();
@@ -1337,23 +1346,50 @@ async function executeBscSwap(params) {
 	);
 }
 
+function validateBscAaveSupplyInput(params) {
+	const token = String(params?.token || "")
+		.trim()
+		.toLowerCase();
+	const amountRaw = String(params?.amountRaw || "0").trim();
+	if (!/^\d+$/.test(amountRaw) || BigInt(amountRaw) <= 0n) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_amount_invalid",
+		);
+	}
+	const maxRaw = /^\d+$/.test(BSC_AAVE_MAX_AMOUNT_RAW)
+		? BigInt(BSC_AAVE_MAX_AMOUNT_RAW)
+		: 0n;
+	if (maxRaw > 0n && BigInt(amountRaw) > maxRaw) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_amount_exceeds_limit",
+		);
+	}
+	if (!token || !BSC_AAVE_ALLOWED_TOKENS.includes(token)) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_token_not_allowed",
+		);
+	}
+	return { token, amountRaw };
+}
+
 async function executeBscAaveSupplyViaCommand(params) {
 	if (!BSC_AAVE_EXECUTE_COMMAND) {
 		throw new Error(
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_execute_command_missing",
 		);
 	}
+	const { token, amountRaw } = validateBscAaveSupplyInput(params);
 	const requiredPlaceholders = ["{amountRaw}", "{runId}"];
-	for (const token of requiredPlaceholders) {
-		if (!BSC_AAVE_EXECUTE_COMMAND.includes(token)) {
+	for (const placeholder of requiredPlaceholders) {
+		if (!BSC_AAVE_EXECUTE_COMMAND.includes(placeholder)) {
 			throw new Error(
-				`BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_execute_command_missing_placeholder_${token}`,
+				`BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_execute_command_missing_placeholder_${placeholder}`,
 			);
 		}
 	}
 	const replacements = {
-		"{amountRaw}": String(params.amountRaw || ""),
-		"{token}": String(params.token || BSC_USDC || ""),
+		"{amountRaw}": amountRaw,
+		"{token}": token,
 		"{rpcUrl}": String(params.rpcUrl || BSC_RPC_URL || ""),
 		"{chainId}": String(params.chainId || BSC_CHAIN_ID || ""),
 		"{runId}": String(params.runId || ""),
@@ -1385,6 +1421,7 @@ async function executeBscAaveSupplyViaCommand(params) {
 }
 
 async function executeBscAaveSupplyViaNativeRpc(params) {
+	const { token, amountRaw } = validateBscAaveSupplyInput(params);
 	if (!BSC_AAVE_POOL) {
 		throw new Error(
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_pool_missing",
@@ -1409,7 +1446,7 @@ async function executeBscAaveSupplyViaNativeRpc(params) {
 	]);
 	try {
 		const allowanceRaw = await provider.call({
-			to: params.token,
+			to: token,
 			data: erc20Iface.encodeFunctionData("allowance", [
 				wallet.address,
 				BSC_AAVE_POOL,
@@ -1419,9 +1456,9 @@ async function executeBscAaveSupplyViaNativeRpc(params) {
 			"allowance",
 			allowanceRaw,
 		)[0];
-		if (allowance.lt(params.amountRaw)) {
+		if (allowance.lt(amountRaw)) {
 			const approveTx = await wallet.sendTransaction({
-				to: params.token,
+				to: token,
 				data: erc20Iface.encodeFunctionData("approve", [
 					BSC_AAVE_POOL,
 					MaxUint256,
@@ -1431,8 +1468,8 @@ async function executeBscAaveSupplyViaNativeRpc(params) {
 			await approveTx.wait(BSC_EXECUTE_CONFIRMATIONS);
 		}
 		const data = poolIface.encodeFunctionData("supply", [
-			params.token,
-			String(params.amountRaw),
+			token,
+			String(amountRaw),
 			wallet.address,
 			BSC_AAVE_REFERRAL_CODE,
 		]);

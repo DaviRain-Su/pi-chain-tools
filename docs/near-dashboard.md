@@ -192,6 +192,8 @@ Open:
 - `BSC_AAVE_POOL` - Aave Pool contract address (required for native mode)
 - `BSC_AAVE_EXECUTE_PRIVATE_KEY` - signer private key for native Aave supply (fallback: `BSC_EXECUTE_PRIVATE_KEY`)
 - `BSC_AAVE_REFERRAL_CODE` - Aave referral code for `supply` (default: `0`)
+- `BSC_AAVE_MAX_AMOUNT_RAW` - max raw amount allowed per Aave supply action (default: `20000000000000000000000`)
+- `BSC_AAVE_ALLOWED_TOKENS` - comma-separated token allowlist for Aave supply (default: `${BSC_USDC},${BSC_USDT}`)
 - `BSC_AAVE_ATOKEN_USDC` - optional Aave aToken address for USDC position read in unified portfolio
 - `BSC_AAVE_ATOKEN_USDT` - optional Aave aToken address for USDT position read in unified portfolio
 - `BSC_VENUS_VTOKEN_USDC` - optional Venus vToken address for USDC position read in unified portfolio
