@@ -199,6 +199,7 @@
           <button id="acpDeadPresetAll">Preset: Clear presets</button>
         </div>
         <div id="acpDismissed" class="muted" style="margin-top:4px">dismissed: -</div>
+        <div id="acpFailureHeatmap" class="muted" style="margin-top:6px">failure heatmap: -</div>
         <div class="row" style="margin-top:4px">
           <input id="acpDismissedPurgeDays" type="number" min="0" value="7" style="width:88px" />
           <button id="acpDismissedPurgeBtn">Purge dismissed older than days</button>
@@ -387,6 +388,7 @@
       const acpAsyncStatusEl = document.getElementById("acpAsyncStatus");
       const acpDeadLettersEl = document.getElementById("acpDeadLetters");
       const acpDismissedEl = document.getElementById("acpDismissed");
+      const acpFailureHeatmapEl = document.getElementById("acpFailureHeatmap");
       const acpDeadPhaseFilterEl = document.getElementById("acpDeadPhaseFilter");
       const acpDeadTypeFilterEl = document.getElementById("acpDeadTypeFilter");
       const acpDeadPresetAaveBtn = document.getElementById("acpDeadPresetAave");
@@ -907,6 +909,46 @@
             acpAsyncStatusEl.textContent = `job=${inQueue.jobId} status=${inQueue.status} updated=${inQueue.updatedAt || "-"}${inQueue.error ? ` error=${inQueue.error}` : ""}`;
           }
         }
+        const classifyPhase = (row) => {
+          const p = String(row?.postActionStatus || "").toLowerCase();
+          const it = String(row?.intentType || "").toLowerCase();
+          const err = String(row?.error || "").toLowerCase();
+          if (p === "success" || p === "error" || it.includes("bsc_stable_yield") || err.includes("bsc_aave_post_action_failed")) return "bsc-aave-post";
+          return "main";
+        };
+        const classifyErrorType = (row) => {
+          const t = String(row?.errorType || "").trim();
+          if (t) return t;
+          const err = String(row?.error || "").toLowerCase();
+          if (err.includes("bsc_aave_post_action_failed")) return "bsc_aave_post_action_failed";
+          if (err.includes("bsc_execute_config")) return "bsc_execute_config";
+          if (err.includes("bsc_execute_failed")) return "bsc_execute_failed";
+          if (err.includes("timeout")) return "timeout";
+          if (err.includes("429") || err.includes("too many requests")) return "rpc_429";
+          return "unknown";
+        };
+
+        const last24h = Date.now() - 24 * 60 * 60 * 1000;
+        const failureRows = (acpJobs?.jobs || []).filter((row) => {
+          const ts = Date.parse(String(row?.timestamp || ""));
+          if (!Number.isFinite(ts) || ts < last24h) return false;
+          return ["error", "blocked"].includes(String(row?.status || "").toLowerCase());
+        });
+        const heatmap = {};
+        for (const row of failureRows) {
+          const phase = classifyPhase(row);
+          const type = classifyErrorType(row);
+          if (!heatmap[phase]) heatmap[phase] = {};
+          heatmap[phase][type] = (heatmap[phase][type] || 0) + 1;
+        }
+        const heatmapEntries = Object.entries(heatmap)
+          .flatMap(([phase, byType]) => Object.entries(byType).map(([type, cnt]) => ({ phase, type, cnt })))
+          .sort((a, b) => b.cnt - a.cnt)
+          .slice(0, 8);
+        acpFailureHeatmapEl.innerHTML = heatmapEntries.length > 0
+          ? `failure heatmap (24h): ${heatmapEntries.map((x) => `<span class="warn">${x.phase}/${x.type}:${x.cnt}</span>`).join(" · ")}`
+          : "failure heatmap (24h): none";
+
         const deadLetters = Array.isArray(acpDead?.deadLetters) ? acpDead.deadLetters : [];
         const deadPhaseFilter = (acpDeadPhaseFilterEl?.value || "all").trim();
         const deadTypeFilter = (acpDeadTypeFilterEl?.value || "all").trim();

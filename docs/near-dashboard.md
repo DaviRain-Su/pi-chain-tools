@@ -121,6 +121,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - ACP filters include phase selectors (`all|main|bsc-aave-post`) for jobs and dead-letter triage
   - dead-letter supports type filter + clickable byType chips for one-click incident narrowing
   - dead-letter quick presets: `Aave post failures`, `Main failures`, `Clear presets`
+  - ACP ops header includes 24h failure heatmap summary (`phase/type:count`) for fast trend scanning
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`
