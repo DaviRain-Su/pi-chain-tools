@@ -200,6 +200,7 @@
             <input id="acpStrategyFilter" placeholder="strategyId filter" size="16" />
             <label class="muted" style="display:flex;align-items:center;gap:4px"><input id="acpOnlyFailed" type="checkbox" />only failed</label>
             <button id="copyAcpFilterLink">Copy filter link</button>
+            <button id="resetAcpFilters">Reset filters</button>
           </div>
           <table style="margin-top:8px">
             <thead><tr><th>Time</th><th>RunId</th><th>Status</th><th>Chain</th><th>Intent</th><th>Strategy</th><th>Buyer</th><th>Remaining</th><th>AmountRaw</th><th>Tx</th></tr></thead>
@@ -341,6 +342,7 @@
       const acpStrategyFilterEl = document.getElementById("acpStrategyFilter");
       const acpOnlyFailedEl = document.getElementById("acpOnlyFailed");
       const copyAcpFilterLinkBtn = document.getElementById("copyAcpFilterLink");
+      const resetAcpFiltersBtn = document.getElementById("resetAcpFilters");
       const acpAsyncStrategyIdEl = document.getElementById("acpAsyncStrategyId");
       const acpAsyncBuyerEl = document.getElementById("acpAsyncBuyer");
       const acpAsyncAmountRawEl = document.getElementById("acpAsyncAmountRaw");
@@ -420,6 +422,14 @@
         setOrDelete("acpOnlyFailed", acpOnlyFailedEl?.checked ? "1" : "");
         const next = `${window.location.pathname}?${qp.toString()}`.replace(/\?$/, "");
         window.history.replaceState(null, "", next);
+      }
+
+      function resetAcpFilters() {
+        if (acpStatusFilterEl) acpStatusFilterEl.value = "all";
+        if (acpBuyerFilterEl) acpBuyerFilterEl.value = "";
+        if (acpStrategyFilterEl) acpStrategyFilterEl.value = "";
+        if (acpOnlyFailedEl) acpOnlyFailedEl.checked = false;
+        syncAcpFiltersToUrl();
       }
 
       function parseNum(value) {
@@ -1354,6 +1364,11 @@
         } catch {
           acpAsyncMetaEl.textContent = "Copy filter link failed";
         }
+      });
+      resetAcpFiltersBtn?.addEventListener("click", () => {
+        resetAcpFilters();
+        acpAsyncMetaEl.textContent = "ACP filters reset";
+        load().catch(() => {});
       });
       applyAcpFiltersFromUrl();
       load().catch((e) => (metaEl.textContent = e.message));
