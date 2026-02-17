@@ -2727,13 +2727,40 @@ async function getBscUsdtUsdcQuote(amountInRaw) {
 			pancakeV2AmountOutRaw: onchainQuote.amountOutRaw,
 			onchainAmountOutRaw: onchainQuote.amountOutRaw,
 			divergenceBps,
+			dexQuoteCompare: {
+				bestSource:
+					BigInt(dexQuote.amountOutRaw) >= BigInt(onchainQuote.amountOutRaw)
+						? "dexscreener"
+						: "pancake-v2-router",
+				conservativeSource:
+					BigInt(dexQuote.amountOutRaw) <= BigInt(onchainQuote.amountOutRaw)
+						? "dexscreener"
+						: "pancake-v2-router",
+				spreadBps: divergenceBps,
+			},
 		};
 	}
 	if (onchainQuote) {
-		return { ...onchainQuote, divergenceBps: null };
+		return {
+			...onchainQuote,
+			divergenceBps: null,
+			dexQuoteCompare: {
+				bestSource: "pancake-v2-router",
+				conservativeSource: "pancake-v2-router",
+				spreadBps: null,
+			},
+		};
 	}
 	if (dexQuote) {
-		return { ...dexQuote, divergenceBps: null };
+		return {
+			...dexQuote,
+			divergenceBps: null,
+			dexQuoteCompare: {
+				bestSource: "dexscreener",
+				conservativeSource: "dexscreener",
+				spreadBps: null,
+			},
+		};
 	}
 
 	const inUi = rawToUi(amountInRaw, BSC_USDT_DECIMALS);
@@ -2745,6 +2772,11 @@ async function getBscUsdtUsdcQuote(amountInRaw) {
 		pairAddress: "",
 		liquidityUsd: 0,
 		divergenceBps: null,
+		dexQuoteCompare: {
+			bestSource: "fallback-1to1",
+			conservativeSource: "fallback-1to1",
+			spreadBps: null,
+		},
 	};
 }
 
@@ -2938,6 +2970,7 @@ async function buildBscDexNetYieldInsight(compare, options = {}) {
 			dexAmountOutRaw: quote.dexAmountOutRaw || null,
 			pancakeV2AmountOutRaw:
 				quote.pancakeV2AmountOutRaw || quote.onchainAmountOutRaw || null,
+			dexQuoteCompare: quote.dexQuoteCompare || null,
 		},
 		swapCost: {
 			estimatedSlipBps: Number(slipBps.toFixed(2)),
