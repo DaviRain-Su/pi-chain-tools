@@ -2083,6 +2083,51 @@ const server = http.createServer(async (req, res) => {
 			}
 		}
 
+		if (url.pathname === "/api/strategies/validate" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			const dslCandidate = payload.dsl
+				? payload.dsl
+				: buildStrategyDslFromLegacy(payload);
+			const validation = validateStrategyDslV1(dslCandidate);
+			if (!validation.ok) {
+				return json(res, 200, {
+					ok: false,
+					phase: "schema",
+					errors: validation.errors,
+					warnings: validation.warnings || [],
+				});
+			}
+			const semantic = validateStrategySemanticV1(
+				validation.normalized,
+				PORTFOLIO_POLICY,
+			);
+			if (!semantic.ok) {
+				return json(res, 200, {
+					ok: false,
+					phase: "semantic",
+					errors: semantic.errors,
+					warnings: [
+						...(validation.warnings || []),
+						...(semantic.warnings || []),
+					],
+					normalized: validation.normalized,
+				});
+			}
+			return json(res, 200, {
+				ok: true,
+				phase: "ready",
+				errors: [],
+				warnings: [
+					...(validation.warnings || []),
+					...(semantic.warnings || []),
+				],
+				normalized: validation.normalized,
+			});
+		}
+
 		if (url.pathname === "/api/strategies") {
 			if (req.method === "GET") {
 				return json(res, 200, { ok: true, strategies: STRATEGY_CATALOG });
