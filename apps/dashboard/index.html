@@ -178,6 +178,17 @@
         <div id="acpOps" class="muted">-</div>
         <details style="margin-top:10px">
           <summary>Recent ACP Jobs</summary>
+          <div class="row" style="margin:8px 0">
+            <label class="muted" for="acpStatusFilter">Status</label>
+            <select id="acpStatusFilter">
+              <option value="all">all</option>
+              <option value="dry-run">dry-run</option>
+              <option value="planned">planned</option>
+              <option value="executed">executed</option>
+              <option value="blocked">blocked</option>
+              <option value="error">error</option>
+            </select>
+          </div>
           <table style="margin-top:8px">
             <thead><tr><th>Time</th><th>RunId</th><th>Status</th><th>Chain</th><th>Intent</th><th>AmountRaw</th><th>Tx</th></tr></thead>
             <tbody id="acpJobs"></tbody>
@@ -300,6 +311,7 @@
       const execQualityEl = document.getElementById("execQuality");
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
+      const acpStatusFilterEl = document.getElementById("acpStatusFilter");
       const strategyEl = document.getElementById("strategy");
       const targetUsdtEl = document.getElementById("targetUsdt");
       const targetUsdceEl = document.getElementById("targetUsdce");
@@ -565,9 +577,19 @@
         const dailyLimit = Number(acpSummary?.summary?.policyDailyLimit || 0);
         acpOpsEl.innerHTML = `<span class="${acpOk}">${acpStatus?.ok ? "connected" : "not connected"}</span> · agent=${who}<br/><span class="muted">jobs=${totalJobs} byStatus=${JSON.stringify(byStatus)} daily=${Number(daily.dailyCount || 0)}/${dailyLimit || "-"}</span>`;
         acpJobsEl.innerHTML = "";
-        for (const row of (acpJobs?.jobs || []).slice(0, 20)) {
+        const statusFilter = (acpStatusFilterEl?.value || "all").trim();
+        const filteredJobs = (acpJobs?.jobs || []).filter((row) => statusFilter === "all" || String(row?.status || "") === statusFilter).slice(0, 20);
+        for (const row of filteredJobs) {
           const tr = document.createElement("tr");
-          const tx = row.txHash ? row.txHash : "-";
+          let tx = "-";
+          if (row.txHash) {
+            if (String(row.targetChain || "").toLowerCase() === "near") {
+              const href = `https://explorer.near.org/transactions/${row.txHash}`;
+              tx = `<a href="${href}" target="_blank" rel="noreferrer">${row.txHash}</a>`;
+            } else {
+              tx = row.txHash;
+            }
+          }
           tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.runId || "-"}</td><td>${row.status || "-"}</td><td>${row.targetChain || "-"}</td><td>${row.intentType || "-"}</td><td>${row.amountRaw || "-"}</td><td>${tx}</td>`;
           acpJobsEl.appendChild(tr);
         }
@@ -953,6 +975,7 @@
       });
 
       refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));
+      acpStatusFilterEl?.addEventListener("change", () => load().catch(() => {}));
       load().catch((e) => (metaEl.textContent = e.message));
       setInterval(() => load().catch(() => {}), 30000);
     </script>

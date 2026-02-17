@@ -26,6 +26,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Post-execution reconciliation: compares wallet residual USDt/USDC.e after step3 and records a reconcile entry in Action History
 - Execution Quality panel: success/failure/rollback/reconcile-warning counters + recent run summary
 - ACP Ops panel: ACP connectivity (`/api/acp/status`) + ACP job summary (`/api/acp/jobs/summary`) + recent ACP job list (`/api/acp/jobs`) in dashboard UI
+- ACP recent jobs table supports status filtering and NEAR tx explorer links when `txHash` is present
 - Execution Quality now also includes RPC reliability counters (attempts/retries/retryRate/HTTP 429/5xx), last successful endpoint / latest error snippet, and a basic endpoint health ranking (`score`) to indicate the currently best-performing RPC
 - Adaptive RPC routing: request loop prefers currently best-scored endpoint first (based on live endpoint health stats)
 - ACP integration bootstrap (Virtual Base identity + multi-chain execution preview):
