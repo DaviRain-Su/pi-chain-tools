@@ -173,6 +173,7 @@ const STRATEGY_CATALOG = [];
 const STRATEGY_PURCHASES = [];
 const STRATEGY_ENTITLEMENTS = [];
 const STRATEGY_PAYMENTS = [];
+const PAYMENT_WEBHOOK_EVENTS = [];
 const PORTFOLIO_POLICY = {
 	targetAllocation: { near: 0.6, bsc: 0.4 },
 	constraints: {
@@ -337,6 +338,7 @@ async function saveMarketplaceToDisk() {
 					purchases: STRATEGY_PURCHASES,
 					entitlements: STRATEGY_ENTITLEMENTS,
 					payments: STRATEGY_PAYMENTS,
+					paymentWebhookEvents: PAYMENT_WEBHOOK_EVENTS,
 				},
 				null,
 				2,
@@ -356,6 +358,7 @@ async function loadMarketplaceFromDisk() {
 		STRATEGY_PURCHASES.length = 0;
 		STRATEGY_ENTITLEMENTS.length = 0;
 		STRATEGY_PAYMENTS.length = 0;
+		PAYMENT_WEBHOOK_EVENTS.length = 0;
 		if (Array.isArray(parsed.strategies)) {
 			STRATEGY_CATALOG.push(...parsed.strategies.slice(0, 200));
 		}
@@ -367,6 +370,11 @@ async function loadMarketplaceFromDisk() {
 		}
 		if (Array.isArray(parsed.payments)) {
 			STRATEGY_PAYMENTS.push(...parsed.payments.slice(0, 1000));
+		}
+		if (Array.isArray(parsed.paymentWebhookEvents)) {
+			PAYMENT_WEBHOOK_EVENTS.push(
+				...parsed.paymentWebhookEvents.slice(0, 2000),
+			);
 		}
 	} catch {
 		// ignore missing/corrupt marketplace file
@@ -1248,6 +1256,46 @@ function verifyPaymentWebhookSignature(rawBody, signatureHeader) {
 	const b = Buffer.from(expected);
 	if (a.length !== b.length) return false;
 	return timingSafeEqual(a, b);
+}
+
+function isWebhookEventProcessed(eventId) {
+	const id = String(eventId || "").trim();
+	if (!id) return false;
+	return PAYMENT_WEBHOOK_EVENTS.some(
+		(row) => String(row?.eventId || "") === id,
+	);
+}
+
+function markWebhookEventProcessed({ eventId, paymentId, status, source }) {
+	const id = String(eventId || "").trim();
+	if (!id) return;
+	PAYMENT_WEBHOOK_EVENTS.unshift({
+		eventId: id,
+		paymentId: String(paymentId || ""),
+		status: String(status || "unknown"),
+		source: String(source || "webhook"),
+		processedAt: new Date().toISOString(),
+	});
+	if (PAYMENT_WEBHOOK_EVENTS.length > 2000)
+		PAYMENT_WEBHOOK_EVENTS.length = 2000;
+}
+
+function normalizeWebhookPayload(payload) {
+	const provider = String(
+		payload?.provider || payload?.source || "generic",
+	).toLowerCase();
+	const eventId = payload?.eventId || payload?.id || payload?.event_id || null;
+	const paymentId =
+		payload?.paymentId ||
+		payload?.payment_id ||
+		payload?.data?.paymentId ||
+		payload?.data?.payment_id ||
+		null;
+	const status =
+		payload?.status || payload?.paymentStatus || payload?.state || null;
+	const txRef =
+		payload?.txRef || payload?.txHash || payload?.transactionHash || null;
+	return { provider, eventId, paymentId, status, txRef, raw: payload };
 }
 
 function applyPaymentStatusUpdate(payload, source = "manual") {
@@ -2965,21 +3013,50 @@ const server = http.createServer(async (req, res) => {
 				});
 			}
 			const payload = JSON.parse(rawText);
+			const normalized = normalizeWebhookPayload(payload);
+			if (!normalized.paymentId) {
+				return json(res, 400, {
+					ok: false,
+					error: "Missing paymentId in webhook payload",
+				});
+			}
+			if (normalized.eventId && isWebhookEventProcessed(normalized.eventId)) {
+				return json(res, 200, {
+					ok: true,
+					idempotent: true,
+					eventId: normalized.eventId,
+					reason: "event_already_processed",
+				});
+			}
 			const out = applyPaymentStatusUpdate(
 				{
-					paymentId: payload?.paymentId,
-					status: payload?.status,
+					paymentId: normalized.paymentId,
+					status: normalized.status,
 					paid: payload?.paid,
-					txRef: payload?.txRef || payload?.txHash || null,
-					eventId: payload?.eventId || payload?.id || null,
+					txRef: normalized.txRef,
+					eventId: normalized.eventId,
 					entitlementUses: payload?.entitlementUses,
 					entitlementDays: payload?.entitlementDays,
 				},
-				"provider-webhook",
+				`provider-webhook:${normalized.provider}`,
 			);
 			if (!out.ok) return json(res, out.status || 400, out);
+			if (normalized.eventId) {
+				markWebhookEventProcessed({
+					eventId: normalized.eventId,
+					paymentId: normalized.paymentId,
+					status: normalized.status,
+					source: normalized.provider,
+				});
+			}
 			await saveMarketplaceToDisk();
-			return json(res, 200, { ok: true, ...out });
+			return json(res, 200, {
+				ok: true,
+				idempotent: false,
+				eventId: normalized.eventId,
+				provider: normalized.provider,
+				...out,
+			});
 		}
 
 		if (url.pathname === "/api/payments") {
