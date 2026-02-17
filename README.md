@@ -11,6 +11,14 @@ Multi-chain toolset library for Pi extensions with a chain-agnostic grouping mod
 - `execute`
 - `rpc`
 
+## Architecture Core
+
+- **Core architecture principles**: [`docs/core-architecture-principles.md`](docs/core-architecture-principles.md)
+  - AI-native boundary design (Intent/Policy/Execution/Settlement/Observability)
+  - Schema-first constrained strategy model
+  - Async job lifecycle and deterministic execution expectations
+  - Marketplace monetization and fee-split baseline
+
 ## Structure
 
 - `src/core`: common toolset abstractions and registration helpers
