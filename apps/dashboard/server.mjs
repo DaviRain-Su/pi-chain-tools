@@ -2216,6 +2216,25 @@ async function executeBscWombatSupplyViaCommand(params) {
 	}
 }
 
+async function executeBscListaSupplyViaNativeSlot(_params) {
+	throw new Error(
+		"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_native_slot_not_implemented",
+	);
+}
+
+async function executeBscWombatSupplyViaNativeSlot(_params) {
+	throw new Error(
+		"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_native_slot_not_implemented",
+	);
+}
+
+function isNativeSlotNotImplementedError(error) {
+	const msg = String(
+		error instanceof Error ? error.message : error || "",
+	).toLowerCase();
+	return msg.includes("native_slot_not_implemented");
+}
+
 async function executeBscListaSupply(params) {
 	if (BSC_LISTA_EXECUTE_MODE === "native") {
 		if (!BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
@@ -2223,13 +2242,17 @@ async function executeBscListaSupply(params) {
 				"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_native_execute_not_enabled",
 			);
 		}
-		return executeBscListaSupplyViaCommand(params);
+		return executeBscListaSupplyViaNativeSlot(params);
 	}
 	if (BSC_LISTA_EXECUTE_MODE === "command") {
 		return executeBscListaSupplyViaCommand(params);
 	}
 	if (BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
-		return executeBscListaSupplyViaCommand(params);
+		try {
+			return await executeBscListaSupplyViaNativeSlot(params);
+		} catch (error) {
+			if (!isNativeSlotNotImplementedError(error)) throw error;
+		}
 	}
 	return executeBscListaSupplyViaCommand(params);
 }
@@ -2241,13 +2264,17 @@ async function executeBscWombatSupply(params) {
 				"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_native_execute_not_enabled",
 			);
 		}
-		return executeBscWombatSupplyViaCommand(params);
+		return executeBscWombatSupplyViaNativeSlot(params);
 	}
 	if (BSC_WOMBAT_EXECUTE_MODE === "command") {
 		return executeBscWombatSupplyViaCommand(params);
 	}
 	if (BSC_WOMBAT_NATIVE_EXECUTE_ENABLED) {
-		return executeBscWombatSupplyViaCommand(params);
+		try {
+			return await executeBscWombatSupplyViaNativeSlot(params);
+		} catch (error) {
+			if (!isNativeSlotNotImplementedError(error)) throw error;
+		}
 	}
 	return executeBscWombatSupplyViaCommand(params);
 }
@@ -4210,24 +4237,27 @@ async function computeBscYieldPlan(input = {}) {
 	if (executionProtocol === "lista") {
 		if (!BSC_LISTA_EXECUTE_ENABLED)
 			listaBlockers.push("lista_execute_disabled");
-		if (
-			BSC_LISTA_EXECUTE_MODE === "native" &&
-			!BSC_LISTA_NATIVE_EXECUTE_ENABLED
-		) {
-			listaBlockers.push("lista_native_execute_not_enabled");
+		if (BSC_LISTA_EXECUTE_MODE === "native") {
+			if (!BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
+				listaBlockers.push("lista_native_execute_not_enabled");
+			} else {
+				listaBlockers.push("lista_native_slot_not_implemented");
+			}
 		}
-		if (!BSC_LISTA_EXECUTE_COMMAND)
-			listaBlockers.push("missing_bsc_lista_execute_command");
-		if (
-			BSC_LISTA_EXECUTE_COMMAND &&
-			!hasRequiredPlaceholders(BSC_LISTA_EXECUTE_COMMAND, [
-				"{amountRaw}",
-				"{runId}",
-			])
-		) {
-			listaBlockers.push(
-				"bsc_lista_execute_command_missing_required_placeholders",
-			);
+		if (BSC_LISTA_EXECUTE_MODE !== "native") {
+			if (!BSC_LISTA_EXECUTE_COMMAND)
+				listaBlockers.push("missing_bsc_lista_execute_command");
+			if (
+				BSC_LISTA_EXECUTE_COMMAND &&
+				!hasRequiredPlaceholders(BSC_LISTA_EXECUTE_COMMAND, [
+					"{amountRaw}",
+					"{runId}",
+				])
+			) {
+				listaBlockers.push(
+					"bsc_lista_execute_command_missing_required_placeholders",
+				);
+			}
 		}
 		if (!BSC_LISTA_ALLOWED_TOKENS.includes(String(BSC_USDC).toLowerCase())) {
 			listaBlockers.push("bsc_usdc_not_in_lista_allowed_tokens");
@@ -4250,24 +4280,27 @@ async function computeBscYieldPlan(input = {}) {
 	if (executionProtocol === "wombat") {
 		if (!BSC_WOMBAT_EXECUTE_ENABLED)
 			wombatBlockers.push("wombat_execute_disabled");
-		if (
-			BSC_WOMBAT_EXECUTE_MODE === "native" &&
-			!BSC_WOMBAT_NATIVE_EXECUTE_ENABLED
-		) {
-			wombatBlockers.push("wombat_native_execute_not_enabled");
+		if (BSC_WOMBAT_EXECUTE_MODE === "native") {
+			if (!BSC_WOMBAT_NATIVE_EXECUTE_ENABLED) {
+				wombatBlockers.push("wombat_native_execute_not_enabled");
+			} else {
+				wombatBlockers.push("wombat_native_slot_not_implemented");
+			}
 		}
-		if (!BSC_WOMBAT_EXECUTE_COMMAND)
-			wombatBlockers.push("missing_bsc_wombat_execute_command");
-		if (
-			BSC_WOMBAT_EXECUTE_COMMAND &&
-			!hasRequiredPlaceholders(BSC_WOMBAT_EXECUTE_COMMAND, [
-				"{amountRaw}",
-				"{runId}",
-			])
-		) {
-			wombatBlockers.push(
-				"bsc_wombat_execute_command_missing_required_placeholders",
-			);
+		if (BSC_WOMBAT_EXECUTE_MODE !== "native") {
+			if (!BSC_WOMBAT_EXECUTE_COMMAND)
+				wombatBlockers.push("missing_bsc_wombat_execute_command");
+			if (
+				BSC_WOMBAT_EXECUTE_COMMAND &&
+				!hasRequiredPlaceholders(BSC_WOMBAT_EXECUTE_COMMAND, [
+					"{amountRaw}",
+					"{runId}",
+				])
+			) {
+				wombatBlockers.push(
+					"bsc_wombat_execute_command_missing_required_placeholders",
+				);
+			}
 		}
 		if (!BSC_WOMBAT_ALLOWED_TOKENS.includes(String(BSC_USDC).toLowerCase())) {
 			wombatBlockers.push("bsc_usdc_not_in_wombat_allowed_tokens");
@@ -4306,6 +4339,8 @@ async function computeBscYieldPlan(input = {}) {
 			"BSC_AAVE_MAX_AMOUNT_RAW=<larger_raw_cap>",
 		lista_execute_disabled: "BSC_LISTA_EXECUTE_ENABLED=true",
 		lista_native_execute_not_enabled: "BSC_LISTA_NATIVE_EXECUTE_ENABLED=true",
+		lista_native_slot_not_implemented:
+			"# native slot reserved: keep BSC_LISTA_EXECUTE_MODE=command or auto until native adapter lands",
 		missing_bsc_lista_execute_command:
 			"BSC_LISTA_EXECUTE_COMMAND='node scripts/lista-supply.mjs --amount {amountRaw} --run {runId}'",
 		bsc_usdc_not_in_lista_allowed_tokens:
@@ -4316,6 +4351,8 @@ async function computeBscYieldPlan(input = {}) {
 			"BSC_LISTA_EXECUTE_COMMAND='node scripts/lista-supply.mjs --amount {amountRaw} --run {runId}'",
 		wombat_execute_disabled: "BSC_WOMBAT_EXECUTE_ENABLED=true",
 		wombat_native_execute_not_enabled: "BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=true",
+		wombat_native_slot_not_implemented:
+			"# native slot reserved: keep BSC_WOMBAT_EXECUTE_MODE=command or auto until native adapter lands",
 		missing_bsc_wombat_execute_command:
 			"BSC_WOMBAT_EXECUTE_COMMAND='node scripts/wombat-supply.mjs --amount {amountRaw} --run {runId}'",
 		bsc_usdc_not_in_wombat_allowed_tokens:
@@ -6119,6 +6156,10 @@ const server = http.createServer(async (req, res) => {
 					aaveEnabled: BSC_AAVE_EXECUTE_ENABLED,
 					listaEnabled: BSC_LISTA_EXECUTE_ENABLED,
 					wombatEnabled: BSC_WOMBAT_EXECUTE_ENABLED,
+					listaMode: BSC_LISTA_EXECUTE_MODE,
+					wombatMode: BSC_WOMBAT_EXECUTE_MODE,
+					listaNativeEnabled: BSC_LISTA_NATIVE_EXECUTE_ENABLED,
+					wombatNativeEnabled: BSC_WOMBAT_NATIVE_EXECUTE_ENABLED,
 				},
 				minAprDeltaBpsDefault: BSC_YIELD_MIN_APR_DELTA_BPS,
 			});
