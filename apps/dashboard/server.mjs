@@ -478,6 +478,33 @@ const BSC_WOMBAT_USDT_EXCHANGE_RATE = Math.max(
 		),
 	) || 1,
 );
+const BSC_LISTA_POSITION_RATE_API_URL = String(
+	envOrCfg(
+		"BSC_LISTA_POSITION_RATE_API_URL",
+		"bsc.positions.listaRateApiUrl",
+		"",
+	),
+).trim();
+const BSC_WOMBAT_POSITION_RATE_API_URL = String(
+	envOrCfg(
+		"BSC_WOMBAT_POSITION_RATE_API_URL",
+		"bsc.positions.wombatRateApiUrl",
+		"",
+	),
+).trim();
+const BSC_POSITION_RATE_CACHE_TTL_MS = Math.max(
+	5_000,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"BSC_POSITION_RATE_CACHE_TTL_MS",
+				"bsc.positions.rateCacheTtlMs",
+				"60000",
+			),
+		),
+		10,
+	) || 60_000,
+);
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(
 		envOrCfg(
@@ -624,6 +651,10 @@ const BSC_APR_SOURCE_HEALTH = {
 	aave: { lastSuccessAt: null, lastErrorAt: null, lastError: null },
 	lista: { lastSuccessAt: null, lastErrorAt: null, lastError: null },
 	wombat: { lastSuccessAt: null, lastErrorAt: null, lastError: null },
+};
+const BSC_POSITION_RATE_CACHE = {
+	lista: { ts: 0, value: null, source: "env" },
+	wombat: { ts: 0, value: null, source: "env" },
 };
 const STRATEGY_CATALOG = [];
 const STRATEGY_PURCHASES = [];
@@ -3351,6 +3382,91 @@ async function buildBscDexNetYieldInsight(compare, options = {}) {
 	};
 }
 
+async function getBscPositionRates(protocol) {
+	const key = String(protocol || "").toLowerCase();
+	if (key !== "lista" && key !== "wombat") {
+		return {
+			usdc: 1,
+			usdt: 1,
+			source: "default",
+			updatedAt: new Date().toISOString(),
+		};
+	}
+	const cache = BSC_POSITION_RATE_CACHE[key];
+	if (
+		cache?.value &&
+		Date.now() - Number(cache.ts || 0) < BSC_POSITION_RATE_CACHE_TTL_MS
+	) {
+		return cache.value;
+	}
+	const fallback = {
+		usdc:
+			key === "lista"
+				? BSC_LISTA_USDC_EXCHANGE_RATE
+				: BSC_WOMBAT_USDC_EXCHANGE_RATE,
+		usdt:
+			key === "lista"
+				? BSC_LISTA_USDT_EXCHANGE_RATE
+				: BSC_WOMBAT_USDT_EXCHANGE_RATE,
+		source: `${key}-env`,
+		updatedAt: new Date().toISOString(),
+	};
+	const apiUrl =
+		key === "lista"
+			? BSC_LISTA_POSITION_RATE_API_URL
+			: BSC_WOMBAT_POSITION_RATE_API_URL;
+	if (!apiUrl) {
+		cache.ts = Date.now();
+		cache.value = fallback;
+		cache.source = "env";
+		return fallback;
+	}
+	try {
+		const resp = await fetch(apiUrl);
+		if (!resp.ok) throw new Error(`http_${resp.status}`);
+		const payload = await resp.json();
+		const usdc =
+			Math.max(
+				0,
+				Number.parseFloat(
+					String(
+						payload?.usdc ??
+							payload?.usdcRate ??
+							payload?.usdcExchangeRate ??
+							1,
+					),
+				),
+			) || 1;
+		const usdt =
+			Math.max(
+				0,
+				Number.parseFloat(
+					String(
+						payload?.usdt ??
+							payload?.usdtRate ??
+							payload?.usdtExchangeRate ??
+							1,
+					),
+				),
+			) || 1;
+		const value = {
+			usdc,
+			usdt,
+			source: `${key}-api`,
+			updatedAt: String(payload?.updatedAt || new Date().toISOString()),
+		};
+		cache.ts = Date.now();
+		cache.value = value;
+		cache.source = "api";
+		return value;
+	} catch {
+		cache.ts = Date.now();
+		cache.value = fallback;
+		cache.source = "env-fallback";
+		return fallback;
+	}
+}
+
 async function getBscWalletStableBalances(account) {
 	const owner = String(account || "").trim();
 	if (!owner) throw new Error("account is required");
@@ -3439,6 +3555,10 @@ async function getBscProtocolPositions(account) {
 			};
 		}
 	};
+	const [listaRates, wombatRates] = await Promise.all([
+		getBscPositionRates("lista"),
+		getBscPositionRates("wombat"),
+	]);
 	const [
 		aaveUsdc,
 		aaveUsdt,
@@ -3465,25 +3585,25 @@ async function getBscProtocolPositions(account) {
 			BSC_LISTA_TOKEN_USDC,
 			BSC_USDC_DECIMALS,
 			"BSC_LISTA_TOKEN_USDC",
-			BSC_LISTA_USDC_EXCHANGE_RATE,
+			Number(listaRates?.usdc || BSC_LISTA_USDC_EXCHANGE_RATE),
 		),
 		readMaybe(
 			BSC_LISTA_TOKEN_USDT,
 			BSC_USDT_DECIMALS,
 			"BSC_LISTA_TOKEN_USDT",
-			BSC_LISTA_USDT_EXCHANGE_RATE,
+			Number(listaRates?.usdt || BSC_LISTA_USDT_EXCHANGE_RATE),
 		),
 		readMaybe(
 			BSC_WOMBAT_TOKEN_USDC,
 			BSC_USDC_DECIMALS,
 			"BSC_WOMBAT_TOKEN_USDC",
-			BSC_WOMBAT_USDC_EXCHANGE_RATE,
+			Number(wombatRates?.usdc || BSC_WOMBAT_USDC_EXCHANGE_RATE),
 		),
 		readMaybe(
 			BSC_WOMBAT_TOKEN_USDT,
 			BSC_USDT_DECIMALS,
 			"BSC_WOMBAT_TOKEN_USDT",
-			BSC_WOMBAT_USDT_EXCHANGE_RATE,
+			Number(wombatRates?.usdt || BSC_WOMBAT_USDT_EXCHANGE_RATE),
 		),
 	]);
 	const subtotalAave =
@@ -3549,6 +3669,20 @@ async function getBscProtocolPositions(account) {
 		venus: { usdc: venusUsdc, usdt: venusUsdt },
 		lista: { usdc: listaUsdc, usdt: listaUsdt },
 		wombat: { usdc: wombatUsdc, usdt: wombatUsdt },
+		normalizationSources: {
+			lista: {
+				source: String(listaRates?.source || "env"),
+				updatedAt: String(listaRates?.updatedAt || ""),
+				usdc: Number(listaRates?.usdc || BSC_LISTA_USDC_EXCHANGE_RATE),
+				usdt: Number(listaRates?.usdt || BSC_LISTA_USDT_EXCHANGE_RATE),
+			},
+			wombat: {
+				source: String(wombatRates?.source || "env"),
+				updatedAt: String(wombatRates?.updatedAt || ""),
+				usdc: Number(wombatRates?.usdc || BSC_WOMBAT_USDC_EXCHANGE_RATE),
+				usdt: Number(wombatRates?.usdt || BSC_WOMBAT_USDT_EXCHANGE_RATE),
+			},
+		},
 		subtotalsUsdApprox: {
 			aave: subtotalAave,
 			venus: subtotalVenus,

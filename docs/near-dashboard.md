@@ -188,6 +188,9 @@ Common mapping examples:
 - `bsc.wombat.allowedTokens` ↔ `BSC_WOMBAT_ALLOWED_TOKENS`
 - `bsc.yield.listaAprApiUrl` ↔ `BSC_LISTA_APR_API_URL`
 - `bsc.yield.wombatAprApiUrl` ↔ `BSC_WOMBAT_APR_API_URL`
+- `bsc.positions.listaRateApiUrl` ↔ `BSC_LISTA_POSITION_RATE_API_URL`
+- `bsc.positions.wombatRateApiUrl` ↔ `BSC_WOMBAT_POSITION_RATE_API_URL`
+- `bsc.positions.rateCacheTtlMs` ↔ `BSC_POSITION_RATE_CACHE_TTL_MS`
 - `bsc.aave.maxAmountRaw` ↔ `BSC_AAVE_MAX_AMOUNT_RAW`
 - `acp.dismissedPurge.enabled` ↔ `ACP_DISMISSED_PURGE_ENABLED`
 - `payments.webhookProvider` ↔ `PAYMENT_WEBHOOK_PROVIDER`
@@ -257,6 +260,9 @@ Common mapping examples:
 - `BSC_LISTA_USDT_EXCHANGE_RATE` - optional normalization rate from Lista position token to USDT underlying (default `1`)
 - `BSC_WOMBAT_USDC_EXCHANGE_RATE` - optional normalization rate from Wombat position token to USDC underlying (default `1`)
 - `BSC_WOMBAT_USDT_EXCHANGE_RATE` - optional normalization rate from Wombat position token to USDT underlying (default `1`)
+- `BSC_LISTA_POSITION_RATE_API_URL` - optional Lista normalization-rate API endpoint (preferred over static rates when available)
+- `BSC_WOMBAT_POSITION_RATE_API_URL` - optional Wombat normalization-rate API endpoint (preferred over static rates when available)
+- `BSC_POSITION_RATE_CACHE_TTL_MS` - cache TTL for Lista/Wombat normalization-rate API fetches (default `60000`)
 - `BSC_AAVE_EXECUTE_COMMAND` - command template for optional post-swap Aave supply action in aave execution mode (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`)
   - required placeholders: `{amountRaw}`, `{runId}` (missing placeholders block execution)
 - `BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT` - default execution protocol for BSC yield plan/worker (`venus|aave|lista|wombat`, default: `venus`)

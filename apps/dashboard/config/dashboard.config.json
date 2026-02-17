@@ -77,7 +77,10 @@
 			"listaUsdcExchangeRate": 1,
 			"listaUsdtExchangeRate": 1,
 			"wombatUsdcExchangeRate": 1,
-			"wombatUsdtExchangeRate": 1
+			"wombatUsdtExchangeRate": 1,
+			"listaRateApiUrl": "",
+			"wombatRateApiUrl": "",
+			"rateCacheTtlMs": 60000
 		}
 	},
 	"acp": {
