@@ -113,6 +113,9 @@ const BSC_YIELD_MIN_APR_DELTA_BPS = Math.max(
 const BSC_STABLE_APR_HINTS_JSON = String(
 	process.env.BSC_STABLE_APR_HINTS_JSON || "",
 ).trim();
+const BSC_AAVE_APR_HINTS_JSON = String(
+	process.env.BSC_AAVE_APR_HINTS_JSON || "",
+).trim();
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
 	"true";
@@ -2250,16 +2253,16 @@ async function getBscUsdtUsdcQuote(amountInRaw) {
 	};
 }
 
-async function getBscStableAprHints() {
+function parseAprHintsFromJson(raw, sourceName) {
 	const fallback = {
-		source: "default",
+		source: `${sourceName}-default`,
 		usdtSupplyAprBps: 0,
 		usdcSupplyAprBps: 0,
 		updatedAt: new Date().toISOString(),
 	};
-	if (!BSC_STABLE_APR_HINTS_JSON) return fallback;
+	if (!raw) return fallback;
 	try {
-		const parsed = JSON.parse(BSC_STABLE_APR_HINTS_JSON);
+		const parsed = JSON.parse(raw);
 		const usdtSupplyAprBps = Math.max(
 			0,
 			Number.parseInt(String(parsed?.usdtSupplyAprBps || 0), 10) || 0,
@@ -2269,14 +2272,54 @@ async function getBscStableAprHints() {
 			Number.parseInt(String(parsed?.usdcSupplyAprBps || 0), 10) || 0,
 		);
 		return {
-			source: "env-json",
+			source: `${sourceName}-env-json`,
 			usdtSupplyAprBps,
 			usdcSupplyAprBps,
 			updatedAt: String(parsed?.updatedAt || new Date().toISOString()),
 		};
 	} catch {
-		return { ...fallback, source: "default-invalid-env-json" };
+		return { ...fallback, source: `${sourceName}-invalid-env-json` };
 	}
+}
+
+async function getBscStableAprHints() {
+	return parseAprHintsFromJson(BSC_STABLE_APR_HINTS_JSON, "venus");
+}
+
+async function getBscAaveAprHints() {
+	return parseAprHintsFromJson(BSC_AAVE_APR_HINTS_JSON, "aave");
+}
+
+async function getBscLendingMarketCompare() {
+	const [venus, aave] = await Promise.all([
+		getBscStableAprHints(),
+		getBscAaveAprHints(),
+	]);
+	const bestUsdtProtocol =
+		venus.usdtSupplyAprBps >= aave.usdtSupplyAprBps ? "venus" : "aave";
+	const bestUsdcProtocol =
+		venus.usdcSupplyAprBps >= aave.usdcSupplyAprBps ? "venus" : "aave";
+	return {
+		ok: true,
+		chain: "bsc",
+		markets: { venus, aave },
+		recommendation: {
+			bestUsdtSupply: {
+				protocol: bestUsdtProtocol,
+				aprBps:
+					bestUsdtProtocol === "venus"
+						? venus.usdtSupplyAprBps
+						: aave.usdtSupplyAprBps,
+			},
+			bestUsdcSupply: {
+				protocol: bestUsdcProtocol,
+				aprBps:
+					bestUsdcProtocol === "venus"
+						? venus.usdcSupplyAprBps
+						: aave.usdcSupplyAprBps,
+			},
+		},
+	};
 }
 
 async function getBscWalletStableBalances(account) {
@@ -2418,10 +2461,22 @@ async function computeBscYieldPlan(input = {}) {
 			10,
 		) || BSC_YIELD_MIN_APR_DELTA_BPS,
 	);
-	const [balances, aprHints] = await Promise.all([
+	const [balances, compare] = await Promise.all([
 		getBscWalletStableBalances(account),
-		getBscStableAprHints(),
+		getBscLendingMarketCompare(),
 	]);
+	const aprHints = {
+		source: "best-of-venus-aave",
+		usdtSupplyAprBps: Math.max(
+			compare.markets.venus.usdtSupplyAprBps,
+			compare.markets.aave.usdtSupplyAprBps,
+		),
+		usdcSupplyAprBps: Math.max(
+			compare.markets.venus.usdcSupplyAprBps,
+			compare.markets.aave.usdcSupplyAprBps,
+		),
+		updatedAt: new Date().toISOString(),
+	};
 	const plan = buildBscYieldPlan({
 		balances,
 		targetUsdcBps,
@@ -2437,6 +2492,7 @@ async function computeBscYieldPlan(input = {}) {
 		account,
 		balances,
 		aprHints,
+		marketCompare: compare,
 		minAprDeltaBps,
 		plan,
 	};
@@ -4000,17 +4056,10 @@ const server = http.createServer(async (req, res) => {
 		}
 
 		if (url.pathname === "/api/bsc/yield/markets") {
-			const aprHints = await getBscStableAprHints();
+			const compare = await getBscLendingMarketCompare();
 			return json(res, 200, {
-				ok: true,
-				chain: "bsc",
-				markets: {
-					usdt: { supplyAprBps: aprHints.usdtSupplyAprBps },
-					usdc: { supplyAprBps: aprHints.usdcSupplyAprBps },
-				},
+				...compare,
 				minAprDeltaBpsDefault: BSC_YIELD_MIN_APR_DELTA_BPS,
-				source: aprHints.source,
-				updatedAt: aprHints.updatedAt,
 			});
 		}
 
