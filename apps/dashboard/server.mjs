@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -103,6 +104,9 @@ const ACP_DISMISSED_PURGE_INTERVAL_MS = Math.max(
 		10,
 	) || 6 * 60 * 60 * 1000,
 );
+const PAYMENT_WEBHOOK_SECRET = String(
+	process.env.PAYMENT_WEBHOOK_SECRET || "",
+).trim();
 const NEAR_RPC_RETRY_ROUNDS = Number.parseInt(
 	process.env.NEAR_RPC_RETRY_ROUNDS || "2",
 	10,
@@ -1230,6 +1234,76 @@ function findPaymentById(paymentId) {
 	return STRATEGY_PAYMENTS.find(
 		(row) => String(row?.paymentId || "") === String(paymentId || ""),
 	);
+}
+
+function verifyPaymentWebhookSignature(rawBody, signatureHeader) {
+	if (!PAYMENT_WEBHOOK_SECRET) return true;
+	const sig = String(signatureHeader || "").trim();
+	if (!sig) return false;
+	const digest = createHmac("sha256", PAYMENT_WEBHOOK_SECRET)
+		.update(String(rawBody || ""), "utf8")
+		.digest("hex");
+	const expected = `sha256=${digest}`;
+	const a = Buffer.from(sig);
+	const b = Buffer.from(expected);
+	if (a.length !== b.length) return false;
+	return timingSafeEqual(a, b);
+}
+
+function applyPaymentStatusUpdate(payload, source = "manual") {
+	const paymentId = String(payload?.paymentId || "").trim();
+	const payment = findPaymentById(paymentId);
+	if (!payment) {
+		return {
+			ok: false,
+			status: 404,
+			error: `payment '${paymentId}' not found`,
+		};
+	}
+	const isPaid =
+		String(payload?.status || "").toLowerCase() === "paid" ||
+		payload?.paid !== false;
+	if (payment.status === "paid" && isPaid) {
+		return {
+			ok: true,
+			payment,
+			entitlementGranted: false,
+			reason: "already_paid",
+		};
+	}
+	payment.status = isPaid ? "paid" : "failed";
+	payment.txRef = payload?.txRef || payment.txRef || null;
+	payment.webhookEventId = payload?.eventId || payment.webhookEventId || null;
+	payment.webhookSource = source;
+	payment.updatedAt = new Date().toISOString();
+	let entitlement = null;
+	if (payment.status === "paid") {
+		const entitlementUses = Math.max(
+			1,
+			Number.parseInt(String(payload?.entitlementUses || 30), 10) || 30,
+		);
+		const entitlementDays = Math.max(
+			1,
+			Number.parseInt(String(payload?.entitlementDays || 30), 10) || 30,
+		);
+		const expiresAt = new Date(
+			Date.now() + entitlementDays * 24 * 60 * 60 * 1000,
+		).toISOString();
+		entitlement = grantStrategyEntitlement({
+			strategyId: payment.strategyId,
+			buyer: payment.buyer,
+			uses: entitlementUses,
+			expiresAt,
+			sourceReceiptId: payment.paymentId,
+			sourcePaymentId: payment.paymentId,
+		});
+	}
+	return {
+		ok: true,
+		payment,
+		entitlementGranted: Boolean(entitlement),
+		entitlement,
+	};
 }
 
 async function executeAcpJob(payload) {
@@ -2871,54 +2945,41 @@ const server = http.createServer(async (req, res) => {
 			if (payload.confirm !== true) {
 				return json(res, 400, { ok: false, error: "Missing confirm=true" });
 			}
-			const paymentId = String(payload.paymentId || "").trim();
-			const payment = findPaymentById(paymentId);
-			if (!payment) {
-				return json(res, 404, {
-					ok: false,
-					error: `payment '${paymentId}' not found`,
-				});
-			}
-			if (payment.status === "paid") {
-				return json(res, 200, {
-					ok: true,
-					payment,
-					entitlementGranted: false,
-					reason: "already_paid",
-				});
-			}
-			payment.status = payload.paid === false ? "failed" : "paid";
-			payment.txRef = payload.txRef || payment.txRef || null;
-			payment.updatedAt = new Date().toISOString();
-			let entitlement = null;
-			if (payment.status === "paid") {
-				const entitlementUses = Math.max(
-					1,
-					Number.parseInt(String(payload.entitlementUses || 30), 10) || 30,
-				);
-				const entitlementDays = Math.max(
-					1,
-					Number.parseInt(String(payload.entitlementDays || 30), 10) || 30,
-				);
-				const expiresAt = new Date(
-					Date.now() + entitlementDays * 24 * 60 * 60 * 1000,
-				).toISOString();
-				entitlement = grantStrategyEntitlement({
-					strategyId: payment.strategyId,
-					buyer: payment.buyer,
-					uses: entitlementUses,
-					expiresAt,
-					sourceReceiptId: payment.paymentId,
-					sourcePaymentId: payment.paymentId,
-				});
-			}
+			const out = applyPaymentStatusUpdate(payload, "manual-confirm");
+			if (!out.ok) return json(res, out.status || 400, out);
 			await saveMarketplaceToDisk();
-			return json(res, 200, {
-				ok: true,
-				payment,
-				entitlementGranted: Boolean(entitlement),
-				entitlement,
-			});
+			return json(res, 200, out);
+		}
+
+		if (url.pathname === "/api/payments/webhook" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const rawText = Buffer.concat(chunks).toString("utf8") || "{}";
+			const signature =
+				req.headers["x-payment-signature"] ||
+				req.headers["x-openclaw-signature"];
+			if (!verifyPaymentWebhookSignature(rawText, signature)) {
+				return json(res, 401, {
+					ok: false,
+					error: "Invalid webhook signature",
+				});
+			}
+			const payload = JSON.parse(rawText);
+			const out = applyPaymentStatusUpdate(
+				{
+					paymentId: payload?.paymentId,
+					status: payload?.status,
+					paid: payload?.paid,
+					txRef: payload?.txRef || payload?.txHash || null,
+					eventId: payload?.eventId || payload?.id || null,
+					entitlementUses: payload?.entitlementUses,
+					entitlementDays: payload?.entitlementDays,
+				},
+				"provider-webhook",
+			);
+			if (!out.ok) return json(res, out.status || 400, out);
+			await saveMarketplaceToDisk();
+			return json(res, 200, { ok: true, ...out });
 		}
 
 		if (url.pathname === "/api/payments") {

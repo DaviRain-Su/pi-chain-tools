@@ -27,6 +27,9 @@ export ACP_DISMISSED_PURGE_ENABLED=true
 export ACP_DISMISSED_PURGE_DAYS=7
 export ACP_DISMISSED_PURGE_INTERVAL_MS=21600000
 
+# 可选：支付回调签名校验
+export PAYMENT_WEBHOOK_SECRET='replace-with-shared-secret'
+
 export BSC_EXECUTE_ENABLED=false
 ```
 
@@ -71,6 +74,14 @@ curl -s -X POST http://127.0.0.1:4173/api/payments/create \
 curl -s -X POST http://127.0.0.1:4173/api/payments/confirm \
   -H 'content-type: application/json' \
   -d '{"confirm":true,"paymentId":"pay-REPLACE","txRef":"tx-demo"}'
+```
+
+2.1 Provider webhook（可选，建议配置签名）：
+```bash
+curl -s -X POST http://127.0.0.1:4173/api/payments/webhook \
+  -H 'content-type: application/json' \
+  -H 'x-payment-signature: sha256=REPLACE' \
+  -d '{"paymentId":"pay-REPLACE","status":"paid","txRef":"tx-provider"}'
 ```
 
 3. 查询支付记录：

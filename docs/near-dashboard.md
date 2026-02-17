@@ -89,6 +89,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `POST /api/strategies/purchase` (`confirm=true`) -> direct purchase path (legacy simulation) + entitlement grant (`entitlementUses`, `entitlementDays`, default 30/30)
   - `POST /api/payments/create` (`confirm=true`) -> create pending payment intent for `strategyId + buyer`
   - `POST /api/payments/confirm` (`confirm=true`) -> confirm payment status (`paid|failed`), and grant entitlement only when paid
+  - `POST /api/payments/webhook` -> provider callback entry (optional signature verification via `PAYMENT_WEBHOOK_SECRET`; header `x-payment-signature`/`x-openclaw-signature`)
   - `GET /api/payments` -> payment records (pending/paid/failed)
   - `GET /api/strategies/purchases` -> recent purchase receipts
   - `GET /api/strategies/entitlements?buyer=...&strategyId=...` -> entitlement snapshots (remaining uses + expiry)
@@ -158,6 +159,7 @@ Open:
 - `ACP_DISMISSED_PURGE_ENABLED` - enable automatic dismissed-archive purge scheduler (`true|false`, default: `false`)
 - `ACP_DISMISSED_PURGE_DAYS` - purge threshold in days for dismissed jobs (default: `7`)
 - `ACP_DISMISSED_PURGE_INTERVAL_MS` - purge scheduler interval in milliseconds (default: `21600000` = 6h)
+- `PAYMENT_WEBHOOK_SECRET` - optional HMAC secret for `/api/payments/webhook` signature verification (`sha256=<hex>`)
 
 Example:
 
