@@ -71,6 +71,11 @@ const NEAR_RPC_ALERT_429_COUNT = Number.parseInt(
 	process.env.NEAR_RPC_ALERT_429_COUNT || "10",
 	10,
 );
+const NEAR_RPC_WARMUP_CALLS = Number.parseInt(
+	process.env.NEAR_RPC_WARMUP_CALLS ||
+		String(Math.max(2, RPC_ENDPOINTS.length * 2)),
+	10,
+);
 
 const ACTION_HISTORY = [];
 const TOKEN_DECIMALS_CACHE = new Map();
@@ -236,12 +241,21 @@ function getRpcEndpointsByHealth() {
 	return [...ranked, ...missing];
 }
 
+function getRpcEndpointsForCall() {
+	if (RPC_ENDPOINTS.length <= 1) return [...RPC_ENDPOINTS];
+	if (RPC_METRICS.totalCalls < Math.max(1, NEAR_RPC_WARMUP_CALLS)) {
+		const offset = RPC_METRICS.totalCalls % RPC_ENDPOINTS.length;
+		return [...RPC_ENDPOINTS.slice(offset), ...RPC_ENDPOINTS.slice(0, offset)];
+	}
+	return getRpcEndpointsByHealth();
+}
+
 async function nearRpc(method, params) {
 	RPC_METRICS.totalCalls += 1;
 	let lastError = null;
 	const rounds = Math.max(1, NEAR_RPC_RETRY_ROUNDS + 1);
 	for (let round = 0; round < rounds; round += 1) {
-		const orderedEndpoints = getRpcEndpointsByHealth();
+		const orderedEndpoints = getRpcEndpointsForCall();
 		for (const endpoint of orderedEndpoints) {
 			RPC_METRICS.totalAttempts += 1;
 			if (round > 0) RPC_METRICS.totalRetries += 1;
