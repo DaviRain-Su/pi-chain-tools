@@ -125,10 +125,19 @@ curl -s -X POST 'http://127.0.0.1:4173/api/crosschain/debridge/quote' \
   -d '{"originChain":"ethereum","destinationChain":"bsc","tokenIn":"ETH","tokenOut":"USDC","amount":"1000000000000000000"}'
 ```
 
+execute（强门禁，需 confirm=true）：
+```bash
+curl -s -X POST 'http://127.0.0.1:4173/api/crosschain/debridge/execute' \
+  -H 'content-type: application/json' \
+  -d '{"confirm":true,"originChain":"ethereum","destinationChain":"bsc","tokenIn":"ETH","tokenOut":"USDC","amount":"1000000000000000000"}'
+```
+
 建议最小配置：
 ```bash
 export DEBRIDGE_MCP_ENABLED=true
 export DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp --help'
+export DEBRIDGE_MCP_EXECUTE_ENABLED=false
+export DEBRIDGE_MCP_EXECUTE_COMMAND=''
 export DEBRIDGE_MCP_TIMEOUT_MS=120000
 ```
 

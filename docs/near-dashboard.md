@@ -149,10 +149,11 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `scripts/ci-resilient.mjs` appends JSONL records to `apps/dashboard/data/ci-signatures.jsonl` (override via `CI_SIGNATURES_JSONL_PATH`)
   - read-only API: `GET /api/ops/ci-signatures?limit=50` (returns newest-first rows)
 - deBridge MCP readiness (cross-chain integration hook):
-  - `GET /api/crosschain/debridge/readiness` (returns `enabled/commandConfigured/canExecute/blockers/hints`)
-  - `POST /api/crosschain/debridge/plan` (returns `canQuote/blockers/hints/fixPack` + `next=/api/crosschain/debridge/quote`)
+  - `GET /api/crosschain/debridge/readiness` (returns `enabled/commandConfigured/executeEnabled/executeCommandConfigured/canExecute/blockers/hints`)
+  - `POST /api/crosschain/debridge/plan` (returns `canQuote/canExecute/blockers/executeBlockers/hints/fixPack` + `next=/api/crosschain/debridge/quote`)
   - `POST /api/crosschain/debridge/quote` (dry-run quote bridge; requires `originChain/destinationChain/tokenIn/tokenOut/amount`; returns `mode=quote|blocked` + `quote/rawOutput`)
-  - config: `crosschain.debridge.enabled|command|timeoutMs` (`DEBRIDGE_MCP_ENABLED|DEBRIDGE_MCP_COMMAND|DEBRIDGE_MCP_TIMEOUT_MS`)
+  - `POST /api/crosschain/debridge/execute` (`confirm=true` required; gated by `DEBRIDGE_MCP_EXECUTE_ENABLED` + execute command)
+  - config: `crosschain.debridge.enabled|command|executeEnabled|executeCommand|timeoutMs` (`DEBRIDGE_MCP_ENABLED|DEBRIDGE_MCP_COMMAND|DEBRIDGE_MCP_EXECUTE_ENABLED|DEBRIDGE_MCP_EXECUTE_COMMAND|DEBRIDGE_MCP_TIMEOUT_MS`)
   - command placeholders (if used in command template): `{originChain} {destinationChain} {tokenIn} {tokenOut} {amount} {recipient} {account}`
 - Rebalance risk guards (env-tunable): max amount, min quote out, max slippage, cooldown, and daily execution cap (`NEAR_REBAL_*`)
   - `NEAR_REBAL_MAX_AMOUNT_RAW` (default `5000000`)

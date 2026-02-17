@@ -127,6 +127,21 @@ const DEBRIDGE_MCP_ENABLED =
 const DEBRIDGE_MCP_COMMAND = String(
 	envOrCfg("DEBRIDGE_MCP_COMMAND", "crosschain.debridge.command", ""),
 ).trim();
+const DEBRIDGE_MCP_EXECUTE_ENABLED =
+	String(
+		envOrCfg(
+			"DEBRIDGE_MCP_EXECUTE_ENABLED",
+			"crosschain.debridge.executeEnabled",
+			"false",
+		),
+	).toLowerCase() === "true";
+const DEBRIDGE_MCP_EXECUTE_COMMAND = String(
+	envOrCfg(
+		"DEBRIDGE_MCP_EXECUTE_COMMAND",
+		"crosschain.debridge.executeCommand",
+		"",
+	),
+).trim();
 const DEBRIDGE_MCP_TIMEOUT_MS = Math.max(
 	1_000,
 	Number.parseInt(
@@ -6264,6 +6279,8 @@ const server = http.createServer(async (req, res) => {
 				provider: "debridge-mcp",
 				enabled: DEBRIDGE_MCP_ENABLED,
 				commandConfigured: Boolean(DEBRIDGE_MCP_COMMAND),
+				executeEnabled: DEBRIDGE_MCP_EXECUTE_ENABLED,
+				executeCommandConfigured: Boolean(DEBRIDGE_MCP_EXECUTE_COMMAND),
 				timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
 				canExecute: blockers.length === 0,
 				blockers,
@@ -6381,10 +6398,18 @@ const server = http.createServer(async (req, res) => {
 			if (!tokenIn) blockers.push("missing_token_in");
 			if (!tokenOut) blockers.push("missing_token_out");
 			if (!amount) blockers.push("missing_amount");
+			const executeBlockers = [];
+			if (!DEBRIDGE_MCP_EXECUTE_ENABLED)
+				executeBlockers.push("debridge_mcp_execute_disabled");
+			if (!DEBRIDGE_MCP_EXECUTE_COMMAND)
+				executeBlockers.push("missing_debridge_mcp_execute_command");
 			const hints = {
 				debridge_mcp_disabled: "DEBRIDGE_MCP_ENABLED=true",
 				missing_debridge_mcp_command:
 					"DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp quote --from {originChain} --to {destinationChain} --token-in {tokenIn} --token-out {tokenOut} --amount {amount}'",
+				debridge_mcp_execute_disabled: "DEBRIDGE_MCP_EXECUTE_ENABLED=true",
+				missing_debridge_mcp_execute_command:
+					"DEBRIDGE_MCP_EXECUTE_COMMAND='npx @debridge-finance/debridge-mcp execute --from {originChain} --to {destinationChain} --token-in {tokenIn} --token-out {tokenOut} --amount {amount} --recipient {recipient}'",
 				missing_origin_chain: "originChain=<source chain id>",
 				missing_destination_chain: "destinationChain=<target chain id>",
 				missing_token_in: "tokenIn=<source token address/symbol>",
@@ -6394,8 +6419,10 @@ const server = http.createServer(async (req, res) => {
 			const fixPack = [
 				"# debridge mcp plan fix pack",
 				`DEBRIDGE_MCP_ENABLED=${DEBRIDGE_MCP_ENABLED}`,
+				`DEBRIDGE_MCP_EXECUTE_ENABLED=${DEBRIDGE_MCP_EXECUTE_ENABLED}`,
 				`DEBRIDGE_MCP_TIMEOUT_MS=${DEBRIDGE_MCP_TIMEOUT_MS}`,
 				`DEBRIDGE_MCP_COMMAND=${DEBRIDGE_MCP_COMMAND || "<set_quote_command>"}`,
+				`DEBRIDGE_MCP_EXECUTE_COMMAND=${DEBRIDGE_MCP_EXECUTE_COMMAND || "<set_execute_command>"}`,
 				"# placeholders: {originChain} {destinationChain} {tokenIn} {tokenOut} {amount} {recipient} {account}",
 			].join("\n");
 			return json(res, 200, {
@@ -6403,7 +6430,9 @@ const server = http.createServer(async (req, res) => {
 				mode: blockers.length === 0 ? "ready" : "blocked",
 				provider: "debridge-mcp",
 				canQuote: blockers.length === 0,
+				canExecute: blockers.length === 0 && executeBlockers.length === 0,
 				blockers,
+				executeBlockers,
 				hints,
 				fixPack,
 				request: {
@@ -6419,6 +6448,81 @@ const server = http.createServer(async (req, res) => {
 					path: "/api/crosschain/debridge/quote",
 				},
 			});
+		}
+
+		if (
+			url.pathname === "/api/crosschain/debridge/execute" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const blockers = [];
+			if (!DEBRIDGE_MCP_ENABLED) blockers.push("debridge_mcp_disabled");
+			if (!DEBRIDGE_MCP_EXECUTE_ENABLED)
+				blockers.push("debridge_mcp_execute_disabled");
+			if (!DEBRIDGE_MCP_EXECUTE_COMMAND)
+				blockers.push("missing_debridge_mcp_execute_command");
+			const originChain = String(payload.originChain || "").trim();
+			const destinationChain = String(payload.destinationChain || "").trim();
+			const tokenIn = String(payload.tokenIn || "").trim();
+			const tokenOut = String(payload.tokenOut || "").trim();
+			const amount = String(payload.amount || "").trim();
+			if (!originChain) blockers.push("missing_origin_chain");
+			if (!destinationChain) blockers.push("missing_destination_chain");
+			if (!tokenIn) blockers.push("missing_token_in");
+			if (!tokenOut) blockers.push("missing_token_out");
+			if (!amount) blockers.push("missing_amount");
+			if (blockers.length > 0) {
+				return json(res, 200, {
+					ok: true,
+					mode: "blocked",
+					provider: "debridge-mcp",
+					blockers,
+				});
+			}
+			const replacements = {
+				"{originChain}": originChain,
+				"{destinationChain}": destinationChain,
+				"{tokenIn}": tokenIn,
+				"{tokenOut}": tokenOut,
+				"{amount}": amount,
+				"{recipient}": String(payload.recipient || "").trim(),
+				"{account}": String(payload.account || "").trim(),
+			};
+			let cmd = DEBRIDGE_MCP_EXECUTE_COMMAND;
+			for (const [k, v] of Object.entries(replacements)) {
+				cmd = cmd.split(k).join(v);
+			}
+			try {
+				const output = await runCommand("bash", ["-lc", cmd], {
+					env: process.env,
+					cwd: ACP_WORKDIR,
+					timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
+				});
+				const txHash =
+					String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
+				return json(res, 200, {
+					ok: true,
+					mode: "execute",
+					provider: "debridge-mcp",
+					txHash,
+					result: tryExtractJsonFromText(output),
+					rawOutput: output,
+				});
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : String(error);
+				return json(res, 500, {
+					ok: false,
+					provider: "debridge-mcp",
+					error: "debridge_execute_failed",
+					message: msg,
+				});
+			}
 		}
 
 		if (url.pathname === "/api/bsc/yield/plan") {
