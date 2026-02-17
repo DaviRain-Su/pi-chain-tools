@@ -1025,6 +1025,38 @@
         cmdMetaEl.textContent = `Parsed raw output: ${m[1]}`;
       });
 
+      function renderStrategyDslHints(result) {
+        const errs = Array.isArray(result?.errors) ? result.errors : [];
+        const warns = Array.isArray(result?.warnings) ? result.warnings : [];
+        const fieldMap = {};
+        const pickKey = (line) => {
+          const m = String(line || "").match(/^([a-zA-Z0-9_.-]+):/);
+          return m ? m[1] : null;
+        };
+        for (const item of errs) {
+          const k = pickKey(item);
+          if (!k) continue;
+          fieldMap[k] = fieldMap[k] || { errors: [], warnings: [] };
+          fieldMap[k].errors.push(item);
+        }
+        for (const item of warns) {
+          const k = pickKey(item);
+          if (!k) continue;
+          fieldMap[k] = fieldMap[k] || { errors: [], warnings: [] };
+          fieldMap[k].warnings.push(item);
+        }
+        const lines = [];
+        if (Object.keys(fieldMap).length > 0) {
+          lines.push("Field hints:");
+          for (const [k, v] of Object.entries(fieldMap)) {
+            const e = v.errors.length ? `errors=${v.errors.length}` : "";
+            const w = v.warnings.length ? `warnings=${v.warnings.length}` : "";
+            lines.push(`- ${k} ${[e, w].filter(Boolean).join(" ")}`);
+          }
+        }
+        return lines.join("\n");
+      }
+
       async function runStrategyDslValidate() {
         let payload;
         try {
@@ -1039,7 +1071,8 @@
           body: JSON.stringify(payload),
         });
         const data = await res.json().catch(() => ({}));
-        strategyDslResultEl.textContent = JSON.stringify(data, null, 2);
+        const hints = renderStrategyDslHints(data);
+        strategyDslResultEl.textContent = `${JSON.stringify(data, null, 2)}${hints ? `\n\n${hints}` : ""}`;
         strategyDslMetaEl.textContent = data?.ok
           ? `Ready (${data.phase || "ready"})`
           : `Validation failed (${data.phase || "unknown"})`;

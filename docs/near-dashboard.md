@@ -50,6 +50,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - accepts either `dsl` object or legacy fields; returns `phase=schema|semantic|ready`
     - includes `errors[]`, `warnings[]`, and `normalized` DSL when available
     - dashboard UI now supports one-click `Validate -> Publish` flow (calls `/api/strategies` with `confirm=true` only after preflight success)
+    - validation output includes simple field-level hints by parsing `field:`-prefixed errors/warnings (e.g., `risk.maxSlippageBps:`)
   - `POST /api/strategies` (`confirm=true`) -> create/update strategy metadata with Strategy DSL v1 + semantic policy validation
     - preferred: submit `dsl` object (validated against `docs/schemas/strategy-dsl.v1.schema.json` and policy semantics)
     - compatible: legacy top-level fields (`id/name/creator/priceUsd/...`) are auto-mapped into DSL v1 then validated
