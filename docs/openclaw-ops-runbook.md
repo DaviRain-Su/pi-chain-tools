@@ -164,3 +164,18 @@ npm test
 - provider-specific 支付签名/回调契约再细化（生产级验签规范）
 - BSC 多跳路径与更复杂路由策略
 - 归档策略与指标告警策略继续精炼
+
+### BSC 分期状态（收尾）
+
+Phase-1（本期，已完成）
+- BSC yield 四协议（venus/aave/lista/wombat）读侧接入 + APR/health/risk 汇总
+- `POST /api/bsc/yield/execute` + post-action artifact/reconcile 统一链路
+- Lista/Wombat command-mode 执行守卫（mode/timeout/max/token/placeholders）
+- 执行与 reconcile 双 registry（便于替换单协议 adapter）
+- native readiness 公开：`executionReadiness.nativeSlotImplemented`
+- CI resilient 自愈 + signature telemetry（JSONL + `/api/ops/ci-signatures`）
+
+Phase-2（下期，最小目标）
+- 落地一个协议的 native slot 真实实现（建议 Lista）
+- native slot 协议级单测（success/failure/retryable 分类）
+- Dashboard readiness 卡片显式展示 native slot implemented 状态
