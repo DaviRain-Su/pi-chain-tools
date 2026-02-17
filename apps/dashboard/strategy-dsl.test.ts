@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildStrategyDslFromLegacy,
 	validateStrategyDslV1,
+	validateStrategySemanticV1,
 } from "./strategy-dsl.mjs";
 
 describe("strategy dsl v1 validator", () => {
@@ -53,5 +54,27 @@ describe("strategy dsl v1 validator", () => {
 		const result = validateStrategyDslV1(dsl);
 		expect(result.ok).toBe(true);
 		expect(result.normalized.targetChain).toBe("bsc");
+	});
+
+	it("blocks semantic violations against policy limits", () => {
+		const parsed = validateStrategyDslV1({
+			id: "s2",
+			name: "strict",
+			creator: "alice",
+			version: "1.0.0",
+			targetChain: "near",
+			intentType: "swap.stable",
+			pricing: { priceUsd: 9, currency: "USDC" },
+			risk: { maxAmountUsd: 10, maxSlippageBps: 80, dailyRunLimit: 99 },
+			execution: { mode: "plan-only" },
+		});
+		expect(parsed.ok).toBe(true);
+		const semantic = validateStrategySemanticV1(parsed.normalized, {
+			constraints: { minRebalanceUsd: 50, maxDailyRebalanceRuns: 10 },
+			monetization: { settlementToken: "USDC", platformTakeRate: 0.15 },
+		});
+		expect(semantic.ok).toBe(false);
+		expect(semantic.errors.join(" ")).toContain("minRebalanceUsd");
+		expect(semantic.errors.join(" ")).toContain("maxDailyRebalanceRuns");
 	});
 });

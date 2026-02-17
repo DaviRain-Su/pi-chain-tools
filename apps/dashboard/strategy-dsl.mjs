@@ -6,6 +6,15 @@ const ALLOWED_INTENTS = new Set([
 ]);
 const ALLOWED_EXECUTION_MODES = new Set(["plan-only", "execute"]);
 
+const CHAIN_INTENT_PREFIX = {
+	near: ["rebalance.", "swap."],
+	bsc: ["rebalance.", "swap."],
+	base: ["swap."],
+	evm: ["swap."],
+	solana: ["swap."],
+	sui: ["swap."],
+};
+
 function asObject(value) {
 	return value && typeof value === "object" && !Array.isArray(value)
 		? value
@@ -115,6 +124,81 @@ export function validateStrategyDslV1(input) {
 			inputs: asObject(dsl.inputs) || {},
 		},
 	};
+}
+
+export function validateStrategySemanticV1(normalizedDsl, policy = {}) {
+	const errors = [];
+	const warnings = [];
+	const dsl = asObject(normalizedDsl);
+	if (!dsl) {
+		return { ok: false, errors: ["normalized dsl is required"], warnings };
+	}
+
+	const constraints = asObject(policy.constraints) || {};
+	const monetization = asObject(policy.monetization) || {};
+	const maxDailyRebalanceRuns = Number(constraints.maxDailyRebalanceRuns || 10);
+	const minRebalanceUsd = Number(constraints.minRebalanceUsd || 0);
+	const settlementToken = String(
+		monetization.settlementToken || "USDC",
+	).toUpperCase();
+	const platformTakeRate = Number(monetization.platformTakeRate || 0.15);
+
+	if (Number.isFinite(minRebalanceUsd) && minRebalanceUsd > 0) {
+		if (Number(dsl.risk?.maxAmountUsd || 0) < minRebalanceUsd) {
+			errors.push(
+				`risk.maxAmountUsd (${dsl.risk?.maxAmountUsd}) must be >= policy minRebalanceUsd (${minRebalanceUsd})`,
+			);
+		}
+	}
+
+	if (
+		Number.isFinite(maxDailyRebalanceRuns) &&
+		maxDailyRebalanceRuns > 0 &&
+		Number(dsl.risk?.dailyRunLimit || 0) > maxDailyRebalanceRuns
+	) {
+		errors.push(
+			`risk.dailyRunLimit (${dsl.risk?.dailyRunLimit}) exceeds policy maxDailyRebalanceRuns (${maxDailyRebalanceRuns})`,
+		);
+	}
+
+	const prefixes = CHAIN_INTENT_PREFIX[dsl.targetChain] || [];
+	if (prefixes.length > 0) {
+		const allowedByPrefix = prefixes.some((prefix) =>
+			String(dsl.intentType || "").startsWith(prefix),
+		);
+		if (!allowedByPrefix) {
+			errors.push(
+				`intentType '${dsl.intentType}' is not compatible with targetChain '${dsl.targetChain}'`,
+			);
+		}
+	}
+
+	if (
+		dsl.execution?.mode === "execute" &&
+		Number(dsl.risk?.maxSlippageBps || 0) > 200
+	) {
+		warnings.push(
+			"execution.mode=execute with maxSlippageBps > 200 is high risk; recommend <= 200",
+		);
+	}
+
+	if (settlementToken && dsl.pricing?.currency !== settlementToken) {
+		warnings.push(
+			`pricing.currency (${dsl.pricing?.currency}) differs from policy settlementToken (${settlementToken})`,
+		);
+	}
+
+	if (
+		!Number.isFinite(platformTakeRate) ||
+		platformTakeRate < 0 ||
+		platformTakeRate > 0.9
+	) {
+		warnings.push(
+			"policy.monetization.platformTakeRate is out of expected range [0,0.9]",
+		);
+	}
+
+	return { ok: errors.length === 0, errors, warnings };
 }
 
 export function buildStrategyDslFromLegacy(payload) {

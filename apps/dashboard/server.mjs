@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
 	buildStrategyDslFromLegacy,
 	validateStrategyDslV1,
+	validateStrategySemanticV1,
 } from "./strategy-dsl.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -2107,6 +2108,21 @@ const server = http.createServer(async (req, res) => {
 					});
 				}
 				const normalized = validation.normalized;
+				const semantic = validateStrategySemanticV1(
+					normalized,
+					PORTFOLIO_POLICY,
+				);
+				if (!semantic.ok) {
+					return json(res, 400, {
+						ok: false,
+						error: "strategy semantic validation failed",
+						errors: semantic.errors,
+						warnings: [
+							...(validation.warnings || []),
+							...(semantic.warnings || []),
+						],
+					});
+				}
 				const row = {
 					id: normalized.id,
 					name: normalized.name,
@@ -2119,7 +2135,10 @@ const server = http.createServer(async (req, res) => {
 					dsl: normalized,
 					validation: {
 						ok: true,
-						warnings: validation.warnings,
+						warnings: [
+							...(validation.warnings || []),
+							...(semantic.warnings || []),
+						],
 						validatedAt: new Date().toISOString(),
 					},
 					updatedAt: new Date().toISOString(),
