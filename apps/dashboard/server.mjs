@@ -2279,6 +2279,12 @@ async function executeBscWombatSupply(params) {
 	return executeBscWombatSupplyViaCommand(params);
 }
 
+const BSC_NATIVE_SLOT_IMPLEMENTED = {
+	aave: true,
+	lista: false,
+	wombat: false,
+};
+
 const BSC_POST_ACTION_SUPPLY_EXECUTORS = {
 	aave: executeBscAaveSupply,
 	lista: executeBscListaSupply,
@@ -4456,6 +4462,7 @@ async function computeBscYieldPlan(input = {}) {
 		wombatMode: BSC_WOMBAT_EXECUTE_MODE,
 		listaNativeEnabled: BSC_LISTA_NATIVE_EXECUTE_ENABLED,
 		wombatNativeEnabled: BSC_WOMBAT_NATIVE_EXECUTE_ENABLED,
+		nativeSlotImplemented: BSC_NATIVE_SLOT_IMPLEMENTED,
 		canExecute,
 		reason: canExecute
 			? "ok"
@@ -6160,6 +6167,7 @@ const server = http.createServer(async (req, res) => {
 					wombatMode: BSC_WOMBAT_EXECUTE_MODE,
 					listaNativeEnabled: BSC_LISTA_NATIVE_EXECUTE_ENABLED,
 					wombatNativeEnabled: BSC_WOMBAT_NATIVE_EXECUTE_ENABLED,
+					nativeSlotImplemented: BSC_NATIVE_SLOT_IMPLEMENTED,
 				},
 				minAprDeltaBpsDefault: BSC_YIELD_MIN_APR_DELTA_BPS,
 			});
