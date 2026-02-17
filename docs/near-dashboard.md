@@ -65,6 +65,8 @@ Open:
 - `NEAR_ACCOUNT_ID` - default account loaded in UI (fallback: `davirain8.near`)
 - `NEAR_RPC_URL` - single JSON-RPC endpoint
 - `NEAR_RPC_URLS` - comma-separated RPC list with automatic 429 fallback (recommended)
+- `NEAR_RPC_RETRY_ROUNDS` - extra retry rounds across endpoint list for transient 429/5xx (default: `2`)
+- `NEAR_RPC_RETRY_BASE_MS` - backoff base in milliseconds between retry rounds (default: `250`)
 - `NEAR_DASHBOARD_PORT` - web port (fallback: `4173`)
 
 Example:

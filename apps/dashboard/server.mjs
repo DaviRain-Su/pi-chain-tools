@@ -151,32 +151,49 @@ function formatUnits(raw, decimals) {
 
 async function nearRpc(method, params) {
 	let lastError = null;
-	for (const endpoint of RPC_ENDPOINTS) {
-		try {
-			const response = await fetch(endpoint, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					jsonrpc: "2.0",
-					id: "near-dashboard",
-					method,
-					params,
-				}),
-			});
-			if (!response.ok) {
-				if (response.status === 429) {
-					lastError = new Error(`RPC HTTP 429 at ${endpoint}`);
-					continue;
+	const rounds = Math.max(1, NEAR_RPC_RETRY_ROUNDS + 1);
+	for (let round = 0; round < rounds; round += 1) {
+		for (const endpoint of RPC_ENDPOINTS) {
+			try {
+				const response = await fetch(endpoint, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						jsonrpc: "2.0",
+						id: "near-dashboard",
+						method,
+						params,
+					}),
+				});
+				if (!response.ok) {
+					if (response.status === 429 || response.status >= 500) {
+						lastError = new Error(`RPC HTTP ${response.status} at ${endpoint}`);
+						continue;
+					}
+					throw new Error(`RPC HTTP ${response.status} at ${endpoint}`);
 				}
-				throw new Error(`RPC HTTP ${response.status} at ${endpoint}`);
+				const payload = await response.json();
+				if (payload.error) {
+					const msg = String(
+						payload.error?.message || `RPC error at ${endpoint}`,
+					);
+					if (
+						msg.toLowerCase().includes("too many requests") ||
+						msg.toLowerCase().includes("timeout")
+					) {
+						lastError = new Error(msg);
+						continue;
+					}
+					throw new Error(msg);
+				}
+				return { result: payload.result, endpoint };
+			} catch (error) {
+				lastError = error instanceof Error ? error : new Error(String(error));
 			}
-			const payload = await response.json();
-			if (payload.error) {
-				throw new Error(payload.error?.message || `RPC error at ${endpoint}`);
-			}
-			return { result: payload.result, endpoint };
-		} catch (error) {
-			lastError = error instanceof Error ? error : new Error(String(error));
+		}
+		if (round < rounds - 1) {
+			const sleepMs = NEAR_RPC_RETRY_BASE_MS * (round + 1);
+			await new Promise((resolve) => setTimeout(resolve, sleepMs));
 		}
 	}
 	throw lastError || new Error("All RPC endpoints failed");

@@ -728,6 +728,8 @@ CI workflow (npm, via GitHub Actions):
 ```bash
 npm ci
 npm run ci
+# optional bounded retry wrapper for transient host/network flakes
+npm run ci:retry
 ```
 
 Security checks are enforced by `npm run ci`, which runs:
