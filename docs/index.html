@@ -43,6 +43,7 @@
 					<a
 						class="btn btn-ghost"
 						href="#hackathon">Hackathon Track</a>
+					<a class="btn btn-ghost" href="#latest-updates">Latest Updates</a>
 					<a class="btn btn-ghost" href="#demo">Demo Flow</a>
 				</div>
 			</header>
@@ -159,6 +160,25 @@
 						rel="noreferrer"
 					>monad-ai-hackathon.en.md</a
 					>
+				</p>
+			</section>
+
+			<section class="panel reveal" id="latest-updates">
+				<h2>Latest Updates (2026-02)</h2>
+				<ul class="checklist">
+					<li><strong>ACP Async Queue Durability</strong>: queue snapshots persist across restart and auto-resume queued jobs safely.</li>
+					<li><strong>Payment Lifecycle APIs</strong>: <code>/api/payments/create</code>, <code>/api/payments/confirm</code>, <code>/api/payments</code>.</li>
+					<li><strong>Execution Hard Gate</strong>: strategy execution now requires <code>buyer + paymentId + paid status + strategy/buyer match + active entitlement</code>.</li>
+					<li><strong>Replay Protection</strong>: duplicate terminal runs with same <code>runId + paymentId</code> are blocked.</li>
+					<li><strong>Ops UI Upgrade</strong>: ACP filters/detail panels and a new Payments panel for pending/paid/failed visibility.</li>
+				</ul>
+				<p>
+					Read details:
+					<a href="https://github.com/DaviRain-Su/pi-chain-tools/blob/main/docs/near-dashboard.md" target="_blank" rel="noreferrer">near-dashboard.md</a>
+					·
+					<a href="https://github.com/DaviRain-Su/pi-chain-tools/blob/main/docs/core-architecture-principles.md" target="_blank" rel="noreferrer">core-architecture-principles.md</a>
+					·
+					<a href="https://github.com/DaviRain-Su/pi-chain-tools/blob/main/docs/openclaw-acp-quickstart.md" target="_blank" rel="noreferrer">openclaw-acp-quickstart.md</a>
 				</p>
 			</section>
 
