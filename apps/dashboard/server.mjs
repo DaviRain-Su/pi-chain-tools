@@ -211,6 +211,10 @@ async function loadMetricsFromDisk() {
 					payload: row?.payload || {},
 					result: row?.result || null,
 					error: row?.error || null,
+					attemptCount: Math.max(0, Number(row?.attemptCount || 0)),
+					maxAttempts: Math.max(1, Number(row?.maxAttempts || 3)),
+					nextAttemptAt: row?.nextAttemptAt || null,
+					lastErrorAt: row?.lastErrorAt || null,
 				});
 			}
 		}
@@ -1292,6 +1296,10 @@ function getAcpAsyncJobById(jobId) {
 
 function enqueueAcpAsyncJob(payload) {
 	const jobId = String(payload?.jobId || `acp-job-${Date.now()}`).trim();
+	const maxAttempts = Math.max(
+		1,
+		Number.parseInt(String(payload?.maxAttempts || 3), 10) || 3,
+	);
 	const record = {
 		jobId,
 		status: "queued",
@@ -1300,6 +1308,10 @@ function enqueueAcpAsyncJob(payload) {
 		payload,
 		result: null,
 		error: null,
+		attemptCount: 0,
+		maxAttempts,
+		nextAttemptAt: null,
+		lastErrorAt: null,
 	};
 	ACP_ASYNC_JOBS.unshift(record);
 	if (ACP_ASYNC_JOBS.length > 200) ACP_ASYNC_JOBS.length = 200;
@@ -1308,24 +1320,48 @@ function enqueueAcpAsyncJob(payload) {
 	return record;
 }
 
+function computeAcpRetryBackoffMs(attemptCount) {
+	const n = Math.max(1, Number(attemptCount || 1));
+	const capped = Math.min(n, 6);
+	return 1000 * 2 ** (capped - 1);
+}
+
 async function processAcpAsyncQueue() {
 	if (ACP_ASYNC_WORKER_ACTIVE) return;
 	ACP_ASYNC_WORKER_ACTIVE = true;
 	try {
 		while (true) {
-			const next = ACP_ASYNC_JOBS.find((row) => row.status === "queued");
+			const now = Date.now();
+			const next = ACP_ASYNC_JOBS.find((row) => {
+				if (row.status !== "queued") return false;
+				if (!row.nextAttemptAt) return true;
+				const nextTs = Date.parse(String(row.nextAttemptAt));
+				return !Number.isFinite(nextTs) || nextTs <= now;
+			});
 			if (!next) break;
 			next.status = "running";
 			next.updatedAt = new Date().toISOString();
 			void saveMetricsToDisk();
 			try {
+				next.attemptCount = Math.max(0, Number(next.attemptCount || 0)) + 1;
 				const result = await executeAcpJob(next.payload || {});
 				next.status = "done";
 				next.result = result;
 				next.error = null;
+				next.nextAttemptAt = null;
 			} catch (error) {
-				next.status = "error";
+				next.lastErrorAt = new Date().toISOString();
 				next.error = error instanceof Error ? error.message : String(error);
+				const attempt = Math.max(0, Number(next.attemptCount || 0));
+				const maxAttempts = Math.max(1, Number(next.maxAttempts || 3));
+				if (attempt >= maxAttempts) {
+					next.status = "dead-letter";
+					next.nextAttemptAt = null;
+				} else {
+					next.status = "queued";
+					const backoffMs = computeAcpRetryBackoffMs(attempt);
+					next.nextAttemptAt = new Date(Date.now() + backoffMs).toISOString();
+				}
 			}
 			next.updatedAt = new Date().toISOString();
 			void saveMetricsToDisk();
@@ -2713,6 +2749,22 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, result);
 		}
 
+		if (url.pathname === "/api/acp/jobs/dead-letter") {
+			const deadLetters = ACP_ASYNC_JOBS.filter(
+				(row) => String(row?.status || "") === "dead-letter",
+			).map((row) => ({
+				jobId: row.jobId,
+				status: row.status,
+				createdAt: row.createdAt,
+				updatedAt: row.updatedAt,
+				attemptCount: Number(row.attemptCount || 0),
+				maxAttempts: Number(row.maxAttempts || 3),
+				lastErrorAt: row.lastErrorAt || null,
+				error: row.error,
+			}));
+			return json(res, 200, { ok: true, deadLetters });
+		}
+
 		if (url.pathname.startsWith("/api/acp/jobs/")) {
 			const jobId = decodeURIComponent(
 				url.pathname.replace("/api/acp/jobs/", ""),
@@ -2728,6 +2780,10 @@ const server = http.createServer(async (req, res) => {
 					status: row.status,
 					createdAt: row.createdAt,
 					updatedAt: row.updatedAt,
+					attemptCount: Number(row.attemptCount || 0),
+					maxAttempts: Number(row.maxAttempts || 3),
+					nextAttemptAt: row.nextAttemptAt || null,
+					lastErrorAt: row.lastErrorAt || null,
 					result: row.result,
 					error: row.error,
 				},
@@ -2743,6 +2799,10 @@ const server = http.createServer(async (req, res) => {
 					status: row.status,
 					createdAt: row.createdAt,
 					updatedAt: row.updatedAt,
+					attemptCount: Number(row.attemptCount || 0),
+					maxAttempts: Number(row.maxAttempts || 3),
+					nextAttemptAt: row.nextAttemptAt || null,
+					lastErrorAt: row.lastErrorAt || null,
 					error: row.error,
 				})),
 			});

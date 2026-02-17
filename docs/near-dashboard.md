@@ -27,6 +27,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Execution Quality panel: success/failure/rollback/reconcile-warning counters + recent run summary
 - ACP Ops panel: ACP connectivity (`/api/acp/status`) + ACP job summary (`/api/acp/jobs/summary`) + recent ACP job list (`/api/acp/jobs`) in dashboard UI
 - ACP Ops now includes async submit controls (strategyId/buyer/amountRaw) and live polling for submitted async job status (`/api/acp/job/submit` + `/api/acp/jobs/:jobId`)
+- ACP async worker now supports retry backoff + max attempts and dead-letter state (`status=dead-letter`) for persistent failures
 - Dashboard includes Payments panel (`/api/payments`) with status breakdown (`pending/paid/failed`) and recent payment rows
 - ACP recent jobs table supports status filtering and NEAR tx explorer links when `txHash` is present
 - ACP recent jobs table now also shows `strategyId` / `buyer` / `remainingUses` to trace entitlement consumption during execution
@@ -54,8 +55,9 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - execute receipts/history include payment/entitlement trace fields (`paymentId`, `entitlementSourcePaymentId`)
     - replay/idempotency guard: repeated terminal run with same `runId + paymentId` is blocked (`reason=duplicate_run`)
     - for chains still in adapter plan-only mode (e.g. current bsc path), receipt `status=planned` and `adapterMode=plan-only`
-  - `GET /api/acp/jobs` -> recent ACP job history (dry-run/executed/planned/blocked/error) + async queue snapshot
-  - `GET /api/acp/jobs/:jobId` -> async job status/result/error by id
+  - `GET /api/acp/jobs` -> recent ACP job history (dry-run/executed/planned/blocked/error) + async queue snapshot (includes `attemptCount/maxAttempts/nextAttemptAt/lastErrorAt`)
+  - `GET /api/acp/jobs/:jobId` -> async job status/result/error by id (includes retry/dead-letter metadata)
+  - `GET /api/acp/jobs/dead-letter` -> async jobs exhausted after max attempts
   - `GET /api/acp/jobs/summary` -> status distribution + daily execution counters/limit
   - execute mode applies policy daily guard `constraints.maxDailyRebalanceRuns`
 - Unified multi-chain portfolio bootstrap:
@@ -82,6 +84,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `GET /api/strategies/entitlements?buyer=...&strategyId=...` -> entitlement snapshots (remaining uses + expiry)
 - Metrics persistence: rebalance + rpc reliability metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
 - ACP async queue persistence: queued/running jobs are persisted and restored on restart (running jobs re-queued for safe resume)
+- ACP async retry policy: exponential backoff (1s,2s,4s...) with per-job `maxAttempts` (default 3); exhausted jobs enter `dead-letter`
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
 - BSC mode now supports a backend **plan-only** action (`rebalance_usdt_to_usdce_txn` with `chain=bsc`) that returns route config placeholders (RPC/router/token addresses/slippage) plus a quote/minOut estimate (`quotedOutRaw`, `minAmountOutRaw`, quote source) but does not execute onchain yet
