@@ -172,7 +172,7 @@ Phase-1（本期，已完成）
 - `POST /api/bsc/yield/execute` + post-action artifact/reconcile 统一链路
 - Lista/Wombat command-mode 执行守卫（mode/timeout/max/token/placeholders）
 - 执行与 reconcile 双 registry（便于替换单协议 adapter）
-- native readiness 公开：`executionReadiness.nativeSlotImplemented`
+- native readiness 公开：`executionReadiness.nativeSlotImplemented`（Lista/Wombat 由 native bridge command 配置驱动）
 - CI resilient 自愈 + signature telemetry（JSONL + `/api/ops/ci-signatures`）
 
 Phase-2（下期，最小目标）

@@ -2375,8 +2375,8 @@ async function executeBscWombatSupply(params) {
 
 const BSC_NATIVE_SLOT_IMPLEMENTED = {
 	aave: true,
-	lista: false,
-	wombat: false,
+	lista: Boolean(BSC_LISTA_NATIVE_EXECUTE_COMMAND),
+	wombat: Boolean(BSC_WOMBAT_NATIVE_EXECUTE_COMMAND),
 };
 
 const BSC_POST_ACTION_SUPPLY_EXECUTORS = {
