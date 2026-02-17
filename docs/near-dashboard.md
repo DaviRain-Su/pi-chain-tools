@@ -68,6 +68,8 @@ Open:
 - `NEAR_RPC_URLS` - comma-separated RPC list with automatic 429 fallback (recommended)
 - `NEAR_RPC_RETRY_ROUNDS` - extra retry rounds across endpoint list for transient 429/5xx (default: `2`)
 - `NEAR_RPC_RETRY_BASE_MS` - backoff base in milliseconds between retry rounds (default: `250`)
+- `NEAR_RPC_ALERT_RETRY_RATE` - warn-alert threshold for retry rate (default: `0.2`)
+- `NEAR_RPC_ALERT_429_COUNT` - warn-alert threshold for cumulative HTTP 429 count (default: `10`)
 - `NEAR_DASHBOARD_PORT` - web port (fallback: `4173`)
 
 Example:
