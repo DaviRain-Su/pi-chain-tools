@@ -137,6 +137,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `NEAR_REBAL_ALERT_DEDUPE_MS=300000` (same-alert dedupe window)
   - `NEAR_REBAL_ALERT_BSC_NORMALIZATION=true` (enable normalization risk alerts)
   - `NEAR_REBAL_ALERT_BSC_NORMALIZATION_MIN_BAND=medium` (trigger threshold: `low|medium|high`)
+  - alert message includes compact `top=` rows (protocol freshness/source) and a runbook pointer (`docs/near-dashboard.md#alerts`)
 - Dashboard alert test endpoint/button:
   - API: `POST /api/alerts/test` (requires `confirm=true`)
   - UI: `Action Console -> Test alerts`

@@ -1444,13 +1444,24 @@ async function buildUnifiedPortfolio(accountId) {
 					currentBandRank >= minBandRank &&
 					normalizationHealth?.status !== "ok"
 				) {
+					const topRowsText = Array.isArray(normalizationHealth?.topRows)
+						? normalizationHealth.topRows
+								.map((row) => {
+									const ageMin = Number.isFinite(Number(row?.ageMs))
+										? Math.round(Number(row.ageMs) / 60000)
+										: "-";
+									return `${row?.protocol || "-"}:${row?.freshness || "unknown"}@${ageMin}m(${row?.source || "unknown"})`;
+								})
+								.join(", ")
+						: "-";
 					await sendAlert({
 						level: "warn",
 						title: "BSC normalization health warning",
-						message: `account=${bscAccount} status=${normalizationHealth.status} band=${normalizationHealth.band} maxRisk=${normalizationHealth.maxRiskScore} stale=${normalizationHealth.staleCount} unknown=${normalizationHealth.unknownCount}`,
+						message: `account=${bscAccount} status=${normalizationHealth.status} band=${normalizationHealth.band} maxRisk=${normalizationHealth.maxRiskScore} stale=${normalizationHealth.staleCount} unknown=${normalizationHealth.unknownCount} top=${topRowsText} runbook=docs/near-dashboard.md#alerts`,
 						meta: {
 							normalizationHealth,
 							thresholdBand: ALERT_BSC_NORMALIZATION_MIN_BAND,
+							runbookHint: normalizationHealth?.runbookHint || null,
 						},
 					});
 				}
@@ -1564,6 +1575,10 @@ function evaluateNormalizationHealth(protocolPositions) {
 	const status = unknownCount > 0 ? "degraded" : staleCount > 0 ? "warn" : "ok";
 	const band =
 		maxRiskScore >= 80 ? "high" : maxRiskScore >= 40 ? "medium" : "low";
+	const topRows = rows
+		.slice()
+		.sort((a, b) => Number(b?.riskScore || 0) - Number(a?.riskScore || 0))
+		.slice(0, 2);
 	return {
 		status,
 		band,
@@ -1574,6 +1589,9 @@ function evaluateNormalizationHealth(protocolPositions) {
 			staleAfterMs: staleMs,
 			unknownAfterMs: unknownMs,
 		},
+		runbookHint:
+			"Check bsc.positions.*RateApiUrl and fallback exchange rates; verify updatedAt freshness and provider availability.",
+		topRows,
 		rows,
 	};
 }
