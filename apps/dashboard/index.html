@@ -805,15 +805,39 @@
         const blockerText = blockers.length ? blockers.join(", ") : "-";
         const readyClass = readiness?.canExecute === true ? "ok" : "warn";
         const envHints = {
-          aave_execute_disabled: "BSC_AAVE_EXECUTE_ENABLED=true",
-          missing_bsc_aave_pool: "BSC_AAVE_POOL=0x...",
-          missing_bsc_aave_execute_private_key: "BSC_AAVE_EXECUTE_PRIVATE_KEY=0x...",
-          missing_bsc_aave_execute_command: "BSC_AAVE_EXECUTE_COMMAND='node scripts/aave-supply.mjs --amount {amountRaw} --run {runId}'",
-          bsc_usdc_not_in_aave_allowed_tokens: "BSC_AAVE_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
-          recommended_amount_exceeds_bsc_aave_max_amount_raw: "BSC_AAVE_MAX_AMOUNT_RAW=<larger_raw_cap>",
+          aave_execute_disabled: { section: "gating", line: "BSC_AAVE_EXECUTE_ENABLED=true", note: "enable aave execute path" },
+          missing_bsc_aave_pool: { section: "required", line: "BSC_AAVE_POOL=0x...", note: "aave pool contract" },
+          missing_bsc_aave_execute_private_key: { section: "required", line: "BSC_AAVE_EXECUTE_PRIVATE_KEY=0x...", note: "signer private key for native mode" },
+          missing_bsc_aave_execute_command: { section: "required", line: "BSC_AAVE_EXECUTE_COMMAND='node scripts/aave-supply.mjs --amount {amountRaw} --run {runId}'", note: "command mode adapter" },
+          bsc_usdc_not_in_aave_allowed_tokens: { section: "policy", line: "BSC_AAVE_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955", note: "include USDC/USDT allowlist" },
+          recommended_amount_exceeds_bsc_aave_max_amount_raw: { section: "policy", line: "BSC_AAVE_MAX_AMOUNT_RAW=<larger_raw_cap>", note: "raise per-action cap or reduce amount" },
         };
-        const envLines = blockers.map((b) => envHints[b]).filter(Boolean);
-        const envSnippet = envLines.length ? envLines.join("\n") : "# no env changes needed";
+        const groups = { required: [], gating: [], policy: [] };
+        for (const b of blockers) {
+          const hint = envHints[b];
+          if (!hint) continue;
+          if (!groups[hint.section]) groups[hint.section] = [];
+          groups[hint.section].push(hint);
+        }
+        const sectionOrder = ["required", "gating", "policy"];
+        const headerMap = {
+          required: "# required config",
+          gating: "# feature gates",
+          policy: "# policy/risk caps",
+        };
+        const envLines = [];
+        for (const section of sectionOrder) {
+          const rows = groups[section] || [];
+          if (!rows.length) continue;
+          envLines.push(headerMap[section]);
+          for (const row of rows) {
+            envLines.push(`${row.line}  # ${row.note}`);
+          }
+          envLines.push("");
+        }
+        const envSnippet = envLines.length
+          ? `${envLines.join("\n").trim()}\n`
+          : "# no env changes needed\n";
         bscYieldReadinessEl.innerHTML = `BSC execute readiness(aave): <span class="${readyClass}">${readiness?.canExecute === true ? "ready" : "blocked"}</span> · reason=${readiness?.reason || "-"} · mode=${readiness?.aaveMode || "-"}<br/><span class="muted">blockers=${blockerText}</span><br/><span class="muted"><button data-copy-blockers="1">Copy blockers</button> <button data-copy-env-snippet="1">Copy env snippet</button></span>`;
         const copyBlockersBtn = bscYieldReadinessEl.querySelector('[data-copy-blockers="1"]');
         const copyEnvBtn = bscYieldReadinessEl.querySelector('[data-copy-env-snippet="1"]');
