@@ -9,6 +9,7 @@ const REQUIRED_FILES = [
 	"openclaw-btc5m-workflow.schema.json",
 	"openclaw-btc5m-runtime-state.schema.json",
 	"openclaw-btc5m-retry-policy.schema.json",
+	"bsc-post-action-supply-artifact.v1.schema.json",
 ];
 
 function createWorkspace(includeFiles: string[] = REQUIRED_FILES) {
@@ -71,12 +72,20 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		const payload = JSON.parse(result.stdout);
 		expect(payload.status).toBe("failed");
 		expect(payload.summary.allExist).toBe(false);
-		expect(payload.summary.missingFiles).toBe(1);
-		expect(payload.errors).toHaveLength(1);
-		expect(payload.errors[0]).toMatchObject({
-			code: "missing_file",
-			file: "openclaw-btc5m-workflow.schema.json",
-		});
+		expect(payload.summary.missingFiles).toBe(2);
+		expect(payload.errors).toHaveLength(2);
+		expect(payload.errors).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					code: "missing_file",
+					file: "openclaw-btc5m-workflow.schema.json",
+				}),
+				expect.objectContaining({
+					code: "missing_file",
+					file: "bsc-post-action-supply-artifact.v1.schema.json",
+				}),
+			]),
+		);
 	});
 
 	it("treats --list --strict as strict list mode when files are missing", () => {
@@ -119,18 +128,22 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		expect(result.stdout + result.stderr).toContain(
 			"invalid schema file: openclaw-btc5m-retry-policy.schema.json",
 		);
+		expect(result.stdout + result.stderr).toContain(
+			"invalid schema file: bsc-post-action-supply-artifact.v1.schema.json",
+		);
 	});
 
 	it("fails --list-strict if a configured file path exists but is directory", () => {
 		const workspace = createWorkspace([
 			"openclaw-btc5m-workflow.schema.json",
 			"openclaw-btc5m-runtime-state.schema.json",
+			"openclaw-btc5m-retry-policy.schema.json",
 		]);
 		workspaces.push(workspace);
 		const schemaDir = getSchemaDir(workspace);
 		const invalidPath = path.join(
 			schemaDir,
-			"openclaw-btc5m-retry-policy.schema.json",
+			"bsc-post-action-supply-artifact.v1.schema.json",
 		);
 		mkdirSync(invalidPath, { recursive: true });
 
@@ -141,7 +154,7 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		expect(payload.summary.missingFiles).toBe(1);
 		expect(payload.errors[0]).toMatchObject({
 			code: "missing_file",
-			file: "openclaw-btc5m-retry-policy.schema.json",
+			file: "bsc-post-action-supply-artifact.v1.schema.json",
 		});
 	});
 

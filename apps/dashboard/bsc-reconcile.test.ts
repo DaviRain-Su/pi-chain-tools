@@ -55,6 +55,39 @@ describe("bsc post-action reconciliation router", () => {
 		expect(result.reason).toContain("protocol_invalid");
 		expect(result.route).toBe("unsupported");
 	});
+
+	it("keeps reconciliation response contract stable", () => {
+		const result = reconcileBscExecutionArtifact({
+			type: "bsc_post_action_supply",
+			version: "v1",
+			protocol: "wombat",
+			status: "success",
+			amountRaw: "99",
+			txHash: `0x${"e".repeat(64)}`,
+			provider: "wombat-command",
+			token: "usdc",
+			retryable: false,
+		});
+		expect(Object.keys(result).sort()).toEqual(
+			expect.arrayContaining([
+				"ok",
+				"route",
+				"reason",
+				"retryable",
+				"checks",
+				"checkedAt",
+			]),
+		);
+		expect(result.route).toBe("bsc_post_action_supply_v1:wombat");
+		expect(result.checks).toMatchObject({
+			protocol: "wombat",
+			status: "success",
+			hasValidAmount: true,
+			hasTxHash: true,
+			providerOk: true,
+		});
+		expect(typeof result.checkedAt).toBe("string");
+	});
 });
 
 describe("bsc post-action artifact validator", () => {
