@@ -2983,6 +2983,48 @@ async function computeBscYieldPlan(input = {}) {
 	}
 	const canExecuteAave =
 		executionProtocol !== "aave" || aaveBlockers.length === 0;
+	const envHintByBlocker = {
+		aave_execute_disabled: "BSC_AAVE_EXECUTE_ENABLED=true",
+		missing_bsc_aave_pool: "BSC_AAVE_POOL=0x...",
+		missing_bsc_aave_execute_private_key: "BSC_AAVE_EXECUTE_PRIVATE_KEY=0x...",
+		missing_bsc_aave_execute_command:
+			"BSC_AAVE_EXECUTE_COMMAND='node scripts/aave-supply.mjs --amount {amountRaw} --run {runId}'",
+		bsc_usdc_not_in_aave_allowed_tokens:
+			"BSC_AAVE_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
+		recommended_amount_exceeds_bsc_aave_max_amount_raw:
+			"BSC_AAVE_MAX_AMOUNT_RAW=<larger_raw_cap>",
+	};
+	const fixLines = aaveBlockers.map((b) => envHintByBlocker[b]).filter(Boolean);
+	const modePack =
+		BSC_AAVE_EXECUTE_MODE === "native"
+			? [
+					"BSC_AAVE_EXECUTE_MODE=native",
+					"# requires: BSC_AAVE_POOL + BSC_AAVE_EXECUTE_PRIVATE_KEY",
+				]
+			: BSC_AAVE_EXECUTE_MODE === "command"
+				? [
+						"BSC_AAVE_EXECUTE_MODE=command",
+						"# requires: BSC_AAVE_EXECUTE_COMMAND",
+					]
+				: [
+						"BSC_AAVE_EXECUTE_MODE=auto",
+						"# auto prefers native when key is present; falls back to command",
+					];
+	const safeDefaults = [
+		"BSC_AAVE_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
+		`BSC_AAVE_MAX_AMOUNT_RAW=${BSC_AAVE_MAX_AMOUNT_RAW}`,
+		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT=venus",
+	];
+	const fullFixPack = [
+		"# bsc aave execute full fix pack",
+		...modePack,
+		"",
+		"# blockers (current)",
+		...(fixLines.length ? fixLines : ["# none"]),
+		"",
+		"# safe defaults",
+		...safeDefaults,
+	].join("\n");
 	const executeReadiness = {
 		requestedProtocol: executionProtocol,
 		venusEnabled: true,
@@ -2996,6 +3038,14 @@ async function computeBscYieldPlan(input = {}) {
 					? "ok"
 					: "aave_precheck_failed",
 		blockers: executionProtocol === "aave" ? aaveBlockers : [],
+		fixPack:
+			executionProtocol === "aave"
+				? {
+						mode: BSC_AAVE_EXECUTE_MODE,
+						envLines: fixLines,
+						fullTemplate: fullFixPack,
+					}
+				: null,
 	};
 	return {
 		ok: true,
