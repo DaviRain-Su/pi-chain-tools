@@ -180,6 +180,8 @@ Common mapping examples:
 - `bsc.aave.enabled` ↔ `BSC_AAVE_EXECUTE_ENABLED`
 - `bsc.lista.enabled` ↔ `BSC_LISTA_EXECUTE_ENABLED`
 - `bsc.lista.executeCommand` ↔ `BSC_LISTA_EXECUTE_COMMAND`
+- `bsc.lista.maxAmountRaw` ↔ `BSC_LISTA_MAX_AMOUNT_RAW`
+- `bsc.lista.allowedTokens` ↔ `BSC_LISTA_ALLOWED_TOKENS`
 - `bsc.aave.maxAmountRaw` ↔ `BSC_AAVE_MAX_AMOUNT_RAW`
 - `acp.dismissedPurge.enabled` ↔ `ACP_DISMISSED_PURGE_ENABLED`
 - `payments.webhookProvider` ↔ `PAYMENT_WEBHOOK_PROVIDER`
@@ -223,6 +225,8 @@ Common mapping examples:
 - `BSC_AAVE_EXECUTE_ENABLED` - allow BSC yield execute path to proceed when `executionProtocol=aave` (default: `false`, safety-gated)
 - `BSC_LISTA_EXECUTE_ENABLED` - gate for Lista execute path (default: `false`)
 - `BSC_LISTA_EXECUTE_COMMAND` - command template for post-swap Lista supply (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`)
+- `BSC_LISTA_MAX_AMOUNT_RAW` - max raw amount allowed per Lista supply action (default: `20000000000000000000000`)
+- `BSC_LISTA_ALLOWED_TOKENS` - comma-separated token allowlist for Lista supply (default: `${BSC_USDC},${BSC_USDT}`)
 - `BSC_AAVE_EXECUTE_MODE` - `auto|native|command` (default: `auto`)
 - `BSC_AAVE_POOL` - Aave Pool contract address (required for native mode)
 - `BSC_AAVE_EXECUTE_PRIVATE_KEY` - signer private key for native Aave supply (fallback: `BSC_EXECUTE_PRIVATE_KEY`)

@@ -308,6 +308,23 @@ const BSC_LISTA_EXECUTE_ENABLED =
 const BSC_LISTA_EXECUTE_COMMAND = String(
 	envOrCfg("BSC_LISTA_EXECUTE_COMMAND", "bsc.lista.executeCommand", ""),
 ).trim();
+const BSC_LISTA_MAX_AMOUNT_RAW = String(
+	envOrCfg(
+		"BSC_LISTA_MAX_AMOUNT_RAW",
+		"bsc.lista.maxAmountRaw",
+		"20000000000000000000000",
+	),
+).trim();
+const BSC_LISTA_ALLOWED_TOKENS = String(
+	envOrCfg(
+		"BSC_LISTA_ALLOWED_TOKENS",
+		"bsc.lista.allowedTokens",
+		`${BSC_USDC},${BSC_USDT}`,
+	),
+)
+	.split(",")
+	.map((x) => x.trim().toLowerCase())
+	.filter(Boolean);
 const BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT = String(
 	envOrCfg(
 		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT",
@@ -1754,6 +1771,19 @@ async function executeBscListaSupply(params) {
 	if (!/^\d+$/.test(amountRaw) || BigInt(amountRaw) <= 0n) {
 		throw new Error(
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_amount_invalid",
+		);
+	}
+	const maxRaw = /^\d+$/.test(BSC_LISTA_MAX_AMOUNT_RAW)
+		? BigInt(BSC_LISTA_MAX_AMOUNT_RAW)
+		: 0n;
+	if (maxRaw > 0n && BigInt(amountRaw) > maxRaw) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_amount_exceeds_limit",
+		);
+	}
+	if (!token || !BSC_LISTA_ALLOWED_TOKENS.includes(token)) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_token_not_allowed",
 		);
 	}
 	const replacements = {
@@ -3502,6 +3532,22 @@ async function computeBscYieldPlan(input = {}) {
 			listaBlockers.push("lista_execute_disabled");
 		if (!BSC_LISTA_EXECUTE_COMMAND)
 			listaBlockers.push("missing_bsc_lista_execute_command");
+		if (!BSC_LISTA_ALLOWED_TOKENS.includes(String(BSC_USDC).toLowerCase())) {
+			listaBlockers.push("bsc_usdc_not_in_lista_allowed_tokens");
+		}
+		if (/^\d+$/.test(plan?.recommendedAmountRaw || "0")) {
+			const maxRaw = /^\d+$/.test(BSC_LISTA_MAX_AMOUNT_RAW)
+				? BigInt(BSC_LISTA_MAX_AMOUNT_RAW)
+				: 0n;
+			if (
+				maxRaw > 0n &&
+				BigInt(String(plan?.recommendedAmountRaw || "0")) > maxRaw
+			) {
+				listaBlockers.push(
+					"recommended_amount_exceeds_bsc_lista_max_amount_raw",
+				);
+			}
+		}
 	}
 	const wombatBlockers = [];
 	if (executionProtocol === "wombat") {
@@ -3528,6 +3574,10 @@ async function computeBscYieldPlan(input = {}) {
 		lista_execute_disabled: "BSC_LISTA_EXECUTE_ENABLED=true",
 		missing_bsc_lista_execute_command:
 			"BSC_LISTA_EXECUTE_COMMAND='node scripts/lista-supply.mjs --amount {amountRaw} --run {runId}'",
+		bsc_usdc_not_in_lista_allowed_tokens:
+			"BSC_LISTA_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
+		recommended_amount_exceeds_bsc_lista_max_amount_raw:
+			"BSC_LISTA_MAX_AMOUNT_RAW=<larger_raw_cap>",
 		wombat_execute_not_implemented:
 			"# Wombat execute adapter pending (read-only integrated)",
 	};
@@ -3561,6 +3611,8 @@ async function computeBscYieldPlan(input = {}) {
 	const safeDefaults = [
 		"BSC_AAVE_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
 		`BSC_AAVE_MAX_AMOUNT_RAW=${BSC_AAVE_MAX_AMOUNT_RAW}`,
+		"BSC_LISTA_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
+		`BSC_LISTA_MAX_AMOUNT_RAW=${BSC_LISTA_MAX_AMOUNT_RAW}`,
 		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT=venus",
 	];
 	const fullFixPack = [
