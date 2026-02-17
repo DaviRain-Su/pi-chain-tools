@@ -150,6 +150,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - read-only API: `GET /api/ops/ci-signatures?limit=50` (returns newest-first rows)
 - deBridge MCP readiness (cross-chain integration hook):
   - `GET /api/crosschain/debridge/readiness` (returns `enabled/commandConfigured/canExecute/blockers/hints`)
+  - `POST /api/crosschain/debridge/plan` (returns `canQuote/blockers/hints/fixPack` + `next=/api/crosschain/debridge/quote`)
   - `POST /api/crosschain/debridge/quote` (dry-run quote bridge; requires `originChain/destinationChain/tokenIn/tokenOut/amount`; returns `mode=quote|blocked` + `quote/rawOutput`)
   - config: `crosschain.debridge.enabled|command|timeoutMs` (`DEBRIDGE_MCP_ENABLED|DEBRIDGE_MCP_COMMAND|DEBRIDGE_MCP_TIMEOUT_MS`)
   - command placeholders (if used in command template): `{originChain} {destinationChain} {tokenIn} {tokenOut} {amount} {recipient} {account}`

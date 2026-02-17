@@ -111,6 +111,13 @@ curl -s 'http://127.0.0.1:4173/api/crosschain/debridge/readiness'
 
 返回 `canExecute/blockers/hints`，用于确认 deBridge MCP 入口是否可被 ACP 工作流接管。
 
+plan readiness（先看 blockers/fixPack）：
+```bash
+curl -s -X POST 'http://127.0.0.1:4173/api/crosschain/debridge/plan' \
+  -H 'content-type: application/json' \
+  -d '{"originChain":"ethereum","destinationChain":"bsc","tokenIn":"ETH","tokenOut":"USDC","amount":"1000000000000000000"}'
+```
+
 quote dry-run（不执行资金）：
 ```bash
 curl -s -X POST 'http://127.0.0.1:4173/api/crosschain/debridge/quote' \

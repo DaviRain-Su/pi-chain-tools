@@ -6360,6 +6360,67 @@ const server = http.createServer(async (req, res) => {
 			}
 		}
 
+		if (
+			url.pathname === "/api/crosschain/debridge/plan" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			const blockers = [];
+			if (!DEBRIDGE_MCP_ENABLED) blockers.push("debridge_mcp_disabled");
+			if (!DEBRIDGE_MCP_COMMAND) blockers.push("missing_debridge_mcp_command");
+			const originChain = String(payload.originChain || "").trim();
+			const destinationChain = String(payload.destinationChain || "").trim();
+			const tokenIn = String(payload.tokenIn || "").trim();
+			const tokenOut = String(payload.tokenOut || "").trim();
+			const amount = String(payload.amount || "").trim();
+			if (!originChain) blockers.push("missing_origin_chain");
+			if (!destinationChain) blockers.push("missing_destination_chain");
+			if (!tokenIn) blockers.push("missing_token_in");
+			if (!tokenOut) blockers.push("missing_token_out");
+			if (!amount) blockers.push("missing_amount");
+			const hints = {
+				debridge_mcp_disabled: "DEBRIDGE_MCP_ENABLED=true",
+				missing_debridge_mcp_command:
+					"DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp quote --from {originChain} --to {destinationChain} --token-in {tokenIn} --token-out {tokenOut} --amount {amount}'",
+				missing_origin_chain: "originChain=<source chain id>",
+				missing_destination_chain: "destinationChain=<target chain id>",
+				missing_token_in: "tokenIn=<source token address/symbol>",
+				missing_token_out: "tokenOut=<target token address/symbol>",
+				missing_amount: "amount=<raw amount>",
+			};
+			const fixPack = [
+				"# debridge mcp plan fix pack",
+				`DEBRIDGE_MCP_ENABLED=${DEBRIDGE_MCP_ENABLED}`,
+				`DEBRIDGE_MCP_TIMEOUT_MS=${DEBRIDGE_MCP_TIMEOUT_MS}`,
+				`DEBRIDGE_MCP_COMMAND=${DEBRIDGE_MCP_COMMAND || "<set_quote_command>"}`,
+				"# placeholders: {originChain} {destinationChain} {tokenIn} {tokenOut} {amount} {recipient} {account}",
+			].join("\n");
+			return json(res, 200, {
+				ok: true,
+				mode: blockers.length === 0 ? "ready" : "blocked",
+				provider: "debridge-mcp",
+				canQuote: blockers.length === 0,
+				blockers,
+				hints,
+				fixPack,
+				request: {
+					originChain,
+					destinationChain,
+					tokenIn,
+					tokenOut,
+					amount,
+					recipient: String(payload.recipient || "").trim() || null,
+				},
+				next: {
+					method: "POST",
+					path: "/api/crosschain/debridge/quote",
+				},
+			});
+		}
+
 		if (url.pathname === "/api/bsc/yield/plan") {
 			const plan = await computeBscYieldPlan({
 				account: url.searchParams.get("account") || undefined,
