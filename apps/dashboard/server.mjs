@@ -301,6 +301,10 @@ const BSC_AAVE_EXECUTE_ENABLED =
 	String(
 		envOrCfg("BSC_AAVE_EXECUTE_ENABLED", "bsc.aave.enabled", "false"),
 	).toLowerCase() === "true";
+const BSC_LISTA_EXECUTE_ENABLED =
+	String(
+		envOrCfg("BSC_LISTA_EXECUTE_ENABLED", "bsc.lista.enabled", "false"),
+	).toLowerCase() === "true";
 const BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT = String(
 	envOrCfg(
 		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT",
@@ -3331,7 +3335,10 @@ async function computeBscYieldPlan(input = {}) {
 		.trim()
 		.toLowerCase();
 	const hasExplicitProtocol =
-		explicitProtocol === "aave" || explicitProtocol === "venus";
+		explicitProtocol === "aave" ||
+		explicitProtocol === "venus" ||
+		explicitProtocol === "lista" ||
+		explicitProtocol === "wombat";
 	const envDefaultProtocol = String(
 		BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT || "venus",
 	)
@@ -3350,7 +3357,9 @@ async function computeBscYieldPlan(input = {}) {
 		.toLowerCase();
 	const recommendedProtocol =
 		recommendedProtocolFromNet === "aave" ||
-		recommendedProtocolFromNet === "venus"
+		recommendedProtocolFromNet === "venus" ||
+		recommendedProtocolFromNet === "lista" ||
+		recommendedProtocolFromNet === "wombat"
 			? recommendedProtocolFromNet
 			: fallbackProtocol;
 	const executionProtocol = hasExplicitProtocol
@@ -3415,8 +3424,24 @@ async function computeBscYieldPlan(input = {}) {
 			}
 		}
 	}
-	const canExecuteAave =
-		executionProtocol !== "aave" || aaveBlockers.length === 0;
+	const listaBlockers = [];
+	if (executionProtocol === "lista") {
+		if (!BSC_LISTA_EXECUTE_ENABLED)
+			listaBlockers.push("lista_execute_disabled");
+		listaBlockers.push("lista_execute_not_implemented");
+	}
+	const wombatBlockers = [];
+	if (executionProtocol === "wombat") {
+		wombatBlockers.push("wombat_execute_not_implemented");
+	}
+	const protocolBlockers =
+		executionProtocol === "aave"
+			? aaveBlockers
+			: executionProtocol === "lista"
+				? listaBlockers
+				: executionProtocol === "wombat"
+					? wombatBlockers
+					: [];
 	const envHintByBlocker = {
 		aave_execute_disabled: "BSC_AAVE_EXECUTE_ENABLED=true",
 		missing_bsc_aave_pool: "BSC_AAVE_POOL=0x...",
@@ -3427,30 +3452,43 @@ async function computeBscYieldPlan(input = {}) {
 			"BSC_AAVE_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
 		recommended_amount_exceeds_bsc_aave_max_amount_raw:
 			"BSC_AAVE_MAX_AMOUNT_RAW=<larger_raw_cap>",
+		lista_execute_disabled: "BSC_LISTA_EXECUTE_ENABLED=true",
+		lista_execute_not_implemented:
+			"# Lista execute adapter pending (read-only integrated)",
+		wombat_execute_not_implemented:
+			"# Wombat execute adapter pending (read-only integrated)",
 	};
-	const fixLines = aaveBlockers.map((b) => envHintByBlocker[b]).filter(Boolean);
+	const fixLines = protocolBlockers
+		.map((b) => envHintByBlocker[b])
+		.filter(Boolean);
 	const modePack =
-		BSC_AAVE_EXECUTE_MODE === "native"
-			? [
-					"BSC_AAVE_EXECUTE_MODE=native",
-					"# requires: BSC_AAVE_POOL + BSC_AAVE_EXECUTE_PRIVATE_KEY",
-				]
-			: BSC_AAVE_EXECUTE_MODE === "command"
+		executionProtocol === "aave"
+			? BSC_AAVE_EXECUTE_MODE === "native"
 				? [
-						"BSC_AAVE_EXECUTE_MODE=command",
-						"# requires: BSC_AAVE_EXECUTE_COMMAND",
+						"BSC_AAVE_EXECUTE_MODE=native",
+						"# requires: BSC_AAVE_POOL + BSC_AAVE_EXECUTE_PRIVATE_KEY",
 					]
-				: [
-						"BSC_AAVE_EXECUTE_MODE=auto",
-						"# auto prefers native when key is present; falls back to command",
-					];
+				: BSC_AAVE_EXECUTE_MODE === "command"
+					? [
+							"BSC_AAVE_EXECUTE_MODE=command",
+							"# requires: BSC_AAVE_EXECUTE_COMMAND",
+						]
+					: [
+							"BSC_AAVE_EXECUTE_MODE=auto",
+							"# auto prefers native when key is present; falls back to command",
+						]
+			: executionProtocol === "lista"
+				? ["# lista execute currently blocked (adapter pending)"]
+				: executionProtocol === "wombat"
+					? ["# wombat execute currently blocked (adapter pending)"]
+					: ["# venus uses existing swap+supply path"];
 	const safeDefaults = [
 		"BSC_AAVE_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
 		`BSC_AAVE_MAX_AMOUNT_RAW=${BSC_AAVE_MAX_AMOUNT_RAW}`,
 		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT=venus",
 	];
 	const fullFixPack = [
-		"# bsc aave execute full fix pack",
+		`# bsc ${executionProtocol} execute full fix pack`,
 		...modePack,
 		"",
 		"# blockers (current)",
@@ -3459,24 +3497,37 @@ async function computeBscYieldPlan(input = {}) {
 		"# safe defaults",
 		...safeDefaults,
 	].join("\n");
+	const canExecute =
+		executionProtocol === "venus"
+			? true
+			: executionProtocol === "aave"
+				? protocolBlockers.length === 0
+				: false;
 	const executeReadiness = {
 		requestedProtocol: hasExplicitProtocol ? explicitProtocol : "auto",
 		venusEnabled: true,
 		aaveEnabled: BSC_AAVE_EXECUTE_ENABLED,
+		listaEnabled: BSC_LISTA_EXECUTE_ENABLED,
 		aaveMode: BSC_AAVE_EXECUTE_MODE,
-		canExecute: executionProtocol === "venus" ? true : canExecuteAave,
-		reason:
-			executionProtocol === "venus"
-				? "ok"
-				: canExecuteAave
-					? "ok"
-					: "aave_precheck_failed",
-		blockers: executionProtocol === "aave" ? aaveBlockers : [],
+		canExecute,
+		reason: canExecute
+			? "ok"
+			: executionProtocol === "aave"
+				? "aave_precheck_failed"
+				: executionProtocol === "lista"
+					? "lista_precheck_failed"
+					: executionProtocol === "wombat"
+						? "wombat_precheck_failed"
+						: "execute_not_ready",
+		blockers: protocolBlockers,
 		recommendedProtocol,
 		fixPack:
-			executionProtocol === "aave"
+			executionProtocol === "aave" ||
+			executionProtocol === "lista" ||
+			executionProtocol === "wombat"
 				? {
-						mode: BSC_AAVE_EXECUTE_MODE,
+						mode:
+							executionProtocol === "aave" ? BSC_AAVE_EXECUTE_MODE : "blocked",
 						envLines: fixLines,
 						fullTemplate: fullFixPack,
 					}
@@ -5118,6 +5169,7 @@ const server = http.createServer(async (req, res) => {
 				executionReadiness: {
 					defaultProtocol: BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT,
 					aaveEnabled: BSC_AAVE_EXECUTE_ENABLED,
+					listaEnabled: BSC_LISTA_EXECUTE_ENABLED,
 				},
 				minAprDeltaBpsDefault: BSC_YIELD_MIN_APR_DELTA_BPS,
 			});
