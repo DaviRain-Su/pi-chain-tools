@@ -116,6 +116,7 @@ const REBALANCE_METRICS = {
 	recent: [],
 	pnlSeries: [],
 };
+const ACP_JOB_HISTORY = [];
 const PORTFOLIO_POLICY = {
 	targetAllocation: { near: 0.6, bsc: 0.4 },
 	constraints: {
@@ -136,6 +137,7 @@ async function saveMetricsToDisk() {
 				{
 					rebalanceMetrics: REBALANCE_METRICS,
 					rpcMetrics: RPC_METRICS,
+					acpJobHistory: ACP_JOB_HISTORY,
 				},
 				null,
 				2,
@@ -165,6 +167,12 @@ async function loadMetricsFromDisk() {
 		REBALANCE_METRICS.pnlSeries = Array.isArray(rebalance.pnlSeries)
 			? rebalance.pnlSeries.slice(0, 100)
 			: [];
+
+		const acpHistory = parsed.acpJobHistory;
+		if (Array.isArray(acpHistory)) {
+			ACP_JOB_HISTORY.length = 0;
+			ACP_JOB_HISTORY.push(...acpHistory.slice(0, 50));
+		}
 
 		const rpc = parsed.rpcMetrics;
 		if (rpc && typeof rpc === "object") {
@@ -883,9 +891,22 @@ async function executeAcpJob(payload) {
 		PORTFOLIO_POLICY?.constraints?.minRebalanceUsd || 50,
 	);
 	if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
+		pushAcpJobHistory({
+			runId,
+			status: "error",
+			reason: "invalid_amount",
+			amountRaw,
+		});
 		throw new Error("Invalid amountRaw for ACP job");
 	}
 	if (amountUsd < minRebalanceUsd) {
+		pushAcpJobHistory({
+			runId,
+			status: "blocked",
+			reason: "below_min_rebalance_usd",
+			amountUsd,
+			minRebalanceUsd,
+		});
 		throw new Error(
 			`amountUsd ${amountUsd.toFixed(6)} below policy minRebalanceUsd ${minRebalanceUsd}`,
 		);
@@ -901,6 +922,13 @@ async function executeAcpJob(payload) {
 	};
 
 	if (dryRun) {
+		pushAcpJobHistory({
+			runId,
+			status: "dry-run",
+			targetChain: plan.targetChain,
+			intentType,
+			amountRaw,
+		});
 		return {
 			ok: true,
 			mode: "dry-run",
@@ -915,6 +943,13 @@ async function executeAcpJob(payload) {
 	}
 
 	if (intentType !== "rebalance") {
+		pushAcpJobHistory({
+			runId,
+			status: "error",
+			reason: "unsupported_intent",
+			intentType,
+			targetChain: plan.targetChain,
+		});
 		throw new Error(
 			`Unsupported intentType='${intentType}' for execute mode. Supported now: rebalance`,
 		);
@@ -930,6 +965,15 @@ async function executeAcpJob(payload) {
 		step: payload?.step || `acp-${plan.targetChain}-rebalance`,
 	});
 
+	const txHash = result?.details?.step3Tx || result?.details?.step2Tx || null;
+	pushAcpJobHistory({
+		runId,
+		status: "executed",
+		targetChain: plan.targetChain,
+		intentType,
+		amountRaw,
+		txHash,
+	});
 	return {
 		ok: true,
 		mode: "execute",
@@ -940,7 +984,7 @@ async function executeAcpJob(payload) {
 		receipt: {
 			...receiptBase,
 			status: "executed",
-			txHash: result?.details?.step3Tx || result?.details?.step2Tx || null,
+			txHash,
 		},
 	};
 }
@@ -974,6 +1018,18 @@ function pushActionHistory(entry) {
 	if (ACTION_HISTORY.length > 30) {
 		ACTION_HISTORY.length = 30;
 	}
+}
+
+function pushAcpJobHistory(entry) {
+	ACP_JOB_HISTORY.unshift({
+		id: `acp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+		timestamp: new Date().toISOString(),
+		...entry,
+	});
+	if (ACP_JOB_HISTORY.length > 50) {
+		ACP_JOB_HISTORY.length = 50;
+	}
+	void saveMetricsToDisk();
 }
 
 function extractTxHash(outputText) {
@@ -1950,6 +2006,10 @@ const server = http.createServer(async (req, res) => {
 			}
 			const result = await executeAcpJob(payload);
 			return json(res, 200, result);
+		}
+
+		if (url.pathname === "/api/acp/jobs") {
+			return json(res, 200, { ok: true, jobs: ACP_JOB_HISTORY });
 		}
 
 		if (url.pathname === "/api/action" && req.method === "POST") {

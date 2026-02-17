@@ -33,6 +33,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `POST /api/acp/job/execute` (`confirm=true`) -> ACP job router entrypoint; supports `dryRun` (default true) and execute mode for `intentType=rebalance` via existing chain action pipeline
     - returns normalized `receipt` (`runId/identityChain/targetChain/intentType/amountRaw/amountUsd/status/txHash?`)
     - enforces policy `constraints.minRebalanceUsd`
+  - `GET /api/acp/jobs` -> recent ACP job history (dry-run/executed/blocked/error)
 - Unified multi-chain portfolio bootstrap:
   - `GET /api/portfolio/unified` -> aggregates current NEAR execution portfolio + ACP identity layer status + BSC scaffold status in one schema
 - Portfolio policy center (cross-chain target + constraints):
