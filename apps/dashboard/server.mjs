@@ -1395,28 +1395,36 @@ function computeAcpRetryBackoffMs(attemptCount) {
 	return 1000 * 2 ** (capped - 1);
 }
 
+function classifyAcpErrorType(error) {
+	const text = String(error?.message || error || "").toLowerCase();
+	if (text.includes("missing_payment_id")) return "missing_payment_id";
+	if (text.includes("payment_not_found")) return "payment_not_found";
+	if (text.includes("payment_not_paid")) return "payment_not_paid";
+	if (text.includes("payment_mismatch")) return "payment_mismatch";
+	if (text.includes("missing_entitlement")) return "missing_entitlement";
+	if (text.includes("duplicate run blocked")) return "duplicate_run";
+	if (text.includes("unsupported intenttype")) return "unsupported_intent";
+	if (text.includes("unsupported targetchain"))
+		return "unsupported_target_chain";
+	if (text.includes("invalid amountraw")) return "invalid_amount";
+	if (text.includes("slippagebps must be between")) return "invalid_slippage";
+	if (text.includes("poolid must be a non-negative integer"))
+		return "invalid_pool_id";
+	if (text.includes("bsc_execute_config")) return "bsc_execute_config";
+	if (text.includes("bsc_execute_failed")) return "bsc_execute_failed";
+	if (text.includes("429") || text.includes("too many requests"))
+		return "rpc_429";
+	if (text.includes("timeout")) return "timeout";
+	if (text.includes("503")) return "rpc_503";
+	return "unknown";
+}
+
 function isAcpRetryableError(error) {
 	if (isTransientExecError(error)) return true;
 	const text = String(error?.message || error || "").toLowerCase();
 	if (text.includes("retryable=true")) return true;
-	const nonRetryableHints = [
-		"missing_payment_id",
-		"payment_not_found",
-		"payment_not_paid",
-		"payment_mismatch",
-		"missing_entitlement",
-		"duplicate run blocked",
-		"unsupported intenttype",
-		"below policy minrebalanceusd",
-		"unsupported targetchain",
-		"invalid amountraw",
-		"slippagebps must be between",
-		"poolid must be a non-negative integer",
-	];
-	for (const hint of nonRetryableHints) {
-		if (text.includes(hint)) return false;
-	}
-	return false;
+	const type = classifyAcpErrorType(error);
+	return ["rpc_429", "timeout", "rpc_503", "bsc_execute_failed"].includes(type);
 }
 
 async function processAcpAsyncQueue() {
@@ -2877,16 +2885,22 @@ const server = http.createServer(async (req, res) => {
 		if (url.pathname === "/api/acp/jobs/dead-letter") {
 			const deadLetters = ACP_ASYNC_JOBS.filter(
 				(row) => String(row?.status || "") === "dead-letter",
-			).map((row) => ({
-				jobId: row.jobId,
-				status: row.status,
-				createdAt: row.createdAt,
-				updatedAt: row.updatedAt,
-				attemptCount: Number(row.attemptCount || 0),
-				maxAttempts: Number(row.maxAttempts || 3),
-				lastErrorAt: row.lastErrorAt || null,
-				error: row.error,
-			}));
+			).map((row) => {
+				const errorType = classifyAcpErrorType(row?.error || "");
+				const retryable = isAcpRetryableError(row?.error || "");
+				return {
+					jobId: row.jobId,
+					status: row.status,
+					createdAt: row.createdAt,
+					updatedAt: row.updatedAt,
+					attemptCount: Number(row.attemptCount || 0),
+					maxAttempts: Number(row.maxAttempts || 3),
+					lastErrorAt: row.lastErrorAt || null,
+					errorType,
+					retryable,
+					error: row.error,
+				};
+			});
 			return json(res, 200, { ok: true, deadLetters });
 		}
 
@@ -2960,6 +2974,34 @@ const server = http.createServer(async (req, res) => {
 				if (row) dismissed.push(id);
 			}
 			return json(res, 200, { ok: true, requested: ids.length, dismissed });
+		}
+
+		if (
+			url.pathname === "/api/acp/jobs/retry-retryable" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const retryableRows = ACP_ASYNC_JOBS.filter((row) => {
+				if (String(row?.status || "") !== "dead-letter") return false;
+				return isAcpRetryableError(row?.error || "");
+			});
+			const retried = [];
+			for (const row of retryableRows) {
+				const out = retryAcpAsyncJob(row.jobId);
+				if (out) retried.push(row.jobId);
+			}
+			return json(res, 200, {
+				ok: true,
+				retried,
+				retriedCount: retried.length,
+				retryableCount: retryableRows.length,
+			});
 		}
 
 		if (url.pathname.startsWith("/api/acp/jobs/")) {

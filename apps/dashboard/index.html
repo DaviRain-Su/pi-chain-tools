@@ -848,12 +848,19 @@
         const deadLetters = Array.isArray(acpDead?.deadLetters) ? acpDead.deadLetters : [];
         acpDeadLettersEl.innerHTML = `dead-letter: ${deadLetters.length}`;
         if (deadLetters.length > 0) {
+          const byType = deadLetters.reduce((acc, row) => {
+            const k = String(row?.errorType || 'unknown');
+            acc[k] = (acc[k] || 0) + 1;
+            return acc;
+          }, {});
+          const retryableCount = deadLetters.filter((row) => !!row?.retryable).length;
           const rowsHtml = deadLetters.slice(0, 20).map((row) => {
             const jobId = String(row?.jobId || "");
             const err = String(row?.error || "").replace(/</g, "&lt;").slice(0, 120);
-            return `<tr><td><input type="checkbox" data-dl-select="${jobId}" /></td><td>${jobId}</td><td>${row.attemptCount || 0}/${row.maxAttempts || 0}</td><td>${row.updatedAt || "-"}</td><td class="warn">${err}</td><td><button data-retry-job="${jobId}">Retry</button></td></tr>`;
+            const retryableBadge = row?.retryable ? '<span class="ok">retryable</span>' : '<span class="warn">non-retryable</span>';
+            return `<tr><td><input type="checkbox" data-dl-select="${jobId}" /></td><td>${jobId}</td><td>${row.attemptCount || 0}/${row.maxAttempts || 0}</td><td>${row.errorType || '-'}</td><td>${retryableBadge}</td><td>${row.updatedAt || "-"}</td><td class="warn">${err}</td><td><button data-retry-job="${jobId}">Retry</button></td></tr>`;
           }).join("");
-          acpDeadLettersEl.innerHTML += `<div style="margin-top:6px"><button data-dl-retry-selected="1">Retry selected</button> <button data-dl-dismiss-selected="1">Dismiss selected</button></div><table style="margin-top:6px"><thead><tr><th></th><th>jobId</th><th>attempts</th><th>updated</th><th>error</th><th>action</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+          acpDeadLettersEl.innerHTML += `<div class="muted" style="margin-top:4px">byType=${JSON.stringify(byType)} retryable=${retryableCount}/${deadLetters.length}</div><div style="margin-top:6px"><button data-dl-retry-retryable="1">Retry retryable only</button> <button data-dl-retry-selected="1">Retry selected</button> <button data-dl-dismiss-selected="1">Dismiss selected</button></div><table style="margin-top:6px"><thead><tr><th></th><th>jobId</th><th>attempts</th><th>type</th><th>retry</th><th>updated</th><th>error</th><th>action</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
 
           acpDeadLettersEl.querySelectorAll("button[data-retry-job]").forEach((btn) => {
             btn.addEventListener("click", async (ev) => {
@@ -880,6 +887,24 @@
           const selectedJobIds = () => Array.from(acpDeadLettersEl.querySelectorAll('input[data-dl-select]:checked'))
             .map((el) => String(el.getAttribute('data-dl-select') || '').trim())
             .filter(Boolean);
+
+          const retryRetryableBtn = acpDeadLettersEl.querySelector('button[data-dl-retry-retryable="1"]');
+          retryRetryableBtn?.addEventListener('click', async () => {
+            acpAsyncMetaEl.textContent = 'Retrying retryable dead-letter jobs...';
+            try {
+              const res = await fetch('/api/acp/jobs/retry-retryable', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirm: true }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) throw new Error(data?.error || `retry-retryable failed (${res.status})`);
+              acpAsyncMetaEl.textContent = `Retried ${Number(data.retriedCount || 0)} retryable job(s)`;
+              await load();
+            } catch (e) {
+              acpAsyncMetaEl.textContent = `Retry retryable failed: ${e.message || e}`;
+            }
+          });
 
           const retrySelectedBtn = acpDeadLettersEl.querySelector('button[data-dl-retry-selected="1"]');
           retrySelectedBtn?.addEventListener('click', async () => {
