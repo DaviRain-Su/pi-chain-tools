@@ -152,7 +152,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `GET /api/crosschain/debridge/readiness` (returns `enabled/commandConfigured/executeEnabled/executeCommandConfigured/canExecute/blockers/hints`)
   - `POST /api/crosschain/debridge/plan` (returns `canQuote/canExecute/blockers/executeBlockers/hints/fixPack` + `next=/api/crosschain/debridge/quote`)
   - `POST /api/crosschain/debridge/quote` (dry-run quote bridge; requires `originChain/destinationChain/tokenIn/tokenOut/amount`; returns `mode=quote|blocked` + `quote/rawOutput`)
-  - `POST /api/crosschain/debridge/execute` (`confirm=true` required; gated by `DEBRIDGE_MCP_EXECUTE_ENABLED` + execute command)
+  - `POST /api/crosschain/debridge/execute` (`confirm=true` required; gated by `DEBRIDGE_MCP_EXECUTE_ENABLED` + execute command; returns `executionArtifact/executionReconciliation`)
   - config: `crosschain.debridge.enabled|command|executeEnabled|executeCommand|timeoutMs` (`DEBRIDGE_MCP_ENABLED|DEBRIDGE_MCP_COMMAND|DEBRIDGE_MCP_EXECUTE_ENABLED|DEBRIDGE_MCP_EXECUTE_COMMAND|DEBRIDGE_MCP_TIMEOUT_MS`)
   - command placeholders (if used in command template): `{originChain} {destinationChain} {tokenIn} {tokenOut} {amount} {recipient} {account}`
 - Rebalance risk guards (env-tunable): max amount, min quote out, max slippage, cooldown, and daily execution cap (`NEAR_REBAL_*`)

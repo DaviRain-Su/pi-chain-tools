@@ -2483,6 +2483,56 @@ function buildBscPostActionArtifact({
 	};
 }
 
+function buildDebridgeExecutionArtifact({
+	payload,
+	output,
+	txHash,
+	status,
+	error,
+}) {
+	return {
+		type: "debridge_crosschain_execute",
+		version: "v1",
+		provider: "debridge-mcp",
+		status,
+		runId: String(payload?.runId || ""),
+		originChain: String(payload?.originChain || "").trim() || null,
+		destinationChain: String(payload?.destinationChain || "").trim() || null,
+		tokenIn: String(payload?.tokenIn || "").trim() || null,
+		tokenOut: String(payload?.tokenOut || "").trim() || null,
+		amount: String(payload?.amount || "").trim() || null,
+		recipient: String(payload?.recipient || "").trim() || null,
+		txHash: txHash || null,
+		error: error || null,
+		rawOutput: output || null,
+		occurredAt: new Date().toISOString(),
+	};
+}
+
+function reconcileDebridgeExecutionArtifact(artifact) {
+	const providerConsistent = artifact?.provider === "debridge-mcp";
+	const txHashPresent = /^0x[a-fA-F0-9]{64}$/.test(
+		String(artifact?.txHash || ""),
+	);
+	const normalizedStatus =
+		artifact?.status === "success" ? "ok" : artifact?.status;
+	return {
+		type: "debridge_execution_reconciliation",
+		version: "v1",
+		ok: normalizedStatus === "ok",
+		normalizedStatus,
+		providerConsistent,
+		txHashPresent,
+		issues: [
+			...(providerConsistent ? [] : ["provider_mismatch"]),
+			...(normalizedStatus === "ok" && !txHashPresent
+				? ["tx_hash_missing"]
+				: []),
+		],
+		checkedAt: new Date().toISOString(),
+	};
+}
+
 function buildAcpExecutionPlan(payload) {
 	const requirements = payload?.requirements || {};
 	const targetChain = String(
@@ -6478,6 +6528,13 @@ const server = http.createServer(async (req, res) => {
 			if (!tokenOut) blockers.push("missing_token_out");
 			if (!amount) blockers.push("missing_amount");
 			if (blockers.length > 0) {
+				const executionArtifact = buildDebridgeExecutionArtifact({
+					payload,
+					status: "blocked",
+					error: blockers.join(","),
+				});
+				const executionReconciliation =
+					reconcileDebridgeExecutionArtifact(executionArtifact);
 				pushActionHistory({
 					action: "debridge_execute",
 					status: "blocked",
@@ -6490,12 +6547,16 @@ const server = http.createServer(async (req, res) => {
 						amount,
 					},
 					blockers,
+					executionArtifact,
+					executionReconciliation,
 				});
 				return json(res, 200, {
 					ok: true,
 					mode: "blocked",
 					provider: "debridge-mcp",
 					blockers,
+					executionArtifact,
+					executionReconciliation,
 				});
 			}
 			const replacements = {
@@ -6519,6 +6580,14 @@ const server = http.createServer(async (req, res) => {
 				});
 				const txHash =
 					String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
+				const executionArtifact = buildDebridgeExecutionArtifact({
+					payload,
+					output,
+					txHash,
+					status: "success",
+				});
+				const executionReconciliation =
+					reconcileDebridgeExecutionArtifact(executionArtifact);
 				pushActionHistory({
 					action: "debridge_execute",
 					status: "ok",
@@ -6531,6 +6600,8 @@ const server = http.createServer(async (req, res) => {
 						tokenOut,
 						amount,
 					},
+					executionArtifact,
+					executionReconciliation,
 				});
 				return json(res, 200, {
 					ok: true,
@@ -6539,9 +6610,18 @@ const server = http.createServer(async (req, res) => {
 					txHash,
 					result: tryExtractJsonFromText(output),
 					rawOutput: output,
+					executionArtifact,
+					executionReconciliation,
 				});
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
+				const executionArtifact = buildDebridgeExecutionArtifact({
+					payload,
+					status: "error",
+					error: msg,
+				});
+				const executionReconciliation =
+					reconcileDebridgeExecutionArtifact(executionArtifact);
 				pushActionHistory({
 					action: "debridge_execute",
 					status: "error",
@@ -6554,12 +6634,16 @@ const server = http.createServer(async (req, res) => {
 						amount,
 					},
 					error: msg,
+					executionArtifact,
+					executionReconciliation,
 				});
 				return json(res, 500, {
 					ok: false,
 					provider: "debridge-mcp",
 					error: "debridge_execute_failed",
 					message: msg,
+					executionArtifact,
+					executionReconciliation,
 				});
 			}
 		}

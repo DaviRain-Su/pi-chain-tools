@@ -132,7 +132,7 @@ curl -s -X POST 'http://127.0.0.1:4173/api/crosschain/debridge/execute' \
   -d '{"confirm":true,"originChain":"ethereum","destinationChain":"bsc","tokenIn":"ETH","tokenOut":"USDC","amount":"1000000000000000000"}'
 ```
 
-执行结果会写入 dashboard actionHistory（`action=debridge_execute`，`status=ok|blocked|error`），便于后续审计与回放。
+执行结果会写入 dashboard actionHistory（`action=debridge_execute`，`status=ok|blocked|error`），并返回 `executionArtifact/executionReconciliation`，便于后续审计与回放。
 
 建议最小配置：
 ```bash
