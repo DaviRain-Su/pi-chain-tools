@@ -199,6 +199,7 @@
             <input id="acpBuyerFilter" placeholder="buyer filter" size="16" />
             <input id="acpStrategyFilter" placeholder="strategyId filter" size="16" />
             <label class="muted" style="display:flex;align-items:center;gap:4px"><input id="acpOnlyFailed" type="checkbox" />only failed</label>
+            <label class="muted" style="display:flex;align-items:center;gap:4px"><input id="acpExpandErrors" type="checkbox" checked />auto-expand errors</label>
             <button id="copyAcpFilterLink">Copy filter link</button>
             <button id="resetAcpFilters">Reset filters</button>
           </div>
@@ -341,6 +342,7 @@
       const acpBuyerFilterEl = document.getElementById("acpBuyerFilter");
       const acpStrategyFilterEl = document.getElementById("acpStrategyFilter");
       const acpOnlyFailedEl = document.getElementById("acpOnlyFailed");
+      const acpExpandErrorsEl = document.getElementById("acpExpandErrors");
       const copyAcpFilterLinkBtn = document.getElementById("copyAcpFilterLink");
       const resetAcpFiltersBtn = document.getElementById("resetAcpFilters");
       const acpAsyncStrategyIdEl = document.getElementById("acpAsyncStrategyId");
@@ -401,6 +403,17 @@
         return rows.map((r) => `${r.symbol}: ${r.amount}`).join(" · ");
       }
 
+      function applyAcpFiltersFromStorage() {
+        try {
+          const s = JSON.parse(localStorage.getItem(ACP_FILTERS_KEY) || "{}");
+          if (acpStatusFilterEl && s.acpStatus) acpStatusFilterEl.value = s.acpStatus;
+          if (acpBuyerFilterEl && typeof s.acpBuyer === "string") acpBuyerFilterEl.value = s.acpBuyer;
+          if (acpStrategyFilterEl && typeof s.acpStrategy === "string") acpStrategyFilterEl.value = s.acpStrategy;
+          if (acpOnlyFailedEl) acpOnlyFailedEl.checked = s.acpOnlyFailed === true;
+          if (acpExpandErrorsEl) acpExpandErrorsEl.checked = s.acpExpandErrors !== false;
+        } catch {}
+      }
+
       function applyAcpFiltersFromUrl() {
         if (!window.location.search) return;
         const p = new URLSearchParams(window.location.search);
@@ -410,7 +423,19 @@
         if (acpOnlyFailedEl && p.get("acpOnlyFailed")) acpOnlyFailedEl.checked = p.get("acpOnlyFailed") === "1";
       }
 
+      function saveAcpFiltersToStorage() {
+        const payload = {
+          acpStatus: acpStatusFilterEl?.value || "all",
+          acpBuyer: acpBuyerFilterEl?.value || "",
+          acpStrategy: acpStrategyFilterEl?.value || "",
+          acpOnlyFailed: !!acpOnlyFailedEl?.checked,
+          acpExpandErrors: !!acpExpandErrorsEl?.checked,
+        };
+        localStorage.setItem(ACP_FILTERS_KEY, JSON.stringify(payload));
+      }
+
       function syncAcpFiltersToUrl() {
+        saveAcpFiltersToStorage();
         const qp = new URLSearchParams(window.location.search);
         const setOrDelete = (key, val) => {
           if (val === undefined || val === null || String(val) === "") qp.delete(key);
@@ -429,6 +454,7 @@
         if (acpBuyerFilterEl) acpBuyerFilterEl.value = "";
         if (acpStrategyFilterEl) acpStrategyFilterEl.value = "";
         if (acpOnlyFailedEl) acpOnlyFailedEl.checked = false;
+        if (acpExpandErrorsEl) acpExpandErrorsEl.checked = true;
         syncAcpFiltersToUrl();
       }
 
@@ -438,6 +464,7 @@
       }
 
       const TARGET_KEY = "near-dashboard-targets-v1";
+      const ACP_FILTERS_KEY = "near-dashboard-acp-filters-v1";
 
       function loadTargets() {
         try {
@@ -733,7 +760,8 @@
           const detailResult = row.result ? JSON.stringify(row.result, null, 2) : "-";
           const detailError = row.error ? JSON.stringify(row.error, null, 2) : "-";
           const hasError = String(row.status || "").toLowerCase() === "error" || !!row.error;
-          detailTd.innerHTML = `<div class="row" style="margin-bottom:6px"><button data-copy-json="1">Copy JSON</button><button data-copy-run="1">Copy runId/jobId</button><button data-copy-tx="1">Copy txHash</button><button data-open-explorer="1">Open explorer</button><span class="muted" data-copy-meta="1"></span></div><details style="margin:4px 0" ${hasError ? "open" : ""}><summary>receipt</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailReceipt}</pre></details><details style="margin:4px 0" ${hasError ? "open" : ""}><summary>result</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailResult}</pre></details><details style="margin:4px 0" ${hasError ? "open" : ""}><summary>${hasError ? "⚠ error" : "error"}</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailError}</pre></details><details style="margin:4px 0"><summary>raw</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailJson}</pre></details>`;
+          const expandErrorBlocks = !!acpExpandErrorsEl?.checked && hasError;
+          detailTd.innerHTML = `<div class="row" style="margin-bottom:6px"><button data-copy-json="1">Copy JSON</button><button data-copy-run="1">Copy runId/jobId</button><button data-copy-tx="1">Copy txHash</button><button data-open-explorer="1">Open explorer</button><span class="muted" data-copy-meta="1"></span></div><details style="margin:4px 0" ${expandErrorBlocks ? "open" : ""}><summary>receipt</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailReceipt}</pre></details><details style="margin:4px 0" ${expandErrorBlocks ? "open" : ""}><summary>result</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailResult}</pre></details><details style="margin:4px 0" ${expandErrorBlocks ? "open" : ""}><summary>${hasError ? "⚠ error" : "error"}</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailError}</pre></details><details style="margin:4px 0"><summary>raw</summary><pre class="muted" style="white-space:pre-wrap;margin:4px 0">${detailJson}</pre></details>`;
           detailTr.appendChild(detailTd);
 
           const copyJsonBtn = detailTd.querySelector('[data-copy-json="1"]');
@@ -1355,6 +1383,10 @@
         syncAcpFiltersToUrl();
         load().catch(() => {});
       });
+      acpExpandErrorsEl?.addEventListener("change", () => {
+        syncAcpFiltersToUrl();
+        load().catch(() => {});
+      });
       copyAcpFilterLinkBtn?.addEventListener("click", async () => {
         syncAcpFiltersToUrl();
         const full = window.location.href;
@@ -1370,7 +1402,9 @@
         acpAsyncMetaEl.textContent = "ACP filters reset";
         load().catch(() => {});
       });
+      applyAcpFiltersFromStorage();
       applyAcpFiltersFromUrl();
+      syncAcpFiltersToUrl();
       load().catch((e) => (metaEl.textContent = e.message));
       setInterval(() => load().catch(() => {}), 30000);
     </script>
