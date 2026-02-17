@@ -2975,12 +2975,25 @@ async function getBscLendingMarketCompare() {
 			return [protocol, tags];
 		}),
 	);
+	const marketRiskScore = Object.fromEntries(
+		Object.entries(marketRiskTags).map(([protocol, tags]) => {
+			let score = 0;
+			if (Array.isArray(tags)) {
+				if (tags.includes("stale_data")) score += 45;
+				if (tags.includes("missing_timestamp")) score += 35;
+				if (tags.includes("manual_hint_source")) score += 20;
+			}
+			if (score > 100) score = 100;
+			return [protocol, score];
+		}),
+	);
 	return {
 		ok: true,
 		chain: "bsc",
 		markets: { venus, aave, lista, wombat },
 		marketHealth,
 		marketRiskTags,
+		marketRiskScore,
 		recommendation: {
 			bestUsdtSupply: {
 				protocol: bestUsdt.protocol,
