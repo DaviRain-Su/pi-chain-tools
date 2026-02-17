@@ -680,8 +680,36 @@
           detailTr.style.display = "none";
           const detailTd = document.createElement("td");
           detailTd.colSpan = 10;
-          detailTd.innerHTML = `<pre class="muted" style="white-space:pre-wrap;margin:0">${JSON.stringify(row, null, 2)}</pre>`;
+          const detailJson = JSON.stringify(row, null, 2);
+          detailTd.innerHTML = `<div class="row" style="margin-bottom:6px"><button data-copy-json="1">Copy JSON</button><button data-copy-run="1">Copy runId/jobId</button><span class="muted" data-copy-meta="1"></span></div><pre class="muted" style="white-space:pre-wrap;margin:0">${detailJson}</pre>`;
           detailTr.appendChild(detailTd);
+
+          const copyJsonBtn = detailTd.querySelector('[data-copy-json="1"]');
+          const copyRunBtn = detailTd.querySelector('[data-copy-run="1"]');
+          const copyMetaEl = detailTd.querySelector('[data-copy-meta="1"]');
+          copyJsonBtn?.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            try {
+              await navigator.clipboard.writeText(detailJson);
+              if (copyMetaEl) copyMetaEl.textContent = "JSON copied";
+            } catch {
+              if (copyMetaEl) copyMetaEl.textContent = "Copy JSON failed";
+            }
+          });
+          copyRunBtn?.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            const token = String(row.runId || row.jobId || row.id || "");
+            if (!token) {
+              if (copyMetaEl) copyMetaEl.textContent = "No runId/jobId";
+              return;
+            }
+            try {
+              await navigator.clipboard.writeText(token);
+              if (copyMetaEl) copyMetaEl.textContent = `Copied: ${token}`;
+            } catch {
+              if (copyMetaEl) copyMetaEl.textContent = "Copy runId/jobId failed";
+            }
+          });
 
           tr.addEventListener("click", () => {
             detailTr.style.display = detailTr.style.display === "none" ? "table-row" : "none";
