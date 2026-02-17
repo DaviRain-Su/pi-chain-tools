@@ -28,7 +28,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP Ops panel: ACP connectivity (`/api/acp/status`) + ACP job summary (`/api/acp/jobs/summary`) + recent ACP job list (`/api/acp/jobs`) in dashboard UI
 - ACP Ops now includes async submit controls (strategyId/buyer/amountRaw) and live polling for submitted async job status (`/api/acp/job/submit` + `/api/acp/jobs/:jobId`)
 - ACP async worker now supports retry backoff + max attempts and dead-letter state (`status=dead-letter`) for persistent failures
-- ACP Ops UI now shows dead-letter quick view and supports one-click retry (calls `POST /api/acp/jobs/retry`)
+- ACP Ops UI now shows dead-letter table view with one-click retry + batch actions (retry selected / dismiss selected)
 - Dashboard includes Payments panel (`/api/payments`) with status breakdown (`pending/paid/failed`) and recent payment rows
 - ACP recent jobs table supports status filtering and NEAR tx explorer links when `txHash` is present
 - ACP recent jobs table now also shows `strategyId` / `buyer` / `remainingUses` to trace entitlement consumption during execution
@@ -60,6 +60,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `GET /api/acp/jobs/:jobId` -> async job status/result/error by id (includes retry/dead-letter metadata)
   - `GET /api/acp/jobs/dead-letter` -> async jobs exhausted after max attempts
   - `POST /api/acp/jobs/retry` (`confirm=true`, `jobId`) -> manually requeue a dead-letter/error async job
+  - `POST /api/acp/jobs/retry-batch` (`confirm=true`, `jobIds[]`) -> batch requeue dead-letter/error async jobs
+  - `POST /api/acp/jobs/dismiss` (`confirm=true`, `jobIds[]`) -> mark dead-letter jobs as dismissed (remove from active DLQ)
   - `GET /api/acp/jobs/summary` -> status distribution + queue status breakdown + daily execution counters/limit
   - execute mode applies policy daily guard `constraints.maxDailyRebalanceRuns`
 - Unified multi-chain portfolio bootstrap:

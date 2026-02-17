@@ -848,12 +848,13 @@
         const deadLetters = Array.isArray(acpDead?.deadLetters) ? acpDead.deadLetters : [];
         acpDeadLettersEl.innerHTML = `dead-letter: ${deadLetters.length}`;
         if (deadLetters.length > 0) {
-          const quick = deadLetters.slice(0, 3).map((row) => {
+          const rowsHtml = deadLetters.slice(0, 20).map((row) => {
             const jobId = String(row?.jobId || "");
-            const err = String(row?.error || "").slice(0, 80);
-            return `<span class="muted" style="margin-right:8px">${jobId}(${row.attemptCount || 0}/${row.maxAttempts || 0})</span><button data-retry-job="${jobId}">Retry</button><span class="warn" style="margin:0 8px">${err}</span>`;
-          }).join("<br/>");
-          acpDeadLettersEl.innerHTML += `<br/>${quick}`;
+            const err = String(row?.error || "").replace(/</g, "&lt;").slice(0, 120);
+            return `<tr><td><input type="checkbox" data-dl-select="${jobId}" /></td><td>${jobId}</td><td>${row.attemptCount || 0}/${row.maxAttempts || 0}</td><td>${row.updatedAt || "-"}</td><td class="warn">${err}</td><td><button data-retry-job="${jobId}">Retry</button></td></tr>`;
+          }).join("");
+          acpDeadLettersEl.innerHTML += `<div style="margin-top:6px"><button data-dl-retry-selected="1">Retry selected</button> <button data-dl-dismiss-selected="1">Dismiss selected</button></div><table style="margin-top:6px"><thead><tr><th></th><th>jobId</th><th>attempts</th><th>updated</th><th>error</th><th>action</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+
           acpDeadLettersEl.querySelectorAll("button[data-retry-job]").forEach((btn) => {
             btn.addEventListener("click", async (ev) => {
               ev.stopPropagation();
@@ -874,6 +875,56 @@
                 acpAsyncMetaEl.textContent = `Retry failed: ${e.message || e}`;
               }
             });
+          });
+
+          const selectedJobIds = () => Array.from(acpDeadLettersEl.querySelectorAll('input[data-dl-select]:checked'))
+            .map((el) => String(el.getAttribute('data-dl-select') || '').trim())
+            .filter(Boolean);
+
+          const retrySelectedBtn = acpDeadLettersEl.querySelector('button[data-dl-retry-selected="1"]');
+          retrySelectedBtn?.addEventListener('click', async () => {
+            const jobIds = selectedJobIds();
+            if (jobIds.length === 0) {
+              acpAsyncMetaEl.textContent = 'No dead-letter jobs selected';
+              return;
+            }
+            acpAsyncMetaEl.textContent = `Retrying ${jobIds.length} dead-letter job(s)...`;
+            try {
+              const res = await fetch('/api/acp/jobs/retry-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirm: true, jobIds }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) throw new Error(data?.error || `retry-batch failed (${res.status})`);
+              acpAsyncMetaEl.textContent = `Retried ${Array.isArray(data.retried) ? data.retried.length : 0} job(s)`;
+              await load();
+            } catch (e) {
+              acpAsyncMetaEl.textContent = `Retry selected failed: ${e.message || e}`;
+            }
+          });
+
+          const dismissSelectedBtn = acpDeadLettersEl.querySelector('button[data-dl-dismiss-selected="1"]');
+          dismissSelectedBtn?.addEventListener('click', async () => {
+            const jobIds = selectedJobIds();
+            if (jobIds.length === 0) {
+              acpAsyncMetaEl.textContent = 'No dead-letter jobs selected';
+              return;
+            }
+            acpAsyncMetaEl.textContent = `Dismissing ${jobIds.length} dead-letter job(s)...`;
+            try {
+              const res = await fetch('/api/acp/jobs/dismiss', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirm: true, jobIds }),
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) throw new Error(data?.error || `dismiss failed (${res.status})`);
+              acpAsyncMetaEl.textContent = `Dismissed ${Array.isArray(data.dismissed) ? data.dismissed.length : 0} job(s)`;
+              await load();
+            } catch (e) {
+              acpAsyncMetaEl.textContent = `Dismiss selected failed: ${e.message || e}`;
+            }
           });
         }
         targetAlertEl.innerHTML = computeTargetAlert(data, targetConfig);

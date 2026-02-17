@@ -1353,6 +1353,16 @@ function retryAcpAsyncJob(jobId) {
 	return row;
 }
 
+function dismissAcpAsyncJob(jobId) {
+	const row = getAcpAsyncJobById(jobId);
+	if (!row) return null;
+	row.status = "dismissed";
+	row.nextAttemptAt = null;
+	row.updatedAt = new Date().toISOString();
+	void saveMetricsToDisk();
+	return row;
+}
+
 function enqueueAcpAsyncJob(payload) {
 	const jobId = String(payload?.jobId || `acp-job-${Date.now()}`).trim();
 	const maxAttempts = Math.max(
@@ -2906,6 +2916,50 @@ const server = http.createServer(async (req, res) => {
 					maxAttempts: Number(row.maxAttempts || 3),
 				},
 			});
+		}
+
+		if (url.pathname === "/api/acp/jobs/retry-batch" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const ids = Array.isArray(payload.jobIds)
+				? payload.jobIds.map((v) => String(v || "").trim()).filter(Boolean)
+				: [];
+			if (ids.length === 0) {
+				return json(res, 400, { ok: false, error: "Missing jobIds[]" });
+			}
+			const retried = [];
+			for (const id of ids) {
+				const row = retryAcpAsyncJob(id);
+				if (row) retried.push(id);
+			}
+			return json(res, 200, { ok: true, requested: ids.length, retried });
+		}
+
+		if (url.pathname === "/api/acp/jobs/dismiss" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const ids = Array.isArray(payload.jobIds)
+				? payload.jobIds.map((v) => String(v || "").trim()).filter(Boolean)
+				: [];
+			if (ids.length === 0) {
+				return json(res, 400, { ok: false, error: "Missing jobIds[]" });
+			}
+			const dismissed = [];
+			for (const id of ids) {
+				const row = dismissAcpAsyncJob(id);
+				if (row) dismissed.push(id);
+			}
+			return json(res, 200, { ok: true, requested: ids.length, dismissed });
 		}
 
 		if (url.pathname.startsWith("/api/acp/jobs/")) {
