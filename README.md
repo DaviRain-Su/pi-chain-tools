@@ -801,6 +801,7 @@ Quick references:
 - Setup guide: `docs/openclaw-near-setup.md`
 - Env template: `.env.near.example`
 - Dashboard doc: `docs/near-dashboard.md`
+- Ops runbook (ACP/Payments/DLQ): `docs/openclaw-ops-runbook.md`
 
 ### Local NEAR Dashboard (web)
 
