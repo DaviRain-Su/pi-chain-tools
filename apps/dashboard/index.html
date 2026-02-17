@@ -873,6 +873,7 @@
         const marketHealth = bscYieldMarkets?.marketHealth || {};
         const marketRiskTags = bscYieldMarkets?.marketRiskTags || {};
         const marketRiskScore = bscYieldMarkets?.marketRiskScore || {};
+        const marketRiskBand = bscYieldMarkets?.marketRiskBand || {};
         const protocols = ["venus", "aave", "lista", "wombat"];
         const marketHealthText = protocols
           .map((p) => {
@@ -884,8 +885,10 @@
             const updatedAt = row?.updatedAt ? new Date(row.updatedAt).toLocaleString() : "-";
             const tags = Array.isArray(marketRiskTags?.[p]) ? marketRiskTags[p].join(",") : "-";
             const riskScore = Number.isFinite(Number(marketRiskScore?.[p])) ? Number(marketRiskScore[p]) : null;
-            const title = `${p} source=${source} updated=${updatedAt} ageMin=${ageMin != null ? ageMin : "-"} tags=${tags} riskScore=${riskScore != null ? riskScore : "-"}`;
-            return `<span class="${cls}" title="${title}">${p}:${status}${ageMin != null ? `(${ageMin}m)` : ""}${riskScore != null ? ` r${riskScore}` : ""}</span>`;
+            const riskBand = String(marketRiskBand?.[p] || "unknown");
+            const riskCls = riskBand === "high" ? "warn" : riskBand === "medium" ? "muted" : riskBand === "low" ? "ok" : "muted";
+            const title = `${p} source=${source} updated=${updatedAt} ageMin=${ageMin != null ? ageMin : "-"} tags=${tags} riskScore=${riskScore != null ? riskScore : "-"} riskBand=${riskBand}`;
+            return `<span class="${cls}" title="${title}">${p}:${status}${ageMin != null ? `(${ageMin}m)` : ""} <span class="${riskCls}">${riskScore != null ? `r${riskScore}` : "r-"}/${riskBand}</span></span>`;
           })
           .join(" · ");
         bscMarketHealthEl.innerHTML = `BSC market health: ${marketHealthText || "<span class=\"muted\">-</span>"}`;

@@ -2987,6 +2987,13 @@ async function getBscLendingMarketCompare() {
 			return [protocol, score];
 		}),
 	);
+	const marketRiskBand = Object.fromEntries(
+		Object.entries(marketRiskScore).map(([protocol, score]) => {
+			const n = Number(score || 0);
+			const band = n >= 70 ? "high" : n >= 40 ? "medium" : "low";
+			return [protocol, band];
+		}),
+	);
 	return {
 		ok: true,
 		chain: "bsc",
@@ -2994,6 +3001,7 @@ async function getBscLendingMarketCompare() {
 		marketHealth,
 		marketRiskTags,
 		marketRiskScore,
+		marketRiskBand,
 		recommendation: {
 			bestUsdtSupply: {
 				protocol: bestUsdt.protocol,
