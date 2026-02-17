@@ -156,6 +156,17 @@ Open:
 
 - `http://127.0.0.1:4173`
 
+## Unified dashboard config (recommended)
+
+The dashboard now supports a single JSON config file for non-sensitive settings:
+
+- Default path: `apps/dashboard/config/dashboard.config.json`
+- Override path: `NEAR_DASHBOARD_CONFIG_PATH=/abs/path/to/dashboard.config.json`
+- Precedence: `env > config file > built-in defaults`
+
+Keep secrets in `.env` (or your secret manager), for example:
+`*_PRIVATE_KEY`, `PAYMENT_WEBHOOK_SECRET`, telegram bot token, etc.
+
 ## Optional environment variables
 
 - `NEAR_ACCOUNT_ID` - default account loaded in UI (fallback: `davirain8.near`)

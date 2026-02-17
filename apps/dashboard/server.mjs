@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -20,197 +21,387 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = Number.parseInt(process.env.NEAR_DASHBOARD_PORT || "4173", 10);
-const ACCOUNT_ID = process.env.NEAR_ACCOUNT_ID || "davirain8.near";
+const DASHBOARD_CONFIG_PATH =
+	process.env.NEAR_DASHBOARD_CONFIG_PATH ||
+	path.join(__dirname, "config", "dashboard.config.json");
+
+function deepGet(obj, dottedPath, fallback = undefined) {
+	const parts = String(dottedPath || "")
+		.split(".")
+		.map((x) => x.trim())
+		.filter(Boolean);
+	let cur = obj;
+	for (const part of parts) {
+		if (!cur || typeof cur !== "object" || !(part in cur)) return fallback;
+		cur = cur[part];
+	}
+	return cur === undefined ? fallback : cur;
+}
+
+let dashboardConfig = {};
+try {
+	if (existsSync(DASHBOARD_CONFIG_PATH)) {
+		dashboardConfig = JSON.parse(
+			readFileSync(DASHBOARD_CONFIG_PATH, "utf8") || "{}",
+		);
+	}
+} catch (error) {
+	console.warn(
+		`[dashboard] failed to parse config ${DASHBOARD_CONFIG_PATH}: ${error instanceof Error ? error.message : String(error)}`,
+	);
+	dashboardConfig = {};
+}
+
+const envOrCfg = (envKey, cfgPath, fallback = "") => {
+	const envValue = process.env[envKey];
+	if (envValue !== undefined && envValue !== "") return envValue;
+	const cfgValue = deepGet(dashboardConfig, cfgPath, fallback);
+	return cfgValue === undefined || cfgValue === null ? fallback : cfgValue;
+};
+
+const PORT = Number.parseInt(
+	String(envOrCfg("NEAR_DASHBOARD_PORT", "server.port", "4173")),
+	10,
+);
+const ACCOUNT_ID = String(
+	envOrCfg("NEAR_ACCOUNT_ID", "near.accountId", "davirain8.near"),
+);
 const BURROW_CONTRACT = "contract.main.burrow.near";
-const RPC_ENDPOINTS = (
-	process.env.NEAR_RPC_URLS ||
-	process.env.NEAR_RPC_URL ||
-	"https://1rpc.io/near,https://rpc.mainnet.near.org"
+const RPC_ENDPOINTS = String(
+	envOrCfg(
+		"NEAR_RPC_URLS",
+		"near.rpcUrls",
+		envOrCfg(
+			"NEAR_RPC_URL",
+			"near.rpcUrl",
+			"https://1rpc.io/near,https://rpc.mainnet.near.org",
+		),
+	),
 )
 	.split(",")
 	.map((value) => value.trim())
 	.filter(Boolean);
-const SESSION_DIR =
-	process.env.OPENCLAW_SESSION_DIR ||
-	path.join(
-		process.env.HOME || "/home/davirain",
-		".openclaw/agents/main/sessions",
-	);
-const METRICS_PATH =
-	process.env.NEAR_DASHBOARD_METRICS_PATH ||
-	path.join(__dirname, "data", "rebalance-metrics.json");
-const POLICY_PATH =
-	process.env.NEAR_DASHBOARD_POLICY_PATH ||
-	path.join(__dirname, "data", "portfolio-policy.json");
-const MARKETPLACE_PATH =
-	process.env.NEAR_DASHBOARD_MARKETPLACE_PATH ||
-	path.join(__dirname, "data", "strategy-marketplace.json");
-const ALERT_WEBHOOK_URL = process.env.NEAR_REBAL_ALERT_WEBHOOK_URL || "";
-const ALERT_TELEGRAM_BOT_TOKEN =
-	process.env.NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN || "";
-const ALERT_TELEGRAM_CHAT_ID =
-	process.env.NEAR_REBAL_ALERT_TELEGRAM_CHAT_ID || "";
+const SESSION_DIR = String(
+	envOrCfg(
+		"OPENCLAW_SESSION_DIR",
+		"openclaw.sessionDir",
+		path.join(
+			process.env.HOME || "/home/davirain",
+			".openclaw/agents/main/sessions",
+		),
+	),
+);
+const METRICS_PATH = String(
+	envOrCfg(
+		"NEAR_DASHBOARD_METRICS_PATH",
+		"paths.metrics",
+		path.join(__dirname, "data", "rebalance-metrics.json"),
+	),
+);
+const POLICY_PATH = String(
+	envOrCfg(
+		"NEAR_DASHBOARD_POLICY_PATH",
+		"paths.policy",
+		path.join(__dirname, "data", "portfolio-policy.json"),
+	),
+);
+const MARKETPLACE_PATH = String(
+	envOrCfg(
+		"NEAR_DASHBOARD_MARKETPLACE_PATH",
+		"paths.marketplace",
+		path.join(__dirname, "data", "strategy-marketplace.json"),
+	),
+);
+const ALERT_WEBHOOK_URL = String(
+	envOrCfg("NEAR_REBAL_ALERT_WEBHOOK_URL", "alerts.webhookUrl", ""),
+);
+const ALERT_TELEGRAM_BOT_TOKEN = String(
+	envOrCfg(
+		"NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN",
+		"alerts.telegramBotToken",
+		"",
+	),
+);
+const ALERT_TELEGRAM_CHAT_ID = String(
+	envOrCfg("NEAR_REBAL_ALERT_TELEGRAM_CHAT_ID", "alerts.telegramChatId", ""),
+);
 const ALERT_SUCCESS_ENABLED =
-	String(process.env.NEAR_REBAL_ALERT_SUCCESS || "false").toLowerCase() ===
-	"true";
+	String(
+		envOrCfg("NEAR_REBAL_ALERT_SUCCESS", "alerts.successEnabled", "false"),
+	).toLowerCase() === "true";
 const ALERT_DEDUPE_WINDOW_MS =
-	Number.parseInt(process.env.NEAR_REBAL_ALERT_DEDUPE_MS || "300000", 10) ||
-	300000;
-const BSC_CHAIN_ID = Number.parseInt(process.env.BSC_CHAIN_ID || "56", 10);
-const BSC_RPC_URL =
-	process.env.BSC_RPC_URL || "https://bsc-dataseed.binance.org";
-const BSC_USDT =
-	process.env.BSC_USDT || "0x55d398326f99059fF775485246999027B3197955";
-const BSC_USDC =
-	process.env.BSC_USDC || "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d";
-const BSC_ROUTER_V2 =
-	process.env.BSC_ROUTER_V2 || "0x10ED43C718714eb63d5aA57B78B54704E256024E";
-const ACP_BIN = process.env.ACP_BIN || "acp";
-const ACP_WORKDIR = process.env.ACP_WORKDIR || process.cwd();
+	Number.parseInt(
+		String(
+			envOrCfg("NEAR_REBAL_ALERT_DEDUPE_MS", "alerts.dedupeWindowMs", "300000"),
+		),
+		10,
+	) || 300000;
+const BSC_CHAIN_ID = Number.parseInt(
+	String(envOrCfg("BSC_CHAIN_ID", "bsc.chainId", "56")),
+	10,
+);
+const BSC_RPC_URL = String(
+	envOrCfg("BSC_RPC_URL", "bsc.rpcUrl", "https://bsc-dataseed.binance.org"),
+);
+const BSC_USDT = String(
+	envOrCfg(
+		"BSC_USDT",
+		"bsc.tokens.usdt",
+		"0x55d398326f99059fF775485246999027B3197955",
+	),
+);
+const BSC_USDC = String(
+	envOrCfg(
+		"BSC_USDC",
+		"bsc.tokens.usdc",
+		"0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+	),
+);
+const BSC_ROUTER_V2 = String(
+	envOrCfg(
+		"BSC_ROUTER_V2",
+		"bsc.routerV2",
+		"0x10ED43C718714eb63d5aA57B78B54704E256024E",
+	),
+);
+const ACP_BIN = String(envOrCfg("ACP_BIN", "acp.bin", "acp"));
+const ACP_WORKDIR = String(
+	envOrCfg("ACP_WORKDIR", "acp.workdir", process.cwd()),
+);
 const BSC_USDT_DECIMALS = Number.parseInt(
-	process.env.BSC_USDT_DECIMALS || "18",
+	String(envOrCfg("BSC_USDT_DECIMALS", "bsc.decimals.usdt", "18")),
 	10,
 );
 const BSC_USDC_DECIMALS = Number.parseInt(
-	process.env.BSC_USDC_DECIMALS || "18",
+	String(envOrCfg("BSC_USDC_DECIMALS", "bsc.decimals.usdc", "18")),
 	10,
 );
 const BSC_EXECUTE_ENABLED =
-	String(process.env.BSC_EXECUTE_ENABLED || "false").toLowerCase() === "true";
-const BSC_EXECUTE_MODE = String(process.env.BSC_EXECUTE_MODE || "auto")
+	String(
+		envOrCfg("BSC_EXECUTE_ENABLED", "bsc.execute.enabled", "false"),
+	).toLowerCase() === "true";
+const BSC_EXECUTE_MODE = String(
+	envOrCfg("BSC_EXECUTE_MODE", "bsc.execute.mode", "auto"),
+)
 	.trim()
 	.toLowerCase();
 const BSC_EXECUTE_COMMAND = String(
-	process.env.BSC_EXECUTE_COMMAND || "",
+	envOrCfg("BSC_EXECUTE_COMMAND", "bsc.execute.command", ""),
 ).trim();
 const BSC_EXECUTE_PRIVATE_KEY = String(
-	process.env.BSC_EXECUTE_PRIVATE_KEY || "",
+	envOrCfg("BSC_EXECUTE_PRIVATE_KEY", "bsc.execute.privateKey", ""),
 ).trim();
 const BSC_EXECUTE_RECIPIENT = String(
-	process.env.BSC_EXECUTE_RECIPIENT || "",
+	envOrCfg("BSC_EXECUTE_RECIPIENT", "bsc.execute.recipient", ""),
 ).trim();
 const BSC_EXECUTE_CONFIRMATIONS = Math.max(
 	1,
-	Number.parseInt(process.env.BSC_EXECUTE_CONFIRMATIONS || "1", 10) || 1,
+	Number.parseInt(
+		String(
+			envOrCfg("BSC_EXECUTE_CONFIRMATIONS", "bsc.execute.confirmations", "1"),
+		),
+		10,
+	) || 1,
 );
 const BSC_EXECUTE_GAS_BUMP_PERCENT = Math.max(
 	0,
-	Number.parseInt(process.env.BSC_EXECUTE_GAS_BUMP_PERCENT || "15", 10) || 15,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"BSC_EXECUTE_GAS_BUMP_PERCENT",
+				"bsc.execute.gasBumpPercent",
+				"15",
+			),
+		),
+		10,
+	) || 15,
 );
 const BSC_EXECUTE_NONCE_RETRY = Math.max(
 	0,
-	Number.parseInt(process.env.BSC_EXECUTE_NONCE_RETRY || "1", 10) || 1,
+	Number.parseInt(
+		String(envOrCfg("BSC_EXECUTE_NONCE_RETRY", "bsc.execute.nonceRetry", "1")),
+		10,
+	) || 1,
 );
 const BSC_QUOTE_MAX_DIVERGENCE_BPS = Math.max(
 	0,
-	Number.parseInt(process.env.BSC_QUOTE_MAX_DIVERGENCE_BPS || "800", 10) || 800,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"BSC_QUOTE_MAX_DIVERGENCE_BPS",
+				"bsc.quote.maxDivergenceBps",
+				"800",
+			),
+		),
+		10,
+	) || 800,
 );
 const BSC_YIELD_MIN_APR_DELTA_BPS = Math.max(
 	0,
-	Number.parseInt(process.env.BSC_YIELD_MIN_APR_DELTA_BPS || "30", 10) || 30,
+	Number.parseInt(
+		String(
+			envOrCfg("BSC_YIELD_MIN_APR_DELTA_BPS", "bsc.yield.minAprDeltaBps", "30"),
+		),
+		10,
+	) || 30,
 );
 const BSC_STABLE_APR_HINTS_JSON = String(
-	process.env.BSC_STABLE_APR_HINTS_JSON || "",
+	envOrCfg("BSC_STABLE_APR_HINTS_JSON", "bsc.yield.stableAprHintsJson", ""),
 ).trim();
 const BSC_AAVE_APR_HINTS_JSON = String(
-	process.env.BSC_AAVE_APR_HINTS_JSON || "",
+	envOrCfg("BSC_AAVE_APR_HINTS_JSON", "bsc.yield.aaveAprHintsJson", ""),
 ).trim();
 const BSC_VENUS_APR_API_URL = String(
-	process.env.BSC_VENUS_APR_API_URL || "",
+	envOrCfg("BSC_VENUS_APR_API_URL", "bsc.yield.venusAprApiUrl", ""),
 ).trim();
 const BSC_AAVE_APR_API_URL = String(
-	process.env.BSC_AAVE_APR_API_URL || "",
+	envOrCfg("BSC_AAVE_APR_API_URL", "bsc.yield.aaveAprApiUrl", ""),
 ).trim();
 const BSC_APR_CACHE_TTL_MS = Math.max(
 	5_000,
-	Number.parseInt(process.env.BSC_APR_CACHE_TTL_MS || "60000", 10) || 60_000,
+	Number.parseInt(
+		String(
+			envOrCfg("BSC_APR_CACHE_TTL_MS", "bsc.yield.aprCacheTtlMs", "60000"),
+		),
+		10,
+	) || 60_000,
 );
 const BSC_AAVE_EXECUTE_ENABLED =
-	String(process.env.BSC_AAVE_EXECUTE_ENABLED || "false").toLowerCase() ===
-	"true";
+	String(
+		envOrCfg("BSC_AAVE_EXECUTE_ENABLED", "bsc.aave.enabled", "false"),
+	).toLowerCase() === "true";
 const BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT = String(
-	process.env.BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT || "venus",
+	envOrCfg(
+		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT",
+		"bsc.yield.executionProtocolDefault",
+		"venus",
+	),
 )
 	.trim()
 	.toLowerCase();
 const BSC_AAVE_EXECUTE_COMMAND = String(
-	process.env.BSC_AAVE_EXECUTE_COMMAND || "",
+	envOrCfg("BSC_AAVE_EXECUTE_COMMAND", "bsc.aave.executeCommand", ""),
 ).trim();
 const BSC_AAVE_EXECUTE_MODE = String(
-	process.env.BSC_AAVE_EXECUTE_MODE || "auto",
+	envOrCfg("BSC_AAVE_EXECUTE_MODE", "bsc.aave.mode", "auto"),
 )
 	.trim()
 	.toLowerCase();
-const BSC_AAVE_POOL = String(process.env.BSC_AAVE_POOL || "").trim();
+const BSC_AAVE_POOL = String(
+	envOrCfg("BSC_AAVE_POOL", "bsc.aave.pool", ""),
+).trim();
 const BSC_AAVE_EXECUTE_PRIVATE_KEY = String(
-	process.env.BSC_AAVE_EXECUTE_PRIVATE_KEY || BSC_EXECUTE_PRIVATE_KEY || "",
+	envOrCfg(
+		"BSC_AAVE_EXECUTE_PRIVATE_KEY",
+		"bsc.aave.privateKey",
+		BSC_EXECUTE_PRIVATE_KEY || "",
+	),
 ).trim();
 const BSC_AAVE_REFERRAL_CODE = Math.max(
 	0,
-	Number.parseInt(process.env.BSC_AAVE_REFERRAL_CODE || "0", 10) || 0,
+	Number.parseInt(
+		String(envOrCfg("BSC_AAVE_REFERRAL_CODE", "bsc.aave.referralCode", "0")),
+		10,
+	) || 0,
 );
 const BSC_AAVE_MAX_AMOUNT_RAW = String(
-	process.env.BSC_AAVE_MAX_AMOUNT_RAW || "20000000000000000000000",
+	envOrCfg(
+		"BSC_AAVE_MAX_AMOUNT_RAW",
+		"bsc.aave.maxAmountRaw",
+		"20000000000000000000000",
+	),
 ).trim();
 const BSC_AAVE_ALLOWED_TOKENS = String(
-	process.env.BSC_AAVE_ALLOWED_TOKENS || `${BSC_USDC},${BSC_USDT}`,
+	envOrCfg(
+		"BSC_AAVE_ALLOWED_TOKENS",
+		"bsc.aave.allowedTokens",
+		`${BSC_USDC},${BSC_USDT}`,
+	),
 )
 	.split(",")
 	.map((x) => x.trim().toLowerCase())
 	.filter(Boolean);
 const BSC_AAVE_ATOKEN_USDC = String(
-	process.env.BSC_AAVE_ATOKEN_USDC || "",
+	envOrCfg("BSC_AAVE_ATOKEN_USDC", "bsc.positions.aaveAtokenUsdc", ""),
 ).trim();
 const BSC_AAVE_ATOKEN_USDT = String(
-	process.env.BSC_AAVE_ATOKEN_USDT || "",
+	envOrCfg("BSC_AAVE_ATOKEN_USDT", "bsc.positions.aaveAtokenUsdt", ""),
 ).trim();
 const BSC_VENUS_VTOKEN_USDC = String(
-	process.env.BSC_VENUS_VTOKEN_USDC || "",
+	envOrCfg("BSC_VENUS_VTOKEN_USDC", "bsc.positions.venusVtokenUsdc", ""),
 ).trim();
 const BSC_VENUS_VTOKEN_USDT = String(
-	process.env.BSC_VENUS_VTOKEN_USDT || "",
+	envOrCfg("BSC_VENUS_VTOKEN_USDT", "bsc.positions.venusVtokenUsdt", ""),
 ).trim();
 const ACP_DISMISSED_PURGE_ENABLED =
-	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
-	"true";
+	String(
+		envOrCfg(
+			"ACP_DISMISSED_PURGE_ENABLED",
+			"acp.dismissedPurge.enabled",
+			"false",
+		),
+	).toLowerCase() === "true";
 const ACP_DISMISSED_PURGE_DAYS = Math.max(
 	0,
-	Number.parseInt(process.env.ACP_DISMISSED_PURGE_DAYS || "7", 10) || 7,
+	Number.parseInt(
+		String(
+			envOrCfg("ACP_DISMISSED_PURGE_DAYS", "acp.dismissedPurge.days", "7"),
+		),
+		10,
+	) || 7,
 );
 const ACP_DISMISSED_PURGE_INTERVAL_MS = Math.max(
 	60_000,
 	Number.parseInt(
-		process.env.ACP_DISMISSED_PURGE_INTERVAL_MS || String(6 * 60 * 60 * 1000),
+		String(
+			envOrCfg(
+				"ACP_DISMISSED_PURGE_INTERVAL_MS",
+				"acp.dismissedPurge.intervalMs",
+				String(6 * 60 * 60 * 1000),
+			),
+		),
 		10,
 	) || 6 * 60 * 60 * 1000,
 );
 const PAYMENT_WEBHOOK_SECRET = String(
-	process.env.PAYMENT_WEBHOOK_SECRET || "",
+	envOrCfg("PAYMENT_WEBHOOK_SECRET", "payments.webhookSecret", ""),
 ).trim();
 const PAYMENT_WEBHOOK_PROVIDER = String(
-	process.env.PAYMENT_WEBHOOK_PROVIDER || "generic",
+	envOrCfg("PAYMENT_WEBHOOK_PROVIDER", "payments.webhookProvider", "generic"),
 )
 	.trim()
 	.toLowerCase();
 const NEAR_RPC_RETRY_ROUNDS = Number.parseInt(
-	process.env.NEAR_RPC_RETRY_ROUNDS || "2",
+	String(envOrCfg("NEAR_RPC_RETRY_ROUNDS", "near.rpcRetry.rounds", "2")),
 	10,
 );
 const NEAR_RPC_RETRY_BASE_MS = Number.parseInt(
-	process.env.NEAR_RPC_RETRY_BASE_MS || "250",
+	String(envOrCfg("NEAR_RPC_RETRY_BASE_MS", "near.rpcRetry.baseMs", "250")),
 	10,
 );
 const NEAR_RPC_ALERT_RETRY_RATE = Number.parseFloat(
-	process.env.NEAR_RPC_ALERT_RETRY_RATE || "0.2",
+	String(
+		envOrCfg(
+			"NEAR_RPC_ALERT_RETRY_RATE",
+			"near.rpcRetry.alertRetryRate",
+			"0.2",
+		),
+	),
 );
 const NEAR_RPC_ALERT_429_COUNT = Number.parseInt(
-	process.env.NEAR_RPC_ALERT_429_COUNT || "10",
+	String(
+		envOrCfg("NEAR_RPC_ALERT_429_COUNT", "near.rpcRetry.alert429Count", "10"),
+	),
 	10,
 );
 const NEAR_RPC_WARMUP_CALLS = Number.parseInt(
-	process.env.NEAR_RPC_WARMUP_CALLS ||
-		String(Math.max(2, RPC_ENDPOINTS.length * 2)),
+	String(
+		envOrCfg(
+			"NEAR_RPC_WARMUP_CALLS",
+			"near.rpcRetry.warmupCalls",
+			String(Math.max(2, RPC_ENDPOINTS.length * 2)),
+		),
+	),
 	10,
 );
 

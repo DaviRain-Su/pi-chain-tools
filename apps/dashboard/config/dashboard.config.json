@@ -1,0 +1,66 @@
+{
+	"server": {
+		"port": 4173
+	},
+	"near": {
+		"accountId": "davirain8.near",
+		"rpcUrls": "https://1rpc.io/near,https://rpc.mainnet.near.org",
+		"rpcRetry": {
+			"rounds": 2,
+			"baseMs": 250,
+			"alertRetryRate": 0.2,
+			"alert429Count": 10,
+			"warmupCalls": 4
+		}
+	},
+	"bsc": {
+		"chainId": 56,
+		"rpcUrl": "https://bsc-dataseed.binance.org",
+		"routerV2": "0x10ED43C718714eb63d5aA57B78B54704E256024E",
+		"tokens": {
+			"usdt": "0x55d398326f99059fF775485246999027B3197955",
+			"usdc": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d"
+		},
+		"decimals": {
+			"usdt": 18,
+			"usdc": 18
+		},
+		"execute": {
+			"enabled": false,
+			"mode": "auto",
+			"confirmations": 1,
+			"gasBumpPercent": 15,
+			"nonceRetry": 1
+		},
+		"quote": {
+			"maxDivergenceBps": 800
+		},
+		"yield": {
+			"minAprDeltaBps": 30,
+			"aprCacheTtlMs": 60000,
+			"executionProtocolDefault": "venus"
+		},
+		"aave": {
+			"enabled": false,
+			"mode": "auto",
+			"referralCode": 0,
+			"maxAmountRaw": "20000000000000000000000",
+			"allowedTokens": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955"
+		}
+	},
+	"acp": {
+		"bin": "acp",
+		"dismissedPurge": {
+			"enabled": false,
+			"days": 7,
+			"intervalMs": 21600000
+		}
+	},
+	"alerts": {
+		"successEnabled": false,
+		"dedupeWindowMs": 300000
+	},
+	"payments": {
+		"webhookProvider": "generic"
+	}
+}
