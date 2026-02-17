@@ -2965,11 +2965,22 @@ async function getBscLendingMarketCompare() {
 			];
 		}),
 	);
+	const marketRiskTags = Object.fromEntries(
+		Object.entries(marketHealth).map(([protocol, row]) => {
+			const tags = [];
+			if (row?.status === "stale") tags.push("stale_data");
+			if (row?.status === "unknown") tags.push("missing_timestamp");
+			if (row?.source === "env-json") tags.push("manual_hint_source");
+			if (tags.length === 0) tags.push("healthy");
+			return [protocol, tags];
+		}),
+	);
 	return {
 		ok: true,
 		chain: "bsc",
 		markets: { venus, aave, lista, wombat },
 		marketHealth,
+		marketRiskTags,
 		recommendation: {
 			bestUsdtSupply: {
 				protocol: bestUsdt.protocol,
