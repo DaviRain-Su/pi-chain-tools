@@ -48,6 +48,8 @@ const BSC_USDC =
 	process.env.BSC_USDC || "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d";
 const BSC_ROUTER_V2 =
 	process.env.BSC_ROUTER_V2 || "0x10ED43C718714eb63d5aA57B78B54704E256024E";
+const ACP_BIN = process.env.ACP_BIN || "acp";
+const ACP_WORKDIR = process.env.ACP_WORKDIR || process.cwd();
 const BSC_USDT_DECIMALS = Number.parseInt(
 	process.env.BSC_USDT_DECIMALS || "18",
 	10,
@@ -681,6 +683,7 @@ function runCommand(command, args, options = {}) {
 			{
 				timeout: options.timeoutMs || 120_000,
 				env: { ...process.env, ...(options.env || {}) },
+				cwd: options.cwd || process.cwd(),
 			},
 			(error, stdout, stderr) => {
 				if (error) {
@@ -702,6 +705,65 @@ function isTransientExecError(error) {
 		text.includes("timeout") ||
 		text.includes("503")
 	);
+}
+
+async function runAcpJson(args = []) {
+	const output = await runCommand(ACP_BIN, [...args, "--json"], {
+		env: process.env,
+		cwd: ACP_WORKDIR,
+	});
+	try {
+		return JSON.parse(output);
+	} catch {
+		return { raw: output };
+	}
+}
+
+function buildAcpExecutionPlan(payload) {
+	const requirements = payload?.requirements || {};
+	const targetChain = String(
+		requirements.targetChain || payload.targetChain || "near",
+	)
+		.trim()
+		.toLowerCase();
+	const intentType = String(
+		requirements.intentType || payload.intentType || "swap",
+	)
+		.trim()
+		.toLowerCase();
+	const riskProfile = String(
+		requirements.riskProfile || payload.riskProfile || "balanced",
+	)
+		.trim()
+		.toLowerCase();
+	if (!["near", "bsc"].includes(targetChain)) {
+		throw new Error(
+			`Unsupported targetChain='${targetChain}'. Supported: near|bsc`,
+		);
+	}
+	return {
+		targetChain,
+		intentType,
+		riskProfile,
+		router:
+			targetChain === "near"
+				? {
+						mode: "near-components",
+						steps: [
+							"quote/intents-or-ref",
+							"risk guards",
+							"execute + reconcile",
+						],
+					}
+				: {
+						mode: "evm-bsc-components",
+						steps: [
+							"quote",
+							"minOut/slippage guards",
+							"execute via bsc adapter",
+						],
+					},
+	};
 }
 
 async function runNearCommandWithRpcFallback(args) {
@@ -1620,6 +1682,42 @@ const server = http.createServer(async (req, res) => {
 			const accountId = url.searchParams.get("accountId") || ACCOUNT_ID;
 			const snapshot = await buildSnapshot(accountId);
 			return json(res, 200, snapshot);
+		}
+
+		if (url.pathname === "/api/acp/status") {
+			try {
+				const [whoami, wallet] = await Promise.all([
+					runAcpJson(["whoami"]),
+					runAcpJson(["wallet", "balance"]),
+				]);
+				return json(res, 200, {
+					ok: true,
+					bin: ACP_BIN,
+					workdir: ACP_WORKDIR,
+					whoami,
+					wallet,
+				});
+			} catch (error) {
+				return json(res, 200, {
+					ok: false,
+					bin: ACP_BIN,
+					workdir: ACP_WORKDIR,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+
+		if (url.pathname === "/api/acp/route-preview" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			const plan = buildAcpExecutionPlan(payload);
+			return json(res, 200, {
+				ok: true,
+				identityChain: "base",
+				plan,
+			});
 		}
 
 		if (url.pathname === "/api/action" && req.method === "POST") {

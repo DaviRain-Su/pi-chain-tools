@@ -27,6 +27,9 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Execution Quality panel: success/failure/rollback/reconcile-warning counters + recent run summary
 - Execution Quality now also includes RPC reliability counters (attempts/retries/retryRate/HTTP 429/5xx), last successful endpoint / latest error snippet, and a basic endpoint health ranking (`score`) to indicate the currently best-performing RPC
 - Adaptive RPC routing: request loop prefers currently best-scored endpoint first (based on live endpoint health stats)
+- ACP integration bootstrap (Virtual Base identity + multi-chain execution preview):
+  - `GET /api/acp/status` -> best-effort `acp whoami` + `acp wallet balance` JSON output
+  - `POST /api/acp/route-preview` -> returns execution route plan (`targetChain=near|bsc`, `intentType`, `riskProfile`) for router wiring
 - Metrics persistence: rebalance + rpc reliability metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
@@ -73,6 +76,8 @@ Open:
 - `NEAR_RPC_ALERT_RETRY_RATE` - warn-alert threshold for retry rate (default: `0.2`)
 - `NEAR_RPC_ALERT_429_COUNT` - warn-alert threshold for cumulative HTTP 429 count (default: `10`)
 - `NEAR_DASHBOARD_PORT` - web port (fallback: `4173`)
+- `ACP_BIN` - ACP CLI binary name/path (default: `acp`)
+- `ACP_WORKDIR` - working directory to run ACP CLI from (default: current repo root)
 
 Example:
 
