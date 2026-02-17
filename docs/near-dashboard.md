@@ -104,6 +104,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can execute in two built-in adapter modes:
   - includes stable-yield agent v1 APIs:
     - `GET /api/bsc/yield/plan`
+    - `GET /api/bsc/yield/markets`
     - `POST /api/bsc/yield/execute` (`confirm=true`)
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
     - `POST /api/bsc/yield/worker/stop` (`confirm=true`)
@@ -171,7 +172,9 @@ Open:
 - `BSC_EXECUTE_NONCE_RETRY` - nonce/underpriced retry count for native mode (default: `1`)
 - `BSC_QUOTE_MAX_DIVERGENCE_BPS` - max allowed quote divergence between Dexscreener and onchain router (default: `800`)
 - `BSC_EXECUTE_COMMAND` - command template for command-mode BSC swap execution (supports placeholders listed above)
-- Worker runtime options (request payload, not env): `dryRun`, `intervalMs`, `targetUsdcBps`, `minDriftBps`, `maxStepUsd`
+- `BSC_YIELD_MIN_APR_DELTA_BPS` - minimum APR delta to trigger APR-driven target override (default: `30`)
+- `BSC_STABLE_APR_HINTS_JSON` - optional JSON APR hints (`{"usdtSupplyAprBps":120,"usdcSupplyAprBps":180,"updatedAt":"..."}`)
+- Worker runtime options (request payload, not env): `dryRun`, `intervalMs`, `targetUsdcBps`, `minDriftBps`, `minAprDeltaBps`, `maxStepUsd`
 - `ACP_DISMISSED_PURGE_ENABLED` - enable automatic dismissed-archive purge scheduler (`true|false`, default: `false`)
 - `ACP_DISMISSED_PURGE_DAYS` - purge threshold in days for dismissed jobs (default: `7`)
 - `ACP_DISMISSED_PURGE_INTERVAL_MS` - purge scheduler interval in milliseconds (default: `21600000` = 6h)

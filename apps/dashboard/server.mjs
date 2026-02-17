@@ -106,6 +106,13 @@ const BSC_QUOTE_MAX_DIVERGENCE_BPS = Math.max(
 	0,
 	Number.parseInt(process.env.BSC_QUOTE_MAX_DIVERGENCE_BPS || "800", 10) || 800,
 );
+const BSC_YIELD_MIN_APR_DELTA_BPS = Math.max(
+	0,
+	Number.parseInt(process.env.BSC_YIELD_MIN_APR_DELTA_BPS || "30", 10) || 30,
+);
+const BSC_STABLE_APR_HINTS_JSON = String(
+	process.env.BSC_STABLE_APR_HINTS_JSON || "",
+).trim();
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
 	"true";
@@ -204,6 +211,7 @@ const BSC_YIELD_WORKER = {
 	intervalMs: 5 * 60 * 1000,
 	maxStepUsd: 100,
 	minDriftBps: 500,
+	minAprDeltaBps: BSC_YIELD_MIN_APR_DELTA_BPS,
 	targetUsdcBps: 7000,
 	lastRunAt: null,
 	lastPlan: null,
@@ -2242,6 +2250,35 @@ async function getBscUsdtUsdcQuote(amountInRaw) {
 	};
 }
 
+async function getBscStableAprHints() {
+	const fallback = {
+		source: "default",
+		usdtSupplyAprBps: 0,
+		usdcSupplyAprBps: 0,
+		updatedAt: new Date().toISOString(),
+	};
+	if (!BSC_STABLE_APR_HINTS_JSON) return fallback;
+	try {
+		const parsed = JSON.parse(BSC_STABLE_APR_HINTS_JSON);
+		const usdtSupplyAprBps = Math.max(
+			0,
+			Number.parseInt(String(parsed?.usdtSupplyAprBps || 0), 10) || 0,
+		);
+		const usdcSupplyAprBps = Math.max(
+			0,
+			Number.parseInt(String(parsed?.usdcSupplyAprBps || 0), 10) || 0,
+		);
+		return {
+			source: "env-json",
+			usdtSupplyAprBps,
+			usdcSupplyAprBps,
+			updatedAt: String(parsed?.updatedAt || new Date().toISOString()),
+		};
+	} catch {
+		return { ...fallback, source: "default-invalid-env-json" };
+	}
+}
+
 async function getBscWalletStableBalances(account) {
 	const owner = String(account || "").trim();
 	if (!owner) throw new Error("account is required");
@@ -2275,6 +2312,8 @@ function buildBscYieldPlan({
 	targetUsdcBps,
 	minDriftBps,
 	maxStepUsd,
+	aprHints,
+	minAprDeltaBps,
 }) {
 	const totalRaw = BigInt(balances.usdtRaw) + BigInt(balances.usdcRaw);
 	if (totalRaw <= 0n) {
@@ -2286,20 +2325,38 @@ function buildBscYieldPlan({
 			recommendedAmountRaw: "0",
 		};
 	}
+	let effectiveTargetUsdcBps = targetUsdcBps;
+	const usdcApr = Number(aprHints?.usdcSupplyAprBps || 0);
+	const usdtApr = Number(aprHints?.usdtSupplyAprBps || 0);
+	if (usdcApr - usdtApr >= minAprDeltaBps) {
+		effectiveTargetUsdcBps = Math.max(effectiveTargetUsdcBps, 8500);
+	} else if (usdtApr - usdcApr >= minAprDeltaBps) {
+		effectiveTargetUsdcBps = Math.min(effectiveTargetUsdcBps, 3000);
+	}
+
 	const currentUsdcBps = Number(
 		(BigInt(balances.usdcRaw) * 10_000n) / totalRaw,
 	);
-	const drift = targetUsdcBps - currentUsdcBps;
+	const drift = effectiveTargetUsdcBps - currentUsdcBps;
 	if (Math.abs(drift) < minDriftBps || drift <= 0) {
 		return {
 			action: "hold",
 			reason: drift <= 0 ? "usdc_at_or_above_target" : "drift_below_threshold",
-			targetUsdcBps,
+			targetUsdcBps: effectiveTargetUsdcBps,
 			currentUsdcBps,
 			recommendedAmountRaw: "0",
 		};
 	}
-	const targetUsdcRaw = (totalRaw * BigInt(targetUsdcBps)) / 10_000n;
+	if (usdtApr - usdcApr >= minAprDeltaBps) {
+		return {
+			action: "hold",
+			reason: "usdt_apr_preferred_but_reverse_path_not_enabled",
+			targetUsdcBps: effectiveTargetUsdcBps,
+			currentUsdcBps,
+			recommendedAmountRaw: "0",
+		};
+	}
+	const targetUsdcRaw = (totalRaw * BigInt(effectiveTargetUsdcBps)) / 10_000n;
 	const needUsdcRaw =
 		targetUsdcRaw > BigInt(balances.usdcRaw)
 			? targetUsdcRaw - BigInt(balances.usdcRaw)
@@ -2318,15 +2375,18 @@ function buildBscYieldPlan({
 		return {
 			action: "hold",
 			reason: "no_usable_usdt_amount",
-			targetUsdcBps,
+			targetUsdcBps: effectiveTargetUsdcBps,
 			currentUsdcBps,
 			recommendedAmountRaw: "0",
 		};
 	}
 	return {
 		action: "rebalance_usdt_to_usdc",
-		reason: "usdc_below_target",
-		targetUsdcBps,
+		reason:
+			usdcApr - usdtApr >= minAprDeltaBps
+				? "usdc_apr_preferred"
+				: "usdc_below_target",
+		targetUsdcBps: effectiveTargetUsdcBps,
 		currentUsdcBps,
 		recommendedAmountRaw: amountRaw.toString(),
 	};
@@ -2351,12 +2411,24 @@ async function computeBscYieldPlan(input = {}) {
 		1,
 		Number.parseFloat(String(input.maxStepUsd || 100)) || 100,
 	);
-	const balances = await getBscWalletStableBalances(account);
+	const minAprDeltaBps = Math.max(
+		0,
+		Number.parseInt(
+			String(input.minAprDeltaBps || BSC_YIELD_MIN_APR_DELTA_BPS),
+			10,
+		) || BSC_YIELD_MIN_APR_DELTA_BPS,
+	);
+	const [balances, aprHints] = await Promise.all([
+		getBscWalletStableBalances(account),
+		getBscStableAprHints(),
+	]);
 	const plan = buildBscYieldPlan({
 		balances,
 		targetUsdcBps,
 		minDriftBps,
 		maxStepUsd,
+		aprHints,
+		minAprDeltaBps,
 	});
 	return {
 		ok: true,
@@ -2364,6 +2436,8 @@ async function computeBscYieldPlan(input = {}) {
 		mode: "stable-yield-plan",
 		account,
 		balances,
+		aprHints,
+		minAprDeltaBps,
 		plan,
 	};
 }
@@ -3115,6 +3189,7 @@ async function runBscYieldWorkerTick() {
 		account: BSC_EXECUTE_RECIPIENT,
 		targetUsdcBps: BSC_YIELD_WORKER.targetUsdcBps,
 		minDriftBps: BSC_YIELD_WORKER.minDriftBps,
+		minAprDeltaBps: BSC_YIELD_WORKER.minAprDeltaBps,
 		maxStepUsd: BSC_YIELD_WORKER.maxStepUsd,
 	});
 	BSC_YIELD_WORKER.lastPlan = planSnapshot;
@@ -3174,6 +3249,13 @@ function startBscYieldWorker(options = {}) {
 			String(options.minDriftBps || BSC_YIELD_WORKER.minDriftBps),
 			10,
 		) || BSC_YIELD_WORKER.minDriftBps,
+	);
+	BSC_YIELD_WORKER.minAprDeltaBps = Math.max(
+		0,
+		Number.parseInt(
+			String(options.minAprDeltaBps || BSC_YIELD_WORKER.minAprDeltaBps),
+			10,
+		) || BSC_YIELD_WORKER.minAprDeltaBps,
 	);
 	BSC_YIELD_WORKER.targetUsdcBps = Math.max(
 		0,
@@ -3912,8 +3994,24 @@ const server = http.createServer(async (req, res) => {
 				targetUsdcBps: url.searchParams.get("targetUsdcBps") || undefined,
 				minDriftBps: url.searchParams.get("minDriftBps") || undefined,
 				maxStepUsd: url.searchParams.get("maxStepUsd") || undefined,
+				minAprDeltaBps: url.searchParams.get("minAprDeltaBps") || undefined,
 			});
 			return json(res, 200, plan);
+		}
+
+		if (url.pathname === "/api/bsc/yield/markets") {
+			const aprHints = await getBscStableAprHints();
+			return json(res, 200, {
+				ok: true,
+				chain: "bsc",
+				markets: {
+					usdt: { supplyAprBps: aprHints.usdtSupplyAprBps },
+					usdc: { supplyAprBps: aprHints.usdcSupplyAprBps },
+				},
+				minAprDeltaBpsDefault: BSC_YIELD_MIN_APR_DELTA_BPS,
+				source: aprHints.source,
+				updatedAt: aprHints.updatedAt,
+			});
 		}
 
 		if (url.pathname === "/api/bsc/yield/execute" && req.method === "POST") {
@@ -3928,6 +4026,7 @@ const server = http.createServer(async (req, res) => {
 				account: payload.account,
 				targetUsdcBps: payload.targetUsdcBps,
 				minDriftBps: payload.minDriftBps,
+				minAprDeltaBps: payload.minAprDeltaBps,
 				maxStepUsd: payload.maxStepUsd,
 			});
 			if (plan.plan.action !== "rebalance_usdt_to_usdc") {
