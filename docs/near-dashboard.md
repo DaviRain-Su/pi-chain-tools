@@ -28,7 +28,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Metrics persistence: rebalance metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
-- BSC mode now supports a backend **plan-only** action (`rebalance_usdt_to_usdce_txn` with `chain=bsc`) that returns route config placeholders (RPC/router/token addresses/slippage) but does not execute onchain yet
+- BSC mode now supports a backend **plan-only** action (`rebalance_usdt_to_usdce_txn` with `chain=bsc`) that returns route config placeholders (RPC/router/token addresses/slippage) plus a quote/minOut estimate (`quotedOutRaw`, `minAmountOutRaw`, quote source) but does not execute onchain yet
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`

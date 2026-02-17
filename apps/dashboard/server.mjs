@@ -48,6 +48,14 @@ const BSC_USDC =
 	process.env.BSC_USDC || "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d";
 const BSC_ROUTER_V2 =
 	process.env.BSC_ROUTER_V2 || "0x10ED43C718714eb63d5aA57B78B54704E256024E";
+const BSC_USDT_DECIMALS = Number.parseInt(
+	process.env.BSC_USDT_DECIMALS || "18",
+	10,
+);
+const BSC_USDC_DECIMALS = Number.parseInt(
+	process.env.BSC_USDC_DECIMALS || "18",
+	10,
+);
 
 const ACTION_HISTORY = [];
 const TOKEN_DECIMALS_CACHE = new Map();
@@ -656,6 +664,71 @@ function applySlippage(rawAmount, slippageBps) {
 	return ((amount * (base - bps)) / base).toString();
 }
 
+function rawToUi(raw, decimals) {
+	return Number(raw) / 10 ** Number(decimals || 18);
+}
+
+function uiToRaw(ui, decimals) {
+	const n = Number(ui);
+	if (!Number.isFinite(n) || n <= 0) return "0";
+	return String(Math.floor(n * 10 ** Number(decimals || 18)));
+}
+
+async function getBscUsdtUsdcQuote(amountInRaw) {
+	const usdt = BSC_USDT.toLowerCase();
+	const usdc = BSC_USDC.toLowerCase();
+	try {
+		const response = await fetch(
+			`https://api.dexscreener.com/latest/dex/tokens/${usdt}`,
+		);
+		if (!response.ok) throw new Error(`dexscreener http ${response.status}`);
+		const payload = await response.json();
+		const pairs = Array.isArray(payload?.pairs) ? payload.pairs : [];
+		const candidates = pairs.filter((pair) => {
+			const chainOk = String(pair.chainId || "").toLowerCase() === "bsc";
+			if (!chainOk) return false;
+			const base = String(pair.baseToken?.address || "").toLowerCase();
+			const quote = String(pair.quoteToken?.address || "").toLowerCase();
+			return (
+				(base === usdt && quote === usdc) || (base === usdc && quote === usdt)
+			);
+		});
+		if (candidates.length === 0) {
+			throw new Error("no usdt/usdc pair found on bsc from dexscreener");
+		}
+		candidates.sort(
+			(a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0),
+		);
+		const best = candidates[0];
+		const base = String(best.baseToken?.address || "").toLowerCase();
+		const priceNative = Number(best.priceNative || 0);
+		if (!Number.isFinite(priceNative) || priceNative <= 0) {
+			throw new Error("invalid dexscreener priceNative");
+		}
+		const inUi = rawToUi(amountInRaw, BSC_USDT_DECIMALS);
+		const rate = base === usdt ? priceNative : 1 / priceNative;
+		const outUi = inUi * rate;
+		const outRaw = uiToRaw(outUi, BSC_USDC_DECIMALS);
+		return {
+			source: "dexscreener",
+			amountOutRaw: outRaw,
+			rate,
+			pairAddress: String(best.pairAddress || ""),
+			liquidityUsd: Number(best?.liquidity?.usd || 0),
+		};
+	} catch {
+		const inUi = rawToUi(amountInRaw, BSC_USDT_DECIMALS);
+		const outRaw = uiToRaw(inUi, BSC_USDC_DECIMALS);
+		return {
+			source: "fallback-1to1",
+			amountOutRaw: outRaw,
+			rate: 1,
+			pairAddress: "",
+			liquidityUsd: 0,
+		};
+	}
+}
+
 function parsePositiveRaw(value, fieldName) {
 	const text = String(value || "").trim();
 	if (!/^\d+$/.test(text) || BigInt(text) <= 0n) {
@@ -921,17 +994,20 @@ async function executeAction(payload) {
 					throw new Error("slippageBps must be between 0 and 5000");
 				}
 				const runId = String(payload.runId || `run-${Date.now()}`).trim();
+				const quote = await getBscUsdtUsdcQuote(amountRaw);
+				const minAmountOutRaw = applySlippage(quote.amountOutRaw, slippageBps);
 				pushActionHistory({
 					action: payload.action,
 					step: payload.step || null,
 					accountId,
 					status: "success",
-					summary: `BSC plan prepared (no onchain execute) amountRaw=${amountRaw}`,
+					summary: `BSC plan prepared amountIn=${amountRaw} quoteOut=${quote.amountOutRaw} minOut=${minAmountOutRaw}`,
 				});
 				recordRebalanceMetric({
 					runId,
 					status: "bsc-plan",
 					amountRaw,
+					suppliedRaw: quote.amountOutRaw,
 					note: "execution not enabled yet",
 				});
 				return {
@@ -946,9 +1022,14 @@ async function executeAction(payload) {
 						tokenIn: BSC_USDT,
 						tokenOut: BSC_USDC,
 						amountInRaw: amountRaw,
+						quotedOutRaw: quote.amountOutRaw,
+						minAmountOutRaw,
+						quoteSource: quote.source,
+						quoteRate: quote.rate,
+						quotePairAddress: quote.pairAddress,
+						quoteLiquidityUsd: quote.liquidityUsd,
 						slippageBps,
 						next: [
-							"quote via Pancake/aggregator",
 							"enforce minOut by slippage",
 							"execute swap through BSC adapter",
 							"optional lend supply adapter",
