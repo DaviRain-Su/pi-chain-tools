@@ -35,6 +35,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `POST /api/acp/job/execute` (`confirm=true`) -> ACP job router entrypoint; supports `dryRun` (default true) and execute mode for `intentType=rebalance` via existing chain action pipeline
     - returns normalized `receipt` (`runId/identityChain/targetChain/intentType/amountRaw/amountUsd/status/txHash?/adapterMode`)
     - enforces policy `constraints.minRebalanceUsd`
+    - entitlement gate: when execute request carries `strategyId`, it must include `buyer` and a valid active entitlement (`remainingUses > 0`, not expired), otherwise blocked
     - for chains still in adapter plan-only mode (e.g. current bsc path), receipt `status=planned` and `adapterMode=plan-only`
   - `GET /api/acp/jobs` -> recent ACP job history (dry-run/executed/planned/blocked/error)
   - `GET /api/acp/jobs/summary` -> status distribution + daily execution counters/limit
@@ -55,8 +56,9 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - preferred: submit `dsl` object (validated against `docs/schemas/strategy-dsl.v1.schema.json` and policy semantics)
     - compatible: legacy top-level fields (`id/name/creator/priceUsd/...`) are auto-mapped into DSL v1 then validated
     - semantic checks include policy-aligned amount floor/limit (`minRebalanceUsd`, `maxDailyRebalanceRuns`), chain-intent compatibility, and execution risk warnings
-  - `POST /api/strategies/purchase` (`confirm=true`) -> simulate paid purchase + compute platform fee and creator payout
+  - `POST /api/strategies/purchase` (`confirm=true`) -> simulate paid purchase + compute platform fee and creator payout; grants entitlement (`entitlementUses`, `entitlementDays` configurable, default 30/30)
   - `GET /api/strategies/purchases` -> recent purchase receipts
+  - `GET /api/strategies/entitlements?buyer=...&strategyId=...` -> entitlement snapshots (remaining uses + expiry)
 - Metrics persistence: rebalance + rpc reliability metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector

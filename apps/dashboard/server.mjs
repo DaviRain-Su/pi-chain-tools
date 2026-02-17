@@ -132,6 +132,7 @@ const ACP_JOB_STATE = {
 };
 const STRATEGY_CATALOG = [];
 const STRATEGY_PURCHASES = [];
+const STRATEGY_ENTITLEMENTS = [];
 const PORTFOLIO_POLICY = {
 	targetAllocation: { near: 0.6, bsc: 0.4 },
 	constraints: {
@@ -271,6 +272,7 @@ async function saveMarketplaceToDisk() {
 				{
 					strategies: STRATEGY_CATALOG,
 					purchases: STRATEGY_PURCHASES,
+					entitlements: STRATEGY_ENTITLEMENTS,
 				},
 				null,
 				2,
@@ -288,11 +290,15 @@ async function loadMarketplaceFromDisk() {
 		if (!parsed || typeof parsed !== "object") return;
 		STRATEGY_CATALOG.length = 0;
 		STRATEGY_PURCHASES.length = 0;
+		STRATEGY_ENTITLEMENTS.length = 0;
 		if (Array.isArray(parsed.strategies)) {
 			STRATEGY_CATALOG.push(...parsed.strategies.slice(0, 200));
 		}
 		if (Array.isArray(parsed.purchases)) {
 			STRATEGY_PURCHASES.push(...parsed.purchases.slice(0, 500));
+		}
+		if (Array.isArray(parsed.entitlements)) {
+			STRATEGY_ENTITLEMENTS.push(...parsed.entitlements.slice(0, 1000));
 		}
 	} catch {
 		// ignore missing/corrupt marketplace file
@@ -939,6 +945,77 @@ function buildAcpExecutionPlan(payload) {
 	};
 }
 
+function findStrategyEntitlement({ strategyId, buyer }) {
+	const now = Date.now();
+	return STRATEGY_ENTITLEMENTS.find((row) => {
+		if (String(row?.strategyId || "") !== String(strategyId || ""))
+			return false;
+		if (String(row?.buyer || "") !== String(buyer || "")) return false;
+		const expiresAtMs = Date.parse(String(row?.expiresAt || ""));
+		if (Number.isFinite(expiresAtMs) && expiresAtMs < now) return false;
+		const remainingUses = Number(row?.remainingUses ?? 0);
+		if (remainingUses <= 0) return false;
+		return true;
+	});
+}
+
+function grantStrategyEntitlement({
+	strategyId,
+	buyer,
+	uses,
+	expiresAt,
+	sourceReceiptId,
+}) {
+	const keyStrategy = String(strategyId || "");
+	const keyBuyer = String(buyer || "");
+	const idx = STRATEGY_ENTITLEMENTS.findIndex(
+		(row) =>
+			String(row?.strategyId || "") === keyStrategy &&
+			String(row?.buyer || "") === keyBuyer,
+	);
+	const nextUses = Number(uses || 0);
+	if (idx >= 0) {
+		const prev = STRATEGY_ENTITLEMENTS[idx];
+		STRATEGY_ENTITLEMENTS[idx] = {
+			...prev,
+			remainingUses: Number(prev?.remainingUses || 0) + nextUses,
+			expiresAt,
+			sourceReceiptId,
+			updatedAt: new Date().toISOString(),
+		};
+		return STRATEGY_ENTITLEMENTS[idx];
+	}
+	const created = {
+		id: `ent-${Date.now()}`,
+		strategyId: keyStrategy,
+		buyer: keyBuyer,
+		remainingUses: nextUses,
+		expiresAt,
+		sourceReceiptId,
+		createdAt: new Date().toISOString(),
+		updatedAt: new Date().toISOString(),
+	};
+	STRATEGY_ENTITLEMENTS.unshift(created);
+	if (STRATEGY_ENTITLEMENTS.length > 1000) STRATEGY_ENTITLEMENTS.length = 1000;
+	return created;
+}
+
+function consumeStrategyEntitlement(entitlement) {
+	if (!entitlement) return null;
+	const idx = STRATEGY_ENTITLEMENTS.findIndex(
+		(row) => row.id === entitlement.id,
+	);
+	if (idx < 0) return null;
+	const current = STRATEGY_ENTITLEMENTS[idx];
+	const remaining = Math.max(0, Number(current.remainingUses || 0) - 1);
+	STRATEGY_ENTITLEMENTS[idx] = {
+		...current,
+		remainingUses: remaining,
+		updatedAt: new Date().toISOString(),
+	};
+	return STRATEGY_ENTITLEMENTS[idx];
+}
+
 async function executeAcpJob(payload) {
 	const plan = buildAcpExecutionPlan(payload);
 	const requirements = payload?.requirements || {};
@@ -973,11 +1050,37 @@ async function executeAcpJob(payload) {
 			`amountUsd ${amountUsd.toFixed(6)} below policy minRebalanceUsd ${minRebalanceUsd}`,
 		);
 	}
+	const strategyId = String(payload?.strategyId || "").trim();
+	const buyer = String(payload?.buyer || "").trim();
+	let entitlement = null;
+	if (!dryRun && strategyId) {
+		if (!buyer) {
+			throw new Error(
+				"buyer is required when strategyId is provided for execute mode",
+			);
+		}
+		entitlement = findStrategyEntitlement({ strategyId, buyer });
+		if (!entitlement) {
+			pushAcpJobHistory({
+				runId,
+				status: "blocked",
+				reason: "missing_entitlement",
+				strategyId,
+				buyer,
+			});
+			throw new Error(
+				`No active entitlement for strategyId='${strategyId}' buyer='${buyer}'`,
+			);
+		}
+	}
+
 	const receiptBase = {
 		runId,
 		identityChain: "base",
 		targetChain: plan.targetChain,
 		intentType,
+		strategyId: strategyId || undefined,
+		buyer: buyer || undefined,
 		amountRaw,
 		amountUsd,
 		status: "planned",
@@ -1030,17 +1133,25 @@ async function executeAcpJob(payload) {
 
 	const txHash = result?.details?.step3Tx || result?.details?.step2Tx || null;
 	const receiptStatus = result?.mode === "plan-only" ? "planned" : "executed";
+	let entitlementAfter = null;
 	if (receiptStatus === "executed") {
 		registerAcpExecutedRun();
+		if (entitlement) {
+			entitlementAfter = consumeStrategyEntitlement(entitlement);
+			await saveMarketplaceToDisk();
+		}
 	}
 	pushAcpJobHistory({
 		runId,
 		status: receiptStatus,
 		targetChain: plan.targetChain,
 		intentType,
+		strategyId: strategyId || undefined,
+		buyer: buyer || undefined,
 		amountRaw,
 		txHash,
 		adapterMode: result?.mode || "execute",
+		remainingUses: entitlementAfter?.remainingUses,
 	});
 	return {
 		ok: true,
@@ -1054,6 +1165,7 @@ async function executeAcpJob(payload) {
 			status: receiptStatus,
 			txHash,
 			adapterMode: result?.mode || "execute",
+			remainingUses: entitlementAfter?.remainingUses,
 		},
 	};
 }
@@ -2214,12 +2326,23 @@ const server = http.createServer(async (req, res) => {
 					error: `strategy '${strategyId}' not found`,
 				});
 			}
+			const entitlementUses = Math.max(
+				1,
+				Number.parseInt(String(payload.entitlementUses || 30), 10) || 30,
+			);
+			const entitlementDays = Math.max(
+				1,
+				Number.parseInt(String(payload.entitlementDays || 30), 10) || 30,
+			);
 			const takeRate = Number(
 				PORTFOLIO_POLICY?.monetization?.platformTakeRate || 0.15,
 			);
 			const amountUsd = Number(strategy.priceUsd || 0);
 			const platformFeeUsd = amountUsd * takeRate;
 			const creatorPayoutUsd = amountUsd - platformFeeUsd;
+			const expiresAt = new Date(
+				Date.now() + entitlementDays * 24 * 60 * 60 * 1000,
+			).toISOString();
 			const receipt = {
 				id: `purchase-${Date.now()}`,
 				strategyId,
@@ -2231,16 +2354,40 @@ const server = http.createServer(async (req, res) => {
 				platformTakeRate: takeRate,
 				platformFeeUsd,
 				creatorPayoutUsd,
+				entitlementUses,
+				entitlementDays,
+				expiresAt,
 				createdAt: new Date().toISOString(),
 			};
+			const entitlement = grantStrategyEntitlement({
+				strategyId,
+				buyer,
+				uses: entitlementUses,
+				expiresAt,
+				sourceReceiptId: receipt.id,
+			});
 			STRATEGY_PURCHASES.unshift(receipt);
 			if (STRATEGY_PURCHASES.length > 500) STRATEGY_PURCHASES.length = 500;
 			await saveMarketplaceToDisk();
-			return json(res, 200, { ok: true, receipt });
+			return json(res, 200, { ok: true, receipt, entitlement });
 		}
 
 		if (url.pathname === "/api/strategies/purchases") {
 			return json(res, 200, { ok: true, purchases: STRATEGY_PURCHASES });
+		}
+
+		if (url.pathname === "/api/strategies/entitlements") {
+			const buyer = String(url.searchParams.get("buyer") || "").trim();
+			const strategyId = String(
+				url.searchParams.get("strategyId") || "",
+			).trim();
+			const rows = STRATEGY_ENTITLEMENTS.filter((row) => {
+				if (buyer && String(row?.buyer || "") !== buyer) return false;
+				if (strategyId && String(row?.strategyId || "") !== strategyId)
+					return false;
+				return true;
+			});
+			return json(res, 200, { ok: true, entitlements: rows });
 		}
 
 		if (url.pathname === "/api/acp/route-preview" && req.method === "POST") {
