@@ -176,6 +176,14 @@
       <div class="card" style="margin-top:16px">
         <h3>ACP Ops</h3>
         <div id="acpOps" class="muted">-</div>
+        <div class="row" style="margin-top:8px">
+          <input id="acpAsyncStrategyId" placeholder="strategyId (optional)" size="20" />
+          <input id="acpAsyncBuyer" placeholder="buyer (for entitlement)" size="20" />
+          <input id="acpAsyncAmountRaw" placeholder="amountRaw (default 1000000)" size="20" />
+          <button id="submitAcpAsyncJob">Submit ACP Async Job</button>
+          <span id="acpAsyncMeta" class="muted"></span>
+        </div>
+        <div id="acpAsyncStatus" class="muted" style="margin-top:6px">-</div>
         <details style="margin-top:10px">
           <summary>Recent ACP Jobs</summary>
           <div class="row" style="margin:8px 0">
@@ -325,6 +333,12 @@
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
+      const acpAsyncStrategyIdEl = document.getElementById("acpAsyncStrategyId");
+      const acpAsyncBuyerEl = document.getElementById("acpAsyncBuyer");
+      const acpAsyncAmountRawEl = document.getElementById("acpAsyncAmountRaw");
+      const submitAcpAsyncJobBtn = document.getElementById("submitAcpAsyncJob");
+      const acpAsyncMetaEl = document.getElementById("acpAsyncMeta");
+      const acpAsyncStatusEl = document.getElementById("acpAsyncStatus");
       const strategyEl = document.getElementById("strategy");
       const strategyDslInputEl = document.getElementById("strategyDslInput");
       const fillStrategyDslSampleBtn = document.getElementById("fillStrategyDslSample");
@@ -556,6 +570,7 @@
 
       let lastSnapshot = null;
       let lastRebalancePlan = null;
+      let lastAcpAsyncJobId = "";
       let targetConfig = loadTargets();
       targetUsdtEl.value = targetConfig.usdt;
       targetUsdceEl.value = targetConfig.usdce;
@@ -626,7 +641,13 @@
         const byStatus = acpSummary?.summary?.byStatus || {};
         const daily = acpSummary?.summary?.dailyState || {};
         const dailyLimit = Number(acpSummary?.summary?.policyDailyLimit || 0);
-        acpOpsEl.innerHTML = `<span class="${acpOk}">${acpStatus?.ok ? "connected" : "not connected"}</span> · agent=${who}<br/><span class="muted">jobs=${totalJobs} byStatus=${JSON.stringify(byStatus)} daily=${Number(daily.dailyCount || 0)}/${dailyLimit || "-"}</span>`;
+        const queueRows = Array.isArray(acpJobs?.queue) ? acpJobs.queue : [];
+        const queueStats = queueRows.reduce((acc, row) => {
+          const k = String(row?.status || "unknown");
+          acc[k] = (acc[k] || 0) + 1;
+          return acc;
+        }, {});
+        acpOpsEl.innerHTML = `<span class="${acpOk}">${acpStatus?.ok ? "connected" : "not connected"}</span> · agent=${who}<br/><span class="muted">jobs=${totalJobs} byStatus=${JSON.stringify(byStatus)} daily=${Number(daily.dailyCount || 0)}/${dailyLimit || "-"} queue=${JSON.stringify(queueStats)}</span>`;
         acpJobsEl.innerHTML = "";
         const statusFilter = (acpStatusFilterEl?.value || "all").trim();
         const filteredJobs = (acpJobs?.jobs || []).filter((row) => statusFilter === "all" || String(row?.status || "") === statusFilter).slice(0, 20);
@@ -643,6 +664,12 @@
           }
           tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.runId || "-"}</td><td>${row.status || "-"}</td><td>${row.targetChain || "-"}</td><td>${row.intentType || "-"}</td><td>${row.amountRaw || "-"}</td><td>${tx}</td>`;
           acpJobsEl.appendChild(tr);
+        }
+        if (lastAcpAsyncJobId) {
+          const inQueue = (acpJobs?.queue || []).find((x) => String(x?.jobId || "") === String(lastAcpAsyncJobId));
+          if (inQueue) {
+            acpAsyncStatusEl.textContent = `job=${inQueue.jobId} status=${inQueue.status} updated=${inQueue.updatedAt || "-"}${inQueue.error ? ` error=${inQueue.error}` : ""}`;
+          }
         }
         targetAlertEl.innerHTML = computeTargetAlert(data, targetConfig);
         const plan = computeRebalancePlan(data, targetConfig);
@@ -1079,6 +1106,27 @@
         return { ok: !!data?.ok, payload, validation: data };
       }
 
+      async function pollAcpAsyncJob(jobId) {
+        if (!jobId) return;
+        try {
+          const res = await fetch(`/api/acp/jobs/${encodeURIComponent(jobId)}`);
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data?.ok) {
+            acpAsyncStatusEl.textContent = `job=${jobId} query failed`;
+            return;
+          }
+          const row = data.job || {};
+          acpAsyncStatusEl.textContent = `job=${row.jobId} status=${row.status} updated=${row.updatedAt || "-"}${row.error ? ` error=${row.error}` : ""}`;
+          if (row.status === "queued" || row.status === "running") {
+            setTimeout(() => pollAcpAsyncJob(jobId), 1500);
+          } else {
+            load().catch(() => {});
+          }
+        } catch (e) {
+          acpAsyncStatusEl.textContent = `job=${jobId} polling error: ${e.message || e}`;
+        }
+      }
+
       fillStrategyDslSampleBtn?.addEventListener("click", () => {
         strategyDslInputEl.value = JSON.stringify(buildStrategyDslSample(), null, 2);
         strategyDslMetaEl.textContent = "Sample filled";
@@ -1125,6 +1173,39 @@
           strategyDslMetaEl.textContent = `Published: ${pubData?.strategy?.id || "ok"}`;
         } catch (e) {
           strategyDslMetaEl.textContent = `Publish request failed: ${e.message || e}`;
+        }
+      });
+
+      submitAcpAsyncJobBtn?.addEventListener("click", async () => {
+        acpAsyncMetaEl.textContent = "Submitting...";
+        const payload = {
+          confirm: true,
+          dryRun: false,
+          intentType: "rebalance",
+          amountRaw: String((acpAsyncAmountRawEl?.value || "1000000").trim() || "1000000"),
+        };
+        const strategyId = String((acpAsyncStrategyIdEl?.value || "").trim());
+        const buyer = String((acpAsyncBuyerEl?.value || "").trim());
+        if (strategyId) payload.strategyId = strategyId;
+        if (buyer) payload.buyer = buyer;
+        try {
+          const res = await fetch("/api/acp/job/submit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data?.ok) {
+            acpAsyncMetaEl.textContent = `Submit failed: ${data?.error || res.status}`;
+            return;
+          }
+          lastAcpAsyncJobId = data.jobId;
+          acpAsyncMetaEl.textContent = `Submitted: ${data.jobId}`;
+          acpAsyncStatusEl.textContent = `job=${data.jobId} status=${data.status}`;
+          pollAcpAsyncJob(data.jobId);
+          load().catch(() => {});
+        } catch (e) {
+          acpAsyncMetaEl.textContent = `Submit error: ${e.message || e}`;
         }
       });
 
