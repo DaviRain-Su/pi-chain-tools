@@ -107,6 +107,11 @@ const ACP_DISMISSED_PURGE_INTERVAL_MS = Math.max(
 const PAYMENT_WEBHOOK_SECRET = String(
 	process.env.PAYMENT_WEBHOOK_SECRET || "",
 ).trim();
+const PAYMENT_WEBHOOK_PROVIDER = String(
+	process.env.PAYMENT_WEBHOOK_PROVIDER || "generic",
+)
+	.trim()
+	.toLowerCase();
 const NEAR_RPC_RETRY_ROUNDS = Number.parseInt(
 	process.env.NEAR_RPC_RETRY_ROUNDS || "2",
 	10,
@@ -1280,10 +1285,45 @@ function markWebhookEventProcessed({ eventId, paymentId, status, source }) {
 		PAYMENT_WEBHOOK_EVENTS.length = 2000;
 }
 
-function normalizeWebhookPayload(payload) {
+function normalizeWebhookPayload(payload, providerHint = "generic") {
 	const provider = String(
-		payload?.provider || payload?.source || "generic",
-	).toLowerCase();
+		providerHint ||
+			payload?.provider ||
+			payload?.source ||
+			PAYMENT_WEBHOOK_PROVIDER ||
+			"generic",
+	)
+		.trim()
+		.toLowerCase();
+
+	if (provider === "ping") {
+		const eventId =
+			payload?.id || payload?.eventId || payload?.event_id || null;
+		const paymentId =
+			payload?.data?.paymentId ||
+			payload?.data?.payment_id ||
+			payload?.paymentId ||
+			null;
+		const status = payload?.data?.status || payload?.status || null;
+		const txRef =
+			payload?.data?.txHash || payload?.data?.txRef || payload?.txRef || null;
+		return { provider, eventId, paymentId, status, txRef, raw: payload };
+	}
+
+	if (provider === "x402") {
+		const eventId =
+			payload?.event_id || payload?.eventId || payload?.id || null;
+		const paymentId =
+			payload?.payment_id ||
+			payload?.paymentId ||
+			payload?.data?.payment_id ||
+			null;
+		const status = payload?.payment_status || payload?.status || null;
+		const txRef =
+			payload?.tx_hash || payload?.txRef || payload?.transactionHash || null;
+		return { provider, eventId, paymentId, status, txRef, raw: payload };
+	}
+
 	const eventId = payload?.eventId || payload?.id || payload?.event_id || null;
 	const paymentId =
 		payload?.paymentId ||
@@ -3013,7 +3053,15 @@ const server = http.createServer(async (req, res) => {
 				});
 			}
 			const payload = JSON.parse(rawText);
-			const normalized = normalizeWebhookPayload(payload);
+			const providerHint = String(
+				url.searchParams.get("provider") ||
+					req.headers["x-payment-provider"] ||
+					PAYMENT_WEBHOOK_PROVIDER ||
+					"generic",
+			)
+				.trim()
+				.toLowerCase();
+			const normalized = normalizeWebhookPayload(payload, providerHint);
 			if (!normalized.paymentId) {
 				return json(res, 400, {
 					ok: false,

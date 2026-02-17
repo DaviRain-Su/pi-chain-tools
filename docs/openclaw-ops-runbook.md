@@ -78,11 +78,17 @@ curl -s -X POST http://127.0.0.1:4173/api/payments/confirm \
 
 2.1 Provider webhook（可选，建议配置签名）：
 ```bash
-curl -s -X POST http://127.0.0.1:4173/api/payments/webhook \
+curl -s -X POST 'http://127.0.0.1:4173/api/payments/webhook?provider=ping' \
   -H 'content-type: application/json' \
+  -H 'x-payment-provider: ping' \
   -H 'x-payment-signature: sha256=REPLACE' \
-  -d '{"paymentId":"pay-REPLACE","status":"paid","txRef":"tx-provider"}'
+  -d '{"id":"evt-1","data":{"paymentId":"pay-REPLACE","status":"paid","txHash":"0xabc"}}'
 ```
+
+> provider schema:
+> - `generic`: `paymentId/status/txRef` (or common aliases)
+> - `ping`: `id + data.paymentId + data.status + data.txHash`
+> - `x402`: `event_id + payment_id + payment_status + tx_hash`
 
 3. 查询支付记录：
 ```bash
