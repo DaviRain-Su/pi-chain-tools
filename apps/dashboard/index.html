@@ -210,7 +210,7 @@
             <button id="resetAcpFilters">Reset filters</button>
           </div>
           <table style="margin-top:8px">
-            <thead><tr><th>Time</th><th>RunId</th><th>Status</th><th>Chain</th><th>Intent</th><th>Strategy</th><th>Buyer</th><th>Remaining</th><th>AmountRaw</th><th>Tx</th></tr></thead>
+            <thead><tr><th>Time</th><th>RunId</th><th>Status</th><th>Chain</th><th>Intent</th><th>Protocol</th><th>PostAction</th><th>Strategy</th><th>Buyer</th><th>Remaining</th><th>AmountRaw</th><th>Tx</th></tr></thead>
             <tbody id="acpJobs"></tbody>
           </table>
         </details>
@@ -767,14 +767,16 @@
               tx = row.txHash;
             }
           }
-          tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.runId || "-"}</td><td>${row.status || "-"}</td><td>${row.targetChain || "-"}</td><td>${row.intentType || "-"}</td><td>${row.strategyId || "-"}</td><td>${row.buyer || "-"}</td><td>${row.remainingUses ?? "-"}</td><td>${row.amountRaw || "-"}</td><td>${tx}</td>`;
+          const protocol = row.executionProtocol || "-";
+          const postActionStatus = row.postActionStatus || "-";
+          tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.runId || "-"}</td><td>${row.status || "-"}</td><td>${row.targetChain || "-"}</td><td>${row.intentType || "-"}</td><td>${protocol}</td><td>${postActionStatus}</td><td>${row.strategyId || "-"}</td><td>${row.buyer || "-"}</td><td>${row.remainingUses ?? "-"}</td><td>${row.amountRaw || "-"}</td><td>${tx}</td>`;
           tr.style.cursor = "pointer";
           tr.title = "Click to expand job details";
 
           const detailTr = document.createElement("tr");
           detailTr.style.display = "none";
           const detailTd = document.createElement("td");
-          detailTd.colSpan = 10;
+          detailTd.colSpan = 12;
           const detailJson = JSON.stringify(row, null, 2);
           const detailTxHash = String(row.txHash || "").trim();
           const detailChain = String(row.targetChain || "").toLowerCase();
@@ -872,9 +874,10 @@
             const jobId = String(row?.jobId || "");
             const err = String(row?.error || "").replace(/</g, "&lt;").slice(0, 120);
             const retryableBadge = row?.retryable ? '<span class="ok">retryable</span>' : '<span class="warn">non-retryable</span>';
-            return `<tr><td><input type="checkbox" data-dl-select="${jobId}" /></td><td>${jobId}</td><td>${row.attemptCount || 0}/${row.maxAttempts || 0}</td><td>${row.errorType || '-'}</td><td>${retryableBadge}</td><td>${row.updatedAt || "-"}</td><td class="warn">${err}</td><td><button data-retry-job="${jobId}">Retry</button></td></tr>`;
+            const phase = String(row?.errorType || '').includes('bsc_aave') ? 'bsc-aave-post' : 'main';
+            return `<tr><td><input type="checkbox" data-dl-select="${jobId}" /></td><td>${jobId}</td><td>${row.attemptCount || 0}/${row.maxAttempts || 0}</td><td>${row.errorType || '-'}</td><td>${phase}</td><td>${retryableBadge}</td><td>${row.updatedAt || "-"}</td><td class="warn">${err}</td><td><button data-retry-job="${jobId}">Retry</button></td></tr>`;
           }).join("");
-          acpDeadLettersEl.innerHTML += `<div class="muted" style="margin-top:4px">byType=${JSON.stringify(byType)} retryable=${retryableCount}/${deadLetters.length}</div><div style="margin-top:6px"><button data-dl-retry-retryable="1">Retry retryable only</button> <button data-dl-retry-selected="1">Retry selected</button> <button data-dl-dismiss-selected="1">Dismiss selected</button></div><table style="margin-top:6px"><thead><tr><th></th><th>jobId</th><th>attempts</th><th>type</th><th>retry</th><th>updated</th><th>error</th><th>action</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+          acpDeadLettersEl.innerHTML += `<div class="muted" style="margin-top:4px">byType=${JSON.stringify(byType)} retryable=${retryableCount}/${deadLetters.length}</div><div style="margin-top:6px"><button data-dl-retry-retryable="1">Retry retryable only</button> <button data-dl-retry-selected="1">Retry selected</button> <button data-dl-dismiss-selected="1">Dismiss selected</button></div><table style="margin-top:6px"><thead><tr><th></th><th>jobId</th><th>attempts</th><th>type</th><th>phase</th><th>retry</th><th>updated</th><th>error</th><th>action</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
 
           acpDeadLettersEl.querySelectorAll("button[data-retry-job]").forEach((btn) => {
             btn.addEventListener("click", async (ev) => {
