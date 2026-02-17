@@ -1125,9 +1125,22 @@
           .flatMap(([phase, byType]) => Object.entries(byType).map(([type, cnt]) => ({ phase, type, cnt })))
           .sort((a, b) => b.cnt - a.cnt)
           .slice(0, 8);
-        acpFailureHeatmapEl.innerHTML = heatmapEntries.length > 0
-          ? `failure heatmap (${heatmapWindow}): ${heatmapEntries.map((x) => `<button data-heatmap-chip="1" data-phase="${x.phase}" data-type="${x.type}" class="warn" style="margin-right:6px">${x.phase}/${x.type}:${x.cnt}</button>`).join("")}`
-          : `failure heatmap (${heatmapWindow}): none`;
+        const normRows = Array.isArray(normalizationHealth?.topRows) ? normalizationHealth.topRows : [];
+        const normBand = String(normalizationHealth?.band || "unknown");
+        const normStatus = String(normalizationHealth?.status || "unknown");
+        const normChips = normRows
+          .map((row) => {
+            const protocol = String(row?.protocol || "-");
+            const freshness = String(row?.freshness || "unknown");
+            const source = String(row?.source || "unknown");
+            const ageMin = Number.isFinite(Number(row?.ageMs)) ? Math.round(Number(row.ageMs) / 60000) : "-";
+            return `<button data-norm-chip="1" data-protocol="${protocol}" data-source="${source}" class="muted" style="margin-right:6px">norm/${protocol}:${freshness}@${ageMin}m(${source})</button>`;
+          })
+          .join("");
+        const heatmapCore = heatmapEntries.length > 0
+          ? heatmapEntries.map((x) => `<button data-heatmap-chip="1" data-phase="${x.phase}" data-type="${x.type}" class="warn" style="margin-right:6px">${x.phase}/${x.type}:${x.cnt}</button>`).join("")
+          : "none";
+        acpFailureHeatmapEl.innerHTML = `failure heatmap (${heatmapWindow}): ${heatmapCore}<br/><span class="muted">normRisk=${normStatus}/${normBand} ${normChips}</span>`;
         acpFailureHeatmapEl.querySelectorAll('button[data-heatmap-chip="1"]').forEach((btn) => {
           btn.addEventListener("click", () => {
             const phase = String(btn.getAttribute("data-phase") || "all");
@@ -1136,6 +1149,13 @@
             if (acpDeadTypeFilterEl) acpDeadTypeFilterEl.value = type;
             syncAcpFiltersToUrl();
             load().catch(() => {});
+          });
+        });
+        acpFailureHeatmapEl.querySelectorAll('button[data-norm-chip="1"]').forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const protocol = String(btn.getAttribute("data-protocol") || "-");
+            const source = String(btn.getAttribute("data-source") || "unknown");
+            acpAsyncMetaEl.textContent = `Normalization focus: ${protocol} source=${source}. Check bsc.positions.*RateApiUrl and rate freshness.`;
           });
         });
 
