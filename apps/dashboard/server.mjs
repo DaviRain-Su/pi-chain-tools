@@ -2683,8 +2683,15 @@ async function getBscProtocolPositions(account) {
 	const erc20Iface = new Interface([
 		"function balanceOf(address owner) view returns (uint256)",
 	]);
-	const readMaybe = async (token, decimals) => {
-		if (!token) return { token: null, missingConfig: true, balanceUi: 0 };
+	const readMaybe = async (token, decimals, configKey) => {
+		if (!token) {
+			return {
+				token: null,
+				configKey,
+				missingConfig: true,
+				balanceUi: 0,
+			};
+		}
 		try {
 			const data = erc20Iface.encodeFunctionData("balanceOf", [owner]);
 			const raw = await provider.call({ to: token, data });
@@ -2702,10 +2709,18 @@ async function getBscProtocolPositions(account) {
 		}
 	};
 	const [aaveUsdc, aaveUsdt, venusUsdc, venusUsdt] = await Promise.all([
-		readMaybe(BSC_AAVE_ATOKEN_USDC, BSC_USDC_DECIMALS),
-		readMaybe(BSC_AAVE_ATOKEN_USDT, BSC_USDT_DECIMALS),
-		readMaybe(BSC_VENUS_VTOKEN_USDC, BSC_USDC_DECIMALS),
-		readMaybe(BSC_VENUS_VTOKEN_USDT, BSC_USDT_DECIMALS),
+		readMaybe(BSC_AAVE_ATOKEN_USDC, BSC_USDC_DECIMALS, "BSC_AAVE_ATOKEN_USDC"),
+		readMaybe(BSC_AAVE_ATOKEN_USDT, BSC_USDT_DECIMALS, "BSC_AAVE_ATOKEN_USDT"),
+		readMaybe(
+			BSC_VENUS_VTOKEN_USDC,
+			BSC_USDC_DECIMALS,
+			"BSC_VENUS_VTOKEN_USDC",
+		),
+		readMaybe(
+			BSC_VENUS_VTOKEN_USDT,
+			BSC_USDT_DECIMALS,
+			"BSC_VENUS_VTOKEN_USDT",
+		),
 	]);
 	const subtotalAave =
 		Number(aaveUsdc?.balanceUi || 0) + Number(aaveUsdt?.balanceUi || 0);
@@ -2715,11 +2730,31 @@ async function getBscProtocolPositions(account) {
 	const rows = [aaveUsdc, aaveUsdt, venusUsdc, venusUsdt];
 	const hasReadError = rows.some((r) => r && r.ok === false);
 	const missingAnyConfig = rows.some((r) => r?.missingConfig);
+	const missingConfigKeys = rows
+		.filter((r) => r?.missingConfig)
+		.map((r) => String(r?.configKey || ""))
+		.filter(Boolean);
+	const failedTokens = rows
+		.filter((r) => r && r.ok === false)
+		.map((r) => String(r?.token || ""))
+		.filter(Boolean);
 	const health = hasReadError
-		? { status: "error", reason: "one_or_more_reads_failed" }
+		? {
+				status: "error",
+				reason: "one_or_more_reads_failed",
+				detail:
+					failedTokens.length > 0 ? `failed=${failedTokens.join(",")}` : "-",
+			}
 		: missingAnyConfig
-			? { status: "degraded", reason: "partial_missing_token_config" }
-			: { status: "ok", reason: "all_configured_reads_ok" };
+			? {
+					status: "degraded",
+					reason: "partial_missing_token_config",
+					detail:
+						missingConfigKeys.length > 0
+							? `missing=${missingConfigKeys.join(",")}`
+							: "-",
+				}
+			: { status: "ok", reason: "all_configured_reads_ok", detail: "-" };
 	return {
 		aave: { usdc: aaveUsdc, usdt: aaveUsdt },
 		venus: { usdc: venusUsdc, usdt: venusUsdt },
