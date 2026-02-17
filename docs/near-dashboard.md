@@ -85,13 +85,14 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `GET /api/strategies/entitlements?buyer=...&strategyId=...` -> entitlement snapshots (remaining uses + expiry)
 - Metrics persistence: rebalance + rpc reliability metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
 - ACP async queue persistence: queued/running jobs are persisted and restored on restart (running jobs re-queued for safe resume)
-- ACP async retry policy: exponential backoff (1s,2s,4s...) with per-job `maxAttempts` (default 3); exhausted jobs enter `dead-letter`
+- ACP async retry policy: exponential backoff (1s,2s,4s...) with per-job `maxAttempts` (default 3); retry now only applies to retryable failures, non-retryable failures enter `dead-letter` immediately
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
 - BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can optionally execute via external adapter command:
   - set `BSC_EXECUTE_ENABLED=true`
   - set `BSC_EXECUTE_COMMAND` template with placeholders `{amountInRaw} {minAmountOutRaw} {tokenIn} {tokenOut} {router} {rpcUrl} {chainId} {runId}`
   - when configured, response returns `mode=execute` with `txHash` and BscScan link; otherwise remains explicit `mode=plan-only`
+  - execute command failures are normalized as `BSC_EXECUTE_FAILED retryable=true|false ...` for async retry/dead-letter classification
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`

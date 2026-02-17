@@ -938,7 +938,9 @@ async function executeBscSwapViaCommand(params) {
 		return { ok: false, reason: "bsc_execute_disabled" };
 	}
 	if (!BSC_EXECUTE_COMMAND) {
-		return { ok: false, reason: "bsc_execute_command_missing" };
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_execute_command_missing",
+		);
 	}
 	const replacements = {
 		"{amountInRaw}": String(params.amountInRaw || ""),
@@ -954,15 +956,23 @@ async function executeBscSwapViaCommand(params) {
 	for (const [k, v] of Object.entries(replacements)) {
 		cmd = cmd.split(k).join(v);
 	}
-	const output = await runCommand("bash", ["-lc", cmd], {
-		env: process.env,
-		cwd: ACP_WORKDIR,
-	});
-	const txHash =
-		extractTxHash(output) ||
-		String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") ||
-		null;
-	return { ok: true, mode: "execute", output, txHash };
+	try {
+		const output = await runCommand("bash", ["-lc", cmd], {
+			env: process.env,
+			cwd: ACP_WORKDIR,
+		});
+		const txHash =
+			extractTxHash(output) ||
+			String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") ||
+			null;
+		return { ok: true, mode: "execute", output, txHash };
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		const retryable = isTransientExecError(error);
+		throw new Error(
+			`BSC_EXECUTE_FAILED retryable=${retryable ? "true" : "false"} message=${msg}`,
+		);
+	}
 }
 
 function buildAcpExecutionPlan(payload) {
@@ -1375,6 +1385,30 @@ function computeAcpRetryBackoffMs(attemptCount) {
 	return 1000 * 2 ** (capped - 1);
 }
 
+function isAcpRetryableError(error) {
+	if (isTransientExecError(error)) return true;
+	const text = String(error?.message || error || "").toLowerCase();
+	if (text.includes("retryable=true")) return true;
+	const nonRetryableHints = [
+		"missing_payment_id",
+		"payment_not_found",
+		"payment_not_paid",
+		"payment_mismatch",
+		"missing_entitlement",
+		"duplicate run blocked",
+		"unsupported intenttype",
+		"below policy minrebalanceusd",
+		"unsupported targetchain",
+		"invalid amountraw",
+		"slippagebps must be between",
+		"poolid must be a non-negative integer",
+	];
+	for (const hint of nonRetryableHints) {
+		if (text.includes(hint)) return false;
+	}
+	return false;
+}
+
 async function processAcpAsyncQueue() {
 	if (ACP_ASYNC_WORKER_ACTIVE) return;
 	ACP_ASYNC_WORKER_ACTIVE = true;
@@ -1403,7 +1437,8 @@ async function processAcpAsyncQueue() {
 				next.error = error instanceof Error ? error.message : String(error);
 				const attempt = Math.max(0, Number(next.attemptCount || 0));
 				const maxAttempts = Math.max(1, Number(next.maxAttempts || 3));
-				if (attempt >= maxAttempts) {
+				const retryable = isAcpRetryableError(error);
+				if (!retryable || attempt >= maxAttempts) {
 					next.status = "dead-letter";
 					next.nextAttemptAt = null;
 				} else {
