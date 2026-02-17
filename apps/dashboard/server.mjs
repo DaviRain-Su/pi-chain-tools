@@ -966,13 +966,15 @@ async function executeAcpJob(payload) {
 	});
 
 	const txHash = result?.details?.step3Tx || result?.details?.step2Tx || null;
+	const receiptStatus = result?.mode === "plan-only" ? "planned" : "executed";
 	pushAcpJobHistory({
 		runId,
-		status: "executed",
+		status: receiptStatus,
 		targetChain: plan.targetChain,
 		intentType,
 		amountRaw,
 		txHash,
+		adapterMode: result?.mode || "execute",
 	});
 	return {
 		ok: true,
@@ -983,8 +985,9 @@ async function executeAcpJob(payload) {
 		result,
 		receipt: {
 			...receiptBase,
-			status: "executed",
+			status: receiptStatus,
 			txHash,
+			adapterMode: result?.mode || "execute",
 		},
 	};
 }
