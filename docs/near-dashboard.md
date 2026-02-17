@@ -118,7 +118,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - quote now supports dual-source validation (Dexscreener + onchain router), returns conservative quote, and enforces divergence guard
   - native mode includes post-trade reconciliation fields (`tokenInDeltaRaw`, `tokenOutDeltaRaw`, `reconcileOk`, `minAmountOutRaw`) in receipt
   - execute failures are normalized as `BSC_EXECUTE_FAILED retryable=true|false ...` for async retry/dead-letter classification
-  - Aave post-action failures are normalized as `BSC_AAVE_POST_ACTION_FAILED ...` and recorded into ACP job history / DLQ type grouping
+  - Aave/Lista/Wombat post-action failures are normalized as `BSC_*_POST_ACTION_FAILED ...` and recorded into ACP job history / DLQ type grouping
+  - `POST /api/bsc/yield/execute` now returns `postActionArtifact` (protocol-agnostic `bsc_post_action_supply@v1`) and persists it in ACP job history for adapter-agnostic reconciliation
   - ACP UI now surfaces `executionProtocol` + `postActionStatus` columns and tags dead-letter phase (`main` vs `bsc-aave-post`)
   - ACP filters include phase selectors (`all|main|bsc-aave-post`) for jobs and dead-letter triage
   - dead-letter supports type filter + clickable byType chips for one-click incident narrowing

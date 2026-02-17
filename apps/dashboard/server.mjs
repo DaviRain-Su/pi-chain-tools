@@ -2182,6 +2182,33 @@ async function executeBscWombatSupply(params) {
 	}
 }
 
+function buildBscPostActionArtifact({
+	protocol,
+	supplyAmountRaw,
+	postAction,
+	runId,
+}) {
+	const p = String(protocol || "unknown").toLowerCase();
+	const amountRaw = /^\d+$/.test(String(supplyAmountRaw || ""))
+		? String(supplyAmountRaw)
+		: null;
+	const status = postAction?.ok ? "success" : "error";
+	return {
+		type: "bsc_post_action_supply",
+		version: "v1",
+		protocol: p,
+		runId: String(runId || ""),
+		status,
+		amountRaw,
+		token: String(BSC_USDC).toLowerCase(),
+		provider: postAction?.provider || null,
+		txHash: postAction?.txHash || null,
+		reason: postAction?.reason || null,
+		retryable: Boolean(postAction && postAction.ok !== true),
+		occurredAt: new Date().toISOString(),
+	};
+}
+
 function buildAcpExecutionPlan(payload) {
 	const requirements = payload?.requirements || {};
 	const targetChain = String(
@@ -5965,6 +5992,7 @@ const server = http.createServer(async (req, res) => {
 					step: payload.step || "bsc-stable-yield-execute",
 				});
 				let postAction = null;
+				let postActionArtifact = null;
 				if (
 					plan.executionProtocol === "aave" ||
 					plan.executionProtocol === "lista" ||
@@ -6013,6 +6041,12 @@ const server = http.createServer(async (req, res) => {
 					}
 					const isAave = plan.executionProtocol === "aave";
 					const isLista = plan.executionProtocol === "lista";
+					postActionArtifact = buildBscPostActionArtifact({
+						protocol: plan.executionProtocol,
+						supplyAmountRaw,
+						postAction,
+						runId,
+					});
 					pushActionHistory({
 						action: isAave
 							? "bsc_aave_supply"
@@ -6048,6 +6082,7 @@ const server = http.createServer(async (req, res) => {
 						: "none",
 					postActionTxHash: postAction?.txHash || null,
 					postActionReason: postAction?.reason || null,
+					postActionArtifact,
 				});
 				return json(res, 200, {
 					ok: true,
@@ -6055,6 +6090,7 @@ const server = http.createServer(async (req, res) => {
 					plan,
 					result,
 					postAction,
+					postActionArtifact,
 				});
 			} catch (error) {
 				pushAcpJobHistory({
