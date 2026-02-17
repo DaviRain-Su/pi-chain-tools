@@ -41,6 +41,7 @@
 		"test": "vitest run",
 		"ci": "npm run check && npm run security:check && npm test",
 		"ci:retry": "node scripts/ci-retry.mjs",
+		"ci:resilient": "node scripts/ci-resilient.mjs",
 		"dashboard:start": "node apps/dashboard/server.mjs"
 	},
 	"dependencies": {

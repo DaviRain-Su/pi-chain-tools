@@ -97,6 +97,10 @@ describe("package.json script contracts", () => {
 		);
 		expect(scripts?.ci).toContain("npm run check");
 		expect(scripts?.ci).toContain("npm test");
+		expect(typeof scripts?.["ci:resilient"]).toBe("string");
+		expect(String(scripts?.["ci:resilient"])).toContain(
+			"node scripts/ci-resilient.mjs",
+		);
 	});
 
 	it("keeps CI schema validation as single-step command", () => {

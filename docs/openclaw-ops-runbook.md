@@ -130,6 +130,7 @@ curl -s http://127.0.0.1:4173/api/payments
 ### 5.1 `python: 未找到命令`
 - 本仓库流程使用 Node/npm；不要依赖 `python`。
 - 统一走：`npm run check` / `npm run ci`。
+- 本地一键稳态流程：`npm run ci:resilient`（内置 check 热修复重跑 + test 单次重试）。
 
 ### 5.2 `edit` 精确匹配失败
 - 先 `rg` / `sed -n` 定位上下文，再缩小替换块。
