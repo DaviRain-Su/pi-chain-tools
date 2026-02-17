@@ -2666,7 +2666,16 @@ async function getBscWalletStableBalances(account) {
 
 async function getBscProtocolPositions(account) {
 	const owner = String(account || "").trim();
-	if (!owner) return { aave: {}, venus: {}, totalUsdApprox: 0 };
+	if (!owner) {
+		return {
+			aave: {},
+			venus: {},
+			subtotalsUsdApprox: { aave: 0, venus: 0 },
+			totalUsdApprox: 0,
+			health: { status: "degraded", reason: "missing_account" },
+			fetchedAt: new Date().toISOString(),
+		};
+	}
 	const provider = new JsonRpcProvider(BSC_RPC_URL, {
 		name: "bsc",
 		chainId: BSC_CHAIN_ID,
@@ -2675,16 +2684,21 @@ async function getBscProtocolPositions(account) {
 		"function balanceOf(address owner) view returns (uint256)",
 	]);
 	const readMaybe = async (token, decimals) => {
-		if (!token) return null;
+		if (!token) return { token: null, missingConfig: true, balanceUi: 0 };
 		try {
 			const data = erc20Iface.encodeFunctionData("balanceOf", [owner]);
 			const raw = await provider.call({ to: token, data });
 			const bal = erc20Iface
 				.decodeFunctionResult("balanceOf", raw)[0]
 				.toString();
-			return { token, balanceRaw: bal, balanceUi: rawToUi(bal, decimals) };
+			return {
+				token,
+				balanceRaw: bal,
+				balanceUi: rawToUi(bal, decimals),
+				ok: true,
+			};
 		} catch {
-			return { token, error: "read_failed" };
+			return { token, error: "read_failed", balanceUi: 0, ok: false };
 		}
 	};
 	const [aaveUsdc, aaveUsdt, venusUsdc, venusUsdt] = await Promise.all([
@@ -2693,14 +2707,26 @@ async function getBscProtocolPositions(account) {
 		readMaybe(BSC_VENUS_VTOKEN_USDC, BSC_USDC_DECIMALS),
 		readMaybe(BSC_VENUS_VTOKEN_USDT, BSC_USDT_DECIMALS),
 	]);
-	const totalUsdApprox = [aaveUsdc, aaveUsdt, venusUsdc, venusUsdt].reduce(
-		(acc, row) => acc + Number(row?.balanceUi || 0),
-		0,
-	);
+	const subtotalAave =
+		Number(aaveUsdc?.balanceUi || 0) + Number(aaveUsdt?.balanceUi || 0);
+	const subtotalVenus =
+		Number(venusUsdc?.balanceUi || 0) + Number(venusUsdt?.balanceUi || 0);
+	const totalUsdApprox = subtotalAave + subtotalVenus;
+	const rows = [aaveUsdc, aaveUsdt, venusUsdc, venusUsdt];
+	const hasReadError = rows.some((r) => r && r.ok === false);
+	const missingAnyConfig = rows.some((r) => r?.missingConfig);
+	const health = hasReadError
+		? { status: "error", reason: "one_or_more_reads_failed" }
+		: missingAnyConfig
+			? { status: "degraded", reason: "partial_missing_token_config" }
+			: { status: "ok", reason: "all_configured_reads_ok" };
 	return {
 		aave: { usdc: aaveUsdc, usdt: aaveUsdt },
 		venus: { usdc: venusUsdc, usdt: venusUsdt },
+		subtotalsUsdApprox: { aave: subtotalAave, venus: subtotalVenus },
 		totalUsdApprox,
+		health,
+		fetchedAt: new Date().toISOString(),
 	};
 }
 
