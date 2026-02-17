@@ -46,7 +46,9 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `POST /api/policy` (`confirm=true`) -> patch `targetAllocation` / `constraints` / `monetization` and persist to disk
 - Strategy marketplace bootstrap:
   - `GET /api/strategies` -> list strategies
-  - `POST /api/strategies` (`confirm=true`) -> create/update strategy metadata (`id/name/creator/priceUsd/...`)
+  - `POST /api/strategies` (`confirm=true`) -> create/update strategy metadata with Strategy DSL v1 validation
+    - preferred: submit `dsl` object (validated by `docs/schemas/strategy-dsl.v1.schema.json` + semantic guard)
+    - compatible: legacy top-level fields (`id/name/creator/priceUsd/...`) are auto-mapped into DSL v1 then validated
   - `POST /api/strategies/purchase` (`confirm=true`) -> simulate paid purchase + compute platform fee and creator payout
   - `GET /api/strategies/purchases` -> recent purchase receipts
 - Metrics persistence: rebalance + rpc reliability metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)

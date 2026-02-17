@@ -5,6 +5,11 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+	buildStrategyDslFromLegacy,
+	validateStrategyDslV1,
+} from "./strategy-dsl.mjs";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -2089,33 +2094,37 @@ const server = http.createServer(async (req, res) => {
 				if (payload.confirm !== true) {
 					return json(res, 400, { ok: false, error: "Missing confirm=true" });
 				}
-				const id = String(payload.id || "").trim();
-				const name = String(payload.name || "").trim();
-				const creator = String(payload.creator || "").trim();
-				const priceUsd = Number(payload.priceUsd || 0);
-				if (
-					!id ||
-					!name ||
-					!creator ||
-					!Number.isFinite(priceUsd) ||
-					priceUsd <= 0
-				) {
+				const dslCandidate = payload.dsl
+					? payload.dsl
+					: buildStrategyDslFromLegacy(payload);
+				const validation = validateStrategyDslV1(dslCandidate);
+				if (!validation.ok) {
 					return json(res, 400, {
 						ok: false,
-						error: "id/name/creator and positive priceUsd are required",
+						error: "strategy dsl validation failed",
+						errors: validation.errors,
+						warnings: validation.warnings,
 					});
 				}
+				const normalized = validation.normalized;
 				const row = {
-					id,
-					name,
-					creator,
-					priceUsd,
-					targetChain: payload.targetChain || "near",
-					intentType: payload.intentType || "rebalance",
+					id: normalized.id,
+					name: normalized.name,
+					creator: normalized.creator,
+					priceUsd: normalized.pricing.priceUsd,
+					targetChain: normalized.targetChain,
+					intentType: normalized.intentType,
 					riskProfile: payload.riskProfile || "balanced",
+					dslVersion: normalized.version,
+					dsl: normalized,
+					validation: {
+						ok: true,
+						warnings: validation.warnings,
+						validatedAt: new Date().toISOString(),
+					},
 					updatedAt: new Date().toISOString(),
 				};
-				const idx = STRATEGY_CATALOG.findIndex((x) => x.id === id);
+				const idx = STRATEGY_CATALOG.findIndex((x) => x.id === row.id);
 				if (idx >= 0) STRATEGY_CATALOG[idx] = row;
 				else STRATEGY_CATALOG.unshift(row);
 				if (STRATEGY_CATALOG.length > 200) STRATEGY_CATALOG.length = 200;

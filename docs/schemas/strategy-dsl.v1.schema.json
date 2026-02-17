@@ -1,0 +1,60 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://pi-chain-tools/schemas/strategy-dsl.v1.schema.json",
+	"title": "Strategy DSL v1",
+	"type": "object",
+	"additionalProperties": false,
+	"required": [
+		"id",
+		"name",
+		"creator",
+		"version",
+		"targetChain",
+		"intentType",
+		"pricing",
+		"risk",
+		"execution"
+	],
+	"properties": {
+		"id": { "type": "string", "minLength": 1 },
+		"name": { "type": "string", "minLength": 1 },
+		"creator": { "type": "string", "minLength": 1 },
+		"version": { "type": "string", "minLength": 1 },
+		"targetChain": {
+			"type": "string",
+			"enum": ["near", "bsc", "base", "evm", "solana", "sui"]
+		},
+		"intentType": { "type": "string", "minLength": 1 },
+		"inputs": {
+			"type": "object",
+			"additionalProperties": true
+		},
+		"pricing": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["priceUsd", "currency"],
+			"properties": {
+				"priceUsd": { "type": "number", "exclusiveMinimum": 0 },
+				"currency": { "type": "string", "minLength": 1 }
+			}
+		},
+		"risk": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["maxAmountUsd", "maxSlippageBps", "dailyRunLimit"],
+			"properties": {
+				"maxAmountUsd": { "type": "number", "exclusiveMinimum": 0 },
+				"maxSlippageBps": { "type": "number", "minimum": 1, "maximum": 500 },
+				"dailyRunLimit": { "type": "integer", "minimum": 1, "maximum": 100 }
+			}
+		},
+		"execution": {
+			"type": "object",
+			"additionalProperties": false,
+			"required": ["mode"],
+			"properties": {
+				"mode": { "type": "string", "enum": ["plan-only", "execute"] }
+			}
+		}
+	}
+}

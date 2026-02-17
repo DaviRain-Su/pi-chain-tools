@@ -1,6 +1,6 @@
 # OpenClaw BTC5m Schema Artifacts
 
-本目录包含 BTC5m（Polymarket）能力的三份可直接用于 OpenClaw 校验的 JSON Schema：
+本目录包含 BTC5m（Polymarket）能力与策略平台能力的 JSON Schema：
 
 - `openclaw-btc5m-workflow.schema.json`
   - 验证 workflow 文档结构（章节 11 的 workflow schema）
@@ -8,6 +8,8 @@
   - 验证运行态状态对象（章节 11 的 runtime state schema）
 - `openclaw-btc5m-retry-policy.schema.json`
   - 验证失败恢复策略（章节 10 的 retry 白名单/重试策略）
+- `strategy-dsl.v1.schema.json`
+  - 验证策略市场 Strategy DSL v1 的结构（发布与执行前置约束）
 
 ## 本地校验
 
@@ -25,6 +27,9 @@ npm run schema:check-files:json    # JSON 输出（推荐用于 CI 机器消费�
 npm run schema:ci-check            # 一步到位：清单 + 全量 schema 内容校验
 npm run schema:audit              # 一步到位：清单 + 严格诊断（适配 AI/自动化）
 ```
+
+> 注：`npm run schema:validate` 当前 CI gate 重点校验 OpenClaw BTC5m 三份基线 schema。
+> `strategy-dsl.v1.schema.json` 由策略发布接口在运行时消费（`/api/strategies` 的 DSL v1 校验）。
 
 脚本会检查：
 
