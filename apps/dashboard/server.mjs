@@ -120,6 +120,26 @@ const CI_SIGNATURES_PATH = String(
 		path.join(__dirname, "data", "ci-signatures.jsonl"),
 	),
 );
+const DEBRIDGE_MCP_ENABLED =
+	String(
+		envOrCfg("DEBRIDGE_MCP_ENABLED", "crosschain.debridge.enabled", "false"),
+	).toLowerCase() === "true";
+const DEBRIDGE_MCP_COMMAND = String(
+	envOrCfg("DEBRIDGE_MCP_COMMAND", "crosschain.debridge.command", ""),
+).trim();
+const DEBRIDGE_MCP_TIMEOUT_MS = Math.max(
+	1_000,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"DEBRIDGE_MCP_TIMEOUT_MS",
+				"crosschain.debridge.timeoutMs",
+				"120000",
+			),
+		),
+		10,
+	) || 120_000,
+);
 const ALERT_WEBHOOK_URL = String(
 	envOrCfg("NEAR_REBAL_ALERT_WEBHOOK_URL", "alerts.webhookUrl", ""),
 );
@@ -6216,6 +6236,26 @@ const server = http.createServer(async (req, res) => {
 					items: [],
 				});
 			}
+		}
+
+		if (url.pathname === "/api/crosschain/debridge/readiness") {
+			const blockers = [];
+			if (!DEBRIDGE_MCP_ENABLED) blockers.push("debridge_mcp_disabled");
+			if (!DEBRIDGE_MCP_COMMAND) blockers.push("missing_debridge_mcp_command");
+			return json(res, 200, {
+				ok: true,
+				provider: "debridge-mcp",
+				enabled: DEBRIDGE_MCP_ENABLED,
+				commandConfigured: Boolean(DEBRIDGE_MCP_COMMAND),
+				timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
+				canExecute: blockers.length === 0,
+				blockers,
+				hints: {
+					debridge_mcp_disabled: "DEBRIDGE_MCP_ENABLED=true",
+					missing_debridge_mcp_command:
+						"DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp --help'",
+				},
+			});
 		}
 
 		if (url.pathname === "/api/bsc/yield/plan") {

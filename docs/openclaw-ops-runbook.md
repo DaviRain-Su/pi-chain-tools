@@ -103,7 +103,22 @@ curl -s http://127.0.0.1:4173/api/payments
 > 非 dry-run + strategy 执行门禁：
 > 必须满足 `buyer + paymentId + payment=paid + strategy/buyer匹配 + entitlement有效`。
 
-### 3.3 DLQ / 归档运维
+### 3.3 deBridge MCP 就绪度（跨链扩展）
+
+```bash
+curl -s 'http://127.0.0.1:4173/api/crosschain/debridge/readiness'
+```
+
+返回 `canExecute/blockers/hints`，用于确认 deBridge MCP 入口是否可被 ACP 工作流接管。
+
+建议最小配置：
+```bash
+export DEBRIDGE_MCP_ENABLED=true
+export DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp --help'
+export DEBRIDGE_MCP_TIMEOUT_MS=120000
+```
+
+### 3.4 DLQ / 归档运维
 
 - 查看 dead-letter：`GET /api/acp/jobs/dead-letter`
 - 单条重试：`POST /api/acp/jobs/retry`

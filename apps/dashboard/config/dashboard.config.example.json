@@ -91,6 +91,13 @@
 			"rateCacheTtlMs": 60000
 		}
 	},
+	"crosschain": {
+		"debridge": {
+			"enabled": false,
+			"command": "",
+			"timeoutMs": 120000
+		}
+	},
 	"acp": {
 		"bin": "acp",
 		"dismissedPurge": {
