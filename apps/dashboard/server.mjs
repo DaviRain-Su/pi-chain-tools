@@ -2626,7 +2626,7 @@ function quoteDivergenceBps(aRaw, bRaw) {
 	return Number((diff * 10_000n) / base);
 }
 
-async function getBscOnchainQuote(amountInRaw) {
+async function getBscPancakeV2Quote(amountInRaw) {
 	const provider = new JsonRpcProvider(BSC_RPC_URL, {
 		name: "bsc",
 		chainId: BSC_CHAIN_ID,
@@ -2646,7 +2646,7 @@ async function getBscOnchainQuote(amountInRaw) {
 	const outUi = rawToUi(outRaw, BSC_USDC_DECIMALS);
 	const rate = inUi > 0 ? outUi / inUi : 0;
 	return {
-		source: "onchain-router",
+		source: "pancake-v2-router",
 		amountOutRaw: outRaw,
 		rate,
 		pairAddress: "",
@@ -2703,7 +2703,7 @@ async function getBscUsdtUsdcQuote(amountInRaw) {
 	}
 
 	try {
-		onchainQuote = await getBscOnchainQuote(amountInRaw);
+		onchainQuote = await getBscPancakeV2Quote(amountInRaw);
 	} catch {
 		// ignore onchain quote failure; keep other sources
 	}
@@ -2718,12 +2718,13 @@ async function getBscUsdtUsdcQuote(amountInRaw) {
 				? dexQuote
 				: onchainQuote;
 		return {
-			source: "dexscreener+onchain",
+			source: "dexscreener+pancake-v2",
 			amountOutRaw: conservative.amountOutRaw,
 			rate: conservative.rate,
 			pairAddress: dexQuote.pairAddress,
 			liquidityUsd: dexQuote.liquidityUsd,
 			dexAmountOutRaw: dexQuote.amountOutRaw,
+			pancakeV2AmountOutRaw: onchainQuote.amountOutRaw,
 			onchainAmountOutRaw: onchainQuote.amountOutRaw,
 			divergenceBps,
 		};
@@ -2934,6 +2935,9 @@ async function buildBscDexNetYieldInsight(compare, options = {}) {
 			amountOutRaw: quote.amountOutRaw,
 			rate: quote.rate,
 			divergenceBps: quote.divergenceBps ?? null,
+			dexAmountOutRaw: quote.dexAmountOutRaw || null,
+			pancakeV2AmountOutRaw:
+				quote.pancakeV2AmountOutRaw || quote.onchainAmountOutRaw || null,
 		},
 		swapCost: {
 			estimatedSlipBps: Number(slipBps.toFixed(2)),
@@ -3705,6 +3709,8 @@ async function executeAction(payload) {
 						quoteLiquidityUsd: quote.liquidityUsd,
 						quoteDivergenceBps: quote.divergenceBps ?? null,
 						dexAmountOutRaw: quote.dexAmountOutRaw || null,
+						pancakeV2AmountOutRaw:
+							quote.pancakeV2AmountOutRaw || quote.onchainAmountOutRaw || null,
 						onchainAmountOutRaw: quote.onchainAmountOutRaw || null,
 						slippageBps,
 						next: executeResult.ok
