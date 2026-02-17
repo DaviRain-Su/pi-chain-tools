@@ -35,6 +35,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - enforces policy `constraints.minRebalanceUsd`
     - for chains still in adapter plan-only mode (e.g. current bsc path), receipt `status=planned` and `adapterMode=plan-only`
   - `GET /api/acp/jobs` -> recent ACP job history (dry-run/executed/planned/blocked/error)
+  - `GET /api/acp/jobs/summary` -> status distribution + daily execution counters/limit
+  - execute mode applies policy daily guard `constraints.maxDailyRebalanceRuns`
 - Unified multi-chain portfolio bootstrap:
   - `GET /api/portfolio/unified` -> aggregates current NEAR execution portfolio + ACP identity layer status + BSC scaffold status in one schema
 - Portfolio policy center (cross-chain target + constraints):

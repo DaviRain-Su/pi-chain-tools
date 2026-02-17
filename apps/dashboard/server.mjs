@@ -117,6 +117,10 @@ const REBALANCE_METRICS = {
 	pnlSeries: [],
 };
 const ACP_JOB_HISTORY = [];
+const ACP_JOB_STATE = {
+	dailyWindowDay: "",
+	dailyCount: 0,
+};
 const PORTFOLIO_POLICY = {
 	targetAllocation: { near: 0.6, bsc: 0.4 },
 	constraints: {
@@ -955,6 +959,7 @@ async function executeAcpJob(payload) {
 		);
 	}
 
+	ensureAcpDailyRunLimit();
 	const result = await executeAction({
 		action: "rebalance_usdt_to_usdce_txn",
 		chain: plan.targetChain,
@@ -967,6 +972,9 @@ async function executeAcpJob(payload) {
 
 	const txHash = result?.details?.step3Tx || result?.details?.step2Tx || null;
 	const receiptStatus = result?.mode === "plan-only" ? "planned" : "executed";
+	if (receiptStatus === "executed") {
+		registerAcpExecutedRun();
+	}
 	pushAcpJobHistory({
 		runId,
 		status: receiptStatus,
@@ -1033,6 +1041,31 @@ function pushAcpJobHistory(entry) {
 		ACP_JOB_HISTORY.length = 50;
 	}
 	void saveMetricsToDisk();
+}
+
+function registerAcpExecutedRun() {
+	const day = currentDayKey();
+	if (ACP_JOB_STATE.dailyWindowDay !== day) {
+		ACP_JOB_STATE.dailyWindowDay = day;
+		ACP_JOB_STATE.dailyCount = 0;
+	}
+	ACP_JOB_STATE.dailyCount += 1;
+}
+
+function ensureAcpDailyRunLimit() {
+	const dailyMax = Number(
+		PORTFOLIO_POLICY?.constraints?.maxDailyRebalanceRuns || 10,
+	);
+	const day = currentDayKey();
+	if (ACP_JOB_STATE.dailyWindowDay !== day) {
+		ACP_JOB_STATE.dailyWindowDay = day;
+		ACP_JOB_STATE.dailyCount = 0;
+	}
+	if (ACP_JOB_STATE.dailyCount >= dailyMax) {
+		throw new Error(
+			`ACP daily run limit reached (${ACP_JOB_STATE.dailyCount}/${dailyMax})`,
+		);
+	}
 }
 
 function extractTxHash(outputText) {
@@ -2013,6 +2046,25 @@ const server = http.createServer(async (req, res) => {
 
 		if (url.pathname === "/api/acp/jobs") {
 			return json(res, 200, { ok: true, jobs: ACP_JOB_HISTORY });
+		}
+
+		if (url.pathname === "/api/acp/jobs/summary") {
+			const byStatus = ACP_JOB_HISTORY.reduce((acc, row) => {
+				const key = String(row?.status || "unknown");
+				acc[key] = (acc[key] || 0) + 1;
+				return acc;
+			}, {});
+			return json(res, 200, {
+				ok: true,
+				summary: {
+					total: ACP_JOB_HISTORY.length,
+					byStatus,
+					dailyState: ACP_JOB_STATE,
+					policyDailyLimit: Number(
+						PORTFOLIO_POLICY?.constraints?.maxDailyRebalanceRuns || 10,
+					),
+				},
+			});
 		}
 
 		if (url.pathname === "/api/action" && req.method === "POST") {
