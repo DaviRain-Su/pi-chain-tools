@@ -194,6 +194,9 @@
           <select id="acpDeadTypeFilter">
             <option value="all">dead-letter type: all</option>
           </select>
+          <button id="acpDeadPresetAave">Preset: Aave post failures</button>
+          <button id="acpDeadPresetMain">Preset: Main failures</button>
+          <button id="acpDeadPresetAll">Preset: Clear presets</button>
         </div>
         <div id="acpDismissed" class="muted" style="margin-top:4px">dismissed: -</div>
         <div class="row" style="margin-top:4px">
@@ -386,6 +389,9 @@
       const acpDismissedEl = document.getElementById("acpDismissed");
       const acpDeadPhaseFilterEl = document.getElementById("acpDeadPhaseFilter");
       const acpDeadTypeFilterEl = document.getElementById("acpDeadTypeFilter");
+      const acpDeadPresetAaveBtn = document.getElementById("acpDeadPresetAave");
+      const acpDeadPresetMainBtn = document.getElementById("acpDeadPresetMain");
+      const acpDeadPresetAllBtn = document.getElementById("acpDeadPresetAll");
       const acpDismissedPurgeDaysEl = document.getElementById("acpDismissedPurgeDays");
       const acpDismissedPurgeBtn = document.getElementById("acpDismissedPurgeBtn");
       const strategyEl = document.getElementById("strategy");
@@ -1644,6 +1650,24 @@
         load().catch(() => {});
       });
       acpDeadTypeFilterEl?.addEventListener("change", () => {
+        syncAcpFiltersToUrl();
+        load().catch(() => {});
+      });
+      acpDeadPresetAaveBtn?.addEventListener("click", () => {
+        if (acpDeadPhaseFilterEl) acpDeadPhaseFilterEl.value = "bsc-aave-post";
+        if (acpDeadTypeFilterEl) acpDeadTypeFilterEl.value = "bsc_aave_post_action_failed";
+        syncAcpFiltersToUrl();
+        load().catch(() => {});
+      });
+      acpDeadPresetMainBtn?.addEventListener("click", () => {
+        if (acpDeadPhaseFilterEl) acpDeadPhaseFilterEl.value = "main";
+        if (acpDeadTypeFilterEl) acpDeadTypeFilterEl.value = "all";
+        syncAcpFiltersToUrl();
+        load().catch(() => {});
+      });
+      acpDeadPresetAllBtn?.addEventListener("click", () => {
+        if (acpDeadPhaseFilterEl) acpDeadPhaseFilterEl.value = "all";
+        if (acpDeadTypeFilterEl) acpDeadTypeFilterEl.value = "all";
         syncAcpFiltersToUrl();
         load().catch(() => {});
       });
