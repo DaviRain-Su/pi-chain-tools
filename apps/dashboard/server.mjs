@@ -878,6 +878,27 @@ async function executeAcpJob(payload) {
 	const intentType = plan.intentType;
 	const dryRun = payload?.dryRun !== false;
 	const runId = String(payload?.runId || `acp-${Date.now()}`).trim();
+	const amountUsd = Number(amountRaw) / 1_000_000;
+	const minRebalanceUsd = Number(
+		PORTFOLIO_POLICY?.constraints?.minRebalanceUsd || 50,
+	);
+	if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
+		throw new Error("Invalid amountRaw for ACP job");
+	}
+	if (amountUsd < minRebalanceUsd) {
+		throw new Error(
+			`amountUsd ${amountUsd.toFixed(6)} below policy minRebalanceUsd ${minRebalanceUsd}`,
+		);
+	}
+	const receiptBase = {
+		runId,
+		identityChain: "base",
+		targetChain: plan.targetChain,
+		intentType,
+		amountRaw,
+		amountUsd,
+		status: "planned",
+	};
 
 	if (dryRun) {
 		return {
@@ -886,10 +907,9 @@ async function executeAcpJob(payload) {
 			runId,
 			identityChain: "base",
 			plan,
-			execution: {
-				targetChain: plan.targetChain,
-				intentType,
-				amountRaw,
+			receipt: {
+				...receiptBase,
+				status: "dry-run",
 			},
 		};
 	}
@@ -917,6 +937,11 @@ async function executeAcpJob(payload) {
 		identityChain: "base",
 		plan,
 		result,
+		receipt: {
+			...receiptBase,
+			status: "executed",
+			txHash: result?.details?.step3Tx || result?.details?.step2Tx || null,
+		},
 	};
 }
 
