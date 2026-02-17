@@ -113,6 +113,13 @@ const MARKETPLACE_PATH = String(
 		path.join(__dirname, "data", "strategy-marketplace.json"),
 	),
 );
+const CI_SIGNATURES_PATH = String(
+	envOrCfg(
+		"CI_SIGNATURES_JSONL_PATH",
+		"paths.ciSignatures",
+		path.join(__dirname, "data", "ci-signatures.jsonl"),
+	),
+);
 const ALERT_WEBHOOK_URL = String(
 	envOrCfg("NEAR_REBAL_ALERT_WEBHOOK_URL", "alerts.webhookUrl", ""),
 );
@@ -5883,6 +5890,41 @@ const server = http.createServer(async (req, res) => {
 					),
 				},
 			});
+		}
+
+		if (url.pathname === "/api/ops/ci-signatures") {
+			const limit = Math.min(
+				200,
+				Math.max(1, Number.parseInt(url.searchParams.get("limit") || "50", 10)),
+			);
+			try {
+				const raw = await readFile(CI_SIGNATURES_PATH, "utf8");
+				const rows = String(raw || "")
+					.split("\n")
+					.map((line) => line.trim())
+					.filter(Boolean)
+					.map((line) => {
+						try {
+							return JSON.parse(line);
+						} catch {
+							return null;
+						}
+					})
+					.filter(Boolean);
+				return json(res, 200, {
+					ok: true,
+					path: CI_SIGNATURES_PATH,
+					count: rows.length,
+					items: rows.slice(-limit).reverse(),
+				});
+			} catch {
+				return json(res, 200, {
+					ok: true,
+					path: CI_SIGNATURES_PATH,
+					count: 0,
+					items: [],
+				});
+			}
 		}
 
 		if (url.pathname === "/api/bsc/yield/plan") {

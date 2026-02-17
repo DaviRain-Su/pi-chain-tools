@@ -144,6 +144,9 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Dashboard alert test endpoint/button:
   - API: `POST /api/alerts/test` (requires `confirm=true`)
   - UI: `Action Console -> Test alerts`
+- CI resilient failure-signature telemetry:
+  - `scripts/ci-resilient.mjs` appends JSONL records to `apps/dashboard/data/ci-signatures.jsonl` (override via `CI_SIGNATURES_JSONL_PATH`)
+  - read-only API: `GET /api/ops/ci-signatures?limit=50` (returns newest-first rows)
 - Rebalance risk guards (env-tunable): max amount, min quote out, max slippage, cooldown, and daily execution cap (`NEAR_REBAL_*`)
   - `NEAR_REBAL_MAX_AMOUNT_RAW` (default `5000000`)
   - `NEAR_REBAL_MIN_QUOTE_OUT_RAW` (default `500000`)

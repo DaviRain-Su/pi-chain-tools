@@ -1,8 +1,18 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	mkdirSync,
+	mkdtempSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+const CI_SIGNATURES_JSONL_PATH =
+	process.env.CI_SIGNATURES_JSONL_PATH ||
+	"apps/dashboard/data/ci-signatures.jsonl";
 
 function run(command, args, label, env = process.env) {
 	return new Promise((resolve) => {
@@ -100,9 +110,30 @@ function printSignatureSummary(signatures) {
 	);
 }
 
+function appendSignatureSummary(signatures, status) {
+	try {
+		const payload = {
+			ts: new Date().toISOString(),
+			status,
+			signatures,
+		};
+		mkdirSync(path.dirname(CI_SIGNATURES_JSONL_PATH), { recursive: true });
+		appendFileSync(
+			CI_SIGNATURES_JSONL_PATH,
+			`${JSON.stringify(payload)}\n`,
+			"utf8",
+		);
+	} catch (error) {
+		console.warn(
+			`[ci-resilient] failed to append signature log: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
 function failWithSummary(code, message, signatures) {
 	console.error(message);
 	printSignatureSummary(signatures);
+	appendSignatureSummary(signatures, "failed");
 	process.exit(code);
 }
 
@@ -209,6 +240,7 @@ async function main() {
 
 	console.log("[ci-resilient] success");
 	printSignatureSummary(signatures);
+	appendSignatureSummary(signatures, "success");
 }
 
 await main();
