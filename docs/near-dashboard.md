@@ -127,6 +127,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - Yield Health card also shows Aave execute readiness from `/api/bsc/yield/plan` (`canExecute/reason/aaveMode/blockers/recommendedProtocol/fixPack`), highlights `primary` blocker + `fix-order`, and provides one-click `Copy blockers` + `Copy env snippet` + `Copy full fix pack` (grouped, annotated `.env` template)
   - Yield Health card now surfaces portfolio-level aggregate risk (`band/avg/max`) from `/api/bsc/yield/markets.aggregateRisk`
   - Yield Health card also surfaces BSC market health summary (`venus/aave/lista/wombat`) from `/api/bsc/yield/markets.marketHealth` with status coloring (`fresh/stale/unknown`) and hover details (`source/updatedAt/age`)
+  - BSC protocol block shows Lista/Wombat normalization sources (`api/env/env-fallback`) with hover details (updatedAt + usdc/usdt rates)
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`
