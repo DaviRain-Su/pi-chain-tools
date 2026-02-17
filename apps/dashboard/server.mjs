@@ -245,6 +245,31 @@ const BSC_YIELD_MIN_APR_DELTA_BPS = Math.max(
 		10,
 	) || 30,
 );
+const BSC_YIELD_REBALANCE_INTERVAL_DAYS = Math.max(
+	1,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"BSC_YIELD_REBALANCE_INTERVAL_DAYS",
+				"bsc.yield.rebalanceIntervalDays",
+				"7",
+			),
+		),
+		10,
+	) || 7,
+);
+const BSC_YIELD_DEFAULT_QUOTE_USD = Math.max(
+	1,
+	Number.parseFloat(
+		String(
+			envOrCfg(
+				"BSC_YIELD_DEFAULT_QUOTE_USD",
+				"bsc.yield.defaultQuoteUsd",
+				"100",
+			),
+		),
+	) || 100,
+);
 const BSC_STABLE_APR_HINTS_JSON = String(
 	envOrCfg("BSC_STABLE_APR_HINTS_JSON", "bsc.yield.stableAprHintsJson", ""),
 ).trim();
@@ -2864,6 +2889,66 @@ async function getBscLendingMarketCompare() {
 	};
 }
 
+async function buildBscDexNetYieldInsight(compare, options = {}) {
+	const amountUsd = Math.max(
+		1,
+		Number.parseFloat(
+			String(options.amountUsd || BSC_YIELD_DEFAULT_QUOTE_USD),
+		) || BSC_YIELD_DEFAULT_QUOTE_USD,
+	);
+	const rebalanceIntervalDays = Math.max(
+		1,
+		Number.parseInt(
+			String(
+				options.rebalanceIntervalDays || BSC_YIELD_REBALANCE_INTERVAL_DAYS,
+			),
+			10,
+		) || BSC_YIELD_REBALANCE_INTERVAL_DAYS,
+	);
+	const amountInRaw = uiToRaw(amountUsd, BSC_USDT_DECIMALS);
+	const quote = await getBscUsdtUsdcQuote(amountInRaw);
+	const outUi = rawToUi(quote.amountOutRaw, BSC_USDC_DECIMALS);
+	const slipBps =
+		amountUsd > 0 ? Math.max(0, ((amountUsd - outUi) / amountUsd) * 10_000) : 0;
+	const annualizedSwapCostBps = slipBps * (365 / rebalanceIntervalDays);
+	const venusAprDeltaBps =
+		Number(compare?.markets?.venus?.usdcSupplyAprBps || 0) -
+		Number(compare?.markets?.venus?.usdtSupplyAprBps || 0);
+	const aaveAprDeltaBps =
+		Number(compare?.markets?.aave?.usdcSupplyAprBps || 0) -
+		Number(compare?.markets?.aave?.usdtSupplyAprBps || 0);
+	const venusNetDeltaBps = venusAprDeltaBps - annualizedSwapCostBps;
+	const aaveNetDeltaBps = aaveAprDeltaBps - annualizedSwapCostBps;
+	const preferredProtocol =
+		aaveNetDeltaBps > venusNetDeltaBps
+			? "aave"
+			: venusNetDeltaBps > aaveNetDeltaBps
+				? "venus"
+				: compare?.recommendation?.bestUsdcSupply?.protocol || "venus";
+	return {
+		amountUsd,
+		rebalanceIntervalDays,
+		quote: {
+			source: quote.source,
+			amountInRaw,
+			amountOutRaw: quote.amountOutRaw,
+			rate: quote.rate,
+			divergenceBps: quote.divergenceBps ?? null,
+		},
+		swapCost: {
+			estimatedSlipBps: Number(slipBps.toFixed(2)),
+			annualizedSwapCostBps: Number(annualizedSwapCostBps.toFixed(2)),
+		},
+		netYieldDelta: {
+			venusAprDeltaBps: Number(venusAprDeltaBps.toFixed(2)),
+			aaveAprDeltaBps: Number(aaveAprDeltaBps.toFixed(2)),
+			venusNetDeltaBps: Number(venusNetDeltaBps.toFixed(2)),
+			aaveNetDeltaBps: Number(aaveNetDeltaBps.toFixed(2)),
+			preferredProtocol,
+		},
+	};
+}
+
 async function getBscWalletStableBalances(account) {
 	const owner = String(account || "").trim();
 	if (!owner) throw new Error("account is required");
@@ -4823,6 +4908,11 @@ const server = http.createServer(async (req, res) => {
 
 		if (url.pathname === "/api/bsc/yield/markets") {
 			const compare = await getBscLendingMarketCompare();
+			const netYieldInsight = await buildBscDexNetYieldInsight(compare, {
+				amountUsd: url.searchParams.get("amountUsd") || undefined,
+				rebalanceIntervalDays:
+					url.searchParams.get("rebalanceIntervalDays") || undefined,
+			});
 			const now = Date.now();
 			const sourceHealth = {
 				venus: {
@@ -4842,6 +4932,7 @@ const server = http.createServer(async (req, res) => {
 			};
 			return json(res, 200, {
 				...compare,
+				netYieldInsight,
 				sourceHealth,
 				executionReadiness: {
 					defaultProtocol: BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT,

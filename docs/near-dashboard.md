@@ -105,7 +105,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can execute in two built-in adapter modes:
   - includes stable-yield agent v1 APIs:
     - `GET /api/bsc/yield/plan` (supports `executionProtocol=venus|aave`; returns `executeReadiness.blockers` for aave precheck)
-    - `GET /api/bsc/yield/markets` (returns Venus/Aave read-only compare + best protocol recommendation + `sourceHealth`)
+    - `GET /api/bsc/yield/markets` (returns Venus/Aave read-only compare + best protocol recommendation + `sourceHealth` + `netYieldInsight`; supports query `amountUsd` and `rebalanceIntervalDays`)
     - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave`; `aave` requires enable flag)
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
     - `POST /api/bsc/yield/worker/stop` (`confirm=true`)
@@ -206,6 +206,8 @@ Common mapping examples:
 - `BSC_QUOTE_MAX_DIVERGENCE_BPS` - max allowed quote divergence between Dexscreener and onchain router (default: `800`)
 - `BSC_EXECUTE_COMMAND` - command template for command-mode BSC swap execution (supports placeholders listed above)
 - `BSC_YIELD_MIN_APR_DELTA_BPS` - minimum APR delta to trigger APR-driven target override (default: `30`)
+- `BSC_YIELD_REBALANCE_INTERVAL_DAYS` - expected rebalance cadence used for net-yield (APR minus swap-cost) annualization in `/api/bsc/yield/markets` (default: `7`)
+- `BSC_YIELD_DEFAULT_QUOTE_USD` - default quote notional (USD) used in `/api/bsc/yield/markets` net-yield preview when `amountUsd` query is omitted (default: `100`)
 - `BSC_STABLE_APR_HINTS_JSON` - optional Venus APR hints (`{"usdtSupplyAprBps":120,"usdcSupplyAprBps":180,"updatedAt":"..."}`)
 - `BSC_AAVE_APR_HINTS_JSON` - optional Aave APR hints (`{"usdtSupplyAprBps":90,"usdcSupplyAprBps":160,"updatedAt":"..."}`)
 - `BSC_VENUS_APR_API_URL` - optional Venus APR API endpoint (if set, API value has priority over env hints)

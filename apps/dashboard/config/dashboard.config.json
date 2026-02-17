@@ -38,7 +38,9 @@
 		"yield": {
 			"minAprDeltaBps": 30,
 			"aprCacheTtlMs": 60000,
-			"executionProtocolDefault": "venus"
+			"executionProtocolDefault": "venus",
+			"rebalanceIntervalDays": 7,
+			"defaultQuoteUsd": 100
 		},
 		"aave": {
 			"enabled": false,
