@@ -1007,6 +1007,46 @@ async function buildUnifiedPortfolio(accountId) {
 	);
 	const nearTotalUsd = Number(snapshot.near?.usd || 0) + nearTokenUsd;
 
+	const bscAccount = String(BSC_EXECUTE_RECIPIENT || "").trim();
+	let bscLayer = {
+		chain: "bsc",
+		status: "degraded",
+		note: "missing BSC_EXECUTE_RECIPIENT; cannot query wallet balances",
+	};
+	if (bscAccount) {
+		try {
+			const [balances, marketCompare, yieldPlan] = await Promise.all([
+				getBscWalletStableBalances(bscAccount),
+				getBscLendingMarketCompare(),
+				computeBscYieldPlan({ account: bscAccount }),
+			]);
+			const bscWalletUsd =
+				Number(balances?.usdtUi || 0) + Number(balances?.usdcUi || 0);
+			bscLayer = {
+				chain: "bsc",
+				status: "active",
+				account: bscAccount,
+				portfolioUsd: bscWalletUsd,
+				positions: {
+					wallet: balances,
+					yield: {
+						plan: yieldPlan?.plan || null,
+						executionProtocol: yieldPlan?.executionProtocol || "venus",
+						executeReadiness: yieldPlan?.executeReadiness || null,
+					},
+					markets: marketCompare,
+				},
+			};
+		} catch (error) {
+			bscLayer = {
+				chain: "bsc",
+				status: "error",
+				account: bscAccount,
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
 	return {
 		updatedAt: new Date().toISOString(),
 		policy: PORTFOLIO_POLICY,
@@ -1025,11 +1065,7 @@ async function buildUnifiedPortfolio(accountId) {
 					burrow: snapshot.burrow,
 				},
 			},
-			{
-				chain: "bsc",
-				status: "scaffold",
-				note: "bsc execution adapter in progress; portfolio ingestion pending",
-			},
+			bscLayer,
 		],
 		risk: {
 			retryRate: snapshot.rpcMetrics?.retryRate || 0,

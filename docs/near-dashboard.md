@@ -72,7 +72,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `GET /api/acp/jobs/summary` -> status distribution + queue status breakdown + daily execution counters/limit
   - execute mode applies policy daily guard `constraints.maxDailyRebalanceRuns`
 - Unified multi-chain portfolio bootstrap:
-  - `GET /api/portfolio/unified` -> aggregates current NEAR execution portfolio + ACP identity layer status + BSC scaffold status in one schema
+  - `GET /api/portfolio/unified` -> aggregates NEAR execution portfolio + ACP identity layer + BSC wallet/yield/market compare snapshot (active when `BSC_EXECUTE_RECIPIENT` is configured)
 - Portfolio policy center (cross-chain target + constraints):
   - `GET /api/policy` -> current policy
   - `POST /api/policy` (`confirm=true`) -> patch `targetAllocation` / `constraints` / `monetization` and persist to disk
