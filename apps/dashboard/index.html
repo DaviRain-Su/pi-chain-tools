@@ -185,6 +185,13 @@
         </div>
         <div id="acpAsyncStatus" class="muted" style="margin-top:6px">-</div>
         <div id="acpDeadLetters" class="muted" style="margin-top:6px">dead-letter: -</div>
+        <div class="row" style="margin-top:4px">
+          <select id="acpDeadPhaseFilter">
+            <option value="all">dead-letter phase: all</option>
+            <option value="main">dead-letter phase: main</option>
+            <option value="bsc-aave-post">dead-letter phase: bsc-aave-post</option>
+          </select>
+        </div>
         <div id="acpDismissed" class="muted" style="margin-top:4px">dismissed: -</div>
         <div class="row" style="margin-top:4px">
           <input id="acpDismissedPurgeDays" type="number" min="0" value="7" style="width:88px" />
@@ -374,6 +381,7 @@
       const acpAsyncStatusEl = document.getElementById("acpAsyncStatus");
       const acpDeadLettersEl = document.getElementById("acpDeadLetters");
       const acpDismissedEl = document.getElementById("acpDismissed");
+      const acpDeadPhaseFilterEl = document.getElementById("acpDeadPhaseFilter");
       const acpDismissedPurgeDaysEl = document.getElementById("acpDismissedPurgeDays");
       const acpDismissedPurgeBtn = document.getElementById("acpDismissedPurgeBtn");
       const strategyEl = document.getElementById("strategy");
@@ -438,6 +446,7 @@
           if (acpStrategyFilterEl && typeof s.acpStrategy === "string") acpStrategyFilterEl.value = s.acpStrategy;
           if (acpOnlyFailedEl) acpOnlyFailedEl.checked = s.acpOnlyFailed === true;
           if (acpPhaseFilterEl && s.acpPhase) acpPhaseFilterEl.value = s.acpPhase;
+          if (acpDeadPhaseFilterEl && s.acpDeadPhase) acpDeadPhaseFilterEl.value = s.acpDeadPhase;
           if (acpExpandErrorsEl) acpExpandErrorsEl.checked = s.acpExpandErrors !== false;
         } catch {}
       }
@@ -450,6 +459,7 @@
         if (acpStrategyFilterEl && p.get("acpStrategy")) acpStrategyFilterEl.value = p.get("acpStrategy");
         if (acpOnlyFailedEl && p.get("acpOnlyFailed")) acpOnlyFailedEl.checked = p.get("acpOnlyFailed") === "1";
         if (acpPhaseFilterEl && p.get("acpPhase")) acpPhaseFilterEl.value = p.get("acpPhase");
+        if (acpDeadPhaseFilterEl && p.get("acpDeadPhase")) acpDeadPhaseFilterEl.value = p.get("acpDeadPhase");
       }
 
       function saveAcpFiltersToStorage() {
@@ -459,6 +469,7 @@
           acpStrategy: acpStrategyFilterEl?.value || "",
           acpOnlyFailed: !!acpOnlyFailedEl?.checked,
           acpPhase: acpPhaseFilterEl?.value || "all",
+          acpDeadPhase: acpDeadPhaseFilterEl?.value || "all",
           acpExpandErrors: !!acpExpandErrorsEl?.checked,
         };
         localStorage.setItem(ACP_FILTERS_KEY, JSON.stringify(payload));
@@ -476,6 +487,7 @@
         setOrDelete("acpStrategy", acpStrategyFilterEl?.value || "");
         setOrDelete("acpOnlyFailed", acpOnlyFailedEl?.checked ? "1" : "");
         setOrDelete("acpPhase", acpPhaseFilterEl?.value || "all");
+        setOrDelete("acpDeadPhase", acpDeadPhaseFilterEl?.value || "all");
         const next = `${window.location.pathname}?${qp.toString()}`.replace(/\?$/, "");
         window.history.replaceState(null, "", next);
       }
@@ -486,6 +498,7 @@
         if (acpStrategyFilterEl) acpStrategyFilterEl.value = "";
         if (acpOnlyFailedEl) acpOnlyFailedEl.checked = false;
         if (acpPhaseFilterEl) acpPhaseFilterEl.value = "all";
+        if (acpDeadPhaseFilterEl) acpDeadPhaseFilterEl.value = "all";
         if (acpExpandErrorsEl) acpExpandErrorsEl.checked = true;
         syncAcpFiltersToUrl();
       }
@@ -880,24 +893,27 @@
           }
         }
         const deadLetters = Array.isArray(acpDead?.deadLetters) ? acpDead.deadLetters : [];
+        const deadPhaseFilter = (acpDeadPhaseFilterEl?.value || "all").trim();
+        const classifyDeadPhase = (row) => String(row?.errorType || '').includes('bsc_aave') ? 'bsc-aave-post' : 'main';
+        const filteredDeadLetters = deadLetters.filter((row) => deadPhaseFilter === "all" || classifyDeadPhase(row) === deadPhaseFilter);
         const dismissedRows = Array.isArray(acpDismissed?.dismissed) ? acpDismissed.dismissed : [];
-        acpDeadLettersEl.innerHTML = `dead-letter: ${deadLetters.length}`;
+        acpDeadLettersEl.innerHTML = `dead-letter: ${filteredDeadLetters.length}/${deadLetters.length}`;
         acpDismissedEl.textContent = `dismissed: ${dismissedRows.length}`;
-        if (deadLetters.length > 0) {
-          const byType = deadLetters.reduce((acc, row) => {
+        if (filteredDeadLetters.length > 0) {
+          const byType = filteredDeadLetters.reduce((acc, row) => {
             const k = String(row?.errorType || 'unknown');
             acc[k] = (acc[k] || 0) + 1;
             return acc;
           }, {});
-          const retryableCount = deadLetters.filter((row) => !!row?.retryable).length;
-          const rowsHtml = deadLetters.slice(0, 20).map((row) => {
+          const retryableCount = filteredDeadLetters.filter((row) => !!row?.retryable).length;
+          const rowsHtml = filteredDeadLetters.slice(0, 20).map((row) => {
             const jobId = String(row?.jobId || "");
             const err = String(row?.error || "").replace(/</g, "&lt;").slice(0, 120);
             const retryableBadge = row?.retryable ? '<span class="ok">retryable</span>' : '<span class="warn">non-retryable</span>';
             const phase = String(row?.errorType || '').includes('bsc_aave') ? 'bsc-aave-post' : 'main';
             return `<tr><td><input type="checkbox" data-dl-select="${jobId}" /></td><td>${jobId}</td><td>${row.attemptCount || 0}/${row.maxAttempts || 0}</td><td>${row.errorType || '-'}</td><td>${phase}</td><td>${retryableBadge}</td><td>${row.updatedAt || "-"}</td><td class="warn">${err}</td><td><button data-retry-job="${jobId}">Retry</button></td></tr>`;
           }).join("");
-          acpDeadLettersEl.innerHTML += `<div class="muted" style="margin-top:4px">byType=${JSON.stringify(byType)} retryable=${retryableCount}/${deadLetters.length}</div><div style="margin-top:6px"><button data-dl-retry-retryable="1">Retry retryable only</button> <button data-dl-retry-selected="1">Retry selected</button> <button data-dl-dismiss-selected="1">Dismiss selected</button></div><table style="margin-top:6px"><thead><tr><th></th><th>jobId</th><th>attempts</th><th>type</th><th>phase</th><th>retry</th><th>updated</th><th>error</th><th>action</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+          acpDeadLettersEl.innerHTML += `<div class="muted" style="margin-top:4px">byType=${JSON.stringify(byType)} retryable=${retryableCount}/${filteredDeadLetters.length}</div><div style="margin-top:6px"><button data-dl-retry-retryable="1">Retry retryable only</button> <button data-dl-retry-selected="1">Retry selected</button> <button data-dl-dismiss-selected="1">Dismiss selected</button></div><table style="margin-top:6px"><thead><tr><th></th><th>jobId</th><th>attempts</th><th>type</th><th>phase</th><th>retry</th><th>updated</th><th>error</th><th>action</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
 
           acpDeadLettersEl.querySelectorAll("button[data-retry-job]").forEach((btn) => {
             btn.addEventListener("click", async (ev) => {
@@ -1581,6 +1597,10 @@
         load().catch(() => {});
       });
       acpPhaseFilterEl?.addEventListener("change", () => {
+        syncAcpFiltersToUrl();
+        load().catch(() => {});
+      });
+      acpDeadPhaseFilterEl?.addEventListener("change", () => {
         syncAcpFiltersToUrl();
         load().catch(() => {});
       });
