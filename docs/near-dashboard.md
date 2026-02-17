@@ -119,6 +119,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - Aave post-action failures are normalized as `BSC_AAVE_POST_ACTION_FAILED ...` and recorded into ACP job history / DLQ type grouping
   - ACP UI now surfaces `executionProtocol` + `postActionStatus` columns and tags dead-letter phase (`main` vs `bsc-aave-post`)
   - ACP filters include phase selectors (`all|main|bsc-aave-post`) for jobs and dead-letter triage
+  - dead-letter supports type filter + clickable byType chips for one-click incident narrowing
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`
