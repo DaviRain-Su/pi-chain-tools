@@ -10,6 +10,8 @@
   - 验证失败恢复策略（章节 10 的 retry 白名单/重试策略）
 - `strategy-dsl.v1.schema.json`
   - 验证策略市场 Strategy DSL v1 的结构（发布与执行前置约束）
+- `bsc-post-action-supply-artifact.v1.schema.json`
+  - 验证 BSC post-action 统一工件（`bsc_post_action_supply@v1`）结构，供协议无关 reconciliation 路由使用
 
 ## 本地校验
 

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { reconcileBscExecutionArtifact } from "./bsc-reconcile.mjs";
+import {
+	reconcileBscExecutionArtifact,
+	validateBscPostActionArtifactV1,
+} from "./bsc-reconcile.mjs";
 
 describe("bsc post-action reconciliation router", () => {
 	it("reconciles successful aave artifact", () => {
@@ -12,6 +15,7 @@ describe("bsc post-action reconciliation router", () => {
 			amountRaw: "12345",
 			txHash: `0x${"a".repeat(64)}`,
 			provider: "aave-native",
+			token: "usdc",
 		});
 		expect(result.ok).toBe(true);
 		expect(result.route).toBe("bsc_post_action_supply_v1:aave");
@@ -28,6 +32,7 @@ describe("bsc post-action reconciliation router", () => {
 			txHash: `0x${"b".repeat(64)}`,
 			provider: "wombat-command",
 			retryable: true,
+			token: "usdc",
 		});
 		expect(result.ok).toBe(false);
 		expect(result.route).toBe("bsc_post_action_supply_v1:lista");
@@ -35,7 +40,7 @@ describe("bsc post-action reconciliation router", () => {
 		expect(result.checks?.providerOk).toBe(false);
 	});
 
-	it("returns unsupported route when protocol adapter missing", () => {
+	it("returns artifact_invalid when protocol adapter missing", () => {
 		const result = reconcileBscExecutionArtifact({
 			type: "bsc_post_action_supply",
 			version: "v1",
@@ -43,9 +48,54 @@ describe("bsc post-action reconciliation router", () => {
 			status: "success",
 			amountRaw: "1",
 			txHash: `0x${"c".repeat(64)}`,
+			token: "usdc",
 		});
 		expect(result.ok).toBe(false);
-		expect(result.reason).toBe("protocol_reconcile_adapter_missing");
-		expect(result.route).toContain("venus:unsupported");
+		expect(result.reason).toContain("artifact_invalid");
+		expect(result.reason).toContain("protocol_invalid");
+		expect(result.route).toBe("unsupported");
+	});
+});
+
+describe("bsc post-action artifact validator", () => {
+	it("returns normalized artifact for valid payload", () => {
+		const result = validateBscPostActionArtifactV1({
+			type: "bsc_post_action_supply",
+			version: "v1",
+			protocol: "WOMBAT",
+			status: "SUCCESS",
+			amountRaw: "10",
+			txHash: `0x${"d".repeat(64)}`,
+			provider: "wombat-command",
+			token: "USDC",
+		});
+		expect(result.ok).toBe(true);
+		expect(result.normalized.protocol).toBe("wombat");
+		expect(result.normalized.status).toBe("success");
+		expect(result.normalized.token).toBe("usdc");
+	});
+
+	it("captures schema violations", () => {
+		const result = validateBscPostActionArtifactV1({
+			type: "bad",
+			version: "v0",
+			protocol: "bad",
+			status: "done",
+			amountRaw: "0",
+			txHash: "0x123",
+			token: "",
+		});
+		expect(result.ok).toBe(false);
+		expect(result.errors).toEqual(
+			expect.arrayContaining([
+				"type_invalid",
+				"version_invalid",
+				"protocol_invalid",
+				"status_invalid",
+				"amount_raw_invalid",
+				"tx_hash_invalid",
+				"token_missing",
+			]),
+		);
 	});
 });

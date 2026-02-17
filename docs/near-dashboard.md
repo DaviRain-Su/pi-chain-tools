@@ -120,6 +120,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - execute failures are normalized as `BSC_EXECUTE_FAILED retryable=true|false ...` for async retry/dead-letter classification
   - Aave/Lista/Wombat post-action failures are normalized as `BSC_*_POST_ACTION_FAILED ...` and recorded into ACP job history / DLQ type grouping
   - `POST /api/bsc/yield/execute` now returns `postActionArtifact` (protocol-agnostic `bsc_post_action_supply@v1`) and `postActionReconciliation` (routed via artifact type/version + protocol adapter registry: `aave|lista|wombat`), and persists both in ACP job history for adapter-agnostic reconciliation
+  - artifact path includes runtime validator (`validateBscPostActionArtifactV1`) and schema artifact (`docs/schemas/bsc-post-action-supply-artifact.v1.schema.json`) to prevent format drift
   - ACP UI now surfaces `executionProtocol` + `postActionStatus` columns and tags dead-letter phase (`main` vs `bsc-aave-post`)
   - ACP filters include phase selectors (`all|main|bsc-aave-post`) for jobs and dead-letter triage
   - dead-letter supports type filter + clickable byType chips for one-click incident narrowing

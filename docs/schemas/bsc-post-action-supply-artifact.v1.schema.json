@@ -1,0 +1,22 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "pi-chain-tools/bsc-post-action-supply-artifact.v1.schema.json",
+	"title": "BSC Post Action Supply Artifact v1",
+	"type": "object",
+	"required": ["type", "version", "protocol", "status", "token"],
+	"properties": {
+		"type": { "const": "bsc_post_action_supply" },
+		"version": { "const": "v1" },
+		"protocol": { "type": "string", "enum": ["aave", "lista", "wombat"] },
+		"runId": { "type": "string" },
+		"status": { "type": "string", "enum": ["success", "error"] },
+		"amountRaw": { "type": ["string", "null"], "pattern": "^\\d+$" },
+		"token": { "type": "string" },
+		"provider": { "type": ["string", "null"] },
+		"txHash": { "type": ["string", "null"], "pattern": "^0x[a-fA-F0-9]{64}$" },
+		"reason": { "type": ["string", "null"] },
+		"retryable": { "type": "boolean" },
+		"occurredAt": { "type": "string" }
+	},
+	"additionalProperties": true
+}
