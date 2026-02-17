@@ -44,6 +44,8 @@
 						class="btn btn-ghost"
 						href="#hackathon">Hackathon Track</a>
 					<a class="btn btn-ghost" href="#latest-updates">Latest Updates</a>
+					<a class="btn btn-ghost" href="#production-readiness">Readiness</a>
+					<a class="btn btn-ghost" href="#api-examples">API Examples</a>
 					<a class="btn btn-ghost" href="#demo">Demo Flow</a>
 				</div>
 			</header>
@@ -180,6 +182,35 @@
 					·
 					<a href="https://github.com/DaviRain-Su/pi-chain-tools/blob/main/docs/openclaw-acp-quickstart.md" target="_blank" rel="noreferrer">openclaw-acp-quickstart.md</a>
 				</p>
+			</section>
+
+			<section class="panel reveal" id="production-readiness">
+				<h2>Production Readiness Checklist</h2>
+				<ul class="checklist">
+					<li>✅ ACP async queue persistence + restart resume</li>
+					<li>✅ Strategy execution hard gate: buyer + paymentId + paid validation + entitlement</li>
+					<li>✅ Replay protection: duplicate terminal run blocked by <code>runId + paymentId</code></li>
+					<li>✅ ACP/Payments operational visibility in dashboard</li>
+					<li>🟡 Next: async retry backoff + max-attempt + dead-letter queue (DLQ)</li>
+					<li>🟡 Next: BSC execute path from plan-only to full on-chain receipt pipeline</li>
+					<li>🟡 Next: real payment provider callback integration to entitlement lifecycle</li>
+				</ul>
+			</section>
+
+			<section class="panel reveal" id="api-examples">
+				<h2>API Examples (ACP / Payments)</h2>
+				<p class="note">Use these examples with dashboard server running on <code>127.0.0.1:8787</code>.</p>
+				<div class="command-grid">
+					<div class="command-block">
+						<code>curl -s -X POST http://127.0.0.1:8787/api/payments/create -H 'content-type: application/json' -d '{"confirm":true,"strategyId":"stb-usdc-v1","buyer":"demo-buyer"}'</code>
+					</div>
+					<div class="command-block">
+						<code>curl -s -X POST http://127.0.0.1:8787/api/payments/confirm -H 'content-type: application/json' -d '{"confirm":true,"paymentId":"pay-REPLACE","txRef":"tx-demo"}'</code>
+					</div>
+					<div class="command-block">
+						<code>curl -s -X POST http://127.0.0.1:8787/api/acp/job/execute -H 'content-type: application/json' -d '{"confirm":true,"dryRun":false,"runId":"acp-demo-1","strategyId":"stb-usdc-v1","buyer":"demo-buyer","paymentId":"pay-REPLACE","requirements":{"targetChain":"near","intentType":"rebalance","amountRaw":"1000000"}}'</code>
+					</div>
+				</div>
 			</section>
 
 			<section class="panel reveal" id="quality-loop">
