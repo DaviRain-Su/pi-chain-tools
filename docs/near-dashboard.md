@@ -31,6 +31,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP Ops UI now shows dead-letter table view with error-type grouping and retryability badges, plus batch actions (retry retryable / retry selected / dismiss selected)
 - ACP Ops also surfaces dismissed-queue count so archived failures do not pollute active dead-letter triage
 - ACP Ops supports archive hygiene: purge dismissed jobs older than N days via confirm-protected action
+- Optional auto-purge scheduler can run in-process for dismissed archive retention control
 - Dashboard includes Payments panel (`/api/payments`) with status breakdown (`pending/paid/failed`) and recent payment rows
 - ACP recent jobs table supports status filtering and NEAR tx explorer links when `txHash` is present
 - ACP recent jobs table now also shows `strategyId` / `buyer` / `remainingUses` to trace entitlement consumption during execution
@@ -150,6 +151,9 @@ Open:
 - `NEAR_DASHBOARD_MARKETPLACE_PATH` - strategy marketplace persistence path (default: `apps/dashboard/data/strategy-marketplace.json`)
 - `BSC_EXECUTE_ENABLED` - enable BSC execute adapter path (`true|false`, default: `false`)
 - `BSC_EXECUTE_COMMAND` - external command template used for BSC swap execution (supports placeholders listed above)
+- `ACP_DISMISSED_PURGE_ENABLED` - enable automatic dismissed-archive purge scheduler (`true|false`, default: `false`)
+- `ACP_DISMISSED_PURGE_DAYS` - purge threshold in days for dismissed jobs (default: `7`)
+- `ACP_DISMISSED_PURGE_INTERVAL_MS` - purge scheduler interval in milliseconds (default: `21600000` = 6h)
 
 Example:
 

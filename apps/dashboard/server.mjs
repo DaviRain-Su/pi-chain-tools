@@ -75,6 +75,20 @@ const BSC_EXECUTE_ENABLED =
 const BSC_EXECUTE_COMMAND = String(
 	process.env.BSC_EXECUTE_COMMAND || "",
 ).trim();
+const ACP_DISMISSED_PURGE_ENABLED =
+	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
+	"true";
+const ACP_DISMISSED_PURGE_DAYS = Math.max(
+	0,
+	Number.parseInt(process.env.ACP_DISMISSED_PURGE_DAYS || "7", 10) || 7,
+);
+const ACP_DISMISSED_PURGE_INTERVAL_MS = Math.max(
+	60_000,
+	Number.parseInt(
+		process.env.ACP_DISMISSED_PURGE_INTERVAL_MS || String(6 * 60 * 60 * 1000),
+		10,
+	) || 6 * 60 * 60 * 1000,
+);
 const NEAR_RPC_RETRY_ROUNDS = Number.parseInt(
 	process.env.NEAR_RPC_RETRY_ROUNDS || "2",
 	10,
@@ -1381,6 +1395,20 @@ function purgeDismissedAcpJobs(olderThanDays = 7) {
 	const removed = before - ACP_ASYNC_JOBS.length;
 	if (removed > 0) void saveMetricsToDisk();
 	return { removed, retained: ACP_ASYNC_JOBS.length };
+}
+
+function setupDismissedPurgeScheduler() {
+	if (!ACP_DISMISSED_PURGE_ENABLED) return;
+	const runOnce = () => {
+		const out = purgeDismissedAcpJobs(ACP_DISMISSED_PURGE_DAYS);
+		if (out.removed > 0) {
+			console.log(
+				`[acp-purge] removed=${out.removed} olderThanDays=${ACP_DISMISSED_PURGE_DAYS}`,
+			);
+		}
+	};
+	runOnce();
+	setInterval(runOnce, ACP_DISMISSED_PURGE_INTERVAL_MS);
 }
 
 function enqueueAcpAsyncJob(payload) {
@@ -3197,6 +3225,7 @@ Promise.all([
 	loadMarketplaceFromDisk(),
 ]).finally(() => {
 	void processAcpAsyncQueue();
+	setupDismissedPurgeScheduler();
 	server.listen(PORT, () => {
 		console.log(`NEAR dashboard listening on http://127.0.0.1:${PORT}`);
 	});
