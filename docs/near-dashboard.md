@@ -30,6 +30,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP integration bootstrap (Virtual Base identity + multi-chain execution preview):
   - `GET /api/acp/status` -> best-effort `acp whoami` + `acp wallet balance` JSON output
   - `POST /api/acp/route-preview` -> returns execution route plan (`targetChain=near|bsc`, `intentType`, `riskProfile`) for router wiring
+- Unified multi-chain portfolio bootstrap:
+  - `GET /api/portfolio/unified` -> aggregates current NEAR execution portfolio + ACP identity layer status + BSC scaffold status in one schema
 - Metrics persistence: rebalance + rpc reliability metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector

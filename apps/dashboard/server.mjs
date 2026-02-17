@@ -675,6 +675,59 @@ async function buildSnapshot(accountId) {
 	};
 }
 
+async function buildUnifiedPortfolio(accountId) {
+	const snapshot = await buildSnapshot(accountId);
+	let acp = { ok: false, error: "acp not queried" };
+	try {
+		const [whoami, wallet] = await Promise.all([
+			runAcpJson(["whoami"]),
+			runAcpJson(["wallet", "balance"]),
+		]);
+		acp = { ok: true, whoami, wallet };
+	} catch (error) {
+		acp = {
+			ok: false,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+
+	const nearTokenUsd = (snapshot.tokens || []).reduce(
+		(acc, row) => acc + Number(row.usd || 0),
+		0,
+	);
+	const nearTotalUsd = Number(snapshot.near?.usd || 0) + nearTokenUsd;
+
+	return {
+		updatedAt: new Date().toISOString(),
+		identityLayer: {
+			chain: "base",
+			provider: "virtual-acp",
+			acp,
+		},
+		executionLayers: [
+			{
+				chain: "near",
+				accountId,
+				portfolioUsd: nearTotalUsd,
+				positions: {
+					wallet: snapshot.tokens,
+					burrow: snapshot.burrow,
+				},
+			},
+			{
+				chain: "bsc",
+				status: "scaffold",
+				note: "bsc execution adapter in progress; portfolio ingestion pending",
+			},
+		],
+		risk: {
+			retryRate: snapshot.rpcMetrics?.retryRate || 0,
+			http429: snapshot.rpcMetrics?.http429 || 0,
+			rebalance: snapshot.rebalanceMetrics,
+		},
+	};
+}
+
 function runCommand(command, args, options = {}) {
 	return new Promise((resolve, reject) => {
 		execFile(
@@ -1705,6 +1758,15 @@ const server = http.createServer(async (req, res) => {
 					error: error instanceof Error ? error.message : String(error),
 				});
 			}
+		}
+
+		if (url.pathname === "/api/portfolio/unified") {
+			const accountId = url.searchParams.get("accountId") || ACCOUNT_ID;
+			const portfolio = await buildUnifiedPortfolio(accountId);
+			return json(res, 200, {
+				ok: true,
+				portfolio,
+			});
 		}
 
 		if (url.pathname === "/api/acp/route-preview" && req.method === "POST") {
