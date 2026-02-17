@@ -167,6 +167,15 @@
         <h3>Yield Health</h3>
         <div id="yieldHealth" class="muted">-</div>
         <div id="bscProtocolHealth" class="muted" style="margin-top:6px">BSC protocol: -</div>
+        <div class="row" style="margin-top:6px">
+          <label class="muted" for="bscExecutionProtocol">readiness protocol</label>
+          <select id="bscExecutionProtocol">
+            <option value="aave">aave</option>
+            <option value="lista">lista</option>
+            <option value="wombat">wombat</option>
+            <option value="venus">venus</option>
+          </select>
+        </div>
         <div id="bscYieldReadiness" class="muted" style="margin-top:6px">BSC execute readiness: -</div>
         <div id="bscMarketHealth" class="muted" style="margin-top:6px">BSC market health: -</div>
       </div>
@@ -381,6 +390,7 @@
       const yieldHealthEl = document.getElementById("yieldHealth");
       const bscProtocolHealthEl = document.getElementById("bscProtocolHealth");
       const bscYieldReadinessEl = document.getElementById("bscYieldReadiness");
+      const bscExecutionProtocolEl = document.getElementById("bscExecutionProtocol");
       const bscMarketHealthEl = document.getElementById("bscMarketHealth");
       const execQualityEl = document.getElementById("execQuality");
       const acpOpsEl = document.getElementById("acpOps");
@@ -722,10 +732,16 @@
       let lastSnapshot = null;
       let lastRebalancePlan = null;
       let lastAcpAsyncJobId = "";
+      const BSC_READINESS_PROTOCOL_KEY = "near_dashboard.bsc.readinessProtocol";
       let targetConfig = loadTargets();
       targetUsdtEl.value = targetConfig.usdt;
       targetUsdceEl.value = targetConfig.usdce;
       targetThresholdEl.value = targetConfig.threshold;
+      if (bscExecutionProtocolEl) {
+        const savedProtocol = String(localStorage.getItem(BSC_READINESS_PROTOCOL_KEY) || "aave").toLowerCase();
+        const allowed = ["aave", "lista", "wombat", "venus"];
+        bscExecutionProtocolEl.value = allowed.includes(savedProtocol) ? savedProtocol : "aave";
+      }
       if (strategyDslInputEl && !strategyDslInputEl.value) {
         strategyDslInputEl.value = JSON.stringify(buildStrategyDslSample(), null, 2);
       }
@@ -762,10 +778,11 @@
       async function load() {
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
+        const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
         const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes] = await Promise.all([
           fetch(`/api/snapshot${query}`),
           fetch(`/api/portfolio/unified${query}`),
-          fetch(`/api/bsc/yield/plan${query ? `${query}&executionProtocol=aave` : "?executionProtocol=aave"}`),
+          fetch(`/api/bsc/yield/plan${query ? `${query}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
           fetch(`/api/bsc/yield/markets${query || ""}`),
           fetch("/api/acp/status"),
           fetch("/api/acp/jobs/summary"),
@@ -823,6 +840,14 @@
           "missing_bsc_aave_execute_command",
           "bsc_usdc_not_in_aave_allowed_tokens",
           "recommended_amount_exceeds_bsc_aave_max_amount_raw",
+          "lista_execute_disabled",
+          "missing_bsc_lista_execute_command",
+          "bsc_usdc_not_in_lista_allowed_tokens",
+          "recommended_amount_exceeds_bsc_lista_max_amount_raw",
+          "wombat_execute_disabled",
+          "missing_bsc_wombat_execute_command",
+          "bsc_usdc_not_in_wombat_allowed_tokens",
+          "recommended_amount_exceeds_bsc_wombat_max_amount_raw",
         ];
         const blockerHint = {
           aave_execute_disabled: "Enable gate: BSC_AAVE_EXECUTE_ENABLED=true",
@@ -831,6 +856,14 @@
           missing_bsc_aave_execute_command: "Set BSC_AAVE_EXECUTE_COMMAND (command mode)",
           bsc_usdc_not_in_aave_allowed_tokens: "Include USDC in BSC_AAVE_ALLOWED_TOKENS",
           recommended_amount_exceeds_bsc_aave_max_amount_raw: "Increase BSC_AAVE_MAX_AMOUNT_RAW or lower amount",
+          lista_execute_disabled: "Enable gate: BSC_LISTA_EXECUTE_ENABLED=true",
+          missing_bsc_lista_execute_command: "Set BSC_LISTA_EXECUTE_COMMAND",
+          bsc_usdc_not_in_lista_allowed_tokens: "Include USDC in BSC_LISTA_ALLOWED_TOKENS",
+          recommended_amount_exceeds_bsc_lista_max_amount_raw: "Increase BSC_LISTA_MAX_AMOUNT_RAW or lower amount",
+          wombat_execute_disabled: "Enable gate: BSC_WOMBAT_EXECUTE_ENABLED=true",
+          missing_bsc_wombat_execute_command: "Set BSC_WOMBAT_EXECUTE_COMMAND",
+          bsc_usdc_not_in_wombat_allowed_tokens: "Include USDC in BSC_WOMBAT_ALLOWED_TOKENS",
+          recommended_amount_exceeds_bsc_wombat_max_amount_raw: "Increase BSC_WOMBAT_MAX_AMOUNT_RAW or lower amount",
         };
         const orderedBlockers = blockers.slice().sort((a, b) => {
           const ia = blockerPriority.indexOf(a);
@@ -842,7 +875,7 @@
         const fixOrderText = orderedBlockers.length
           ? orderedBlockers.map((b, i) => `${i + 1}. ${b}`).join(" | ")
           : "-";
-        bscYieldReadinessEl.innerHTML = `BSC execute readiness(aave): <span class="${readyClass}">${readiness?.canExecute === true ? "ready" : "blocked"}</span> · reason=${readiness?.reason || "-"} · mode=${readiness?.aaveMode || "-"}<br/><span class="muted">recommendedProtocol=${readiness?.recommendedProtocol || bscYieldPlan?.netYieldInsight?.netYieldDelta?.preferredProtocol || "-"} · blockers=${blockerText}</span><br/><span class="${readiness?.canExecute === true ? "ok" : "warn"}">primary=${primaryBlocker}</span> <span class="muted">hint=${primaryHint}</span><br/><span class="muted">fix-order=${fixOrderText}</span><br/><span class="muted"><button data-copy-blockers="1">Copy blockers</button> <button data-copy-env-snippet="1">Copy env snippet</button> <button data-copy-full-fix-pack="1">Copy full fix pack</button></span>`;
+        bscYieldReadinessEl.innerHTML = `BSC execute readiness(${selectedProtocol}): <span class="${readyClass}">${readiness?.canExecute === true ? "ready" : "blocked"}</span> · reason=${readiness?.reason || "-"} · mode=${readiness?.aaveMode || (selectedProtocol === "venus" ? "native-path" : "command") || "-"}<br/><span class="muted">recommendedProtocol=${readiness?.recommendedProtocol || bscYieldPlan?.netYieldInsight?.netYieldDelta?.preferredProtocol || "-"} · blockers=${blockerText}</span><br/><span class="${readiness?.canExecute === true ? "ok" : "warn"}">primary=${primaryBlocker}</span> <span class="muted">hint=${primaryHint}</span><br/><span class="muted">fix-order=${fixOrderText}</span><br/><span class="muted"><button data-copy-blockers="1">Copy blockers</button> <button data-copy-env-snippet="1">Copy env snippet</button> <button data-copy-full-fix-pack="1">Copy full fix pack</button></span>`;
         const copyBlockersBtn = bscYieldReadinessEl.querySelector('[data-copy-blockers="1"]');
         const copyEnvBtn = bscYieldReadinessEl.querySelector('[data-copy-env-snippet="1"]');
         const copyFullFixPackBtn = bscYieldReadinessEl.querySelector('[data-copy-full-fix-pack="1"]');
@@ -1808,6 +1841,11 @@
       });
 
       refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));
+      bscExecutionProtocolEl?.addEventListener("change", () => {
+        const selected = String(bscExecutionProtocolEl.value || "aave").toLowerCase();
+        localStorage.setItem(BSC_READINESS_PROTOCOL_KEY, selected);
+        load().catch(() => {});
+      });
       acpStatusFilterEl?.addEventListener("change", () => {
         syncAcpFiltersToUrl();
         load().catch(() => {});
