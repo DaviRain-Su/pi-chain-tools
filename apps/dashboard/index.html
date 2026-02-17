@@ -185,6 +185,7 @@
         </div>
         <div id="acpAsyncStatus" class="muted" style="margin-top:6px">-</div>
         <div id="acpDeadLetters" class="muted" style="margin-top:6px">dead-letter: -</div>
+        <div id="acpDismissed" class="muted" style="margin-top:4px">dismissed: -</div>
         <details style="margin-top:10px">
           <summary>Recent ACP Jobs</summary>
           <div class="row" style="margin:8px 0">
@@ -362,6 +363,7 @@
       const acpAsyncMetaEl = document.getElementById("acpAsyncMeta");
       const acpAsyncStatusEl = document.getElementById("acpAsyncStatus");
       const acpDeadLettersEl = document.getElementById("acpDeadLetters");
+      const acpDismissedEl = document.getElementById("acpDismissed");
       const strategyEl = document.getElementById("strategy");
       const paymentsMetaEl = document.getElementById("paymentsMeta");
       const paymentsRowsEl = document.getElementById("paymentsRows");
@@ -692,13 +694,14 @@
       async function load() {
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
-        const [snapRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes] = await Promise.all([
+        const [snapRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes] = await Promise.all([
           fetch(`/api/snapshot${query}`),
           fetch("/api/acp/status"),
           fetch("/api/acp/jobs/summary"),
           fetch("/api/acp/jobs"),
           fetch("/api/payments"),
           fetch("/api/acp/jobs/dead-letter"),
+          fetch("/api/acp/jobs/dismissed"),
         ]);
         const data = await snapRes.json();
         const acpStatus = await acpStatusRes.json().catch(() => ({ ok: false }));
@@ -706,6 +709,7 @@
         const acpJobs = await acpJobsRes.json().catch(() => ({ ok: false, jobs: [] }));
         const payments = await paymentsRes.json().catch(() => ({ ok: false, payments: [] }));
         const acpDead = await acpDeadRes.json().catch(() => ({ ok: false, deadLetters: [] }));
+        const acpDismissed = await acpDismissedRes.json().catch(() => ({ ok: false, dismissed: [] }));
         if (!snapRes.ok) {
           metaEl.textContent = `Error: ${data.error || "Unknown"}`;
           return;
@@ -846,7 +850,9 @@
           }
         }
         const deadLetters = Array.isArray(acpDead?.deadLetters) ? acpDead.deadLetters : [];
+        const dismissedRows = Array.isArray(acpDismissed?.dismissed) ? acpDismissed.dismissed : [];
         acpDeadLettersEl.innerHTML = `dead-letter: ${deadLetters.length}`;
+        acpDismissedEl.textContent = `dismissed: ${dismissedRows.length}`;
         if (deadLetters.length > 0) {
           const byType = deadLetters.reduce((acc, row) => {
             const k = String(row?.errorType || 'unknown');

@@ -2904,6 +2904,22 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, { ok: true, deadLetters });
 		}
 
+		if (url.pathname === "/api/acp/jobs/dismissed") {
+			const dismissed = ACP_ASYNC_JOBS.filter(
+				(row) => String(row?.status || "") === "dismissed",
+			).map((row) => ({
+				jobId: row.jobId,
+				status: row.status,
+				createdAt: row.createdAt,
+				updatedAt: row.updatedAt,
+				attemptCount: Number(row.attemptCount || 0),
+				maxAttempts: Number(row.maxAttempts || 3),
+				lastErrorAt: row.lastErrorAt || null,
+				error: row.error,
+			}));
+			return json(res, 200, { ok: true, dismissed });
+		}
+
 		if (url.pathname === "/api/acp/jobs/retry" && req.method === "POST") {
 			const chunks = [];
 			for await (const chunk of req) chunks.push(chunk);
