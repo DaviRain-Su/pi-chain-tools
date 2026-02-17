@@ -166,6 +166,7 @@
       <div class="card" style="margin-top:16px">
         <h3>Yield Health</h3>
         <div id="yieldHealth" class="muted">-</div>
+        <div id="bscProtocolHealth" class="muted" style="margin-top:6px">BSC protocol: -</div>
       </div>
 
       <div class="card" style="margin-top:16px">
@@ -376,6 +377,7 @@
       const burrowRegEl = document.getElementById("burrowReg");
       const workerEl = document.getElementById("worker");
       const yieldHealthEl = document.getElementById("yieldHealth");
+      const bscProtocolHealthEl = document.getElementById("bscProtocolHealth");
       const execQualityEl = document.getElementById("execQuality");
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
@@ -756,8 +758,9 @@
       async function load() {
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
-        const [snapRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes] = await Promise.all([
+        const [snapRes, unifiedRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes] = await Promise.all([
           fetch(`/api/snapshot${query}`),
+          fetch(`/api/portfolio/unified${query}`),
           fetch("/api/acp/status"),
           fetch("/api/acp/jobs/summary"),
           fetch("/api/acp/jobs"),
@@ -766,6 +769,7 @@
           fetch("/api/acp/jobs/dismissed"),
         ]);
         const data = await snapRes.json();
+        const unified = await unifiedRes.json().catch(() => ({ ok: false }));
         const acpStatus = await acpStatusRes.json().catch(() => ({ ok: false }));
         const acpSummary = await acpSummaryRes.json().catch(() => ({ ok: false }));
         const acpJobs = await acpJobsRes.json().catch(() => ({ ok: false, jobs: [] }));
@@ -786,6 +790,12 @@
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
         yieldHealthEl.textContent = computeYieldHealth(data);
         execQualityEl.textContent = computeExecutionQuality(data);
+        const bscLayer = (unified?.portfolio?.executionLayers || []).find((x) => String(x?.chain || "").toLowerCase() === "bsc");
+        const protocolPos = bscLayer?.positions?.protocols || {};
+        const sub = protocolPos?.subtotalsUsdApprox || {};
+        const health = protocolPos?.health || { status: bscLayer?.status || "unknown", reason: bscLayer?.note || "-" };
+        const fetchedAt = protocolPos?.fetchedAt ? new Date(protocolPos.fetchedAt).toLocaleString() : "-";
+        bscProtocolHealthEl.innerHTML = `BSC protocol: <span class="${health.status === "ok" ? "ok" : health.status === "error" ? "warn" : "muted"}">${health.status || "unknown"}</span> · reason=${health.reason || "-"}<br/><span class="muted">Aave≈$${Number(sub.aave || 0).toFixed(2)} · Venus≈$${Number(sub.venus || 0).toFixed(2)} · Total≈$${Number(protocolPos.totalUsdApprox || 0).toFixed(2)} · fetched=${fetchedAt}</span>`;
         const acpOk = acpStatus?.ok ? "ok" : "warn";
         const who = acpStatus?.whoami?.name || acpStatus?.whoami?.agentName || "-";
         const totalJobs = Number(acpSummary?.summary?.total || 0);
