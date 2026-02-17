@@ -198,6 +198,7 @@
             </select>
             <input id="acpBuyerFilter" placeholder="buyer filter" size="16" />
             <input id="acpStrategyFilter" placeholder="strategyId filter" size="16" />
+            <label class="muted" style="display:flex;align-items:center;gap:4px"><input id="acpOnlyFailed" type="checkbox" />only failed</label>
           </div>
           <table style="margin-top:8px">
             <thead><tr><th>Time</th><th>RunId</th><th>Status</th><th>Chain</th><th>Intent</th><th>Strategy</th><th>Buyer</th><th>Remaining</th><th>AmountRaw</th><th>Tx</th></tr></thead>
@@ -337,6 +338,7 @@
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
       const acpBuyerFilterEl = document.getElementById("acpBuyerFilter");
       const acpStrategyFilterEl = document.getElementById("acpStrategyFilter");
+      const acpOnlyFailedEl = document.getElementById("acpOnlyFailed");
       const acpAsyncStrategyIdEl = document.getElementById("acpAsyncStrategyId");
       const acpAsyncBuyerEl = document.getElementById("acpAsyncBuyer");
       const acpAsyncAmountRawEl = document.getElementById("acpAsyncAmountRaw");
@@ -656,10 +658,12 @@
         const statusFilter = (acpStatusFilterEl?.value || "all").trim();
         const buyerFilter = String(acpBuyerFilterEl?.value || "").trim().toLowerCase();
         const strategyFilter = String(acpStrategyFilterEl?.value || "").trim().toLowerCase();
+        const onlyFailed = !!acpOnlyFailedEl?.checked;
         const filteredJobs = (acpJobs?.jobs || [])
           .filter((row) => statusFilter === "all" || String(row?.status || "") === statusFilter)
           .filter((row) => !buyerFilter || String(row?.buyer || "").toLowerCase().includes(buyerFilter))
           .filter((row) => !strategyFilter || String(row?.strategyId || "").toLowerCase().includes(strategyFilter))
+          .filter((row) => !onlyFailed || ["error", "blocked"].includes(String(row?.status || "").toLowerCase()))
           .slice(0, 20);
         for (const row of filteredJobs) {
           const tr = document.createElement("tr");
@@ -1303,6 +1307,7 @@
       acpStatusFilterEl?.addEventListener("change", () => load().catch(() => {}));
       acpBuyerFilterEl?.addEventListener("input", () => load().catch(() => {}));
       acpStrategyFilterEl?.addEventListener("input", () => load().catch(() => {}));
+      acpOnlyFailedEl?.addEventListener("change", () => load().catch(() => {}));
       load().catch((e) => (metaEl.textContent = e.message));
       setInterval(() => load().catch(() => {}), 30000);
     </script>

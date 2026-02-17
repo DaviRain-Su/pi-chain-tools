@@ -30,6 +30,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP recent jobs table supports status filtering and NEAR tx explorer links when `txHash` is present
 - ACP recent jobs table now also shows `strategyId` / `buyer` / `remainingUses` to trace entitlement consumption during execution
 - ACP recent jobs supports local filters by `status` + `buyer` + `strategyId` for faster ops triage
+- ACP recent jobs includes `only failed` quick toggle (status in `error|blocked`)
 - ACP recent jobs row supports click-to-expand detail view (raw job JSON, including receipt/error-related fields when present)
 - Expanded detail view includes quick actions: `Copy JSON`, `Copy runId/jobId`, `Copy txHash`, and `Open explorer` (NEAR/BSC tx links)
 - Expanded detail now renders structured blocks (`receipt` / `result` / `error` / `raw`) for faster troubleshooting
