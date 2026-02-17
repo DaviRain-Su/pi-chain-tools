@@ -198,7 +198,7 @@
             </select>
           </div>
           <table style="margin-top:8px">
-            <thead><tr><th>Time</th><th>RunId</th><th>Status</th><th>Chain</th><th>Intent</th><th>AmountRaw</th><th>Tx</th></tr></thead>
+            <thead><tr><th>Time</th><th>RunId</th><th>Status</th><th>Chain</th><th>Intent</th><th>Strategy</th><th>Buyer</th><th>Remaining</th><th>AmountRaw</th><th>Tx</th></tr></thead>
             <tbody id="acpJobs"></tbody>
           </table>
         </details>
@@ -662,7 +662,7 @@
               tx = row.txHash;
             }
           }
-          tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.runId || "-"}</td><td>${row.status || "-"}</td><td>${row.targetChain || "-"}</td><td>${row.intentType || "-"}</td><td>${row.amountRaw || "-"}</td><td>${tx}</td>`;
+          tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.runId || "-"}</td><td>${row.status || "-"}</td><td>${row.targetChain || "-"}</td><td>${row.intentType || "-"}</td><td>${row.strategyId || "-"}</td><td>${row.buyer || "-"}</td><td>${row.remainingUses ?? "-"}</td><td>${row.amountRaw || "-"}</td><td>${tx}</td>`;
           acpJobsEl.appendChild(tr);
         }
         if (lastAcpAsyncJobId) {
