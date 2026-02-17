@@ -268,16 +268,15 @@ function printStrict(errors) {
 }
 
 function printJsonOutput(errors) {
-	console.error(
-		JSON.stringify(
-			{
-				status: "failed",
-				errors,
-			},
-			null,
-			2,
-		),
+	const payload = JSON.stringify(
+		{
+			status: "failed",
+			errors,
+		},
+		null,
+		2,
 	);
+	console.log(payload);
 }
 
 async function getSchemaFileList() {

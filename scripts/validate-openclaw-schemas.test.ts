@@ -213,8 +213,9 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 
 		const result = runValidator(workspace, ["--json"]);
 		expect(result.status).toBe(1);
-		const payload = JSON.parse(result.stderr);
+		const payload = JSON.parse(result.stdout);
 		expect(payload.status).toBe("failed");
+		expect(result.stderr.trim()).toBe("");
 		expect(payload.errors).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -237,5 +238,21 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		expect(result.status).toBe(0);
 		const payload = JSON.parse(result.stdout);
 		expect(payload.status).toBe("ok");
+	});
+
+	it("emits schema_dir_missing JSON to stdout for machine consumers", () => {
+		const workspace = mkdtempSync(
+			path.join(os.tmpdir(), "pi-chain-tools-schema-validate-empty-"),
+		);
+		workspaces.push(workspace);
+		const result = runValidator(workspace, ["--json"]);
+		expect(result.status).toBe(1);
+		const payload = JSON.parse(result.stdout);
+		expect(payload.status).toBe("failed");
+		expect(payload.errors).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ code: "schema_dir_missing" }),
+			]),
+		);
 	});
 });
