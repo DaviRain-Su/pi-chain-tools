@@ -39,6 +39,15 @@ const ALERT_SUCCESS_ENABLED =
 const ALERT_DEDUPE_WINDOW_MS =
 	Number.parseInt(process.env.NEAR_REBAL_ALERT_DEDUPE_MS || "300000", 10) ||
 	300000;
+const BSC_CHAIN_ID = Number.parseInt(process.env.BSC_CHAIN_ID || "56", 10);
+const BSC_RPC_URL =
+	process.env.BSC_RPC_URL || "https://bsc-dataseed.binance.org";
+const BSC_USDT =
+	process.env.BSC_USDT || "0x55d398326f99059fF775485246999027B3197955";
+const BSC_USDC =
+	process.env.BSC_USDC || "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d";
+const BSC_ROUTER_V2 =
+	process.env.BSC_ROUTER_V2 || "0x10ED43C718714eb63d5aA57B78B54704E256024E";
 
 const ACTION_HISTORY = [];
 const TOKEN_DECIMALS_CACHE = new Map();
@@ -898,10 +907,57 @@ async function executeAction(payload) {
 			const chain = String(payload.chain || "near")
 				.trim()
 				.toLowerCase();
-			if (chain !== "near") {
-				throw new Error(
-					`chain '${chain}' is not enabled for transactional rebalance yet (skeleton only).`,
+			if (chain === "bsc") {
+				const amountRaw = parsePositiveRaw(payload.amountRaw, "amountRaw");
+				const slippageBps = Number.parseInt(
+					String(payload.slippageBps || "50"),
+					10,
 				);
+				if (
+					!Number.isFinite(slippageBps) ||
+					slippageBps < 0 ||
+					slippageBps > 5000
+				) {
+					throw new Error("slippageBps must be between 0 and 5000");
+				}
+				const runId = String(payload.runId || `run-${Date.now()}`).trim();
+				pushActionHistory({
+					action: payload.action,
+					step: payload.step || null,
+					accountId,
+					status: "success",
+					summary: `BSC plan prepared (no onchain execute) amountRaw=${amountRaw}`,
+				});
+				recordRebalanceMetric({
+					runId,
+					status: "bsc-plan",
+					amountRaw,
+					note: "execution not enabled yet",
+				});
+				return {
+					ok: true,
+					action: payload.action,
+					chain: "bsc",
+					mode: "plan-only",
+					plan: {
+						rpcUrl: BSC_RPC_URL,
+						chainId: BSC_CHAIN_ID,
+						router: BSC_ROUTER_V2,
+						tokenIn: BSC_USDT,
+						tokenOut: BSC_USDC,
+						amountInRaw: amountRaw,
+						slippageBps,
+						next: [
+							"quote via Pancake/aggregator",
+							"enforce minOut by slippage",
+							"execute swap through BSC adapter",
+							"optional lend supply adapter",
+						],
+					},
+				};
+			}
+			if (chain !== "near") {
+				throw new Error(`unsupported chain '${chain}'`);
 			}
 			const stepBase = String(payload.step || "rebalance").trim();
 			const runId = String(payload.runId || `run-${Date.now()}`).trim();

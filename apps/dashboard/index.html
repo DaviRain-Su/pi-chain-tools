@@ -817,13 +817,20 @@
 
       execRebalanceTxnBtn.addEventListener("click", () => {
         const chain = (rebalanceChainEl.value || "near").trim();
-        if (chain !== "near") {
-          rebalanceMetaEl.textContent = "One-click transactional execution is currently enabled for near only.";
-          return;
-        }
         const p = getPlanTokensAndRaw(lastRebalancePlan);
         if (!p) {
           rebalanceMetaEl.textContent = "No executable rebalance plan";
+          return;
+        }
+        if (chain === "bsc") {
+          executeAction({
+            action: "rebalance_usdt_to_usdce_txn",
+            chain,
+            amountRaw: p.raw,
+            slippageBps: 50,
+            step: (execStepTagEl.value || "rebalance-bsc-plan").trim() || "rebalance-bsc-plan",
+          });
+          rebalanceMetaEl.textContent = "Submitted BSC plan-only action";
           return;
         }
         if (p.fromToken !== "usdt.tether-token.near" || p.toToken !== "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near") {
