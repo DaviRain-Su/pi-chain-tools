@@ -25,7 +25,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Idempotency/state guard: optional `runId` support, duplicate run rejection, and single active rebalance lock
 - Post-execution reconciliation: compares wallet residual USDt/USDC.e after step3 and records a reconcile entry in Action History
 - Execution Quality panel: success/failure/rollback/reconcile-warning counters + recent run summary
-- Execution Quality now also includes RPC reliability counters (attempts/retries/retryRate/HTTP 429/5xx)
+- Execution Quality now also includes RPC reliability counters (attempts/retries/retryRate/HTTP 429/5xx) and last successful endpoint / latest error snippet for quick diagnosis
 - Metrics persistence: rebalance metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
