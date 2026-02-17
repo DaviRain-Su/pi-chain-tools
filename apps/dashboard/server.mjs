@@ -1087,11 +1087,68 @@ async function executeAcpJob(payload) {
 	}
 	const strategyId = String(payload?.strategyId || "").trim();
 	const buyer = String(payload?.buyer || "").trim();
+	const paymentId = String(payload?.paymentId || "").trim();
 	let entitlement = null;
 	if (!dryRun && strategyId) {
 		if (!buyer) {
 			throw new Error(
 				"buyer is required when strategyId is provided for execute mode",
+			);
+		}
+		if (!paymentId) {
+			pushAcpJobHistory({
+				runId,
+				status: "blocked",
+				reason: "missing_payment_id",
+				strategyId,
+				buyer,
+			});
+			throw new Error(
+				"paymentId is required when strategyId is provided for execute mode",
+			);
+		}
+		const payment = findPaymentById(paymentId);
+		if (!payment) {
+			pushAcpJobHistory({
+				runId,
+				status: "blocked",
+				reason: "payment_not_found",
+				strategyId,
+				buyer,
+				paymentId,
+			});
+			throw new Error(`paymentId '${paymentId}' not found`);
+		}
+		if (String(payment.status || "") !== "paid") {
+			pushAcpJobHistory({
+				runId,
+				status: "blocked",
+				reason: "payment_not_paid",
+				strategyId,
+				buyer,
+				paymentId,
+				paymentStatus: payment.status,
+			});
+			throw new Error(
+				`paymentId '${paymentId}' is not paid (status=${payment.status || "unknown"})`,
+			);
+		}
+		if (
+			String(payment.strategyId || "") !== strategyId ||
+			String(payment.buyer || "") !== buyer
+		) {
+			pushAcpJobHistory({
+				runId,
+				status: "blocked",
+				reason: "payment_mismatch",
+				strategyId,
+				buyer,
+				paymentId,
+				paymentStrategyId: payment.strategyId,
+				paymentBuyer: payment.buyer,
+			});
+			throw new Error(
+				`paymentId '${paymentId}' does not match strategyId/buyer`,
 			);
 		}
 		entitlement = findStrategyEntitlement({ strategyId, buyer });
@@ -1102,6 +1159,7 @@ async function executeAcpJob(payload) {
 				reason: "missing_entitlement",
 				strategyId,
 				buyer,
+				paymentId,
 			});
 			throw new Error(
 				`No active entitlement for strategyId='${strategyId}' buyer='${buyer}'`,
@@ -1116,6 +1174,7 @@ async function executeAcpJob(payload) {
 		intentType,
 		strategyId: strategyId || undefined,
 		buyer: buyer || undefined,
+		paymentId: paymentId || undefined,
 		amountRaw,
 		amountUsd,
 		status: "planned",
@@ -1183,6 +1242,7 @@ async function executeAcpJob(payload) {
 		intentType,
 		strategyId: strategyId || undefined,
 		buyer: buyer || undefined,
+		paymentId: paymentId || undefined,
 		amountRaw,
 		txHash,
 		adapterMode: result?.mode || "execute",

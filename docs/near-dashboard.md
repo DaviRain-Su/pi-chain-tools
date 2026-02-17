@@ -49,8 +49,9 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `POST /api/acp/job/execute` (`confirm=true`) -> ACP job router entrypoint; supports `dryRun` (default true) and execute mode for `intentType=rebalance` via existing chain action pipeline
     - returns normalized `receipt` (`runId/identityChain/targetChain/intentType/amountRaw/amountUsd/status/txHash?/adapterMode`)
     - enforces policy `constraints.minRebalanceUsd`
-    - entitlement gate: when execute request carries `strategyId`, it must include `buyer` and a valid active entitlement (`remainingUses > 0`, not expired), otherwise blocked
-    - execute receipts/history include entitlement trace field `entitlementSourcePaymentId` when entitlement originated from payment confirmation
+    - entitlement gate: when execute request carries `strategyId`, it must include `buyer` and `paymentId`, and pass strict checks: payment exists, status is `paid`, and `strategyId+buyer` matches payment record
+    - a valid active entitlement (`remainingUses > 0`, not expired) is still required; otherwise blocked
+    - execute receipts/history include payment/entitlement trace fields (`paymentId`, `entitlementSourcePaymentId`)
     - for chains still in adapter plan-only mode (e.g. current bsc path), receipt `status=planned` and `adapterMode=plan-only`
   - `GET /api/acp/jobs` -> recent ACP job history (dry-run/executed/planned/blocked/error) + async queue snapshot
   - `GET /api/acp/jobs/:jobId` -> async job status/result/error by id
