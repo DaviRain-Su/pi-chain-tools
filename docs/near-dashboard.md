@@ -116,6 +116,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - quote now supports dual-source validation (Dexscreener + onchain router), returns conservative quote, and enforces divergence guard
   - native mode includes post-trade reconciliation fields (`tokenInDeltaRaw`, `tokenOutDeltaRaw`, `reconcileOk`, `minAmountOutRaw`) in receipt
   - execute failures are normalized as `BSC_EXECUTE_FAILED retryable=true|false ...` for async retry/dead-letter classification
+  - Aave post-action failures are normalized as `BSC_AAVE_POST_ACTION_FAILED ...` and recorded into ACP job history / DLQ type grouping
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`

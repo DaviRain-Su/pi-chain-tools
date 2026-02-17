@@ -4302,58 +4302,87 @@ const server = http.createServer(async (req, res) => {
 				});
 			}
 			const runId = payload.runId || `bsc-yield-${Date.now()}`;
-			const result = await executeAction({
-				action: "rebalance_usdt_to_usdce_txn",
-				chain: "bsc",
-				amountRaw: plan.plan.recommendedAmountRaw,
-				slippageBps: Number.parseInt(String(payload.slippageBps || 50), 10),
-				runId,
-				step: payload.step || "bsc-stable-yield-execute",
-			});
-			let postAction = null;
-			if (plan.executionProtocol === "aave") {
-				const supplyAmountRaw = String(
-					result?.execution?.receipt?.tokenOutDeltaRaw ||
-						result?.plan?.quotedOutRaw ||
-						"0",
-				);
-				if (/^\d+$/.test(supplyAmountRaw) && BigInt(supplyAmountRaw) > 0n) {
-					postAction = await executeBscAaveSupplyViaCommand({
-						amountRaw: supplyAmountRaw,
-						token: BSC_USDC,
-						rpcUrl: BSC_RPC_URL,
-						chainId: BSC_CHAIN_ID,
-						runId,
-					});
-				} else {
-					postAction = {
-						ok: false,
-						reason: "aave_supply_amount_unavailable",
-					};
-				}
-				pushActionHistory({
-					action: "bsc_aave_supply",
-					step: payload.step || "bsc-stable-yield-post-action",
-					accountId: payload.account || null,
-					status: postAction?.ok ? "success" : "error",
-					summary: postAction?.ok
-						? "aave post-swap supply executed"
-						: `aave post-swap supply failed: ${postAction?.reason || "unknown"}`,
-					txHash: postAction?.txHash || null,
+			try {
+				const result = await executeAction({
+					action: "rebalance_usdt_to_usdce_txn",
+					chain: "bsc",
+					amountRaw: plan.plan.recommendedAmountRaw,
+					slippageBps: Number.parseInt(String(payload.slippageBps || 50), 10),
+					runId,
+					step: payload.step || "bsc-stable-yield-execute",
 				});
-				if (!postAction?.ok) {
-					throw new Error(
-						`BSC_AAVE_POST_ACTION_FAILED retryable=true message=${postAction?.reason || "unknown"}`,
+				let postAction = null;
+				if (plan.executionProtocol === "aave") {
+					const supplyAmountRaw = String(
+						result?.execution?.receipt?.tokenOutDeltaRaw ||
+							result?.plan?.quotedOutRaw ||
+							"0",
 					);
+					if (/^\d+$/.test(supplyAmountRaw) && BigInt(supplyAmountRaw) > 0n) {
+						postAction = await executeBscAaveSupplyViaCommand({
+							amountRaw: supplyAmountRaw,
+							token: BSC_USDC,
+							rpcUrl: BSC_RPC_URL,
+							chainId: BSC_CHAIN_ID,
+							runId,
+						});
+					} else {
+						postAction = {
+							ok: false,
+							reason: "aave_supply_amount_unavailable",
+						};
+					}
+					pushActionHistory({
+						action: "bsc_aave_supply",
+						step: payload.step || "bsc-stable-yield-post-action",
+						accountId: payload.account || null,
+						status: postAction?.ok ? "success" : "error",
+						summary: postAction?.ok
+							? "aave post-swap supply executed"
+							: `aave post-swap supply failed: ${postAction?.reason || "unknown"}`,
+						txHash: postAction?.txHash || null,
+					});
+					if (!postAction?.ok) {
+						throw new Error(
+							`BSC_AAVE_POST_ACTION_FAILED retryable=true message=${postAction?.reason || "unknown"}`,
+						);
+					}
 				}
+				pushAcpJobHistory({
+					runId,
+					status: "executed",
+					targetChain: "bsc",
+					intentType: "bsc_stable_yield",
+					executionProtocol: plan.executionProtocol,
+					amountRaw: plan.plan.recommendedAmountRaw,
+					txHash: result?.txHash || null,
+					postActionStatus: postAction
+						? postAction.ok
+							? "success"
+							: "error"
+						: "none",
+					postActionTxHash: postAction?.txHash || null,
+					postActionReason: postAction?.reason || null,
+				});
+				return json(res, 200, {
+					ok: true,
+					mode: "execute",
+					plan,
+					result,
+					postAction,
+				});
+			} catch (error) {
+				pushAcpJobHistory({
+					runId,
+					status: "error",
+					targetChain: "bsc",
+					intentType: "bsc_stable_yield",
+					executionProtocol: plan.executionProtocol,
+					amountRaw: plan.plan.recommendedAmountRaw,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				throw error;
 			}
-			return json(res, 200, {
-				ok: true,
-				mode: "execute",
-				plan,
-				result,
-				postAction,
-			});
 		}
 
 		if (
