@@ -104,7 +104,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can execute in two built-in adapter modes:
   - includes stable-yield agent v1 APIs:
     - `GET /api/bsc/yield/plan`
-    - `GET /api/bsc/yield/markets` (returns Venus/Aave read-only compare + best protocol recommendation)
+    - `GET /api/bsc/yield/markets` (returns Venus/Aave read-only compare + best protocol recommendation + `sourceHealth`)
     - `POST /api/bsc/yield/execute` (`confirm=true`)
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
     - `POST /api/bsc/yield/worker/stop` (`confirm=true`)
@@ -177,6 +177,7 @@ Open:
 - `BSC_AAVE_APR_HINTS_JSON` - optional Aave APR hints (`{"usdtSupplyAprBps":90,"usdcSupplyAprBps":160,"updatedAt":"..."}`)
 - `BSC_VENUS_APR_API_URL` - optional Venus APR API endpoint (if set, API value has priority over env hints)
 - `BSC_AAVE_APR_API_URL` - optional Aave APR API endpoint (if set, API value has priority over env hints)
+  - accepted response keys: `usdtSupplyAprBps|usdtAprBps|usdt_supply_apr_bps`, `usdcSupplyAprBps|usdcAprBps|usdc_supply_apr_bps`, optional `updatedAt|timestamp|updated_at`
 - `BSC_APR_CACHE_TTL_MS` - APR compare cache TTL (default: `60000`)
 - Worker runtime options (request payload, not env): `dryRun`, `intervalMs`, `targetUsdcBps`, `minDriftBps`, `minAprDeltaBps`, `maxStepUsd`
 - `ACP_DISMISSED_PURGE_ENABLED` - enable automatic dismissed-archive purge scheduler (`true|false`, default: `false`)

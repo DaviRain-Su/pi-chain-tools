@@ -236,6 +236,10 @@ const BSC_APR_CACHE = {
 	venus: { ts: 0, value: null },
 	aave: { ts: 0, value: null },
 };
+const BSC_APR_SOURCE_HEALTH = {
+	venus: { lastSuccessAt: null, lastErrorAt: null, lastError: null },
+	aave: { lastSuccessAt: null, lastErrorAt: null, lastError: null },
+};
 const STRATEGY_CATALOG = [];
 const STRATEGY_PURCHASES = [];
 const STRATEGY_ENTITLEMENTS = [];
@@ -2303,40 +2307,37 @@ function normalizeAprHintsFromApi(payload, sourceName) {
 		}
 		return null;
 	};
-	const usdtSupplyAprBps = Math.max(
-		0,
-		Number.parseInt(
-			String(
-				pick(payload, [
-					"usdtSupplyAprBps",
-					"usdtAprBps",
-					"usdt_supply_apr_bps",
-				]) || 0,
-			),
-			10,
-		) || 0,
-	);
-	const usdcSupplyAprBps = Math.max(
-		0,
-		Number.parseInt(
-			String(
-				pick(payload, [
-					"usdcSupplyAprBps",
-					"usdcAprBps",
-					"usdc_supply_apr_bps",
-				]) || 0,
-			),
-			10,
-		) || 0,
-	);
+	const usdtRaw = pick(payload, [
+		"usdtSupplyAprBps",
+		"usdtAprBps",
+		"usdt_supply_apr_bps",
+	]);
+	const usdcRaw = pick(payload, [
+		"usdcSupplyAprBps",
+		"usdcAprBps",
+		"usdc_supply_apr_bps",
+	]);
+	if (usdtRaw == null && usdcRaw == null) {
+		throw new Error(`${sourceName}_apr_api_schema_missing_fields`);
+	}
+	const usdtParsed = Number.parseInt(String(usdtRaw ?? 0), 10);
+	const usdcParsed = Number.parseInt(String(usdcRaw ?? 0), 10);
+	if (!Number.isFinite(usdtParsed) || !Number.isFinite(usdcParsed)) {
+		throw new Error(`${sourceName}_apr_api_schema_invalid_numeric`);
+	}
+	const usdtSupplyAprBps = Math.max(0, usdtParsed);
+	const usdcSupplyAprBps = Math.max(0, usdcParsed);
+	const updatedAtRaw = pick(payload, ["updatedAt", "timestamp", "updated_at"]);
+	const updatedAt = String(updatedAtRaw || new Date().toISOString());
+	const ts = Date.parse(updatedAt);
+	if (!Number.isFinite(ts)) {
+		throw new Error(`${sourceName}_apr_api_schema_invalid_updatedAt`);
+	}
 	return {
 		source: `${sourceName}-api`,
 		usdtSupplyAprBps,
 		usdcSupplyAprBps,
-		updatedAt: String(
-			pick(payload, ["updatedAt", "timestamp", "updated_at"]) ||
-				new Date().toISOString(),
-		),
+		updatedAt,
 	};
 }
 
@@ -2351,6 +2352,7 @@ async function fetchAprHintsFromApi(url, sourceName) {
 async function getBscProtocolAprHints(protocol) {
 	const key = protocol === "aave" ? "aave" : "venus";
 	const cache = BSC_APR_CACHE[key];
+	const health = BSC_APR_SOURCE_HEALTH[key];
 	if (Date.now() - cache.ts < BSC_APR_CACHE_TTL_MS && cache.value)
 		return cache.value;
 	const apiUrl = key === "aave" ? BSC_AAVE_APR_API_URL : BSC_VENUS_APR_API_URL;
@@ -2359,7 +2361,11 @@ async function getBscProtocolAprHints(protocol) {
 	let value = null;
 	try {
 		value = await fetchAprHintsFromApi(apiUrl, key);
-	} catch {
+		health.lastSuccessAt = new Date().toISOString();
+		health.lastError = null;
+	} catch (error) {
+		health.lastErrorAt = new Date().toISOString();
+		health.lastError = error instanceof Error ? error.message : String(error);
 		value = parseAprHintsFromJson(envJson, key);
 	}
 	cache.ts = Date.now();
@@ -4142,8 +4148,26 @@ const server = http.createServer(async (req, res) => {
 
 		if (url.pathname === "/api/bsc/yield/markets") {
 			const compare = await getBscLendingMarketCompare();
+			const now = Date.now();
+			const sourceHealth = {
+				venus: {
+					...BSC_APR_SOURCE_HEALTH.venus,
+					cacheAgeMs: BSC_APR_CACHE.venus.ts
+						? now - BSC_APR_CACHE.venus.ts
+						: null,
+					cacheTtlMs: BSC_APR_CACHE_TTL_MS,
+				},
+				aave: {
+					...BSC_APR_SOURCE_HEALTH.aave,
+					cacheAgeMs: BSC_APR_CACHE.aave.ts
+						? now - BSC_APR_CACHE.aave.ts
+						: null,
+					cacheTtlMs: BSC_APR_CACHE_TTL_MS,
+				},
+			};
 			return json(res, 200, {
 				...compare,
+				sourceHealth,
 				minAprDeltaBpsDefault: BSC_YIELD_MIN_APR_DELTA_BPS,
 			});
 		}
