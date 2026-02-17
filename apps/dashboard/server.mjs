@@ -116,6 +116,16 @@ const BSC_STABLE_APR_HINTS_JSON = String(
 const BSC_AAVE_APR_HINTS_JSON = String(
 	process.env.BSC_AAVE_APR_HINTS_JSON || "",
 ).trim();
+const BSC_VENUS_APR_API_URL = String(
+	process.env.BSC_VENUS_APR_API_URL || "",
+).trim();
+const BSC_AAVE_APR_API_URL = String(
+	process.env.BSC_AAVE_APR_API_URL || "",
+).trim();
+const BSC_APR_CACHE_TTL_MS = Math.max(
+	5_000,
+	Number.parseInt(process.env.BSC_APR_CACHE_TTL_MS || "60000", 10) || 60_000,
+);
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
 	"true";
@@ -221,6 +231,10 @@ const BSC_YIELD_WORKER = {
 	lastExecute: null,
 	lastError: null,
 	timer: null,
+};
+const BSC_APR_CACHE = {
+	venus: { ts: 0, value: null },
+	aave: { ts: 0, value: null },
 };
 const STRATEGY_CATALOG = [];
 const STRATEGY_PURCHASES = [];
@@ -2282,12 +2296,83 @@ function parseAprHintsFromJson(raw, sourceName) {
 	}
 }
 
+function normalizeAprHintsFromApi(payload, sourceName) {
+	const pick = (obj, keys) => {
+		for (const key of keys) {
+			if (obj && obj[key] != null) return obj[key];
+		}
+		return null;
+	};
+	const usdtSupplyAprBps = Math.max(
+		0,
+		Number.parseInt(
+			String(
+				pick(payload, [
+					"usdtSupplyAprBps",
+					"usdtAprBps",
+					"usdt_supply_apr_bps",
+				]) || 0,
+			),
+			10,
+		) || 0,
+	);
+	const usdcSupplyAprBps = Math.max(
+		0,
+		Number.parseInt(
+			String(
+				pick(payload, [
+					"usdcSupplyAprBps",
+					"usdcAprBps",
+					"usdc_supply_apr_bps",
+				]) || 0,
+			),
+			10,
+		) || 0,
+	);
+	return {
+		source: `${sourceName}-api`,
+		usdtSupplyAprBps,
+		usdcSupplyAprBps,
+		updatedAt: String(
+			pick(payload, ["updatedAt", "timestamp", "updated_at"]) ||
+				new Date().toISOString(),
+		),
+	};
+}
+
+async function fetchAprHintsFromApi(url, sourceName) {
+	if (!url) return null;
+	const resp = await fetch(url);
+	if (!resp.ok) throw new Error(`${sourceName}_apr_api_http_${resp.status}`);
+	const payload = await resp.json();
+	return normalizeAprHintsFromApi(payload, sourceName);
+}
+
+async function getBscProtocolAprHints(protocol) {
+	const key = protocol === "aave" ? "aave" : "venus";
+	const cache = BSC_APR_CACHE[key];
+	if (Date.now() - cache.ts < BSC_APR_CACHE_TTL_MS && cache.value)
+		return cache.value;
+	const apiUrl = key === "aave" ? BSC_AAVE_APR_API_URL : BSC_VENUS_APR_API_URL;
+	const envJson =
+		key === "aave" ? BSC_AAVE_APR_HINTS_JSON : BSC_STABLE_APR_HINTS_JSON;
+	let value = null;
+	try {
+		value = await fetchAprHintsFromApi(apiUrl, key);
+	} catch {
+		value = parseAprHintsFromJson(envJson, key);
+	}
+	cache.ts = Date.now();
+	cache.value = value;
+	return value;
+}
+
 async function getBscStableAprHints() {
-	return parseAprHintsFromJson(BSC_STABLE_APR_HINTS_JSON, "venus");
+	return getBscProtocolAprHints("venus");
 }
 
 async function getBscAaveAprHints() {
-	return parseAprHintsFromJson(BSC_AAVE_APR_HINTS_JSON, "aave");
+	return getBscProtocolAprHints("aave");
 }
 
 async function getBscLendingMarketCompare() {

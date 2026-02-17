@@ -175,6 +175,9 @@ Open:
 - `BSC_YIELD_MIN_APR_DELTA_BPS` - minimum APR delta to trigger APR-driven target override (default: `30`)
 - `BSC_STABLE_APR_HINTS_JSON` - optional Venus APR hints (`{"usdtSupplyAprBps":120,"usdcSupplyAprBps":180,"updatedAt":"..."}`)
 - `BSC_AAVE_APR_HINTS_JSON` - optional Aave APR hints (`{"usdtSupplyAprBps":90,"usdcSupplyAprBps":160,"updatedAt":"..."}`)
+- `BSC_VENUS_APR_API_URL` - optional Venus APR API endpoint (if set, API value has priority over env hints)
+- `BSC_AAVE_APR_API_URL` - optional Aave APR API endpoint (if set, API value has priority over env hints)
+- `BSC_APR_CACHE_TTL_MS` - APR compare cache TTL (default: `60000`)
 - Worker runtime options (request payload, not env): `dryRun`, `intervalMs`, `targetUsdcBps`, `minDriftBps`, `minAprDeltaBps`, `maxStepUsd`
 - `ACP_DISMISSED_PURGE_ENABLED` - enable automatic dismissed-archive purge scheduler (`true|false`, default: `false`)
 - `ACP_DISMISSED_PURGE_DAYS` - purge threshold in days for dismissed jobs (default: `7`)
