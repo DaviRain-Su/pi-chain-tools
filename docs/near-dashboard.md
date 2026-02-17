@@ -52,6 +52,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - entitlement gate: when execute request carries `strategyId`, it must include `buyer` and `paymentId`, and pass strict checks: payment exists, status is `paid`, and `strategyId+buyer` matches payment record
     - a valid active entitlement (`remainingUses > 0`, not expired) is still required; otherwise blocked
     - execute receipts/history include payment/entitlement trace fields (`paymentId`, `entitlementSourcePaymentId`)
+    - replay/idempotency guard: repeated terminal run with same `runId + paymentId` is blocked (`reason=duplicate_run`)
     - for chains still in adapter plan-only mode (e.g. current bsc path), receipt `status=planned` and `adapterMode=plan-only`
   - `GET /api/acp/jobs` -> recent ACP job history (dry-run/executed/planned/blocked/error) + async queue snapshot
   - `GET /api/acp/jobs/:jobId` -> async job status/result/error by id

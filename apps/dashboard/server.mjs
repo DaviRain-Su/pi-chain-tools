@@ -1089,6 +1089,23 @@ async function executeAcpJob(payload) {
 	const buyer = String(payload?.buyer || "").trim();
 	const paymentId = String(payload?.paymentId || "").trim();
 	let entitlement = null;
+	if (!dryRun && strategyId && paymentId) {
+		const prior = findAcpPriorTerminalRun({ runId, paymentId });
+		if (prior) {
+			pushAcpJobHistory({
+				runId,
+				status: "blocked",
+				reason: "duplicate_run",
+				strategyId,
+				buyer,
+				paymentId,
+				priorStatus: prior.status,
+			});
+			throw new Error(
+				`duplicate run blocked: runId='${runId}' paymentId='${paymentId}' priorStatus='${prior.status}'`,
+			);
+		}
+	}
 	if (!dryRun && strategyId) {
 		if (!buyer) {
 			throw new Error(
@@ -1359,6 +1376,24 @@ function pushAcpJobHistory(entry) {
 		ACP_JOB_HISTORY.length = 50;
 	}
 	void saveMetricsToDisk();
+}
+
+function findAcpPriorTerminalRun({ runId, paymentId }) {
+	const rid = String(runId || "").trim();
+	const pid = String(paymentId || "").trim();
+	if (!rid || !pid) return null;
+	return ACP_JOB_HISTORY.find((row) => {
+		const rowRunId = String(row?.runId || "").trim();
+		const rowPaymentId = String(row?.paymentId || "").trim();
+		const status = String(row?.status || "").trim();
+		const terminal =
+			status === "executed" ||
+			status === "simulated" ||
+			status === "failed" ||
+			status === "error" ||
+			status === "blocked";
+		return terminal && rowRunId === rid && rowPaymentId === pid;
+	});
 }
 
 function registerAcpExecutedRun() {
