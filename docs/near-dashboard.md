@@ -32,12 +32,14 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP integration bootstrap (Virtual Base identity + multi-chain execution preview):
   - `GET /api/acp/status` -> best-effort `acp whoami` + `acp wallet balance` JSON output
   - `POST /api/acp/route-preview` -> returns execution route plan (`targetChain=near|bsc`, `intentType`, `riskProfile`) for router wiring
+  - `POST /api/acp/job/submit` (`confirm=true`) -> async enqueue ACP job and return `jobId` immediately
   - `POST /api/acp/job/execute` (`confirm=true`) -> ACP job router entrypoint; supports `dryRun` (default true) and execute mode for `intentType=rebalance` via existing chain action pipeline
     - returns normalized `receipt` (`runId/identityChain/targetChain/intentType/amountRaw/amountUsd/status/txHash?/adapterMode`)
     - enforces policy `constraints.minRebalanceUsd`
     - entitlement gate: when execute request carries `strategyId`, it must include `buyer` and a valid active entitlement (`remainingUses > 0`, not expired), otherwise blocked
     - for chains still in adapter plan-only mode (e.g. current bsc path), receipt `status=planned` and `adapterMode=plan-only`
-  - `GET /api/acp/jobs` -> recent ACP job history (dry-run/executed/planned/blocked/error)
+  - `GET /api/acp/jobs` -> recent ACP job history (dry-run/executed/planned/blocked/error) + async queue snapshot
+  - `GET /api/acp/jobs/:jobId` -> async job status/result/error by id
   - `GET /api/acp/jobs/summary` -> status distribution + daily execution counters/limit
   - execute mode applies policy daily guard `constraints.maxDailyRebalanceRuns`
 - Unified multi-chain portfolio bootstrap:

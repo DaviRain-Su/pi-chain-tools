@@ -130,6 +130,8 @@ const ACP_JOB_STATE = {
 	dailyWindowDay: "",
 	dailyCount: 0,
 };
+const ACP_ASYNC_JOBS = [];
+let ACP_ASYNC_WORKER_ACTIVE = false;
 const STRATEGY_CATALOG = [];
 const STRATEGY_PURCHASES = [];
 const STRATEGY_ENTITLEMENTS = [];
@@ -1168,6 +1170,54 @@ async function executeAcpJob(payload) {
 			remainingUses: entitlementAfter?.remainingUses,
 		},
 	};
+}
+
+function getAcpAsyncJobById(jobId) {
+	return ACP_ASYNC_JOBS.find(
+		(row) => String(row?.jobId || "") === String(jobId || ""),
+	);
+}
+
+function enqueueAcpAsyncJob(payload) {
+	const jobId = String(payload?.jobId || `acp-job-${Date.now()}`).trim();
+	const record = {
+		jobId,
+		status: "queued",
+		createdAt: new Date().toISOString(),
+		updatedAt: new Date().toISOString(),
+		payload,
+		result: null,
+		error: null,
+	};
+	ACP_ASYNC_JOBS.unshift(record);
+	if (ACP_ASYNC_JOBS.length > 200) ACP_ASYNC_JOBS.length = 200;
+	void processAcpAsyncQueue();
+	return record;
+}
+
+async function processAcpAsyncQueue() {
+	if (ACP_ASYNC_WORKER_ACTIVE) return;
+	ACP_ASYNC_WORKER_ACTIVE = true;
+	try {
+		while (true) {
+			const next = ACP_ASYNC_JOBS.find((row) => row.status === "queued");
+			if (!next) break;
+			next.status = "running";
+			next.updatedAt = new Date().toISOString();
+			try {
+				const result = await executeAcpJob(next.payload || {});
+				next.status = "done";
+				next.result = result;
+				next.error = null;
+			} catch (error) {
+				next.status = "error";
+				next.error = error instanceof Error ? error.message : String(error);
+			}
+			next.updatedAt = new Date().toISOString();
+		}
+	} finally {
+		ACP_ASYNC_WORKER_ACTIVE = false;
+	}
 }
 
 async function runNearCommandWithRpcFallback(args) {
@@ -2403,6 +2453,23 @@ const server = http.createServer(async (req, res) => {
 			});
 		}
 
+		if (url.pathname === "/api/acp/job/submit" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const job = enqueueAcpAsyncJob(payload);
+			return json(res, 200, {
+				ok: true,
+				jobId: job.jobId,
+				status: job.status,
+				createdAt: job.createdAt,
+			});
+		}
+
 		if (url.pathname === "/api/acp/job/execute" && req.method === "POST") {
 			const chunks = [];
 			for await (const chunk of req) chunks.push(chunk);
@@ -2415,8 +2482,39 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, result);
 		}
 
+		if (url.pathname.startsWith("/api/acp/jobs/")) {
+			const jobId = decodeURIComponent(
+				url.pathname.replace("/api/acp/jobs/", ""),
+			);
+			const row = getAcpAsyncJobById(jobId);
+			if (!row) {
+				return json(res, 404, { ok: false, error: `job '${jobId}' not found` });
+			}
+			return json(res, 200, {
+				ok: true,
+				job: {
+					jobId: row.jobId,
+					status: row.status,
+					createdAt: row.createdAt,
+					updatedAt: row.updatedAt,
+					result: row.result,
+					error: row.error,
+				},
+			});
+		}
+
 		if (url.pathname === "/api/acp/jobs") {
-			return json(res, 200, { ok: true, jobs: ACP_JOB_HISTORY });
+			return json(res, 200, {
+				ok: true,
+				jobs: ACP_JOB_HISTORY,
+				queue: ACP_ASYNC_JOBS.map((row) => ({
+					jobId: row.jobId,
+					status: row.status,
+					createdAt: row.createdAt,
+					updatedAt: row.updatedAt,
+					error: row.error,
+				})),
+			});
 		}
 
 		if (url.pathname === "/api/acp/jobs/summary") {
