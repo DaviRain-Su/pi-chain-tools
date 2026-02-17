@@ -331,6 +331,19 @@ const BSC_LISTA_EXECUTE_ENABLED =
 const BSC_LISTA_EXECUTE_COMMAND = String(
 	envOrCfg("BSC_LISTA_EXECUTE_COMMAND", "bsc.lista.executeCommand", ""),
 ).trim();
+const BSC_LISTA_EXECUTE_TIMEOUT_MS = Math.max(
+	1_000,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"BSC_LISTA_EXECUTE_TIMEOUT_MS",
+				"bsc.lista.executeTimeoutMs",
+				"120000",
+			),
+		),
+		10,
+	) || 120_000,
+);
 const BSC_LISTA_MAX_AMOUNT_RAW = String(
 	envOrCfg(
 		"BSC_LISTA_MAX_AMOUNT_RAW",
@@ -355,6 +368,19 @@ const BSC_WOMBAT_EXECUTE_ENABLED =
 const BSC_WOMBAT_EXECUTE_COMMAND = String(
 	envOrCfg("BSC_WOMBAT_EXECUTE_COMMAND", "bsc.wombat.executeCommand", ""),
 ).trim();
+const BSC_WOMBAT_EXECUTE_TIMEOUT_MS = Math.max(
+	1_000,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"BSC_WOMBAT_EXECUTE_TIMEOUT_MS",
+				"bsc.wombat.executeTimeoutMs",
+				"120000",
+			),
+		),
+		10,
+	) || 120_000,
+);
 const BSC_WOMBAT_MAX_AMOUNT_RAW = String(
 	envOrCfg(
 		"BSC_WOMBAT_MAX_AMOUNT_RAW",
@@ -1536,6 +1562,11 @@ function getRiskBandRank(band) {
 	return 1;
 }
 
+function hasRequiredPlaceholders(template, required = []) {
+	const source = String(template || "");
+	return required.every((ph) => source.includes(ph));
+}
+
 function evaluateNormalizationHealth(protocolPositions) {
 	const sources = protocolPositions?.normalizationSources || {};
 	const now = Date.now();
@@ -2013,6 +2044,16 @@ async function executeBscListaSupply(params) {
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_execute_command_missing",
 		);
 	}
+	if (
+		!hasRequiredPlaceholders(BSC_LISTA_EXECUTE_COMMAND, [
+			"{amountRaw}",
+			"{runId}",
+		])
+	) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_execute_command_missing_required_placeholders",
+		);
+	}
 	const token = String(params?.token || "")
 		.trim()
 		.toLowerCase();
@@ -2050,6 +2091,7 @@ async function executeBscListaSupply(params) {
 		const output = await runCommand("bash", ["-lc", cmd], {
 			env: process.env,
 			cwd: ACP_WORKDIR,
+			timeoutMs: BSC_LISTA_EXECUTE_TIMEOUT_MS,
 		});
 		const txHash = String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
 		return {
@@ -2072,6 +2114,16 @@ async function executeBscWombatSupply(params) {
 	if (!BSC_WOMBAT_EXECUTE_COMMAND) {
 		throw new Error(
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_execute_command_missing",
+		);
+	}
+	if (
+		!hasRequiredPlaceholders(BSC_WOMBAT_EXECUTE_COMMAND, [
+			"{amountRaw}",
+			"{runId}",
+		])
+	) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_execute_command_missing_required_placeholders",
 		);
 	}
 	const token = String(params?.token || "")
@@ -2111,6 +2163,7 @@ async function executeBscWombatSupply(params) {
 		const output = await runCommand("bash", ["-lc", cmd], {
 			env: process.env,
 			cwd: ACP_WORKDIR,
+			timeoutMs: BSC_WOMBAT_EXECUTE_TIMEOUT_MS,
 		});
 		const txHash = String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
 		return {
@@ -4037,6 +4090,17 @@ async function computeBscYieldPlan(input = {}) {
 			listaBlockers.push("lista_execute_disabled");
 		if (!BSC_LISTA_EXECUTE_COMMAND)
 			listaBlockers.push("missing_bsc_lista_execute_command");
+		if (
+			BSC_LISTA_EXECUTE_COMMAND &&
+			!hasRequiredPlaceholders(BSC_LISTA_EXECUTE_COMMAND, [
+				"{amountRaw}",
+				"{runId}",
+			])
+		) {
+			listaBlockers.push(
+				"bsc_lista_execute_command_missing_required_placeholders",
+			);
+		}
 		if (!BSC_LISTA_ALLOWED_TOKENS.includes(String(BSC_USDC).toLowerCase())) {
 			listaBlockers.push("bsc_usdc_not_in_lista_allowed_tokens");
 		}
@@ -4060,6 +4124,17 @@ async function computeBscYieldPlan(input = {}) {
 			wombatBlockers.push("wombat_execute_disabled");
 		if (!BSC_WOMBAT_EXECUTE_COMMAND)
 			wombatBlockers.push("missing_bsc_wombat_execute_command");
+		if (
+			BSC_WOMBAT_EXECUTE_COMMAND &&
+			!hasRequiredPlaceholders(BSC_WOMBAT_EXECUTE_COMMAND, [
+				"{amountRaw}",
+				"{runId}",
+			])
+		) {
+			wombatBlockers.push(
+				"bsc_wombat_execute_command_missing_required_placeholders",
+			);
+		}
 		if (!BSC_WOMBAT_ALLOWED_TOKENS.includes(String(BSC_USDC).toLowerCase())) {
 			wombatBlockers.push("bsc_usdc_not_in_wombat_allowed_tokens");
 		}
@@ -4102,6 +4177,8 @@ async function computeBscYieldPlan(input = {}) {
 			"BSC_LISTA_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
 		recommended_amount_exceeds_bsc_lista_max_amount_raw:
 			"BSC_LISTA_MAX_AMOUNT_RAW=<larger_raw_cap>",
+		bsc_lista_execute_command_missing_required_placeholders:
+			"BSC_LISTA_EXECUTE_COMMAND='node scripts/lista-supply.mjs --amount {amountRaw} --run {runId}'",
 		wombat_execute_disabled: "BSC_WOMBAT_EXECUTE_ENABLED=true",
 		missing_bsc_wombat_execute_command:
 			"BSC_WOMBAT_EXECUTE_COMMAND='node scripts/wombat-supply.mjs --amount {amountRaw} --run {runId}'",
@@ -4109,6 +4186,8 @@ async function computeBscYieldPlan(input = {}) {
 			"BSC_WOMBAT_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
 		recommended_amount_exceeds_bsc_wombat_max_amount_raw:
 			"BSC_WOMBAT_MAX_AMOUNT_RAW=<larger_raw_cap>",
+		bsc_wombat_execute_command_missing_required_placeholders:
+			"BSC_WOMBAT_EXECUTE_COMMAND='node scripts/wombat-supply.mjs --amount {amountRaw} --run {runId}'",
 	};
 	const fixLines = protocolBlockers
 		.map((b) => envHintByBlocker[b])
@@ -4147,6 +4226,8 @@ async function computeBscYieldPlan(input = {}) {
 		`BSC_LISTA_MAX_AMOUNT_RAW=${BSC_LISTA_MAX_AMOUNT_RAW}`,
 		"BSC_WOMBAT_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
 		`BSC_WOMBAT_MAX_AMOUNT_RAW=${BSC_WOMBAT_MAX_AMOUNT_RAW}`,
+		`BSC_LISTA_EXECUTE_TIMEOUT_MS=${BSC_LISTA_EXECUTE_TIMEOUT_MS}`,
+		`BSC_WOMBAT_EXECUTE_TIMEOUT_MS=${BSC_WOMBAT_EXECUTE_TIMEOUT_MS}`,
 		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT=venus",
 	];
 	const fullFixPack = [
