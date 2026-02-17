@@ -305,6 +305,9 @@ const BSC_LISTA_EXECUTE_ENABLED =
 	String(
 		envOrCfg("BSC_LISTA_EXECUTE_ENABLED", "bsc.lista.enabled", "false"),
 	).toLowerCase() === "true";
+const BSC_LISTA_EXECUTE_COMMAND = String(
+	envOrCfg("BSC_LISTA_EXECUTE_COMMAND", "bsc.lista.executeCommand", ""),
+).trim();
 const BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT = String(
 	envOrCfg(
 		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT",
@@ -1738,6 +1741,54 @@ async function executeBscAaveSupply(params) {
 	return executeBscAaveSupplyViaCommand(params);
 }
 
+async function executeBscListaSupply(params) {
+	if (!BSC_LISTA_EXECUTE_COMMAND) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_execute_command_missing",
+		);
+	}
+	const token = String(params?.token || "")
+		.trim()
+		.toLowerCase();
+	const amountRaw = String(params?.amountRaw || "0").trim();
+	if (!/^\d+$/.test(amountRaw) || BigInt(amountRaw) <= 0n) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_amount_invalid",
+		);
+	}
+	const replacements = {
+		"{amountRaw}": amountRaw,
+		"{token}": token,
+		"{rpcUrl}": String(params.rpcUrl || BSC_RPC_URL || ""),
+		"{chainId}": String(params.chainId || BSC_CHAIN_ID || ""),
+		"{runId}": String(params.runId || ""),
+	};
+	let cmd = BSC_LISTA_EXECUTE_COMMAND;
+	for (const [k, v] of Object.entries(replacements)) {
+		cmd = cmd.split(k).join(v);
+	}
+	try {
+		const output = await runCommand("bash", ["-lc", cmd], {
+			env: process.env,
+			cwd: ACP_WORKDIR,
+		});
+		const txHash = String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
+		return {
+			ok: true,
+			mode: "execute",
+			provider: "lista-command",
+			output,
+			txHash,
+		};
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		const retryable = isTransientExecError(error);
+		throw new Error(
+			`BSC_EXECUTE_FAILED retryable=${retryable ? "true" : "false"} message=${msg}`,
+		);
+	}
+}
+
 function buildAcpExecutionPlan(payload) {
 	const requirements = payload?.requirements || {};
 	const targetChain = String(
@@ -2355,6 +2406,8 @@ function classifyAcpErrorType(error) {
 	if (text.includes("bsc_execute_config")) return "bsc_execute_config";
 	if (text.includes("bsc_aave_post_action_failed"))
 		return "bsc_aave_post_action_failed";
+	if (text.includes("bsc_lista_post_action_failed"))
+		return "bsc_lista_post_action_failed";
 	if (text.includes("bsc_execute_failed")) return "bsc_execute_failed";
 	if (text.includes("429") || text.includes("too many requests"))
 		return "rpc_429";
@@ -2374,6 +2427,7 @@ function isAcpRetryableError(error) {
 		"rpc_503",
 		"bsc_execute_failed",
 		"bsc_aave_post_action_failed",
+		"bsc_lista_post_action_failed",
 	].includes(type);
 }
 
@@ -3446,7 +3500,8 @@ async function computeBscYieldPlan(input = {}) {
 	if (executionProtocol === "lista") {
 		if (!BSC_LISTA_EXECUTE_ENABLED)
 			listaBlockers.push("lista_execute_disabled");
-		listaBlockers.push("lista_execute_not_implemented");
+		if (!BSC_LISTA_EXECUTE_COMMAND)
+			listaBlockers.push("missing_bsc_lista_execute_command");
 	}
 	const wombatBlockers = [];
 	if (executionProtocol === "wombat") {
@@ -3471,8 +3526,8 @@ async function computeBscYieldPlan(input = {}) {
 		recommended_amount_exceeds_bsc_aave_max_amount_raw:
 			"BSC_AAVE_MAX_AMOUNT_RAW=<larger_raw_cap>",
 		lista_execute_disabled: "BSC_LISTA_EXECUTE_ENABLED=true",
-		lista_execute_not_implemented:
-			"# Lista execute adapter pending (read-only integrated)",
+		missing_bsc_lista_execute_command:
+			"BSC_LISTA_EXECUTE_COMMAND='node scripts/lista-supply.mjs --amount {amountRaw} --run {runId}'",
 		wombat_execute_not_implemented:
 			"# Wombat execute adapter pending (read-only integrated)",
 	};
@@ -3496,7 +3551,10 @@ async function computeBscYieldPlan(input = {}) {
 							"# auto prefers native when key is present; falls back to command",
 						]
 			: executionProtocol === "lista"
-				? ["# lista execute currently blocked (adapter pending)"]
+				? [
+						"# lista command-mode execute",
+						"# requires: BSC_LISTA_EXECUTE_ENABLED + BSC_LISTA_EXECUTE_COMMAND",
+					]
 				: executionProtocol === "wombat"
 					? ["# wombat execute currently blocked (adapter pending)"]
 					: ["# venus uses existing swap+supply path"];
@@ -3518,7 +3576,7 @@ async function computeBscYieldPlan(input = {}) {
 	const canExecute =
 		executionProtocol === "venus"
 			? true
-			: executionProtocol === "aave"
+			: executionProtocol === "aave" || executionProtocol === "lista"
 				? protocolBlockers.length === 0
 				: false;
 	const executeReadiness = {
@@ -3545,7 +3603,11 @@ async function computeBscYieldPlan(input = {}) {
 			executionProtocol === "wombat"
 				? {
 						mode:
-							executionProtocol === "aave" ? BSC_AAVE_EXECUTE_MODE : "blocked",
+							executionProtocol === "aave"
+								? BSC_AAVE_EXECUTE_MODE
+								: executionProtocol === "lista"
+									? "command"
+									: "blocked",
 						envLines: fixLines,
 						fullTemplate: fullFixPack,
 					}
@@ -5233,39 +5295,55 @@ const server = http.createServer(async (req, res) => {
 					step: payload.step || "bsc-stable-yield-execute",
 				});
 				let postAction = null;
-				if (plan.executionProtocol === "aave") {
+				if (
+					plan.executionProtocol === "aave" ||
+					plan.executionProtocol === "lista"
+				) {
 					const supplyAmountRaw = String(
 						result?.execution?.receipt?.tokenOutDeltaRaw ||
 							result?.plan?.quotedOutRaw ||
 							"0",
 					);
 					if (/^\d+$/.test(supplyAmountRaw) && BigInt(supplyAmountRaw) > 0n) {
-						postAction = await executeBscAaveSupply({
-							amountRaw: supplyAmountRaw,
-							token: BSC_USDC,
-							rpcUrl: BSC_RPC_URL,
-							chainId: BSC_CHAIN_ID,
-							runId,
-						});
+						postAction =
+							plan.executionProtocol === "aave"
+								? await executeBscAaveSupply({
+										amountRaw: supplyAmountRaw,
+										token: BSC_USDC,
+										rpcUrl: BSC_RPC_URL,
+										chainId: BSC_CHAIN_ID,
+										runId,
+									})
+								: await executeBscListaSupply({
+										amountRaw: supplyAmountRaw,
+										token: BSC_USDC,
+										rpcUrl: BSC_RPC_URL,
+										chainId: BSC_CHAIN_ID,
+										runId,
+									});
 					} else {
 						postAction = {
 							ok: false,
-							reason: "aave_supply_amount_unavailable",
+							reason:
+								plan.executionProtocol === "aave"
+									? "aave_supply_amount_unavailable"
+									: "lista_supply_amount_unavailable",
 						};
 					}
+					const isAave = plan.executionProtocol === "aave";
 					pushActionHistory({
-						action: "bsc_aave_supply",
+						action: isAave ? "bsc_aave_supply" : "bsc_lista_supply",
 						step: payload.step || "bsc-stable-yield-post-action",
 						accountId: payload.account || null,
 						status: postAction?.ok ? "success" : "error",
 						summary: postAction?.ok
-							? "aave post-swap supply executed"
-							: `aave post-swap supply failed: ${postAction?.reason || "unknown"}`,
+							? `${isAave ? "aave" : "lista"} post-swap supply executed`
+							: `${isAave ? "aave" : "lista"} post-swap supply failed: ${postAction?.reason || "unknown"}`,
 						txHash: postAction?.txHash || null,
 					});
 					if (!postAction?.ok) {
 						throw new Error(
-							`BSC_AAVE_POST_ACTION_FAILED retryable=true message=${postAction?.reason || "unknown"}`,
+							`${isAave ? "BSC_AAVE_POST_ACTION_FAILED" : "BSC_LISTA_POST_ACTION_FAILED"} retryable=true message=${postAction?.reason || "unknown"}`,
 						);
 					}
 				}

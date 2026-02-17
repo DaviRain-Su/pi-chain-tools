@@ -106,7 +106,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - includes stable-yield agent v1 APIs:
     - `GET /api/bsc/yield/plan` (supports `executionProtocol=venus|aave|lista|wombat`; when omitted, defaults to net-yield `recommendedProtocol`; returns `executeReadiness.blockers/recommendedProtocol` and includes `netYieldInsight`)
     - `GET /api/bsc/yield/markets` (returns Venus/Aave/Lista/Wombat read-only compare + best protocol recommendation + `sourceHealth` + `marketHealth(status/source/updatedAt/ageMs)` + `marketRiskTags` + `marketRiskScore(0-100)` + `marketRiskBand(low|medium|high)` + `aggregateRisk{avgScore,maxScore,band}` + `netYieldInsight`; includes Pancake V2 read-only quote signal and `dexQuoteCompare{bestSource,conservativeSource,spreadBps}` in `netYieldInsight.quote`; supports query `amountUsd` and `rebalanceIntervalDays`)
-    - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista/wombat` currently return readiness-blocked until execute adapters are implemented)
+    - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista` requires enable flag + command adapter; `wombat` currently readiness-blocked)
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
     - `POST /api/bsc/yield/worker/stop` (`confirm=true`)
     - `GET /api/bsc/yield/worker/status`
@@ -179,6 +179,7 @@ Common mapping examples:
 - `bsc.yield.minAprDeltaBps` ↔ `BSC_YIELD_MIN_APR_DELTA_BPS`
 - `bsc.aave.enabled` ↔ `BSC_AAVE_EXECUTE_ENABLED`
 - `bsc.lista.enabled` ↔ `BSC_LISTA_EXECUTE_ENABLED`
+- `bsc.lista.executeCommand` ↔ `BSC_LISTA_EXECUTE_COMMAND`
 - `bsc.aave.maxAmountRaw` ↔ `BSC_AAVE_MAX_AMOUNT_RAW`
 - `acp.dismissedPurge.enabled` ↔ `ACP_DISMISSED_PURGE_ENABLED`
 - `payments.webhookProvider` ↔ `PAYMENT_WEBHOOK_PROVIDER`
@@ -220,7 +221,8 @@ Common mapping examples:
   - accepted response keys: `usdtSupplyAprBps|usdtAprBps|usdt_supply_apr_bps`, `usdcSupplyAprBps|usdcAprBps|usdc_supply_apr_bps`, optional `updatedAt|timestamp|updated_at`
 - `BSC_APR_CACHE_TTL_MS` - APR compare cache TTL (default: `60000`)
 - `BSC_AAVE_EXECUTE_ENABLED` - allow BSC yield execute path to proceed when `executionProtocol=aave` (default: `false`, safety-gated)
-- `BSC_LISTA_EXECUTE_ENABLED` - gate for future Lista execute path (default: `false`; currently still blocked by `lista_execute_not_implemented`)
+- `BSC_LISTA_EXECUTE_ENABLED` - gate for Lista execute path (default: `false`)
+- `BSC_LISTA_EXECUTE_COMMAND` - command template for post-swap Lista supply (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`)
 - `BSC_AAVE_EXECUTE_MODE` - `auto|native|command` (default: `auto`)
 - `BSC_AAVE_POOL` - Aave Pool contract address (required for native mode)
 - `BSC_AAVE_EXECUTE_PRIVATE_KEY` - signer private key for native Aave supply (fallback: `BSC_EXECUTE_PRIVATE_KEY`)
