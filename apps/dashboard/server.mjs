@@ -126,6 +126,14 @@ const BSC_APR_CACHE_TTL_MS = Math.max(
 	5_000,
 	Number.parseInt(process.env.BSC_APR_CACHE_TTL_MS || "60000", 10) || 60_000,
 );
+const BSC_AAVE_EXECUTE_ENABLED =
+	String(process.env.BSC_AAVE_EXECUTE_ENABLED || "false").toLowerCase() ===
+	"true";
+const BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT = String(
+	process.env.BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT || "venus",
+)
+	.trim()
+	.toLowerCase();
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
 	"true";
@@ -2556,6 +2564,15 @@ async function computeBscYieldPlan(input = {}) {
 		getBscWalletStableBalances(account),
 		getBscLendingMarketCompare(),
 	]);
+	const requestedProtocol = String(
+		input.executionProtocol || BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT || "venus",
+	)
+		.trim()
+		.toLowerCase();
+	const executionProtocol =
+		requestedProtocol === "aave" || requestedProtocol === "venus"
+			? requestedProtocol
+			: "venus";
 	const aprHints = {
 		source: "best-of-venus-aave",
 		usdtSupplyAprBps: Math.max(
@@ -2576,6 +2593,16 @@ async function computeBscYieldPlan(input = {}) {
 		aprHints,
 		minAprDeltaBps,
 	});
+	const executeReadiness = {
+		requestedProtocol: executionProtocol,
+		venusEnabled: true,
+		aaveEnabled: BSC_AAVE_EXECUTE_ENABLED,
+		canExecute: executionProtocol === "venus" || BSC_AAVE_EXECUTE_ENABLED,
+		reason:
+			executionProtocol === "venus" || BSC_AAVE_EXECUTE_ENABLED
+				? "ok"
+				: "aave_execute_disabled",
+	};
 	return {
 		ok: true,
 		chain: "bsc",
@@ -2584,6 +2611,8 @@ async function computeBscYieldPlan(input = {}) {
 		balances,
 		aprHints,
 		marketCompare: compare,
+		executionProtocol,
+		executeReadiness,
 		minAprDeltaBps,
 		plan,
 	};
@@ -3342,6 +3371,15 @@ async function runBscYieldWorkerTick() {
 	BSC_YIELD_WORKER.lastPlan = planSnapshot;
 	BSC_YIELD_WORKER.lastRunAt = new Date().toISOString();
 	if (planSnapshot?.plan?.action !== "rebalance_usdt_to_usdc") return;
+	if (planSnapshot?.executeReadiness?.canExecute !== true) {
+		BSC_YIELD_WORKER.lastExecute = {
+			dryRun: BSC_YIELD_WORKER.dryRun,
+			blocked: true,
+			reason: planSnapshot?.executeReadiness?.reason || "execute_not_ready",
+			timestamp: new Date().toISOString(),
+		};
+		return;
+	}
 	if (BSC_YIELD_WORKER.dryRun) {
 		BSC_YIELD_WORKER.lastExecute = {
 			dryRun: true,
@@ -4142,6 +4180,8 @@ const server = http.createServer(async (req, res) => {
 				minDriftBps: url.searchParams.get("minDriftBps") || undefined,
 				maxStepUsd: url.searchParams.get("maxStepUsd") || undefined,
 				minAprDeltaBps: url.searchParams.get("minAprDeltaBps") || undefined,
+				executionProtocol:
+					url.searchParams.get("executionProtocol") || undefined,
 			});
 			return json(res, 200, plan);
 		}
@@ -4168,6 +4208,10 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, {
 				...compare,
 				sourceHealth,
+				executionReadiness: {
+					defaultProtocol: BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT,
+					aaveEnabled: BSC_AAVE_EXECUTE_ENABLED,
+				},
 				minAprDeltaBpsDefault: BSC_YIELD_MIN_APR_DELTA_BPS,
 			});
 		}
@@ -4186,9 +4230,18 @@ const server = http.createServer(async (req, res) => {
 				minDriftBps: payload.minDriftBps,
 				minAprDeltaBps: payload.minAprDeltaBps,
 				maxStepUsd: payload.maxStepUsd,
+				executionProtocol: payload.executionProtocol,
 			});
 			if (plan.plan.action !== "rebalance_usdt_to_usdc") {
 				return json(res, 200, { ok: true, mode: "noop", plan });
+			}
+			if (plan.executeReadiness?.canExecute !== true) {
+				return json(res, 200, {
+					ok: true,
+					mode: "blocked",
+					plan,
+					reason: plan.executeReadiness?.reason || "execute_not_ready",
+				});
 			}
 			const result = await executeAction({
 				action: "rebalance_usdt_to_usdce_txn",
