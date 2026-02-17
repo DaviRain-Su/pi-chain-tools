@@ -234,6 +234,7 @@
         <div class="row" style="margin-top:8px">
           <button id="fillStrategyDslSample">Fill sample</button>
           <button id="validateStrategyDsl">Validate DSL</button>
+          <button id="publishStrategyDsl">Publish Strategy</button>
           <span id="strategyDslMeta" class="muted"></span>
         </div>
         <pre id="strategyDslResult" class="muted" style="white-space:pre-wrap;margin-top:8px">-</pre>
@@ -328,6 +329,7 @@
       const strategyDslInputEl = document.getElementById("strategyDslInput");
       const fillStrategyDslSampleBtn = document.getElementById("fillStrategyDslSample");
       const validateStrategyDslBtn = document.getElementById("validateStrategyDsl");
+      const publishStrategyDslBtn = document.getElementById("publishStrategyDsl");
       const strategyDslMetaEl = document.getElementById("strategyDslMeta");
       const strategyDslResultEl = document.getElementById("strategyDslResult");
       const targetUsdtEl = document.getElementById("targetUsdt");
@@ -1023,6 +1025,27 @@
         cmdMetaEl.textContent = `Parsed raw output: ${m[1]}`;
       });
 
+      async function runStrategyDslValidate() {
+        let payload;
+        try {
+          payload = JSON.parse(strategyDslInputEl.value || "{}");
+        } catch (e) {
+          strategyDslMetaEl.textContent = `Invalid JSON: ${e.message || e}`;
+          return { ok: false, localError: true };
+        }
+        const res = await fetch("/api/strategies/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        strategyDslResultEl.textContent = JSON.stringify(data, null, 2);
+        strategyDslMetaEl.textContent = data?.ok
+          ? `Ready (${data.phase || "ready"})`
+          : `Validation failed (${data.phase || "unknown"})`;
+        return { ok: !!data?.ok, payload, validation: data };
+      }
+
       fillStrategyDslSampleBtn?.addEventListener("click", () => {
         strategyDslInputEl.value = JSON.stringify(buildStrategyDslSample(), null, 2);
         strategyDslMetaEl.textContent = "Sample filled";
@@ -1031,26 +1054,44 @@
       validateStrategyDslBtn?.addEventListener("click", async () => {
         strategyDslMetaEl.textContent = "Validating...";
         strategyDslResultEl.textContent = "-";
-        let payload;
         try {
-          payload = JSON.parse(strategyDslInputEl.value || "{}");
-        } catch (e) {
-          strategyDslMetaEl.textContent = `Invalid JSON: ${e.message || e}`;
-          return;
-        }
-        try {
-          const res = await fetch("/api/strategies/validate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          const data = await res.json().catch(() => ({}));
-          strategyDslResultEl.textContent = JSON.stringify(data, null, 2);
-          strategyDslMetaEl.textContent = data?.ok
-            ? `Ready (${data.phase || "ready"})`
-            : `Validation failed (${data.phase || "unknown"})`;
+          await runStrategyDslValidate();
         } catch (e) {
           strategyDslMetaEl.textContent = `Validate request failed: ${e.message || e}`;
+        }
+      });
+
+      publishStrategyDslBtn?.addEventListener("click", async () => {
+        strategyDslMetaEl.textContent = "Preflight + publishing...";
+        strategyDslResultEl.textContent = "-";
+        try {
+          const first = await runStrategyDslValidate();
+          if (!first.ok || !first.payload) {
+            return;
+          }
+          const yes = window.confirm("Validation passed. Publish this strategy now?");
+          if (!yes) {
+            strategyDslMetaEl.textContent = "Publish canceled";
+            return;
+          }
+          const publishPayload = {
+            ...first.payload,
+            confirm: true,
+          };
+          const pubRes = await fetch("/api/strategies", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(publishPayload),
+          });
+          const pubData = await pubRes.json().catch(() => ({}));
+          strategyDslResultEl.textContent = JSON.stringify(pubData, null, 2);
+          if (!pubRes.ok || !pubData?.ok) {
+            strategyDslMetaEl.textContent = `Publish failed: ${pubData?.error || pubRes.status}`;
+            return;
+          }
+          strategyDslMetaEl.textContent = `Published: ${pubData?.strategy?.id || "ok"}`;
+        } catch (e) {
+          strategyDslMetaEl.textContent = `Publish request failed: ${e.message || e}`;
         }
       });
 
