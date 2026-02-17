@@ -29,6 +29,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP Ops now includes async submit controls (strategyId/buyer/amountRaw) and live polling for submitted async job status (`/api/acp/job/submit` + `/api/acp/jobs/:jobId`)
 - ACP recent jobs table supports status filtering and NEAR tx explorer links when `txHash` is present
 - ACP recent jobs table now also shows `strategyId` / `buyer` / `remainingUses` to trace entitlement consumption during execution
+- ACP recent jobs supports local filters by `status` + `buyer` + `strategyId` for faster ops triage
 - Execution Quality now also includes RPC reliability counters (attempts/retries/retryRate/HTTP 429/5xx), last successful endpoint / latest error snippet, and a basic endpoint health ranking (`score`) to indicate the currently best-performing RPC
 - Adaptive RPC routing: request loop prefers currently best-scored endpoint first (based on live endpoint health stats)
 - ACP integration bootstrap (Virtual Base identity + multi-chain execution preview):

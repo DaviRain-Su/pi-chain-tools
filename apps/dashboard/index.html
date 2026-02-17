@@ -196,6 +196,8 @@
               <option value="blocked">blocked</option>
               <option value="error">error</option>
             </select>
+            <input id="acpBuyerFilter" placeholder="buyer filter" size="16" />
+            <input id="acpStrategyFilter" placeholder="strategyId filter" size="16" />
           </div>
           <table style="margin-top:8px">
             <thead><tr><th>Time</th><th>RunId</th><th>Status</th><th>Chain</th><th>Intent</th><th>Strategy</th><th>Buyer</th><th>Remaining</th><th>AmountRaw</th><th>Tx</th></tr></thead>
@@ -333,6 +335,8 @@
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
+      const acpBuyerFilterEl = document.getElementById("acpBuyerFilter");
+      const acpStrategyFilterEl = document.getElementById("acpStrategyFilter");
       const acpAsyncStrategyIdEl = document.getElementById("acpAsyncStrategyId");
       const acpAsyncBuyerEl = document.getElementById("acpAsyncBuyer");
       const acpAsyncAmountRawEl = document.getElementById("acpAsyncAmountRaw");
@@ -650,7 +654,13 @@
         acpOpsEl.innerHTML = `<span class="${acpOk}">${acpStatus?.ok ? "connected" : "not connected"}</span> · agent=${who}<br/><span class="muted">jobs=${totalJobs} byStatus=${JSON.stringify(byStatus)} daily=${Number(daily.dailyCount || 0)}/${dailyLimit || "-"} queue=${JSON.stringify(queueStats)}</span>`;
         acpJobsEl.innerHTML = "";
         const statusFilter = (acpStatusFilterEl?.value || "all").trim();
-        const filteredJobs = (acpJobs?.jobs || []).filter((row) => statusFilter === "all" || String(row?.status || "") === statusFilter).slice(0, 20);
+        const buyerFilter = String(acpBuyerFilterEl?.value || "").trim().toLowerCase();
+        const strategyFilter = String(acpStrategyFilterEl?.value || "").trim().toLowerCase();
+        const filteredJobs = (acpJobs?.jobs || [])
+          .filter((row) => statusFilter === "all" || String(row?.status || "") === statusFilter)
+          .filter((row) => !buyerFilter || String(row?.buyer || "").toLowerCase().includes(buyerFilter))
+          .filter((row) => !strategyFilter || String(row?.strategyId || "").toLowerCase().includes(strategyFilter))
+          .slice(0, 20);
         for (const row of filteredJobs) {
           const tr = document.createElement("tr");
           let tx = "-";
@@ -1211,6 +1221,8 @@
 
       refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));
       acpStatusFilterEl?.addEventListener("change", () => load().catch(() => {}));
+      acpBuyerFilterEl?.addEventListener("input", () => load().catch(() => {}));
+      acpStrategyFilterEl?.addEventListener("input", () => load().catch(() => {}));
       load().catch((e) => (metaEl.textContent = e.message));
       setInterval(() => load().catch(() => {}), 30000);
     </script>
