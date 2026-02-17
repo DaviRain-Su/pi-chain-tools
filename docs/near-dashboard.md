@@ -186,6 +186,10 @@ Open:
   - accepted response keys: `usdtSupplyAprBps|usdtAprBps|usdt_supply_apr_bps`, `usdcSupplyAprBps|usdcAprBps|usdc_supply_apr_bps`, optional `updatedAt|timestamp|updated_at`
 - `BSC_APR_CACHE_TTL_MS` - APR compare cache TTL (default: `60000`)
 - `BSC_AAVE_EXECUTE_ENABLED` - allow BSC yield execute path to proceed when `executionProtocol=aave` (default: `false`, safety-gated)
+- `BSC_AAVE_EXECUTE_MODE` - `auto|native|command` (default: `auto`)
+- `BSC_AAVE_POOL` - Aave Pool contract address (required for native mode)
+- `BSC_AAVE_EXECUTE_PRIVATE_KEY` - signer private key for native Aave supply (fallback: `BSC_EXECUTE_PRIVATE_KEY`)
+- `BSC_AAVE_REFERRAL_CODE` - Aave referral code for `supply` (default: `0`)
 - `BSC_AAVE_EXECUTE_COMMAND` - command template for optional post-swap Aave supply action in aave execution mode (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`)
   - required placeholders: `{amountRaw}`, `{runId}` (missing placeholders block execution)
 - `BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT` - default execution protocol for BSC yield plan/worker (`venus|aave`, default: `venus`)

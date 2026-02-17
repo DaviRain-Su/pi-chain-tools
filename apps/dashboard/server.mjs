@@ -137,6 +137,19 @@ const BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT = String(
 const BSC_AAVE_EXECUTE_COMMAND = String(
 	process.env.BSC_AAVE_EXECUTE_COMMAND || "",
 ).trim();
+const BSC_AAVE_EXECUTE_MODE = String(
+	process.env.BSC_AAVE_EXECUTE_MODE || "auto",
+)
+	.trim()
+	.toLowerCase();
+const BSC_AAVE_POOL = String(process.env.BSC_AAVE_POOL || "").trim();
+const BSC_AAVE_EXECUTE_PRIVATE_KEY = String(
+	process.env.BSC_AAVE_EXECUTE_PRIVATE_KEY || BSC_EXECUTE_PRIVATE_KEY || "",
+).trim();
+const BSC_AAVE_REFERRAL_CODE = Math.max(
+	0,
+	Number.parseInt(process.env.BSC_AAVE_REFERRAL_CODE || "0", 10) || 0,
+);
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
 	"true";
@@ -1316,6 +1329,97 @@ async function executeBscAaveSupplyViaCommand(params) {
 			`BSC_EXECUTE_FAILED retryable=${retryable ? "true" : "false"} message=${msg}`,
 		);
 	}
+}
+
+async function executeBscAaveSupplyViaNativeRpc(params) {
+	if (!BSC_AAVE_POOL) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_pool_missing",
+		);
+	}
+	if (!BSC_AAVE_EXECUTE_PRIVATE_KEY) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_private_key_missing",
+		);
+	}
+	const provider = new JsonRpcProvider(params.rpcUrl || BSC_RPC_URL, {
+		name: "bsc",
+		chainId: Number(params.chainId || BSC_CHAIN_ID),
+	});
+	const wallet = new Wallet(BSC_AAVE_EXECUTE_PRIVATE_KEY, provider);
+	const erc20Iface = new Interface([
+		"function allowance(address owner,address spender) view returns (uint256)",
+		"function approve(address spender,uint256 value) returns (bool)",
+	]);
+	const poolIface = new Interface([
+		"function supply(address asset,uint256 amount,address onBehalfOf,uint16 referralCode)",
+	]);
+	try {
+		const allowanceRaw = await provider.call({
+			to: params.token,
+			data: erc20Iface.encodeFunctionData("allowance", [
+				wallet.address,
+				BSC_AAVE_POOL,
+			]),
+		});
+		const allowance = erc20Iface.decodeFunctionResult(
+			"allowance",
+			allowanceRaw,
+		)[0];
+		if (allowance.lt(params.amountRaw)) {
+			const approveTx = await wallet.sendTransaction({
+				to: params.token,
+				data: erc20Iface.encodeFunctionData("approve", [
+					BSC_AAVE_POOL,
+					MaxUint256,
+				]),
+				value: 0,
+			});
+			await approveTx.wait(BSC_EXECUTE_CONFIRMATIONS);
+		}
+		const data = poolIface.encodeFunctionData("supply", [
+			params.token,
+			String(params.amountRaw),
+			wallet.address,
+			BSC_AAVE_REFERRAL_CODE,
+		]);
+		const tx = await wallet.sendTransaction({
+			to: BSC_AAVE_POOL,
+			data,
+			value: 0,
+		});
+		const receipt = await tx.wait(BSC_EXECUTE_CONFIRMATIONS);
+		return {
+			ok: true,
+			mode: "execute",
+			provider: "aave-native-rpc",
+			txHash: tx.hash,
+			receipt: {
+				status: receipt?.status,
+				blockNumber: receipt?.blockNumber,
+				gasUsed: receipt?.gasUsed?.toString?.() || null,
+			},
+		};
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		const retryable = isTransientExecError(error);
+		throw new Error(
+			`BSC_EXECUTE_FAILED retryable=${retryable ? "true" : "false"} message=${msg}`,
+		);
+	}
+}
+
+async function executeBscAaveSupply(params) {
+	if (BSC_AAVE_EXECUTE_MODE === "native") {
+		return executeBscAaveSupplyViaNativeRpc(params);
+	}
+	if (BSC_AAVE_EXECUTE_MODE === "command") {
+		return executeBscAaveSupplyViaCommand(params);
+	}
+	if (BSC_AAVE_EXECUTE_PRIVATE_KEY && BSC_AAVE_POOL) {
+		return executeBscAaveSupplyViaNativeRpc(params);
+	}
+	return executeBscAaveSupplyViaCommand(params);
 }
 
 function buildAcpExecutionPlan(payload) {
@@ -4319,7 +4423,7 @@ const server = http.createServer(async (req, res) => {
 							"0",
 					);
 					if (/^\d+$/.test(supplyAmountRaw) && BigInt(supplyAmountRaw) > 0n) {
-						postAction = await executeBscAaveSupplyViaCommand({
+						postAction = await executeBscAaveSupply({
 							amountRaw: supplyAmountRaw,
 							token: BSC_USDC,
 							rpcUrl: BSC_RPC_URL,
