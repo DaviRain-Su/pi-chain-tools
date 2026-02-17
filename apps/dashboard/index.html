@@ -681,11 +681,22 @@
           const detailTd = document.createElement("td");
           detailTd.colSpan = 10;
           const detailJson = JSON.stringify(row, null, 2);
-          detailTd.innerHTML = `<div class="row" style="margin-bottom:6px"><button data-copy-json="1">Copy JSON</button><button data-copy-run="1">Copy runId/jobId</button><span class="muted" data-copy-meta="1"></span></div><pre class="muted" style="white-space:pre-wrap;margin:0">${detailJson}</pre>`;
+          const detailTxHash = String(row.txHash || "").trim();
+          const detailChain = String(row.targetChain || "").toLowerCase();
+          const detailExplorer = detailTxHash
+            ? detailChain === "near"
+              ? `https://explorer.near.org/transactions/${detailTxHash}`
+              : detailChain === "bsc"
+                ? `https://bscscan.com/tx/${detailTxHash}`
+                : ""
+            : "";
+          detailTd.innerHTML = `<div class="row" style="margin-bottom:6px"><button data-copy-json="1">Copy JSON</button><button data-copy-run="1">Copy runId/jobId</button><button data-copy-tx="1">Copy txHash</button><button data-open-explorer="1">Open explorer</button><span class="muted" data-copy-meta="1"></span></div><pre class="muted" style="white-space:pre-wrap;margin:0">${detailJson}</pre>`;
           detailTr.appendChild(detailTd);
 
           const copyJsonBtn = detailTd.querySelector('[data-copy-json="1"]');
           const copyRunBtn = detailTd.querySelector('[data-copy-run="1"]');
+          const copyTxBtn = detailTd.querySelector('[data-copy-tx="1"]');
+          const openExplorerBtn = detailTd.querySelector('[data-open-explorer="1"]');
           const copyMetaEl = detailTd.querySelector('[data-copy-meta="1"]');
           copyJsonBtn?.addEventListener("click", async (ev) => {
             ev.stopPropagation();
@@ -709,6 +720,28 @@
             } catch {
               if (copyMetaEl) copyMetaEl.textContent = "Copy runId/jobId failed";
             }
+          });
+          copyTxBtn?.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            if (!detailTxHash) {
+              if (copyMetaEl) copyMetaEl.textContent = "No txHash";
+              return;
+            }
+            try {
+              await navigator.clipboard.writeText(detailTxHash);
+              if (copyMetaEl) copyMetaEl.textContent = `txHash copied: ${detailTxHash}`;
+            } catch {
+              if (copyMetaEl) copyMetaEl.textContent = "Copy txHash failed";
+            }
+          });
+          openExplorerBtn?.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            if (!detailExplorer) {
+              if (copyMetaEl) copyMetaEl.textContent = "No explorer URL for this chain/tx";
+              return;
+            }
+            window.open(detailExplorer, "_blank", "noopener,noreferrer");
+            if (copyMetaEl) copyMetaEl.textContent = "Explorer opened";
           });
 
           tr.addEventListener("click", () => {
