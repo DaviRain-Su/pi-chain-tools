@@ -191,11 +191,15 @@ Common mapping examples:
 - `bsc.yield.minAprDeltaBps` ↔ `BSC_YIELD_MIN_APR_DELTA_BPS`
 - `bsc.aave.enabled` ↔ `BSC_AAVE_EXECUTE_ENABLED`
 - `bsc.lista.enabled` ↔ `BSC_LISTA_EXECUTE_ENABLED`
+- `bsc.lista.mode` ↔ `BSC_LISTA_EXECUTE_MODE`
+- `bsc.lista.nativeEnabled` ↔ `BSC_LISTA_NATIVE_EXECUTE_ENABLED`
 - `bsc.lista.executeCommand` ↔ `BSC_LISTA_EXECUTE_COMMAND`
 - `bsc.lista.executeTimeoutMs` ↔ `BSC_LISTA_EXECUTE_TIMEOUT_MS`
 - `bsc.lista.maxAmountRaw` ↔ `BSC_LISTA_MAX_AMOUNT_RAW`
 - `bsc.lista.allowedTokens` ↔ `BSC_LISTA_ALLOWED_TOKENS`
 - `bsc.wombat.enabled` ↔ `BSC_WOMBAT_EXECUTE_ENABLED`
+- `bsc.wombat.mode` ↔ `BSC_WOMBAT_EXECUTE_MODE`
+- `bsc.wombat.nativeEnabled` ↔ `BSC_WOMBAT_NATIVE_EXECUTE_ENABLED`
 - `bsc.wombat.executeCommand` ↔ `BSC_WOMBAT_EXECUTE_COMMAND`
 - `bsc.wombat.executeTimeoutMs` ↔ `BSC_WOMBAT_EXECUTE_TIMEOUT_MS`
 - `bsc.wombat.maxAmountRaw` ↔ `BSC_WOMBAT_MAX_AMOUNT_RAW`
@@ -251,11 +255,15 @@ Common mapping examples:
 - `BSC_APR_CACHE_TTL_MS` - APR compare cache TTL (default: `60000`)
 - `BSC_AAVE_EXECUTE_ENABLED` - allow BSC yield execute path to proceed when `executionProtocol=aave` (default: `false`, safety-gated)
 - `BSC_LISTA_EXECUTE_ENABLED` - gate for Lista execute path (default: `false`)
+- `BSC_LISTA_EXECUTE_MODE` - `auto|native|command` (default: `auto`; native slot currently routes via command fallback)
+- `BSC_LISTA_NATIVE_EXECUTE_ENABLED` - native slot readiness gate for Lista execute (default: `false`)
 - `BSC_LISTA_EXECUTE_COMMAND` - command template for post-swap Lista supply (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`; required placeholders: `{amountRaw}`, `{runId}`)
 - `BSC_LISTA_EXECUTE_TIMEOUT_MS` - timeout for Lista command-mode execute (default: `120000`)
 - `BSC_LISTA_MAX_AMOUNT_RAW` - max raw amount allowed per Lista supply action (default: `20000000000000000000000`)
 - `BSC_LISTA_ALLOWED_TOKENS` - comma-separated token allowlist for Lista supply (default: `${BSC_USDC},${BSC_USDT}`)
 - `BSC_WOMBAT_EXECUTE_ENABLED` - gate for Wombat execute path (default: `false`)
+- `BSC_WOMBAT_EXECUTE_MODE` - `auto|native|command` (default: `auto`; native slot currently routes via command fallback)
+- `BSC_WOMBAT_NATIVE_EXECUTE_ENABLED` - native slot readiness gate for Wombat execute (default: `false`)
 - `BSC_WOMBAT_EXECUTE_COMMAND` - command template for post-swap Wombat supply (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`; required placeholders: `{amountRaw}`, `{runId}`)
 - `BSC_WOMBAT_EXECUTE_TIMEOUT_MS` - timeout for Wombat command-mode execute (default: `120000`)
 - `BSC_WOMBAT_MAX_AMOUNT_RAW` - max raw amount allowed per Wombat supply action (default: `20000000000000000000000`)

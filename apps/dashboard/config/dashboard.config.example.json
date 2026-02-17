@@ -55,6 +55,8 @@
 		},
 		"lista": {
 			"enabled": false,
+			"mode": "auto",
+			"nativeEnabled": false,
 			"executeCommand": "",
 			"executeTimeoutMs": 120000,
 			"maxAmountRaw": "20000000000000000000000",
@@ -62,6 +64,8 @@
 		},
 		"wombat": {
 			"enabled": false,
+			"mode": "auto",
+			"nativeEnabled": false,
 			"executeCommand": "",
 			"executeTimeoutMs": 120000,
 			"maxAmountRaw": "20000000000000000000000",
