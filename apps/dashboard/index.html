@@ -228,6 +228,18 @@
       </div>
 
       <div class="card" style="margin-top:16px">
+        <h3>Strategy DSL Validate (Preflight)</h3>
+        <p class="muted">Validate strategy DSL without persisting (schema + semantic policy checks).</p>
+        <textarea id="strategyDslInput" rows="8" style="width:100%;border-radius:8px;border:1px solid #2d3656;background:#0e1529;color:#e8eefc;padding:8px"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button id="fillStrategyDslSample">Fill sample</button>
+          <button id="validateStrategyDsl">Validate DSL</button>
+          <span id="strategyDslMeta" class="muted"></span>
+        </div>
+        <pre id="strategyDslResult" class="muted" style="white-space:pre-wrap;margin-top:8px">-</pre>
+      </div>
+
+      <div class="card" style="margin-top:16px">
         <h3>Burrow Positions</h3>
         <div id="burrowPos" class="muted">-</div>
       </div>
@@ -313,6 +325,11 @@
       const acpJobsEl = document.getElementById("acpJobs");
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
       const strategyEl = document.getElementById("strategy");
+      const strategyDslInputEl = document.getElementById("strategyDslInput");
+      const fillStrategyDslSampleBtn = document.getElementById("fillStrategyDslSample");
+      const validateStrategyDslBtn = document.getElementById("validateStrategyDsl");
+      const strategyDslMetaEl = document.getElementById("strategyDslMeta");
+      const strategyDslResultEl = document.getElementById("strategyDslResult");
       const targetUsdtEl = document.getElementById("targetUsdt");
       const targetUsdceEl = document.getElementById("targetUsdce");
       const targetThresholdEl = document.getElementById("targetThreshold");
@@ -541,6 +558,38 @@
       targetUsdtEl.value = targetConfig.usdt;
       targetUsdceEl.value = targetConfig.usdce;
       targetThresholdEl.value = targetConfig.threshold;
+      if (strategyDslInputEl && !strategyDslInputEl.value) {
+        strategyDslInputEl.value = JSON.stringify(buildStrategyDslSample(), null, 2);
+      }
+
+      function buildStrategyDslSample() {
+        return {
+          dsl: {
+            id: "stable-rebalance-near-v1",
+            name: "Stable Rebalance NEAR",
+            creator: currentAccount(),
+            version: "1.0.0",
+            targetChain: "near",
+            intentType: "rebalance.usdt_to_usdce",
+            pricing: {
+              priceUsd: 9.9,
+              currency: "USDC",
+            },
+            risk: {
+              maxAmountUsd: 100,
+              maxSlippageBps: 80,
+              dailyRunLimit: 3,
+            },
+            execution: {
+              mode: "plan-only",
+            },
+            inputs: {
+              tokenIn: "USDt",
+              tokenOut: "USDC.e",
+            },
+          },
+        };
+      }
 
       async function load() {
         const accountId = accountInput.value.trim();
@@ -972,6 +1021,37 @@
         }
         step2OutRawEl.value = m[1];
         cmdMetaEl.textContent = `Parsed raw output: ${m[1]}`;
+      });
+
+      fillStrategyDslSampleBtn?.addEventListener("click", () => {
+        strategyDslInputEl.value = JSON.stringify(buildStrategyDslSample(), null, 2);
+        strategyDslMetaEl.textContent = "Sample filled";
+      });
+
+      validateStrategyDslBtn?.addEventListener("click", async () => {
+        strategyDslMetaEl.textContent = "Validating...";
+        strategyDslResultEl.textContent = "-";
+        let payload;
+        try {
+          payload = JSON.parse(strategyDslInputEl.value || "{}");
+        } catch (e) {
+          strategyDslMetaEl.textContent = `Invalid JSON: ${e.message || e}`;
+          return;
+        }
+        try {
+          const res = await fetch("/api/strategies/validate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(() => ({}));
+          strategyDslResultEl.textContent = JSON.stringify(data, null, 2);
+          strategyDslMetaEl.textContent = data?.ok
+            ? `Ready (${data.phase || "ready"})`
+            : `Validation failed (${data.phase || "unknown"})`;
+        } catch (e) {
+          strategyDslMetaEl.textContent = `Validate request failed: ${e.message || e}`;
+        }
       });
 
       refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));
