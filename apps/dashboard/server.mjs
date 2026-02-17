@@ -6478,6 +6478,19 @@ const server = http.createServer(async (req, res) => {
 			if (!tokenOut) blockers.push("missing_token_out");
 			if (!amount) blockers.push("missing_amount");
 			if (blockers.length > 0) {
+				pushActionHistory({
+					action: "debridge_execute",
+					status: "blocked",
+					provider: "debridge-mcp",
+					request: {
+						originChain,
+						destinationChain,
+						tokenIn,
+						tokenOut,
+						amount,
+					},
+					blockers,
+				});
 				return json(res, 200, {
 					ok: true,
 					mode: "blocked",
@@ -6506,6 +6519,19 @@ const server = http.createServer(async (req, res) => {
 				});
 				const txHash =
 					String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
+				pushActionHistory({
+					action: "debridge_execute",
+					status: "ok",
+					provider: "debridge-mcp",
+					txHash,
+					request: {
+						originChain,
+						destinationChain,
+						tokenIn,
+						tokenOut,
+						amount,
+					},
+				});
 				return json(res, 200, {
 					ok: true,
 					mode: "execute",
@@ -6516,6 +6542,19 @@ const server = http.createServer(async (req, res) => {
 				});
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
+				pushActionHistory({
+					action: "debridge_execute",
+					status: "error",
+					provider: "debridge-mcp",
+					request: {
+						originChain,
+						destinationChain,
+						tokenIn,
+						tokenOut,
+						amount,
+					},
+					error: msg,
+				});
 				return json(res, 500, {
 					ok: false,
 					provider: "debridge-mcp",
