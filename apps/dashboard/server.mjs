@@ -869,6 +869,57 @@ function buildAcpExecutionPlan(payload) {
 	};
 }
 
+async function executeAcpJob(payload) {
+	const plan = buildAcpExecutionPlan(payload);
+	const requirements = payload?.requirements || {};
+	const amountRaw = String(
+		requirements.amountRaw || payload.amountRaw || "1000000",
+	).trim();
+	const intentType = plan.intentType;
+	const dryRun = payload?.dryRun !== false;
+	const runId = String(payload?.runId || `acp-${Date.now()}`).trim();
+
+	if (dryRun) {
+		return {
+			ok: true,
+			mode: "dry-run",
+			runId,
+			identityChain: "base",
+			plan,
+			execution: {
+				targetChain: plan.targetChain,
+				intentType,
+				amountRaw,
+			},
+		};
+	}
+
+	if (intentType !== "rebalance") {
+		throw new Error(
+			`Unsupported intentType='${intentType}' for execute mode. Supported now: rebalance`,
+		);
+	}
+
+	const result = await executeAction({
+		action: "rebalance_usdt_to_usdce_txn",
+		chain: plan.targetChain,
+		amountRaw,
+		slippageBps: Number.parseInt(String(requirements.slippageBps || 50), 10),
+		poolId: requirements.poolId || 3725,
+		runId,
+		step: payload?.step || `acp-${plan.targetChain}-rebalance`,
+	});
+
+	return {
+		ok: true,
+		mode: "execute",
+		runId,
+		identityChain: "base",
+		plan,
+		result,
+	};
+}
+
 async function runNearCommandWithRpcFallback(args) {
 	let lastError = null;
 	for (const endpoint of RPC_ENDPOINTS) {
@@ -1862,6 +1913,18 @@ const server = http.createServer(async (req, res) => {
 				identityChain: "base",
 				plan,
 			});
+		}
+
+		if (url.pathname === "/api/acp/job/execute" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const result = await executeAcpJob(payload);
+			return json(res, 200, result);
 		}
 
 		if (url.pathname === "/api/action" && req.method === "POST") {

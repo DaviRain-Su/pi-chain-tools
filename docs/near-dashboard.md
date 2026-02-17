@@ -30,6 +30,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP integration bootstrap (Virtual Base identity + multi-chain execution preview):
   - `GET /api/acp/status` -> best-effort `acp whoami` + `acp wallet balance` JSON output
   - `POST /api/acp/route-preview` -> returns execution route plan (`targetChain=near|bsc`, `intentType`, `riskProfile`) for router wiring
+  - `POST /api/acp/job/execute` (`confirm=true`) -> ACP job router entrypoint; supports `dryRun` (default true) and execute mode for `intentType=rebalance` via existing chain action pipeline
 - Unified multi-chain portfolio bootstrap:
   - `GET /api/portfolio/unified` -> aggregates current NEAR execution portfolio + ACP identity layer status + BSC scaffold status in one schema
 - Portfolio policy center (cross-chain target + constraints):
