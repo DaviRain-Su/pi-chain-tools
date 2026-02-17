@@ -213,6 +213,7 @@ async function loadMetricsFromDisk() {
 					status: status === "running" ? "queued" : status,
 					createdAt: row?.createdAt || new Date().toISOString(),
 					updatedAt: row?.updatedAt || new Date().toISOString(),
+					dismissedAt: row?.dismissedAt || null,
 					payload: row?.payload || {},
 					result: row?.result || null,
 					error: row?.error || null,
@@ -1357,10 +1358,29 @@ function dismissAcpAsyncJob(jobId) {
 	const row = getAcpAsyncJobById(jobId);
 	if (!row) return null;
 	row.status = "dismissed";
+	row.dismissedAt = new Date().toISOString();
 	row.nextAttemptAt = null;
 	row.updatedAt = new Date().toISOString();
 	void saveMetricsToDisk();
 	return row;
+}
+
+function purgeDismissedAcpJobs(olderThanDays = 7) {
+	const days = Math.max(0, Number(olderThanDays || 0));
+	const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
+	const before = ACP_ASYNC_JOBS.length;
+	for (let i = ACP_ASYNC_JOBS.length - 1; i >= 0; i -= 1) {
+		const row = ACP_ASYNC_JOBS[i];
+		if (String(row?.status || "") !== "dismissed") continue;
+		const ts = Date.parse(
+			String(row?.dismissedAt || row?.updatedAt || row?.createdAt || ""),
+		);
+		if (!Number.isFinite(ts)) continue;
+		if (ts <= cutoffMs) ACP_ASYNC_JOBS.splice(i, 1);
+	}
+	const removed = before - ACP_ASYNC_JOBS.length;
+	if (removed > 0) void saveMetricsToDisk();
+	return { removed, retained: ACP_ASYNC_JOBS.length };
 }
 
 function enqueueAcpAsyncJob(payload) {
@@ -1375,6 +1395,7 @@ function enqueueAcpAsyncJob(payload) {
 		createdAt: new Date().toISOString(),
 		updatedAt: new Date().toISOString(),
 		payload,
+		dismissedAt: null,
 		result: null,
 		error: null,
 		attemptCount: 0,
@@ -2912,12 +2933,37 @@ const server = http.createServer(async (req, res) => {
 				status: row.status,
 				createdAt: row.createdAt,
 				updatedAt: row.updatedAt,
+				dismissedAt: row.dismissedAt || null,
 				attemptCount: Number(row.attemptCount || 0),
 				maxAttempts: Number(row.maxAttempts || 3),
 				lastErrorAt: row.lastErrorAt || null,
 				error: row.error,
 			}));
 			return json(res, 200, { ok: true, dismissed });
+		}
+
+		if (
+			url.pathname === "/api/acp/jobs/dismissed/purge" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const olderThanDays = Math.max(
+				0,
+				Number.parseInt(String(payload.olderThanDays || 7), 10) || 7,
+			);
+			const out = purgeDismissedAcpJobs(olderThanDays);
+			return json(res, 200, {
+				ok: true,
+				olderThanDays,
+				removed: out.removed,
+				retained: out.retained,
+			});
 		}
 
 		if (url.pathname === "/api/acp/jobs/retry" && req.method === "POST") {

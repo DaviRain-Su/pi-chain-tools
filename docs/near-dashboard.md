@@ -30,6 +30,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP async worker now supports retry backoff + max attempts and dead-letter state (`status=dead-letter`) for persistent failures
 - ACP Ops UI now shows dead-letter table view with error-type grouping and retryability badges, plus batch actions (retry retryable / retry selected / dismiss selected)
 - ACP Ops also surfaces dismissed-queue count so archived failures do not pollute active dead-letter triage
+- ACP Ops supports archive hygiene: purge dismissed jobs older than N days via confirm-protected action
 - Dashboard includes Payments panel (`/api/payments`) with status breakdown (`pending/paid/failed`) and recent payment rows
 - ACP recent jobs table supports status filtering and NEAR tx explorer links when `txHash` is present
 - ACP recent jobs table now also shows `strategyId` / `buyer` / `remainingUses` to trace entitlement consumption during execution
@@ -61,6 +62,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `GET /api/acp/jobs/:jobId` -> async job status/result/error by id (includes retry/dead-letter metadata)
   - `GET /api/acp/jobs/dead-letter` -> async jobs exhausted after max attempts
   - `GET /api/acp/jobs/dismissed` -> archived dismissed jobs
+  - `POST /api/acp/jobs/dismissed/purge` (`confirm=true`, `olderThanDays`) -> purge archived dismissed jobs older than N days
   - `POST /api/acp/jobs/retry` (`confirm=true`, `jobId`) -> manually requeue a dead-letter/error async job
   - `POST /api/acp/jobs/retry-batch` (`confirm=true`, `jobIds[]`) -> batch requeue dead-letter/error async jobs
   - `POST /api/acp/jobs/retry-retryable` (`confirm=true`) -> requeue all currently retryable dead-letter jobs
