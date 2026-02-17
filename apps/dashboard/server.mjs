@@ -70,6 +70,11 @@ const BSC_USDC_DECIMALS = Number.parseInt(
 	process.env.BSC_USDC_DECIMALS || "18",
 	10,
 );
+const BSC_EXECUTE_ENABLED =
+	String(process.env.BSC_EXECUTE_ENABLED || "false").toLowerCase() === "true";
+const BSC_EXECUTE_COMMAND = String(
+	process.env.BSC_EXECUTE_COMMAND || "",
+).trim();
 const NEAR_RPC_RETRY_ROUNDS = Number.parseInt(
 	process.env.NEAR_RPC_RETRY_ROUNDS || "2",
 	10,
@@ -926,6 +931,38 @@ async function runAcpJson(args = []) {
 	} catch {
 		return { raw: output };
 	}
+}
+
+async function executeBscSwapViaCommand(params) {
+	if (!BSC_EXECUTE_ENABLED) {
+		return { ok: false, reason: "bsc_execute_disabled" };
+	}
+	if (!BSC_EXECUTE_COMMAND) {
+		return { ok: false, reason: "bsc_execute_command_missing" };
+	}
+	const replacements = {
+		"{amountInRaw}": String(params.amountInRaw || ""),
+		"{minAmountOutRaw}": String(params.minAmountOutRaw || ""),
+		"{tokenIn}": String(params.tokenIn || ""),
+		"{tokenOut}": String(params.tokenOut || ""),
+		"{router}": String(params.router || ""),
+		"{rpcUrl}": String(params.rpcUrl || ""),
+		"{chainId}": String(params.chainId || ""),
+		"{runId}": String(params.runId || ""),
+	};
+	let cmd = BSC_EXECUTE_COMMAND;
+	for (const [k, v] of Object.entries(replacements)) {
+		cmd = cmd.split(k).join(v);
+	}
+	const output = await runCommand("bash", ["-lc", cmd], {
+		env: process.env,
+		cwd: ACP_WORKDIR,
+	});
+	const txHash =
+		extractTxHash(output) ||
+		String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") ||
+		null;
+	return { ok: true, mode: "execute", output, txHash };
 }
 
 function buildAcpExecutionPlan(payload) {
@@ -1909,25 +1946,54 @@ async function executeAction(payload) {
 				const runId = String(payload.runId || `run-${Date.now()}`).trim();
 				const quote = await getBscUsdtUsdcQuote(amountRaw);
 				const minAmountOutRaw = applySlippage(quote.amountOutRaw, slippageBps);
+				const executeResult = await executeBscSwapViaCommand({
+					amountInRaw: amountRaw,
+					minAmountOutRaw,
+					tokenIn: BSC_USDT,
+					tokenOut: BSC_USDC,
+					router: BSC_ROUTER_V2,
+					rpcUrl: BSC_RPC_URL,
+					chainId: BSC_CHAIN_ID,
+					runId,
+				});
+				const mode = executeResult.ok ? "execute" : "plan-only";
 				pushActionHistory({
 					action: payload.action,
 					step: payload.step || null,
 					accountId,
-					status: "success",
-					summary: `BSC plan prepared amountIn=${amountRaw} quoteOut=${quote.amountOutRaw} minOut=${minAmountOutRaw}`,
+					status: executeResult.ok ? "success" : "warning",
+					summary: executeResult.ok
+						? `BSC executed amountIn=${amountRaw} minOut=${minAmountOutRaw}`
+						: `BSC plan prepared amountIn=${amountRaw} quoteOut=${quote.amountOutRaw} minOut=${minAmountOutRaw} reason=${executeResult.reason}`,
+					txHash: executeResult.txHash || null,
 				});
 				recordRebalanceMetric({
 					runId,
-					status: "bsc-plan",
+					status: executeResult.ok ? "bsc-executed" : "bsc-plan",
 					amountRaw,
 					suppliedRaw: quote.amountOutRaw,
-					note: "execution not enabled yet",
+					note: executeResult.ok
+						? "bsc execution command success"
+						: `execution fallback: ${executeResult.reason}`,
 				});
 				return {
 					ok: true,
 					action: payload.action,
 					chain: "bsc",
-					mode: "plan-only",
+					mode,
+					txHash: executeResult.txHash || null,
+					explorerUrl: executeResult.txHash
+						? `https://bscscan.com/tx/${executeResult.txHash}`
+						: null,
+					execution: executeResult.ok
+						? {
+								provider: "external-command",
+								output: executeResult.output,
+							}
+						: {
+								provider: "none",
+								reason: executeResult.reason,
+							},
 					plan: {
 						rpcUrl: BSC_RPC_URL,
 						chainId: BSC_CHAIN_ID,
@@ -1942,11 +2008,13 @@ async function executeAction(payload) {
 						quotePairAddress: quote.pairAddress,
 						quoteLiquidityUsd: quote.liquidityUsd,
 						slippageBps,
-						next: [
-							"enforce minOut by slippage",
-							"execute swap through BSC adapter",
-							"optional lend supply adapter",
-						],
+						next: executeResult.ok
+							? ["optional lend supply adapter"]
+							: [
+									"set BSC_EXECUTE_ENABLED=true",
+									"set BSC_EXECUTE_COMMAND template",
+									"retry execute",
+								],
 					},
 				};
 			}

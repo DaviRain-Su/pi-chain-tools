@@ -88,7 +88,10 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP async retry policy: exponential backoff (1s,2s,4s...) with per-job `maxAttempts` (default 3); exhausted jobs enter `dead-letter`
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
-- BSC mode now supports a backend **plan-only** action (`rebalance_usdt_to_usdce_txn` with `chain=bsc`) that returns route config placeholders (RPC/router/token addresses/slippage) plus a quote/minOut estimate (`quotedOutRaw`, `minAmountOutRaw`, quote source) but does not execute onchain yet
+- BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can optionally execute via external adapter command:
+  - set `BSC_EXECUTE_ENABLED=true`
+  - set `BSC_EXECUTE_COMMAND` template with placeholders `{amountInRaw} {minAmountOutRaw} {tokenIn} {tokenOut} {router} {rpcUrl} {chainId} {runId}`
+  - when configured, response returns `mode=execute` with `txHash` and BscScan link; otherwise remains explicit `mode=plan-only`
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`
@@ -136,6 +139,8 @@ Open:
 - `NEAR_DASHBOARD_METRICS_PATH` - metrics persistence path (default: `apps/dashboard/data/rebalance-metrics.json`)
 - `NEAR_DASHBOARD_POLICY_PATH` - policy persistence path (default: `apps/dashboard/data/portfolio-policy.json`)
 - `NEAR_DASHBOARD_MARKETPLACE_PATH` - strategy marketplace persistence path (default: `apps/dashboard/data/strategy-marketplace.json`)
+- `BSC_EXECUTE_ENABLED` - enable BSC execute adapter path (`true|false`, default: `false`)
+- `BSC_EXECUTE_COMMAND` - external command template used for BSC swap execution (supports placeholders listed above)
 
 Example:
 
