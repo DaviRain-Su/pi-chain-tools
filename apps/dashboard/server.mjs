@@ -2190,6 +2190,31 @@ async function executeBscWombatSupply(params) {
 	}
 }
 
+const BSC_POST_ACTION_SUPPLY_EXECUTORS = {
+	aave: executeBscAaveSupply,
+	lista: executeBscListaSupply,
+	wombat: executeBscWombatSupply,
+};
+
+async function executeBscPostActionSupply(protocol, params) {
+	const p = String(protocol || "")
+		.trim()
+		.toLowerCase();
+	const executor = BSC_POST_ACTION_SUPPLY_EXECUTORS[p];
+	if (!executor) {
+		return {
+			ok: false,
+			reason: "unsupported_post_action_protocol",
+			provider: null,
+		};
+	}
+	const result = await executor(params);
+	return {
+		...result,
+		adapterProtocol: p,
+	};
+}
+
 function buildBscPostActionArtifact({
 	protocol,
 	supplyAmountRaw,
@@ -6048,30 +6073,16 @@ const server = http.createServer(async (req, res) => {
 							"0",
 					);
 					if (/^\d+$/.test(supplyAmountRaw) && BigInt(supplyAmountRaw) > 0n) {
-						postAction =
-							plan.executionProtocol === "aave"
-								? await executeBscAaveSupply({
-										amountRaw: supplyAmountRaw,
-										token: BSC_USDC,
-										rpcUrl: BSC_RPC_URL,
-										chainId: BSC_CHAIN_ID,
-										runId,
-									})
-								: plan.executionProtocol === "lista"
-									? await executeBscListaSupply({
-											amountRaw: supplyAmountRaw,
-											token: BSC_USDC,
-											rpcUrl: BSC_RPC_URL,
-											chainId: BSC_CHAIN_ID,
-											runId,
-										})
-									: await executeBscWombatSupply({
-											amountRaw: supplyAmountRaw,
-											token: BSC_USDC,
-											rpcUrl: BSC_RPC_URL,
-											chainId: BSC_CHAIN_ID,
-											runId,
-										});
+						postAction = await executeBscPostActionSupply(
+							plan.executionProtocol,
+							{
+								amountRaw: supplyAmountRaw,
+								token: BSC_USDC,
+								rpcUrl: BSC_RPC_URL,
+								chainId: BSC_CHAIN_ID,
+								runId,
+							},
+						);
 					} else {
 						postAction = {
 							ok: false,
