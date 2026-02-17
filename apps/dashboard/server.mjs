@@ -5,6 +5,11 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { Interface } from "@ethersproject/abi";
+import { MaxUint256 } from "@ethersproject/constants";
+import { JsonRpcProvider } from "@ethersproject/providers";
+import { Wallet } from "@ethersproject/wallet";
+
 import {
 	buildStrategyDslFromLegacy,
 	validateStrategyDslV1,
@@ -72,8 +77,17 @@ const BSC_USDC_DECIMALS = Number.parseInt(
 );
 const BSC_EXECUTE_ENABLED =
 	String(process.env.BSC_EXECUTE_ENABLED || "false").toLowerCase() === "true";
+const BSC_EXECUTE_MODE = String(process.env.BSC_EXECUTE_MODE || "auto")
+	.trim()
+	.toLowerCase();
 const BSC_EXECUTE_COMMAND = String(
 	process.env.BSC_EXECUTE_COMMAND || "",
+).trim();
+const BSC_EXECUTE_PRIVATE_KEY = String(
+	process.env.BSC_EXECUTE_PRIVATE_KEY || "",
+).trim();
+const BSC_EXECUTE_RECIPIENT = String(
+	process.env.BSC_EXECUTE_RECIPIENT || "",
 ).trim();
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
@@ -948,10 +962,87 @@ async function runAcpJson(args = []) {
 	}
 }
 
-async function executeBscSwapViaCommand(params) {
-	if (!BSC_EXECUTE_ENABLED) {
-		return { ok: false, reason: "bsc_execute_disabled" };
+async function executeBscSwapViaNativeRpc(params) {
+	if (!BSC_EXECUTE_PRIVATE_KEY) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_execute_private_key_missing",
+		);
 	}
+	const provider = new JsonRpcProvider(params.rpcUrl || BSC_RPC_URL, {
+		name: "bsc",
+		chainId: Number(params.chainId || BSC_CHAIN_ID),
+	});
+	const wallet = new Wallet(BSC_EXECUTE_PRIVATE_KEY, provider);
+	const recipient = BSC_EXECUTE_RECIPIENT || wallet.address;
+	const erc20Iface = new Interface([
+		"function allowance(address owner,address spender) view returns (uint256)",
+		"function approve(address spender,uint256 value) returns (bool)",
+	]);
+	const routerIface = new Interface([
+		"function swapExactTokensForTokens(uint256 amountIn,uint256 amountOutMin,address[] path,address to,uint256 deadline) returns (uint256[] amounts)",
+	]);
+	try {
+		const allowanceCallData = erc20Iface.encodeFunctionData("allowance", [
+			wallet.address,
+			params.router,
+		]);
+		const allowanceRaw = await provider.call({
+			to: params.tokenIn,
+			data: allowanceCallData,
+		});
+		const allowance = erc20Iface.decodeFunctionResult(
+			"allowance",
+			allowanceRaw,
+		)[0];
+		if (allowance.lt(params.amountInRaw)) {
+			const approveData = erc20Iface.encodeFunctionData("approve", [
+				params.router,
+				MaxUint256,
+			]);
+			const approveTx = await wallet.sendTransaction({
+				to: params.tokenIn,
+				data: approveData,
+				value: 0,
+			});
+			await approveTx.wait(1);
+		}
+		const deadline = Math.floor(Date.now() / 1000) + 20 * 60;
+		const swapData = routerIface.encodeFunctionData(
+			"swapExactTokensForTokens",
+			[
+				String(params.amountInRaw),
+				String(params.minAmountOutRaw),
+				[params.tokenIn, params.tokenOut],
+				recipient,
+				deadline,
+			],
+		);
+		const tx = await wallet.sendTransaction({
+			to: params.router,
+			data: swapData,
+			value: 0,
+		});
+		const receipt = await tx.wait(1);
+		return {
+			ok: true,
+			mode: "execute",
+			txHash: tx.hash,
+			receipt: {
+				status: receipt?.status,
+				blockNumber: receipt?.blockNumber,
+				gasUsed: receipt?.gasUsed?.toString?.() || null,
+			},
+		};
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		const retryable = isTransientExecError(error);
+		throw new Error(
+			`BSC_EXECUTE_FAILED retryable=${retryable ? "true" : "false"} message=${msg}`,
+		);
+	}
+}
+
+async function executeBscSwapViaCommand(params) {
 	if (!BSC_EXECUTE_COMMAND) {
 		throw new Error(
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_execute_command_missing",
@@ -980,7 +1071,7 @@ async function executeBscSwapViaCommand(params) {
 			extractTxHash(output) ||
 			String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") ||
 			null;
-		return { ok: true, mode: "execute", output, txHash };
+		return { ok: true, mode: "execute", output, txHash, provider: "command" };
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		const retryable = isTransientExecError(error);
@@ -988,6 +1079,30 @@ async function executeBscSwapViaCommand(params) {
 			`BSC_EXECUTE_FAILED retryable=${retryable ? "true" : "false"} message=${msg}`,
 		);
 	}
+}
+
+async function executeBscSwap(params) {
+	if (!BSC_EXECUTE_ENABLED) {
+		return { ok: false, reason: "bsc_execute_disabled" };
+	}
+	const mode = BSC_EXECUTE_MODE;
+	if (mode === "native") {
+		const out = await executeBscSwapViaNativeRpc(params);
+		return { ...out, provider: "native-rpc" };
+	}
+	if (mode === "command") {
+		return executeBscSwapViaCommand(params);
+	}
+	if (BSC_EXECUTE_PRIVATE_KEY) {
+		const out = await executeBscSwapViaNativeRpc(params);
+		return { ...out, provider: "native-rpc" };
+	}
+	if (BSC_EXECUTE_COMMAND) {
+		return executeBscSwapViaCommand(params);
+	}
+	throw new Error(
+		"BSC_EXECUTE_CONFIG retryable=false message=missing_native_key_and_command",
+	);
 }
 
 function buildAcpExecutionPlan(payload) {
@@ -2048,7 +2163,7 @@ async function executeAction(payload) {
 				const runId = String(payload.runId || `run-${Date.now()}`).trim();
 				const quote = await getBscUsdtUsdcQuote(amountRaw);
 				const minAmountOutRaw = applySlippage(quote.amountOutRaw, slippageBps);
-				const executeResult = await executeBscSwapViaCommand({
+				const executeResult = await executeBscSwap({
 					amountInRaw: amountRaw,
 					minAmountOutRaw,
 					tokenIn: BSC_USDT,
@@ -2075,7 +2190,7 @@ async function executeAction(payload) {
 					amountRaw,
 					suppliedRaw: quote.amountOutRaw,
 					note: executeResult.ok
-						? "bsc execution command success"
+						? `bsc execution success provider=${executeResult.provider || "unknown"}`
 						: `execution fallback: ${executeResult.reason}`,
 				});
 				return {
@@ -2089,8 +2204,9 @@ async function executeAction(payload) {
 						: null,
 					execution: executeResult.ok
 						? {
-								provider: "external-command",
+								provider: executeResult.provider || "unknown",
 								output: executeResult.output,
+								receipt: executeResult.receipt || null,
 							}
 						: {
 								provider: "none",
@@ -2114,7 +2230,8 @@ async function executeAction(payload) {
 							? ["optional lend supply adapter"]
 							: [
 									"set BSC_EXECUTE_ENABLED=true",
-									"set BSC_EXECUTE_COMMAND template",
+									"prefer BSC_EXECUTE_MODE=native + BSC_EXECUTE_PRIVATE_KEY",
+									"or set BSC_EXECUTE_MODE=command + BSC_EXECUTE_COMMAND",
 									"retry execute",
 								],
 					},

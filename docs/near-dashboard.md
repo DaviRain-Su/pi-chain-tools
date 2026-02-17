@@ -97,11 +97,12 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP async retry policy: exponential backoff (1s,2s,4s...) with per-job `maxAttempts` (default 3); retry now only applies to retryable failures, non-retryable failures enter `dead-letter` immediately
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
-- BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can optionally execute via external adapter command:
-  - set `BSC_EXECUTE_ENABLED=true`
-  - set `BSC_EXECUTE_COMMAND` template with placeholders `{amountInRaw} {minAmountOutRaw} {tokenIn} {tokenOut} {router} {rpcUrl} {chainId} {runId}`
-  - when configured, response returns `mode=execute` with `txHash` and BscScan link; otherwise remains explicit `mode=plan-only`
-  - execute command failures are normalized as `BSC_EXECUTE_FAILED retryable=true|false ...` for async retry/dead-letter classification
+- BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can execute in two built-in adapter modes:
+  - `BSC_EXECUTE_MODE=native` (recommended): uses in-process native RPC signer path with `BSC_EXECUTE_PRIVATE_KEY`
+  - `BSC_EXECUTE_MODE=command`: uses `BSC_EXECUTE_COMMAND` template placeholders `{amountInRaw} {minAmountOutRaw} {tokenIn} {tokenOut} {router} {rpcUrl} {chainId} {runId}`
+  - `BSC_EXECUTE_MODE=auto` (default): prefer native when key exists, otherwise command
+  - when configured, response returns `mode=execute` with `txHash` and BscScan link; otherwise explicit `mode=plan-only`
+  - execute failures are normalized as `BSC_EXECUTE_FAILED retryable=true|false ...` for async retry/dead-letter classification
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`
@@ -150,7 +151,10 @@ Open:
 - `NEAR_DASHBOARD_POLICY_PATH` - policy persistence path (default: `apps/dashboard/data/portfolio-policy.json`)
 - `NEAR_DASHBOARD_MARKETPLACE_PATH` - strategy marketplace persistence path (default: `apps/dashboard/data/strategy-marketplace.json`)
 - `BSC_EXECUTE_ENABLED` - enable BSC execute adapter path (`true|false`, default: `false`)
-- `BSC_EXECUTE_COMMAND` - external command template used for BSC swap execution (supports placeholders listed above)
+- `BSC_EXECUTE_MODE` - `auto|native|command` (default: `auto`)
+- `BSC_EXECUTE_PRIVATE_KEY` - private key for native BSC executor signer (used by `native`/`auto` mode)
+- `BSC_EXECUTE_RECIPIENT` - optional recipient for BSC swap output (default signer address)
+- `BSC_EXECUTE_COMMAND` - command template for command-mode BSC swap execution (supports placeholders listed above)
 - `ACP_DISMISSED_PURGE_ENABLED` - enable automatic dismissed-archive purge scheduler (`true|false`, default: `false`)
 - `ACP_DISMISSED_PURGE_DAYS` - purge threshold in days for dismissed jobs (default: `7`)
 - `ACP_DISMISSED_PURGE_INTERVAL_MS` - purge scheduler interval in milliseconds (default: `21600000` = 6h)

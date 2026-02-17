@@ -32,8 +32,21 @@ export BSC_EXECUTE_ENABLED=false
 
 ### 2.2 激进执行档（BSC 执行适配器开启）
 
+#### A) Native 模式（推荐）
+
 ```bash
 export BSC_EXECUTE_ENABLED=true
+export BSC_EXECUTE_MODE=native
+export BSC_EXECUTE_PRIVATE_KEY='0x...'
+# 可选：不填则默认回到 signer 地址
+export BSC_EXECUTE_RECIPIENT='0xyourAddress'
+```
+
+#### B) Command 模式（兼容）
+
+```bash
+export BSC_EXECUTE_ENABLED=true
+export BSC_EXECUTE_MODE=command
 export BSC_EXECUTE_COMMAND='your-bsc-exec-cli --rpc {rpcUrl} --chain {chainId} --router {router} --token-in {tokenIn} --token-out {tokenOut} --amount-in {amountInRaw} --min-out {minAmountOutRaw} --run-id {runId}'
 ```
 
