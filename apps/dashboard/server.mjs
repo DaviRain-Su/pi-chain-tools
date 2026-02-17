@@ -90,6 +90,18 @@ const BSC_EXECUTE_PRIVATE_KEY = String(
 const BSC_EXECUTE_RECIPIENT = String(
 	process.env.BSC_EXECUTE_RECIPIENT || "",
 ).trim();
+const BSC_EXECUTE_CONFIRMATIONS = Math.max(
+	1,
+	Number.parseInt(process.env.BSC_EXECUTE_CONFIRMATIONS || "1", 10) || 1,
+);
+const BSC_EXECUTE_GAS_BUMP_PERCENT = Math.max(
+	0,
+	Number.parseInt(process.env.BSC_EXECUTE_GAS_BUMP_PERCENT || "15", 10) || 15,
+);
+const BSC_EXECUTE_NONCE_RETRY = Math.max(
+	0,
+	Number.parseInt(process.env.BSC_EXECUTE_NONCE_RETRY || "1", 10) || 1,
+);
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
 	"true";
@@ -1016,11 +1028,37 @@ async function executeBscSwapViaNativeRpc(params) {
 	const erc20Iface = new Interface([
 		"function allowance(address owner,address spender) view returns (uint256)",
 		"function approve(address spender,uint256 value) returns (bool)",
+		"function balanceOf(address owner) view returns (uint256)",
 	]);
 	const routerIface = new Interface([
 		"function swapExactTokensForTokens(uint256 amountIn,uint256 amountOutMin,address[] path,address to,uint256 deadline) returns (uint256[] amounts)",
 	]);
+	const readTokenBalance = async (token, owner) => {
+		const data = erc20Iface.encodeFunctionData("balanceOf", [owner]);
+		const raw = await provider.call({ to: token, data });
+		return erc20Iface.decodeFunctionResult("balanceOf", raw)[0];
+	};
+	const bumpGas = async () => {
+		const fee = await provider.getFeeData();
+		const bump = BigInt(100 + BSC_EXECUTE_GAS_BUMP_PERCENT);
+		const out = {};
+		if (fee?.gasPrice) {
+			const gp = (BigInt(fee.gasPrice.toString()) * bump) / 100n;
+			out.gasPrice = gp.toString();
+		}
+		if (fee?.maxFeePerGas && fee?.maxPriorityFeePerGas) {
+			const mf = (BigInt(fee.maxFeePerGas.toString()) * bump) / 100n;
+			const mp = (BigInt(fee.maxPriorityFeePerGas.toString()) * bump) / 100n;
+			out.maxFeePerGas = mf.toString();
+			out.maxPriorityFeePerGas = mp.toString();
+		}
+		return out;
+	};
 	try {
+		const [tokenInBefore, tokenOutBefore] = await Promise.all([
+			readTokenBalance(params.tokenIn, wallet.address),
+			readTokenBalance(params.tokenOut, recipient),
+		]);
 		const allowanceCallData = erc20Iface.encodeFunctionData("allowance", [
 			wallet.address,
 			params.router,
@@ -1042,8 +1080,9 @@ async function executeBscSwapViaNativeRpc(params) {
 				to: params.tokenIn,
 				data: approveData,
 				value: 0,
+				...(await bumpGas()),
 			});
-			await approveTx.wait(1);
+			await approveTx.wait(BSC_EXECUTE_CONFIRMATIONS);
 		}
 		const deadline = Math.floor(Date.now() / 1000) + 20 * 60;
 		const swapData = routerIface.encodeFunctionData(
@@ -1056,12 +1095,38 @@ async function executeBscSwapViaNativeRpc(params) {
 				deadline,
 			],
 		);
-		const tx = await wallet.sendTransaction({
-			to: params.router,
-			data: swapData,
-			value: 0,
-		});
-		const receipt = await tx.wait(1);
+		let tx;
+		let lastErr = null;
+		for (let attempt = 0; attempt <= BSC_EXECUTE_NONCE_RETRY; attempt += 1) {
+			try {
+				tx = await wallet.sendTransaction({
+					to: params.router,
+					data: swapData,
+					value: 0,
+					...(await bumpGas()),
+					nonce: await provider.getTransactionCount(wallet.address, "pending"),
+				});
+				break;
+			} catch (error) {
+				lastErr = error;
+				const msg = String(error?.message || error || "").toLowerCase();
+				if (
+					attempt >= BSC_EXECUTE_NONCE_RETRY ||
+					(!msg.includes("nonce") && !msg.includes("underpriced"))
+				) {
+					throw error;
+				}
+			}
+		}
+		if (!tx) throw lastErr || new Error("bsc swap tx not created");
+		const receipt = await tx.wait(BSC_EXECUTE_CONFIRMATIONS);
+		const [tokenInAfter, tokenOutAfter] = await Promise.all([
+			readTokenBalance(params.tokenIn, wallet.address),
+			readTokenBalance(params.tokenOut, recipient),
+		]);
+		const tokenOutDelta = tokenOutAfter.sub(tokenOutBefore);
+		const tokenInDelta = tokenInBefore.sub(tokenInAfter);
+		const reconcileOk = tokenOutDelta.gte(String(params.minAmountOutRaw));
 		return {
 			ok: true,
 			mode: "execute",
@@ -1070,6 +1135,11 @@ async function executeBscSwapViaNativeRpc(params) {
 				status: receipt?.status,
 				blockNumber: receipt?.blockNumber,
 				gasUsed: receipt?.gasUsed?.toString?.() || null,
+				confirmations: BSC_EXECUTE_CONFIRMATIONS,
+				reconcileOk,
+				tokenInDeltaRaw: tokenInDelta.toString(),
+				tokenOutDeltaRaw: tokenOutDelta.toString(),
+				minAmountOutRaw: String(params.minAmountOutRaw),
 			},
 		};
 	} catch (error) {
