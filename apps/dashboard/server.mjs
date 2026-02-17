@@ -282,6 +282,12 @@ const BSC_LISTA_APR_HINTS_JSON = String(
 const BSC_WOMBAT_APR_HINTS_JSON = String(
 	envOrCfg("BSC_WOMBAT_APR_HINTS_JSON", "bsc.yield.wombatAprHintsJson", ""),
 ).trim();
+const BSC_LISTA_APR_API_URL = String(
+	envOrCfg("BSC_LISTA_APR_API_URL", "bsc.yield.listaAprApiUrl", ""),
+).trim();
+const BSC_WOMBAT_APR_API_URL = String(
+	envOrCfg("BSC_WOMBAT_APR_API_URL", "bsc.yield.wombatAprApiUrl", ""),
+).trim();
 const BSC_VENUS_APR_API_URL = String(
 	envOrCfg("BSC_VENUS_APR_API_URL", "bsc.yield.venusAprApiUrl", ""),
 ).trim();
@@ -550,10 +556,14 @@ const BSC_YIELD_WORKER = {
 const BSC_APR_CACHE = {
 	venus: { ts: 0, value: null },
 	aave: { ts: 0, value: null },
+	lista: { ts: 0, value: null },
+	wombat: { ts: 0, value: null },
 };
 const BSC_APR_SOURCE_HEALTH = {
 	venus: { lastSuccessAt: null, lastErrorAt: null, lastError: null },
 	aave: { lastSuccessAt: null, lastErrorAt: null, lastError: null },
+	lista: { lastSuccessAt: null, lastErrorAt: null, lastError: null },
+	wombat: { lastSuccessAt: null, lastErrorAt: null, lastError: null },
 };
 const STRATEGY_CATALOG = [];
 const STRATEGY_PURCHASES = [];
@@ -3041,14 +3051,25 @@ async function fetchAprHintsFromApi(url, sourceName) {
 }
 
 async function getBscProtocolAprHints(protocol) {
-	const key = protocol === "aave" ? "aave" : "venus";
-	const cache = BSC_APR_CACHE[key];
-	const health = BSC_APR_SOURCE_HEALTH[key];
+	const key = String(protocol || "venus").toLowerCase();
+	const cache = BSC_APR_CACHE[key] || BSC_APR_CACHE.venus;
+	const health = BSC_APR_SOURCE_HEALTH[key] || BSC_APR_SOURCE_HEALTH.venus;
 	if (Date.now() - cache.ts < BSC_APR_CACHE_TTL_MS && cache.value)
 		return cache.value;
-	const apiUrl = key === "aave" ? BSC_AAVE_APR_API_URL : BSC_VENUS_APR_API_URL;
-	const envJson =
-		key === "aave" ? BSC_AAVE_APR_HINTS_JSON : BSC_STABLE_APR_HINTS_JSON;
+	const apiUrlByProtocol = {
+		venus: BSC_VENUS_APR_API_URL,
+		aave: BSC_AAVE_APR_API_URL,
+		lista: BSC_LISTA_APR_API_URL,
+		wombat: BSC_WOMBAT_APR_API_URL,
+	};
+	const envJsonByProtocol = {
+		venus: BSC_STABLE_APR_HINTS_JSON,
+		aave: BSC_AAVE_APR_HINTS_JSON,
+		lista: BSC_LISTA_APR_HINTS_JSON,
+		wombat: BSC_WOMBAT_APR_HINTS_JSON,
+	};
+	const apiUrl = apiUrlByProtocol[key] || apiUrlByProtocol.venus;
+	const envJson = envJsonByProtocol[key] || envJsonByProtocol.venus;
 	let value = null;
 	try {
 		value = await fetchAprHintsFromApi(apiUrl, key);
@@ -3073,12 +3094,12 @@ async function getBscAaveAprHints() {
 }
 
 async function getBscLendingMarketCompare() {
-	const [venus, aave] = await Promise.all([
+	const [venus, aave, lista, wombat] = await Promise.all([
 		getBscStableAprHints(),
 		getBscAaveAprHints(),
+		getBscProtocolAprHints("lista"),
+		getBscProtocolAprHints("wombat"),
 	]);
-	const lista = parseAprHintsFromJson(BSC_LISTA_APR_HINTS_JSON, "lista");
-	const wombat = parseAprHintsFromJson(BSC_WOMBAT_APR_HINTS_JSON, "wombat");
 	const protocolRows = [
 		{
 			protocol: "venus",
@@ -3126,10 +3147,7 @@ async function getBscLendingMarketCompare() {
 					: ageMs <= 6 * 60 * 60 * 1000
 						? "fresh"
 						: "stale";
-			const source =
-				protocol === "lista" || protocol === "wombat"
-					? "env-json"
-					: String(row?.source || protocol);
+			const source = String(row?.source || protocol);
 			return [
 				protocol,
 				{
@@ -5399,20 +5417,18 @@ const server = http.createServer(async (req, res) => {
 					cacheTtlMs: BSC_APR_CACHE_TTL_MS,
 				},
 				lista: {
-					source: "env-json",
-					lastSuccessAt: compare?.markets?.lista?.updatedAt || null,
-					lastErrorAt: null,
-					lastError: null,
-					cacheAgeMs: null,
-					cacheTtlMs: null,
+					...BSC_APR_SOURCE_HEALTH.lista,
+					cacheAgeMs: BSC_APR_CACHE.lista.ts
+						? now - BSC_APR_CACHE.lista.ts
+						: null,
+					cacheTtlMs: BSC_APR_CACHE_TTL_MS,
 				},
 				wombat: {
-					source: "env-json",
-					lastSuccessAt: compare?.markets?.wombat?.updatedAt || null,
-					lastErrorAt: null,
-					lastError: null,
-					cacheAgeMs: null,
-					cacheTtlMs: null,
+					...BSC_APR_SOURCE_HEALTH.wombat,
+					cacheAgeMs: BSC_APR_CACHE.wombat.ts
+						? now - BSC_APR_CACHE.wombat.ts
+						: null,
+					cacheTtlMs: BSC_APR_CACHE_TTL_MS,
 				},
 			};
 			return json(res, 200, {

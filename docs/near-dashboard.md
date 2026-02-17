@@ -186,6 +186,8 @@ Common mapping examples:
 - `bsc.wombat.executeCommand` ↔ `BSC_WOMBAT_EXECUTE_COMMAND`
 - `bsc.wombat.maxAmountRaw` ↔ `BSC_WOMBAT_MAX_AMOUNT_RAW`
 - `bsc.wombat.allowedTokens` ↔ `BSC_WOMBAT_ALLOWED_TOKENS`
+- `bsc.yield.listaAprApiUrl` ↔ `BSC_LISTA_APR_API_URL`
+- `bsc.yield.wombatAprApiUrl` ↔ `BSC_WOMBAT_APR_API_URL`
 - `bsc.aave.maxAmountRaw` ↔ `BSC_AAVE_MAX_AMOUNT_RAW`
 - `acp.dismissedPurge.enabled` ↔ `ACP_DISMISSED_PURGE_ENABLED`
 - `payments.webhookProvider` ↔ `PAYMENT_WEBHOOK_PROVIDER`
@@ -220,8 +222,10 @@ Common mapping examples:
 - `BSC_YIELD_DEFAULT_QUOTE_USD` - default quote notional (USD) used in `/api/bsc/yield/markets` net-yield preview when `amountUsd` query is omitted (default: `100`)
 - `BSC_STABLE_APR_HINTS_JSON` - optional Venus APR hints (`{"usdtSupplyAprBps":120,"usdcSupplyAprBps":180,"updatedAt":"..."}`)
 - `BSC_AAVE_APR_HINTS_JSON` - optional Aave APR hints (`{"usdtSupplyAprBps":90,"usdcSupplyAprBps":160,"updatedAt":"..."}`)
-- `BSC_LISTA_APR_HINTS_JSON` - optional Lista APR hints (read-only compare input; same shape as Aave/Venus hints)
-- `BSC_WOMBAT_APR_HINTS_JSON` - optional Wombat APR hints (read-only compare input; same shape as Aave/Venus hints)
+- `BSC_LISTA_APR_HINTS_JSON` - optional Lista APR hints fallback (read-only compare input; same shape as Aave/Venus hints)
+- `BSC_WOMBAT_APR_HINTS_JSON` - optional Wombat APR hints fallback (read-only compare input; same shape as Aave/Venus hints)
+- `BSC_LISTA_APR_API_URL` - optional Lista APR API endpoint (preferred over JSON fallback when available)
+- `BSC_WOMBAT_APR_API_URL` - optional Wombat APR API endpoint (preferred over JSON fallback when available)
 - `BSC_VENUS_APR_API_URL` - optional Venus APR API endpoint (if set, API value has priority over env hints)
 - `BSC_AAVE_APR_API_URL` - optional Aave APR API endpoint (if set, API value has priority over env hints)
   - accepted response keys: `usdtSupplyAprBps|usdtAprBps|usdt_supply_apr_bps`, `usdcSupplyAprBps|usdcAprBps|usdc_supply_apr_bps`, optional `updatedAt|timestamp|updated_at`

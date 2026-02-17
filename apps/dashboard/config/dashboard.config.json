@@ -42,7 +42,9 @@
 			"rebalanceIntervalDays": 7,
 			"defaultQuoteUsd": 100,
 			"listaAprHintsJson": "",
-			"wombatAprHintsJson": ""
+			"wombatAprHintsJson": "",
+			"listaAprApiUrl": "",
+			"wombatAprApiUrl": ""
 		},
 		"aave": {
 			"enabled": false,
