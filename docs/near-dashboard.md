@@ -73,6 +73,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - execute mode applies policy daily guard `constraints.maxDailyRebalanceRuns`
 - Unified multi-chain portfolio bootstrap:
   - `GET /api/portfolio/unified` -> aggregates NEAR execution portfolio + ACP identity layer + BSC wallet/yield/market compare/protocol positions snapshot (active when `BSC_EXECUTE_RECIPIENT` is configured)
+    - includes `risk.bscNormalization` summary (`status/band/maxRiskScore/staleCount/unknownCount/rows`) for Lista/Wombat normalization freshness monitoring
     - BSC protocol positions include `subtotalsUsdApprox`, `totalUsdApprox`, `health` (`status/reason/detail`), and `fetchedAt`
 - Portfolio policy center (cross-chain target + constraints):
   - `GET /api/policy` -> current policy

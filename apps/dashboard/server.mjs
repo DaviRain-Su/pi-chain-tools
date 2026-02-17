@@ -1418,6 +1418,8 @@ async function buildUnifiedPortfolio(accountId) {
 				Number(balances?.usdtUi || 0) + Number(balances?.usdcUi || 0);
 			const bscTotalUsd =
 				bscWalletUsd + Number(protocolPositions?.totalUsdApprox || 0);
+			const normalizationHealth =
+				evaluateNormalizationHealth(protocolPositions);
 			bscLayer = {
 				chain: "bsc",
 				status: "active",
@@ -1426,6 +1428,7 @@ async function buildUnifiedPortfolio(accountId) {
 				positions: {
 					wallet: balances,
 					protocols: protocolPositions,
+					normalizationHealth,
 					yield: {
 						plan: yieldPlan?.plan || null,
 						executionProtocol: yieldPlan?.executionProtocol || "venus",
@@ -1468,7 +1471,68 @@ async function buildUnifiedPortfolio(accountId) {
 			retryRate: snapshot.rpcMetrics?.retryRate || 0,
 			http429: snapshot.rpcMetrics?.http429 || 0,
 			rebalance: snapshot.rebalanceMetrics,
+			bscNormalization: bscLayer?.positions?.normalizationHealth || {
+				status: "unknown",
+				band: "high",
+				maxRiskScore: 100,
+				staleCount: 0,
+				unknownCount: 2,
+				rows: [],
+			},
 		},
+	};
+}
+
+function evaluateNormalizationHealth(protocolPositions) {
+	const sources = protocolPositions?.normalizationSources || {};
+	const now = Date.now();
+	const staleMs = 6 * 60 * 60 * 1000;
+	const unknownMs = 24 * 60 * 60 * 1000;
+	const rows = ["lista", "wombat"].map((protocol) => {
+		const row = sources?.[protocol] || {};
+		const source = String(row?.source || "unknown");
+		const updatedAt = String(row?.updatedAt || "").trim();
+		const ts = Date.parse(updatedAt);
+		const ageMs = Number.isFinite(ts) ? Math.max(0, now - ts) : null;
+		const freshness =
+			ageMs == null
+				? "unknown"
+				: ageMs > unknownMs
+					? "unknown"
+					: ageMs > staleMs
+						? "stale"
+						: "fresh";
+		const riskScore =
+			freshness === "fresh" ? 10 : freshness === "stale" ? 55 : 85;
+		return {
+			protocol,
+			source,
+			updatedAt: updatedAt || null,
+			ageMs,
+			freshness,
+			riskScore,
+		};
+	});
+	const maxRiskScore = rows.reduce(
+		(acc, row) => Math.max(acc, Number(row?.riskScore || 0)),
+		0,
+	);
+	const staleCount = rows.filter((row) => row.freshness === "stale").length;
+	const unknownCount = rows.filter((row) => row.freshness === "unknown").length;
+	const status = unknownCount > 0 ? "degraded" : staleCount > 0 ? "warn" : "ok";
+	const band =
+		maxRiskScore >= 80 ? "high" : maxRiskScore >= 40 ? "medium" : "low";
+	return {
+		status,
+		band,
+		maxRiskScore,
+		staleCount,
+		unknownCount,
+		thresholds: {
+			staleAfterMs: staleMs,
+			unknownAfterMs: unknownMs,
+		},
+		rows,
 	};
 }
 

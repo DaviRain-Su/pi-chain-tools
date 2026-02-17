@@ -823,6 +823,7 @@
         execQualityEl.textContent = computeExecutionQuality(data);
         const bscLayer = (unified?.portfolio?.executionLayers || []).find((x) => String(x?.chain || "").toLowerCase() === "bsc");
         const protocolPos = bscLayer?.positions?.protocols || {};
+        const normalizationHealth = bscLayer?.positions?.normalizationHealth || {};
         const sub = protocolPos?.subtotalsUsdApprox || {};
         const health = protocolPos?.health || { status: bscLayer?.status || "unknown", reason: bscLayer?.note || "-", detail: "-" };
         const fetchedAt = protocolPos?.fetchedAt ? new Date(protocolPos.fetchedAt).toLocaleString() : "-";
@@ -835,7 +836,13 @@
         const wombatNormUpdated = wombatNorm?.updatedAt ? new Date(wombatNorm.updatedAt).toLocaleString() : "-";
         const listaNormTitle = `lista source=${listaNormSource} updated=${listaNormUpdated} usdc=${Number(listaNorm?.usdc || 1).toFixed(6)} usdt=${Number(listaNorm?.usdt || 1).toFixed(6)}`;
         const wombatNormTitle = `wombat source=${wombatNormSource} updated=${wombatNormUpdated} usdc=${Number(wombatNorm?.usdc || 1).toFixed(6)} usdt=${Number(wombatNorm?.usdt || 1).toFixed(6)}`;
-        bscProtocolHealthEl.innerHTML = `BSC protocol: <span class="${health.status === "ok" ? "ok" : health.status === "error" ? "warn" : "muted"}">${health.status || "unknown"}</span> · reason=${health.reason || "-"} · detail=${health.detail || "-"}<br/><span class="muted">Aave≈$${Number(sub.aave || 0).toFixed(2)} · Venus≈$${Number(sub.venus || 0).toFixed(2)} · Lista≈$${Number(sub.lista || 0).toFixed(2)} · Wombat≈$${Number(sub.wombat || 0).toFixed(2)} · Total≈$${Number(protocolPos.totalUsdApprox || 0).toFixed(2)} · fetched=${fetchedAt}</span><br/><span class="muted">normalization: <span title="${listaNormTitle}">lista=${listaNormSource}</span> · <span title="${wombatNormTitle}">wombat=${wombatNormSource}</span></span>`;
+        const normStatus = String(normalizationHealth?.status || "unknown");
+        const normBand = String(normalizationHealth?.band || "unknown");
+        const normMaxRisk = Number.isFinite(Number(normalizationHealth?.maxRiskScore)) ? Number(normalizationHealth.maxRiskScore) : "-";
+        const normStale = Number(normalizationHealth?.staleCount || 0);
+        const normUnknown = Number(normalizationHealth?.unknownCount || 0);
+        const normCls = normStatus === "ok" ? "ok" : normStatus === "warn" ? "warn" : "muted";
+        bscProtocolHealthEl.innerHTML = `BSC protocol: <span class="${health.status === "ok" ? "ok" : health.status === "error" ? "warn" : "muted"}">${health.status || "unknown"}</span> · reason=${health.reason || "-"} · detail=${health.detail || "-"}<br/><span class="muted">Aave≈$${Number(sub.aave || 0).toFixed(2)} · Venus≈$${Number(sub.venus || 0).toFixed(2)} · Lista≈$${Number(sub.lista || 0).toFixed(2)} · Wombat≈$${Number(sub.wombat || 0).toFixed(2)} · Total≈$${Number(protocolPos.totalUsdApprox || 0).toFixed(2)} · fetched=${fetchedAt}</span><br/><span class="muted">normalization: <span title="${listaNormTitle}">lista=${listaNormSource}</span> · <span title="${wombatNormTitle}">wombat=${wombatNormSource}</span> · <span class="${normCls}">health=${normStatus}/${normBand}</span> · maxRisk=${normMaxRisk} · stale=${normStale} · unknown=${normUnknown}</span>`;
         const readiness = bscYieldPlan?.executeReadiness || {};
         const blockers = Array.isArray(readiness?.blockers) ? readiness.blockers : [];
         const blockerText = blockers.length ? blockers.join(", ") : "-";
