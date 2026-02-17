@@ -28,6 +28,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP Ops panel: ACP connectivity (`/api/acp/status`) + ACP job summary (`/api/acp/jobs/summary`) + recent ACP job list (`/api/acp/jobs`) in dashboard UI
 - ACP Ops now includes async submit controls (strategyId/buyer/amountRaw) and live polling for submitted async job status (`/api/acp/job/submit` + `/api/acp/jobs/:jobId`)
 - ACP async worker now supports retry backoff + max attempts and dead-letter state (`status=dead-letter`) for persistent failures
+- ACP Ops UI now shows dead-letter quick view and supports one-click retry (calls `POST /api/acp/jobs/retry`)
 - Dashboard includes Payments panel (`/api/payments`) with status breakdown (`pending/paid/failed`) and recent payment rows
 - ACP recent jobs table supports status filtering and NEAR tx explorer links when `txHash` is present
 - ACP recent jobs table now also shows `strategyId` / `buyer` / `remainingUses` to trace entitlement consumption during execution

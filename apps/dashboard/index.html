@@ -184,6 +184,7 @@
           <span id="acpAsyncMeta" class="muted"></span>
         </div>
         <div id="acpAsyncStatus" class="muted" style="margin-top:6px">-</div>
+        <div id="acpDeadLetters" class="muted" style="margin-top:6px">dead-letter: -</div>
         <details style="margin-top:10px">
           <summary>Recent ACP Jobs</summary>
           <div class="row" style="margin:8px 0">
@@ -360,6 +361,7 @@
       const submitAcpAsyncJobBtn = document.getElementById("submitAcpAsyncJob");
       const acpAsyncMetaEl = document.getElementById("acpAsyncMeta");
       const acpAsyncStatusEl = document.getElementById("acpAsyncStatus");
+      const acpDeadLettersEl = document.getElementById("acpDeadLetters");
       const strategyEl = document.getElementById("strategy");
       const paymentsMetaEl = document.getElementById("paymentsMeta");
       const paymentsRowsEl = document.getElementById("paymentsRows");
@@ -690,18 +692,20 @@
       async function load() {
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
-        const [snapRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes] = await Promise.all([
+        const [snapRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes] = await Promise.all([
           fetch(`/api/snapshot${query}`),
           fetch("/api/acp/status"),
           fetch("/api/acp/jobs/summary"),
           fetch("/api/acp/jobs"),
           fetch("/api/payments"),
+          fetch("/api/acp/jobs/dead-letter"),
         ]);
         const data = await snapRes.json();
         const acpStatus = await acpStatusRes.json().catch(() => ({ ok: false }));
         const acpSummary = await acpSummaryRes.json().catch(() => ({ ok: false }));
         const acpJobs = await acpJobsRes.json().catch(() => ({ ok: false, jobs: [] }));
         const payments = await paymentsRes.json().catch(() => ({ ok: false, payments: [] }));
+        const acpDead = await acpDeadRes.json().catch(() => ({ ok: false, deadLetters: [] }));
         if (!snapRes.ok) {
           metaEl.textContent = `Error: ${data.error || "Unknown"}`;
           return;
@@ -840,6 +844,37 @@
           if (inQueue) {
             acpAsyncStatusEl.textContent = `job=${inQueue.jobId} status=${inQueue.status} updated=${inQueue.updatedAt || "-"}${inQueue.error ? ` error=${inQueue.error}` : ""}`;
           }
+        }
+        const deadLetters = Array.isArray(acpDead?.deadLetters) ? acpDead.deadLetters : [];
+        acpDeadLettersEl.innerHTML = `dead-letter: ${deadLetters.length}`;
+        if (deadLetters.length > 0) {
+          const quick = deadLetters.slice(0, 3).map((row) => {
+            const jobId = String(row?.jobId || "");
+            const err = String(row?.error || "").slice(0, 80);
+            return `<span class="muted" style="margin-right:8px">${jobId}(${row.attemptCount || 0}/${row.maxAttempts || 0})</span><button data-retry-job="${jobId}">Retry</button><span class="warn" style="margin:0 8px">${err}</span>`;
+          }).join("<br/>");
+          acpDeadLettersEl.innerHTML += `<br/>${quick}`;
+          acpDeadLettersEl.querySelectorAll("button[data-retry-job]").forEach((btn) => {
+            btn.addEventListener("click", async (ev) => {
+              ev.stopPropagation();
+              const jobId = String(btn.getAttribute("data-retry-job") || "");
+              if (!jobId) return;
+              acpAsyncMetaEl.textContent = `Retrying ${jobId}...`;
+              try {
+                const res = await fetch("/api/acp/jobs/retry", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ confirm: true, jobId }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data?.error || `retry failed (${res.status})`);
+                acpAsyncMetaEl.textContent = `Retried ${jobId}`;
+                await load();
+              } catch (e) {
+                acpAsyncMetaEl.textContent = `Retry failed: ${e.message || e}`;
+              }
+            });
+          });
         }
         targetAlertEl.innerHTML = computeTargetAlert(data, targetConfig);
         const plan = computeRebalancePlan(data, targetConfig);
