@@ -102,6 +102,10 @@ const BSC_EXECUTE_NONCE_RETRY = Math.max(
 	0,
 	Number.parseInt(process.env.BSC_EXECUTE_NONCE_RETRY || "1", 10) || 1,
 );
+const BSC_QUOTE_MAX_DIVERGENCE_BPS = Math.max(
+	0,
+	Number.parseInt(process.env.BSC_QUOTE_MAX_DIVERGENCE_BPS || "800", 10) || 800,
+);
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
 	"true";
@@ -2095,9 +2099,49 @@ function uiToRaw(ui, decimals) {
 	return String(Math.floor(n * 10 ** Number(decimals || 18)));
 }
 
+function quoteDivergenceBps(aRaw, bRaw) {
+	const a = BigInt(String(aRaw || "0"));
+	const b = BigInt(String(bRaw || "0"));
+	if (a <= 0n || b <= 0n) return null;
+	const base = a > b ? a : b;
+	const diff = a > b ? a - b : b - a;
+	return Number((diff * 10_000n) / base);
+}
+
+async function getBscOnchainQuote(amountInRaw) {
+	const provider = new JsonRpcProvider(BSC_RPC_URL, {
+		name: "bsc",
+		chainId: BSC_CHAIN_ID,
+	});
+	const routerIface = new Interface([
+		"function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)",
+	]);
+	const data = routerIface.encodeFunctionData("getAmountsOut", [
+		String(amountInRaw),
+		[BSC_USDT, BSC_USDC],
+	]);
+	const raw = await provider.call({ to: BSC_ROUTER_V2, data });
+	const decoded = routerIface.decodeFunctionResult("getAmountsOut", raw);
+	const amounts = decoded?.[0] || [];
+	const outRaw = String(amounts?.[1]?.toString?.() || "0");
+	const inUi = rawToUi(amountInRaw, BSC_USDT_DECIMALS);
+	const outUi = rawToUi(outRaw, BSC_USDC_DECIMALS);
+	const rate = inUi > 0 ? outUi / inUi : 0;
+	return {
+		source: "onchain-router",
+		amountOutRaw: outRaw,
+		rate,
+		pairAddress: "",
+		liquidityUsd: 0,
+	};
+}
+
 async function getBscUsdtUsdcQuote(amountInRaw) {
 	const usdt = BSC_USDT.toLowerCase();
 	const usdc = BSC_USDC.toLowerCase();
+	let dexQuote = null;
+	let onchainQuote = null;
+
 	try {
 		const response = await fetch(
 			`https://api.dexscreener.com/latest/dex/tokens/${usdt}`,
@@ -2114,40 +2158,75 @@ async function getBscUsdtUsdcQuote(amountInRaw) {
 				(base === usdt && quote === usdc) || (base === usdc && quote === usdt)
 			);
 		});
-		if (candidates.length === 0) {
-			throw new Error("no usdt/usdc pair found on bsc from dexscreener");
+		if (candidates.length > 0) {
+			candidates.sort(
+				(a, b) =>
+					Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0),
+			);
+			const best = candidates[0];
+			const base = String(best.baseToken?.address || "").toLowerCase();
+			const priceNative = Number(best.priceNative || 0);
+			if (Number.isFinite(priceNative) && priceNative > 0) {
+				const inUi = rawToUi(amountInRaw, BSC_USDT_DECIMALS);
+				const rate = base === usdt ? priceNative : 1 / priceNative;
+				const outUi = inUi * rate;
+				const outRaw = uiToRaw(outUi, BSC_USDC_DECIMALS);
+				dexQuote = {
+					source: "dexscreener",
+					amountOutRaw: outRaw,
+					rate,
+					pairAddress: String(best.pairAddress || ""),
+					liquidityUsd: Number(best?.liquidity?.usd || 0),
+				};
+			}
 		}
-		candidates.sort(
-			(a, b) => Number(b?.liquidity?.usd || 0) - Number(a?.liquidity?.usd || 0),
-		);
-		const best = candidates[0];
-		const base = String(best.baseToken?.address || "").toLowerCase();
-		const priceNative = Number(best.priceNative || 0);
-		if (!Number.isFinite(priceNative) || priceNative <= 0) {
-			throw new Error("invalid dexscreener priceNative");
-		}
-		const inUi = rawToUi(amountInRaw, BSC_USDT_DECIMALS);
-		const rate = base === usdt ? priceNative : 1 / priceNative;
-		const outUi = inUi * rate;
-		const outRaw = uiToRaw(outUi, BSC_USDC_DECIMALS);
-		return {
-			source: "dexscreener",
-			amountOutRaw: outRaw,
-			rate,
-			pairAddress: String(best.pairAddress || ""),
-			liquidityUsd: Number(best?.liquidity?.usd || 0),
-		};
 	} catch {
-		const inUi = rawToUi(amountInRaw, BSC_USDT_DECIMALS);
-		const outRaw = uiToRaw(inUi, BSC_USDC_DECIMALS);
+		// ignore dexscreener failures; rely on onchain/fallback
+	}
+
+	try {
+		onchainQuote = await getBscOnchainQuote(amountInRaw);
+	} catch {
+		// ignore onchain quote failure; keep other sources
+	}
+
+	if (dexQuote && onchainQuote) {
+		const divergenceBps = quoteDivergenceBps(
+			dexQuote.amountOutRaw,
+			onchainQuote.amountOutRaw,
+		);
+		const conservative =
+			BigInt(dexQuote.amountOutRaw) < BigInt(onchainQuote.amountOutRaw)
+				? dexQuote
+				: onchainQuote;
 		return {
-			source: "fallback-1to1",
-			amountOutRaw: outRaw,
-			rate: 1,
-			pairAddress: "",
-			liquidityUsd: 0,
+			source: "dexscreener+onchain",
+			amountOutRaw: conservative.amountOutRaw,
+			rate: conservative.rate,
+			pairAddress: dexQuote.pairAddress,
+			liquidityUsd: dexQuote.liquidityUsd,
+			dexAmountOutRaw: dexQuote.amountOutRaw,
+			onchainAmountOutRaw: onchainQuote.amountOutRaw,
+			divergenceBps,
 		};
 	}
+	if (onchainQuote) {
+		return { ...onchainQuote, divergenceBps: null };
+	}
+	if (dexQuote) {
+		return { ...dexQuote, divergenceBps: null };
+	}
+
+	const inUi = rawToUi(amountInRaw, BSC_USDT_DECIMALS);
+	const outRaw = uiToRaw(inUi, BSC_USDC_DECIMALS);
+	return {
+		source: "fallback-1to1",
+		amountOutRaw: outRaw,
+		rate: 1,
+		pairAddress: "",
+		liquidityUsd: 0,
+		divergenceBps: null,
+	};
 }
 
 function parsePositiveRaw(value, fieldName) {
@@ -2416,6 +2495,16 @@ async function executeAction(payload) {
 				}
 				const runId = String(payload.runId || `run-${Date.now()}`).trim();
 				const quote = await getBscUsdtUsdcQuote(amountRaw);
+				const divergenceBps = Number(quote?.divergenceBps ?? -1);
+				if (
+					Number.isFinite(divergenceBps) &&
+					divergenceBps >= 0 &&
+					divergenceBps > BSC_QUOTE_MAX_DIVERGENCE_BPS
+				) {
+					throw new Error(
+						`quote divergence too high: ${divergenceBps}bps > ${BSC_QUOTE_MAX_DIVERGENCE_BPS}bps`,
+					);
+				}
 				const minAmountOutRaw = applySlippage(quote.amountOutRaw, slippageBps);
 				const executeResult = await executeBscSwap({
 					amountInRaw: amountRaw,
@@ -2479,6 +2568,9 @@ async function executeAction(payload) {
 						quoteRate: quote.rate,
 						quotePairAddress: quote.pairAddress,
 						quoteLiquidityUsd: quote.liquidityUsd,
+						quoteDivergenceBps: quote.divergenceBps ?? null,
+						dexAmountOutRaw: quote.dexAmountOutRaw || null,
+						onchainAmountOutRaw: quote.onchainAmountOutRaw || null,
 						slippageBps,
 						next: executeResult.ok
 							? ["optional lend supply adapter"]

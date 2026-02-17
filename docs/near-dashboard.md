@@ -106,6 +106,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `BSC_EXECUTE_MODE=command`: uses `BSC_EXECUTE_COMMAND` template placeholders `{amountInRaw} {minAmountOutRaw} {tokenIn} {tokenOut} {router} {rpcUrl} {chainId} {runId}`
   - `BSC_EXECUTE_MODE=auto` (default): prefer native when key exists, otherwise command
   - when configured, response returns `mode=execute` with `txHash` and BscScan link; otherwise explicit `mode=plan-only`
+  - quote now supports dual-source validation (Dexscreener + onchain router), returns conservative quote, and enforces divergence guard
   - native mode includes post-trade reconciliation fields (`tokenInDeltaRaw`, `tokenOutDeltaRaw`, `reconcileOk`, `minAmountOutRaw`) in receipt
   - execute failures are normalized as `BSC_EXECUTE_FAILED retryable=true|false ...` for async retry/dead-letter classification
 - Optional alert push on rollback/failure/reconcile-warning:
@@ -162,6 +163,7 @@ Open:
 - `BSC_EXECUTE_CONFIRMATIONS` - receipt confirmation count for native mode (default: `1`)
 - `BSC_EXECUTE_GAS_BUMP_PERCENT` - gas bump percentage over fee data for native mode (default: `15`)
 - `BSC_EXECUTE_NONCE_RETRY` - nonce/underpriced retry count for native mode (default: `1`)
+- `BSC_QUOTE_MAX_DIVERGENCE_BPS` - max allowed quote divergence between Dexscreener and onchain router (default: `800`)
 - `BSC_EXECUTE_COMMAND` - command template for command-mode BSC swap execution (supports placeholders listed above)
 - `ACP_DISMISSED_PURGE_ENABLED` - enable automatic dismissed-archive purge scheduler (`true|false`, default: `false`)
 - `ACP_DISMISSED_PURGE_DAYS` - purge threshold in days for dismissed jobs (default: `7`)

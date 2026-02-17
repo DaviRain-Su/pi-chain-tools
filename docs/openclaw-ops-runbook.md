@@ -155,9 +155,11 @@ npm test
 已完成：
 - ACP async 持久化、重试退避、DLQ、批量运维、归档、归档清理
 - payment -> entitlement -> execute 硬门禁
-- BSC execute 外部适配器模式
+- BSC execute 双模式（native RPC signer + command fallback）
+- BSC native 执行稳健化（gas/nonce/confirmations）+ post-trade reconciliation
+- BSC quote 双源校验（Dexscreener + onchain router）与 divergence 风险门限
 
 待持续优化：
-- BSC 原生执行器进一步产品化（非外部命令模板）
-- 真实支付通道回调深度集成
+- provider-specific 支付签名/回调契约再细化（生产级验签规范）
+- BSC 多跳路径与更复杂路由策略
 - 归档策略与指标告警策略继续精炼
