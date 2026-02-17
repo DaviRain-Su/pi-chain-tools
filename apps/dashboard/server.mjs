@@ -325,6 +325,30 @@ const BSC_LISTA_ALLOWED_TOKENS = String(
 	.split(",")
 	.map((x) => x.trim().toLowerCase())
 	.filter(Boolean);
+const BSC_WOMBAT_EXECUTE_ENABLED =
+	String(
+		envOrCfg("BSC_WOMBAT_EXECUTE_ENABLED", "bsc.wombat.enabled", "false"),
+	).toLowerCase() === "true";
+const BSC_WOMBAT_EXECUTE_COMMAND = String(
+	envOrCfg("BSC_WOMBAT_EXECUTE_COMMAND", "bsc.wombat.executeCommand", ""),
+).trim();
+const BSC_WOMBAT_MAX_AMOUNT_RAW = String(
+	envOrCfg(
+		"BSC_WOMBAT_MAX_AMOUNT_RAW",
+		"bsc.wombat.maxAmountRaw",
+		"20000000000000000000000",
+	),
+).trim();
+const BSC_WOMBAT_ALLOWED_TOKENS = String(
+	envOrCfg(
+		"BSC_WOMBAT_ALLOWED_TOKENS",
+		"bsc.wombat.allowedTokens",
+		`${BSC_USDC},${BSC_USDT}`,
+	),
+)
+	.split(",")
+	.map((x) => x.trim().toLowerCase())
+	.filter(Boolean);
 const BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT = String(
 	envOrCfg(
 		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT",
@@ -1819,6 +1843,67 @@ async function executeBscListaSupply(params) {
 	}
 }
 
+async function executeBscWombatSupply(params) {
+	if (!BSC_WOMBAT_EXECUTE_COMMAND) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_execute_command_missing",
+		);
+	}
+	const token = String(params?.token || "")
+		.trim()
+		.toLowerCase();
+	const amountRaw = String(params?.amountRaw || "0").trim();
+	if (!/^\d+$/.test(amountRaw) || BigInt(amountRaw) <= 0n) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_amount_invalid",
+		);
+	}
+	const maxRaw = /^\d+$/.test(BSC_WOMBAT_MAX_AMOUNT_RAW)
+		? BigInt(BSC_WOMBAT_MAX_AMOUNT_RAW)
+		: 0n;
+	if (maxRaw > 0n && BigInt(amountRaw) > maxRaw) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_amount_exceeds_limit",
+		);
+	}
+	if (!token || !BSC_WOMBAT_ALLOWED_TOKENS.includes(token)) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_token_not_allowed",
+		);
+	}
+	const replacements = {
+		"{amountRaw}": amountRaw,
+		"{token}": token,
+		"{rpcUrl}": String(params.rpcUrl || BSC_RPC_URL || ""),
+		"{chainId}": String(params.chainId || BSC_CHAIN_ID || ""),
+		"{runId}": String(params.runId || ""),
+	};
+	let cmd = BSC_WOMBAT_EXECUTE_COMMAND;
+	for (const [k, v] of Object.entries(replacements)) {
+		cmd = cmd.split(k).join(v);
+	}
+	try {
+		const output = await runCommand("bash", ["-lc", cmd], {
+			env: process.env,
+			cwd: ACP_WORKDIR,
+		});
+		const txHash = String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
+		return {
+			ok: true,
+			mode: "execute",
+			provider: "wombat-command",
+			output,
+			txHash,
+		};
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		const retryable = isTransientExecError(error);
+		throw new Error(
+			`BSC_EXECUTE_FAILED retryable=${retryable ? "true" : "false"} message=${msg}`,
+		);
+	}
+}
+
 function buildAcpExecutionPlan(payload) {
 	const requirements = payload?.requirements || {};
 	const targetChain = String(
@@ -2438,6 +2523,8 @@ function classifyAcpErrorType(error) {
 		return "bsc_aave_post_action_failed";
 	if (text.includes("bsc_lista_post_action_failed"))
 		return "bsc_lista_post_action_failed";
+	if (text.includes("bsc_wombat_post_action_failed"))
+		return "bsc_wombat_post_action_failed";
 	if (text.includes("bsc_execute_failed")) return "bsc_execute_failed";
 	if (text.includes("429") || text.includes("too many requests"))
 		return "rpc_429";
@@ -2458,6 +2545,7 @@ function isAcpRetryableError(error) {
 		"bsc_execute_failed",
 		"bsc_aave_post_action_failed",
 		"bsc_lista_post_action_failed",
+		"bsc_wombat_post_action_failed",
 	].includes(type);
 }
 
@@ -3551,7 +3639,26 @@ async function computeBscYieldPlan(input = {}) {
 	}
 	const wombatBlockers = [];
 	if (executionProtocol === "wombat") {
-		wombatBlockers.push("wombat_execute_not_implemented");
+		if (!BSC_WOMBAT_EXECUTE_ENABLED)
+			wombatBlockers.push("wombat_execute_disabled");
+		if (!BSC_WOMBAT_EXECUTE_COMMAND)
+			wombatBlockers.push("missing_bsc_wombat_execute_command");
+		if (!BSC_WOMBAT_ALLOWED_TOKENS.includes(String(BSC_USDC).toLowerCase())) {
+			wombatBlockers.push("bsc_usdc_not_in_wombat_allowed_tokens");
+		}
+		if (/^\d+$/.test(plan?.recommendedAmountRaw || "0")) {
+			const maxRaw = /^\d+$/.test(BSC_WOMBAT_MAX_AMOUNT_RAW)
+				? BigInt(BSC_WOMBAT_MAX_AMOUNT_RAW)
+				: 0n;
+			if (
+				maxRaw > 0n &&
+				BigInt(String(plan?.recommendedAmountRaw || "0")) > maxRaw
+			) {
+				wombatBlockers.push(
+					"recommended_amount_exceeds_bsc_wombat_max_amount_raw",
+				);
+			}
+		}
 	}
 	const protocolBlockers =
 		executionProtocol === "aave"
@@ -3578,8 +3685,13 @@ async function computeBscYieldPlan(input = {}) {
 			"BSC_LISTA_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
 		recommended_amount_exceeds_bsc_lista_max_amount_raw:
 			"BSC_LISTA_MAX_AMOUNT_RAW=<larger_raw_cap>",
-		wombat_execute_not_implemented:
-			"# Wombat execute adapter pending (read-only integrated)",
+		wombat_execute_disabled: "BSC_WOMBAT_EXECUTE_ENABLED=true",
+		missing_bsc_wombat_execute_command:
+			"BSC_WOMBAT_EXECUTE_COMMAND='node scripts/wombat-supply.mjs --amount {amountRaw} --run {runId}'",
+		bsc_usdc_not_in_wombat_allowed_tokens:
+			"BSC_WOMBAT_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
+		recommended_amount_exceeds_bsc_wombat_max_amount_raw:
+			"BSC_WOMBAT_MAX_AMOUNT_RAW=<larger_raw_cap>",
 	};
 	const fixLines = protocolBlockers
 		.map((b) => envHintByBlocker[b])
@@ -3606,13 +3718,18 @@ async function computeBscYieldPlan(input = {}) {
 						"# requires: BSC_LISTA_EXECUTE_ENABLED + BSC_LISTA_EXECUTE_COMMAND",
 					]
 				: executionProtocol === "wombat"
-					? ["# wombat execute currently blocked (adapter pending)"]
+					? [
+							"# wombat command-mode execute",
+							"# requires: BSC_WOMBAT_EXECUTE_ENABLED + BSC_WOMBAT_EXECUTE_COMMAND",
+						]
 					: ["# venus uses existing swap+supply path"];
 	const safeDefaults = [
 		"BSC_AAVE_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
 		`BSC_AAVE_MAX_AMOUNT_RAW=${BSC_AAVE_MAX_AMOUNT_RAW}`,
 		"BSC_LISTA_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
 		`BSC_LISTA_MAX_AMOUNT_RAW=${BSC_LISTA_MAX_AMOUNT_RAW}`,
+		"BSC_WOMBAT_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
+		`BSC_WOMBAT_MAX_AMOUNT_RAW=${BSC_WOMBAT_MAX_AMOUNT_RAW}`,
 		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT=venus",
 	];
 	const fullFixPack = [
@@ -3628,7 +3745,9 @@ async function computeBscYieldPlan(input = {}) {
 	const canExecute =
 		executionProtocol === "venus"
 			? true
-			: executionProtocol === "aave" || executionProtocol === "lista"
+			: executionProtocol === "aave" ||
+					executionProtocol === "lista" ||
+					executionProtocol === "wombat"
 				? protocolBlockers.length === 0
 				: false;
 	const executeReadiness = {
@@ -3636,6 +3755,7 @@ async function computeBscYieldPlan(input = {}) {
 		venusEnabled: true,
 		aaveEnabled: BSC_AAVE_EXECUTE_ENABLED,
 		listaEnabled: BSC_LISTA_EXECUTE_ENABLED,
+		wombatEnabled: BSC_WOMBAT_EXECUTE_ENABLED,
 		aaveMode: BSC_AAVE_EXECUTE_MODE,
 		canExecute,
 		reason: canExecute
@@ -3657,7 +3777,8 @@ async function computeBscYieldPlan(input = {}) {
 						mode:
 							executionProtocol === "aave"
 								? BSC_AAVE_EXECUTE_MODE
-								: executionProtocol === "lista"
+								: executionProtocol === "lista" ||
+										executionProtocol === "wombat"
 									? "command"
 									: "blocked",
 						envLines: fixLines,
@@ -5302,6 +5423,7 @@ const server = http.createServer(async (req, res) => {
 					defaultProtocol: BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT,
 					aaveEnabled: BSC_AAVE_EXECUTE_ENABLED,
 					listaEnabled: BSC_LISTA_EXECUTE_ENABLED,
+					wombatEnabled: BSC_WOMBAT_EXECUTE_ENABLED,
 				},
 				minAprDeltaBpsDefault: BSC_YIELD_MIN_APR_DELTA_BPS,
 			});
@@ -5349,7 +5471,8 @@ const server = http.createServer(async (req, res) => {
 				let postAction = null;
 				if (
 					plan.executionProtocol === "aave" ||
-					plan.executionProtocol === "lista"
+					plan.executionProtocol === "lista" ||
+					plan.executionProtocol === "wombat"
 				) {
 					const supplyAmountRaw = String(
 						result?.execution?.receipt?.tokenOutDeltaRaw ||
@@ -5366,36 +5489,51 @@ const server = http.createServer(async (req, res) => {
 										chainId: BSC_CHAIN_ID,
 										runId,
 									})
-								: await executeBscListaSupply({
-										amountRaw: supplyAmountRaw,
-										token: BSC_USDC,
-										rpcUrl: BSC_RPC_URL,
-										chainId: BSC_CHAIN_ID,
-										runId,
-									});
+								: plan.executionProtocol === "lista"
+									? await executeBscListaSupply({
+											amountRaw: supplyAmountRaw,
+											token: BSC_USDC,
+											rpcUrl: BSC_RPC_URL,
+											chainId: BSC_CHAIN_ID,
+											runId,
+										})
+									: await executeBscWombatSupply({
+											amountRaw: supplyAmountRaw,
+											token: BSC_USDC,
+											rpcUrl: BSC_RPC_URL,
+											chainId: BSC_CHAIN_ID,
+											runId,
+										});
 					} else {
 						postAction = {
 							ok: false,
 							reason:
 								plan.executionProtocol === "aave"
 									? "aave_supply_amount_unavailable"
-									: "lista_supply_amount_unavailable",
+									: plan.executionProtocol === "lista"
+										? "lista_supply_amount_unavailable"
+										: "wombat_supply_amount_unavailable",
 						};
 					}
 					const isAave = plan.executionProtocol === "aave";
+					const isLista = plan.executionProtocol === "lista";
 					pushActionHistory({
-						action: isAave ? "bsc_aave_supply" : "bsc_lista_supply",
+						action: isAave
+							? "bsc_aave_supply"
+							: isLista
+								? "bsc_lista_supply"
+								: "bsc_wombat_supply",
 						step: payload.step || "bsc-stable-yield-post-action",
 						accountId: payload.account || null,
 						status: postAction?.ok ? "success" : "error",
 						summary: postAction?.ok
-							? `${isAave ? "aave" : "lista"} post-swap supply executed`
-							: `${isAave ? "aave" : "lista"} post-swap supply failed: ${postAction?.reason || "unknown"}`,
+							? `${isAave ? "aave" : isLista ? "lista" : "wombat"} post-swap supply executed`
+							: `${isAave ? "aave" : isLista ? "lista" : "wombat"} post-swap supply failed: ${postAction?.reason || "unknown"}`,
 						txHash: postAction?.txHash || null,
 					});
 					if (!postAction?.ok) {
 						throw new Error(
-							`${isAave ? "BSC_AAVE_POST_ACTION_FAILED" : "BSC_LISTA_POST_ACTION_FAILED"} retryable=true message=${postAction?.reason || "unknown"}`,
+							`${isAave ? "BSC_AAVE_POST_ACTION_FAILED" : isLista ? "BSC_LISTA_POST_ACTION_FAILED" : "BSC_WOMBAT_POST_ACTION_FAILED"} retryable=true message=${postAction?.reason || "unknown"}`,
 						);
 					}
 				}

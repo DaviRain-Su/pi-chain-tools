@@ -106,7 +106,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - includes stable-yield agent v1 APIs:
     - `GET /api/bsc/yield/plan` (supports `executionProtocol=venus|aave|lista|wombat`; when omitted, defaults to net-yield `recommendedProtocol`; returns `executeReadiness.blockers/recommendedProtocol` and includes `netYieldInsight`)
     - `GET /api/bsc/yield/markets` (returns Venus/Aave/Lista/Wombat read-only compare + best protocol recommendation + `sourceHealth` + `marketHealth(status/source/updatedAt/ageMs)` + `marketRiskTags` + `marketRiskScore(0-100)` + `marketRiskBand(low|medium|high)` + `aggregateRisk{avgScore,maxScore,band}` + `netYieldInsight`; includes Pancake V2 read-only quote signal and `dexQuoteCompare{bestSource,conservativeSource,spreadBps}` in `netYieldInsight.quote`; supports query `amountUsd` and `rebalanceIntervalDays`)
-    - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista` requires enable flag + command adapter; `wombat` currently readiness-blocked)
+    - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista/wombat` require enable flag + command adapter)
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
     - `POST /api/bsc/yield/worker/stop` (`confirm=true`)
     - `GET /api/bsc/yield/worker/status`
@@ -182,6 +182,10 @@ Common mapping examples:
 - `bsc.lista.executeCommand` ↔ `BSC_LISTA_EXECUTE_COMMAND`
 - `bsc.lista.maxAmountRaw` ↔ `BSC_LISTA_MAX_AMOUNT_RAW`
 - `bsc.lista.allowedTokens` ↔ `BSC_LISTA_ALLOWED_TOKENS`
+- `bsc.wombat.enabled` ↔ `BSC_WOMBAT_EXECUTE_ENABLED`
+- `bsc.wombat.executeCommand` ↔ `BSC_WOMBAT_EXECUTE_COMMAND`
+- `bsc.wombat.maxAmountRaw` ↔ `BSC_WOMBAT_MAX_AMOUNT_RAW`
+- `bsc.wombat.allowedTokens` ↔ `BSC_WOMBAT_ALLOWED_TOKENS`
 - `bsc.aave.maxAmountRaw` ↔ `BSC_AAVE_MAX_AMOUNT_RAW`
 - `acp.dismissedPurge.enabled` ↔ `ACP_DISMISSED_PURGE_ENABLED`
 - `payments.webhookProvider` ↔ `PAYMENT_WEBHOOK_PROVIDER`
@@ -227,6 +231,10 @@ Common mapping examples:
 - `BSC_LISTA_EXECUTE_COMMAND` - command template for post-swap Lista supply (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`)
 - `BSC_LISTA_MAX_AMOUNT_RAW` - max raw amount allowed per Lista supply action (default: `20000000000000000000000`)
 - `BSC_LISTA_ALLOWED_TOKENS` - comma-separated token allowlist for Lista supply (default: `${BSC_USDC},${BSC_USDT}`)
+- `BSC_WOMBAT_EXECUTE_ENABLED` - gate for Wombat execute path (default: `false`)
+- `BSC_WOMBAT_EXECUTE_COMMAND` - command template for post-swap Wombat supply (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`)
+- `BSC_WOMBAT_MAX_AMOUNT_RAW` - max raw amount allowed per Wombat supply action (default: `20000000000000000000000`)
+- `BSC_WOMBAT_ALLOWED_TOKENS` - comma-separated token allowlist for Wombat supply (default: `${BSC_USDC},${BSC_USDT}`)
 - `BSC_AAVE_EXECUTE_MODE` - `auto|native|command` (default: `auto`)
 - `BSC_AAVE_POOL` - Aave Pool contract address (required for native mode)
 - `BSC_AAVE_EXECUTE_PRIVATE_KEY` - signer private key for native Aave supply (fallback: `BSC_EXECUTE_PRIVATE_KEY`)
