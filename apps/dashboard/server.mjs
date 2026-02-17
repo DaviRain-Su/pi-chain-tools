@@ -2946,15 +2946,56 @@ async function computeBscYieldPlan(input = {}) {
 		aprHints,
 		minAprDeltaBps,
 	});
+	const aaveBlockers = [];
+	if (executionProtocol === "aave") {
+		if (!BSC_AAVE_EXECUTE_ENABLED) aaveBlockers.push("aave_execute_disabled");
+		if (
+			BSC_AAVE_EXECUTE_MODE === "native" ||
+			BSC_AAVE_EXECUTE_MODE === "auto"
+		) {
+			if (!BSC_AAVE_POOL) aaveBlockers.push("missing_bsc_aave_pool");
+			if (!BSC_AAVE_EXECUTE_PRIVATE_KEY) {
+				aaveBlockers.push("missing_bsc_aave_execute_private_key");
+			}
+		}
+		if (
+			BSC_AAVE_EXECUTE_MODE === "command" ||
+			BSC_AAVE_EXECUTE_MODE === "auto"
+		) {
+			if (!BSC_AAVE_EXECUTE_COMMAND) {
+				aaveBlockers.push("missing_bsc_aave_execute_command");
+			}
+		}
+		if (!BSC_AAVE_ALLOWED_TOKENS.includes(String(BSC_USDC).toLowerCase())) {
+			aaveBlockers.push("bsc_usdc_not_in_aave_allowed_tokens");
+		}
+		if (/^\d+$/.test(plan?.recommendedAmountRaw || "0")) {
+			const maxRaw = /^\d+$/.test(BSC_AAVE_MAX_AMOUNT_RAW)
+				? BigInt(BSC_AAVE_MAX_AMOUNT_RAW)
+				: 0n;
+			if (
+				maxRaw > 0n &&
+				BigInt(String(plan?.recommendedAmountRaw || "0")) > maxRaw
+			) {
+				aaveBlockers.push("recommended_amount_exceeds_bsc_aave_max_amount_raw");
+			}
+		}
+	}
+	const canExecuteAave =
+		executionProtocol !== "aave" || aaveBlockers.length === 0;
 	const executeReadiness = {
 		requestedProtocol: executionProtocol,
 		venusEnabled: true,
 		aaveEnabled: BSC_AAVE_EXECUTE_ENABLED,
-		canExecute: executionProtocol === "venus" || BSC_AAVE_EXECUTE_ENABLED,
+		aaveMode: BSC_AAVE_EXECUTE_MODE,
+		canExecute: executionProtocol === "venus" ? true : canExecuteAave,
 		reason:
-			executionProtocol === "venus" || BSC_AAVE_EXECUTE_ENABLED
+			executionProtocol === "venus"
 				? "ok"
-				: "aave_execute_disabled",
+				: canExecuteAave
+					? "ok"
+					: "aave_precheck_failed",
+		blockers: executionProtocol === "aave" ? aaveBlockers : [],
 	};
 	return {
 		ok: true,
