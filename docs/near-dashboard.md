@@ -46,6 +46,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Expanded detail now renders structured blocks (`receipt` / `result` / `error` / `raw`) for faster troubleshooting
 - Error-focused readability: when a job is `error` (or has error payload), detail blocks auto-expand and the error section is visually marked (`⚠ error`)
 - Execution Quality now also includes RPC reliability counters (attempts/retries/retryRate/HTTP 429/5xx), last successful endpoint / latest error snippet, and a basic endpoint health ranking (`score`) to indicate the currently best-performing RPC
+- Execution Quality includes payment webhook health counters (`accepted/idempotent/rejected`, last provider/error) for callback operations
 - Adaptive RPC routing: request loop prefers currently best-scored endpoint first (based on live endpoint health stats)
 - ACP integration bootstrap (Virtual Base identity + multi-chain execution preview):
   - `GET /api/acp/status` -> best-effort `acp whoami` + `acp wallet balance` JSON output

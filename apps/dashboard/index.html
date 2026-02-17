@@ -637,7 +637,9 @@
         const topText = top
           ? `best=${top.endpoint} score=${Number(top.score || 0).toFixed(2)}`
           : "best=-";
-        return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText} · ${pnlText} · ${rpcText} · ${rpcDetail} · ${topText}`;
+        const w = snapshot?.paymentWebhookMetrics || {};
+        const webhookText = `Webhook accepted=${Number(w.accepted || 0)} idempotent=${Number(w.idempotent || 0)} rejected=${Number(w.rejected || 0)} lastProvider=${w.lastProvider || '-'} lastErr=${w.lastError || '-'}`;
+        return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText} · ${pnlText} · ${rpcText} · ${rpcDetail} · ${topText} · ${webhookText}`;
       }
 
       function toCsv(snapshot) {

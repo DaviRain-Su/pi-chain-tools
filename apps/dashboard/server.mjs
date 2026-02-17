@@ -167,6 +167,14 @@ const REBALANCE_METRICS = {
 	recent: [],
 	pnlSeries: [],
 };
+const PAYMENT_WEBHOOK_METRICS = {
+	accepted: 0,
+	idempotent: 0,
+	rejected: 0,
+	lastEventAt: null,
+	lastProvider: null,
+	lastError: null,
+};
 const ACP_JOB_HISTORY = [];
 const ACP_JOB_STATE = {
 	dailyWindowDay: "",
@@ -203,6 +211,7 @@ async function saveMetricsToDisk() {
 				{
 					rebalanceMetrics: REBALANCE_METRICS,
 					rpcMetrics: RPC_METRICS,
+					paymentWebhookMetrics: PAYMENT_WEBHOOK_METRICS,
 					acpJobHistory: ACP_JOB_HISTORY,
 					acpAsyncJobs: ACP_ASYNC_JOBS,
 				},
@@ -234,6 +243,16 @@ async function loadMetricsFromDisk() {
 		REBALANCE_METRICS.pnlSeries = Array.isArray(rebalance.pnlSeries)
 			? rebalance.pnlSeries.slice(0, 100)
 			: [];
+
+		const webhook = parsed.paymentWebhookMetrics;
+		if (webhook && typeof webhook === "object") {
+			PAYMENT_WEBHOOK_METRICS.accepted = Number(webhook.accepted || 0);
+			PAYMENT_WEBHOOK_METRICS.idempotent = Number(webhook.idempotent || 0);
+			PAYMENT_WEBHOOK_METRICS.rejected = Number(webhook.rejected || 0);
+			PAYMENT_WEBHOOK_METRICS.lastEventAt = webhook.lastEventAt || null;
+			PAYMENT_WEBHOOK_METRICS.lastProvider = webhook.lastProvider || null;
+			PAYMENT_WEBHOOK_METRICS.lastError = webhook.lastError || null;
+		}
 
 		const acpHistory = parsed.acpJobHistory;
 		if (Array.isArray(acpHistory)) {
@@ -877,6 +896,9 @@ async function buildSnapshot(accountId) {
 		rebalanceMetrics: {
 			...REBALANCE_METRICS,
 			recent: REBALANCE_METRICS.recent,
+		},
+		paymentWebhookMetrics: {
+			...PAYMENT_WEBHOOK_METRICS,
 		},
 	};
 }
@@ -3047,6 +3069,10 @@ const server = http.createServer(async (req, res) => {
 				req.headers["x-payment-signature"] ||
 				req.headers["x-openclaw-signature"];
 			if (!verifyPaymentWebhookSignature(rawText, signature)) {
+				PAYMENT_WEBHOOK_METRICS.rejected += 1;
+				PAYMENT_WEBHOOK_METRICS.lastEventAt = new Date().toISOString();
+				PAYMENT_WEBHOOK_METRICS.lastError = "invalid_signature";
+				void saveMetricsToDisk();
 				return json(res, 401, {
 					ok: false,
 					error: "Invalid webhook signature",
@@ -3063,12 +3089,21 @@ const server = http.createServer(async (req, res) => {
 				.toLowerCase();
 			const normalized = normalizeWebhookPayload(payload, providerHint);
 			if (!normalized.paymentId) {
+				PAYMENT_WEBHOOK_METRICS.rejected += 1;
+				PAYMENT_WEBHOOK_METRICS.lastEventAt = new Date().toISOString();
+				PAYMENT_WEBHOOK_METRICS.lastProvider = normalized.provider || null;
+				PAYMENT_WEBHOOK_METRICS.lastError = "missing_payment_id";
+				void saveMetricsToDisk();
 				return json(res, 400, {
 					ok: false,
 					error: "Missing paymentId in webhook payload",
 				});
 			}
 			if (normalized.eventId && isWebhookEventProcessed(normalized.eventId)) {
+				PAYMENT_WEBHOOK_METRICS.idempotent += 1;
+				PAYMENT_WEBHOOK_METRICS.lastEventAt = new Date().toISOString();
+				PAYMENT_WEBHOOK_METRICS.lastProvider = normalized.provider || null;
+				void saveMetricsToDisk();
 				return json(res, 200, {
 					ok: true,
 					idempotent: true,
@@ -3088,7 +3123,14 @@ const server = http.createServer(async (req, res) => {
 				},
 				`provider-webhook:${normalized.provider}`,
 			);
-			if (!out.ok) return json(res, out.status || 400, out);
+			if (!out.ok) {
+				PAYMENT_WEBHOOK_METRICS.rejected += 1;
+				PAYMENT_WEBHOOK_METRICS.lastEventAt = new Date().toISOString();
+				PAYMENT_WEBHOOK_METRICS.lastProvider = normalized.provider || null;
+				PAYMENT_WEBHOOK_METRICS.lastError = out.error || "status_update_failed";
+				void saveMetricsToDisk();
+				return json(res, out.status || 400, out);
+			}
 			if (normalized.eventId) {
 				markWebhookEventProcessed({
 					eventId: normalized.eventId,
@@ -3097,7 +3139,12 @@ const server = http.createServer(async (req, res) => {
 					source: normalized.provider,
 				});
 			}
+			PAYMENT_WEBHOOK_METRICS.accepted += 1;
+			PAYMENT_WEBHOOK_METRICS.lastEventAt = new Date().toISOString();
+			PAYMENT_WEBHOOK_METRICS.lastProvider = normalized.provider || null;
+			PAYMENT_WEBHOOK_METRICS.lastError = null;
 			await saveMarketplaceToDisk();
+			void saveMetricsToDisk();
 			return json(res, 200, {
 				ok: true,
 				idempotent: false,
