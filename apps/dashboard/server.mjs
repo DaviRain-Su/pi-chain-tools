@@ -2209,6 +2209,41 @@ function buildBscPostActionArtifact({
 	};
 }
 
+function reconcileBscExecutionArtifact(artifact) {
+	const type = String(artifact?.type || "");
+	const version = String(artifact?.version || "");
+	if (type !== "bsc_post_action_supply" || version !== "v1") {
+		return {
+			ok: false,
+			route: "unsupported",
+			reason: "artifact_unsupported",
+			retryable: false,
+		};
+	}
+	const protocol = String(artifact?.protocol || "unknown").toLowerCase();
+	const status = String(artifact?.status || "error").toLowerCase();
+	const amountRaw = String(artifact?.amountRaw || "");
+	const hasValidAmount = /^\d+$/.test(amountRaw) && BigInt(amountRaw) > 0n;
+	const hasTxHash = /^0x[a-fA-F0-9]{64}$/.test(String(artifact?.txHash || ""));
+	const checks = {
+		hasValidAmount,
+		hasTxHash,
+		status,
+		protocol,
+	};
+	const ok = status === "success" && hasValidAmount && hasTxHash;
+	return {
+		ok,
+		route: "bsc_post_action_supply_v1",
+		reason: ok
+			? null
+			: String(artifact?.reason || "post_action_reconcile_failed"),
+		retryable: ok ? false : Boolean(artifact?.retryable),
+		checks,
+		checkedAt: new Date().toISOString(),
+	};
+}
+
 function buildAcpExecutionPlan(payload) {
 	const requirements = payload?.requirements || {};
 	const targetChain = String(
@@ -5993,6 +6028,7 @@ const server = http.createServer(async (req, res) => {
 				});
 				let postAction = null;
 				let postActionArtifact = null;
+				let postActionReconciliation = null;
 				if (
 					plan.executionProtocol === "aave" ||
 					plan.executionProtocol === "lista" ||
@@ -6047,6 +6083,8 @@ const server = http.createServer(async (req, res) => {
 						postAction,
 						runId,
 					});
+					postActionReconciliation =
+						reconcileBscExecutionArtifact(postActionArtifact);
 					pushActionHistory({
 						action: isAave
 							? "bsc_aave_supply"
@@ -6083,6 +6121,7 @@ const server = http.createServer(async (req, res) => {
 					postActionTxHash: postAction?.txHash || null,
 					postActionReason: postAction?.reason || null,
 					postActionArtifact,
+					postActionReconciliation,
 				});
 				return json(res, 200, {
 					ok: true,
@@ -6091,6 +6130,7 @@ const server = http.createServer(async (req, res) => {
 					result,
 					postAction,
 					postActionArtifact,
+					postActionReconciliation,
 				});
 			} catch (error) {
 				pushAcpJobHistory({
