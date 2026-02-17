@@ -397,6 +397,29 @@
         return rows.map((r) => `${r.symbol}: ${r.amount}`).join(" · ");
       }
 
+      function applyAcpFiltersFromUrl() {
+        if (!window.location.search) return;
+        const p = new URLSearchParams(window.location.search);
+        if (acpStatusFilterEl && p.get("acpStatus")) acpStatusFilterEl.value = p.get("acpStatus");
+        if (acpBuyerFilterEl && p.get("acpBuyer")) acpBuyerFilterEl.value = p.get("acpBuyer");
+        if (acpStrategyFilterEl && p.get("acpStrategy")) acpStrategyFilterEl.value = p.get("acpStrategy");
+        if (acpOnlyFailedEl && p.get("acpOnlyFailed")) acpOnlyFailedEl.checked = p.get("acpOnlyFailed") === "1";
+      }
+
+      function syncAcpFiltersToUrl() {
+        const qp = new URLSearchParams(window.location.search);
+        const setOrDelete = (key, val) => {
+          if (val === undefined || val === null || String(val) === "") qp.delete(key);
+          else qp.set(key, String(val));
+        };
+        setOrDelete("acpStatus", acpStatusFilterEl?.value || "all");
+        setOrDelete("acpBuyer", acpBuyerFilterEl?.value || "");
+        setOrDelete("acpStrategy", acpStrategyFilterEl?.value || "");
+        setOrDelete("acpOnlyFailed", acpOnlyFailedEl?.checked ? "1" : "");
+        const next = `${window.location.pathname}?${qp.toString()}`.replace(/\?$/, "");
+        window.history.replaceState(null, "", next);
+      }
+
       function parseNum(value) {
         const n = Number.parseFloat(String(value || "0"));
         return Number.isFinite(n) ? n : 0;
@@ -1304,10 +1327,23 @@
       });
 
       refreshBtn.addEventListener("click", () => load().catch((e) => (metaEl.textContent = e.message)));
-      acpStatusFilterEl?.addEventListener("change", () => load().catch(() => {}));
-      acpBuyerFilterEl?.addEventListener("input", () => load().catch(() => {}));
-      acpStrategyFilterEl?.addEventListener("input", () => load().catch(() => {}));
-      acpOnlyFailedEl?.addEventListener("change", () => load().catch(() => {}));
+      acpStatusFilterEl?.addEventListener("change", () => {
+        syncAcpFiltersToUrl();
+        load().catch(() => {});
+      });
+      acpBuyerFilterEl?.addEventListener("input", () => {
+        syncAcpFiltersToUrl();
+        load().catch(() => {});
+      });
+      acpStrategyFilterEl?.addEventListener("input", () => {
+        syncAcpFiltersToUrl();
+        load().catch(() => {});
+      });
+      acpOnlyFailedEl?.addEventListener("change", () => {
+        syncAcpFiltersToUrl();
+        load().catch(() => {});
+      });
+      applyAcpFiltersFromUrl();
       load().catch((e) => (metaEl.textContent = e.message));
       setInterval(() => load().catch(() => {}), 30000);
     </script>
