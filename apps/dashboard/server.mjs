@@ -67,6 +67,15 @@ const REBALANCE_STATE = {
 	recentRuns: new Map(),
 };
 const ALERT_DEDUPE_CACHE = new Map();
+const RPC_METRICS = {
+	totalCalls: 0,
+	totalAttempts: 0,
+	totalRetries: 0,
+	http429: 0,
+	http5xx: 0,
+	lastSuccessEndpoint: null,
+	lastError: null,
+};
 const REBALANCE_METRICS = {
 	totalRuns: 0,
 	successRuns: 0,
@@ -150,10 +159,13 @@ function formatUnits(raw, decimals) {
 }
 
 async function nearRpc(method, params) {
+	RPC_METRICS.totalCalls += 1;
 	let lastError = null;
 	const rounds = Math.max(1, NEAR_RPC_RETRY_ROUNDS + 1);
 	for (let round = 0; round < rounds; round += 1) {
 		for (const endpoint of RPC_ENDPOINTS) {
+			RPC_METRICS.totalAttempts += 1;
+			if (round > 0) RPC_METRICS.totalRetries += 1;
 			try {
 				const response = await fetch(endpoint, {
 					method: "POST",
@@ -166,8 +178,11 @@ async function nearRpc(method, params) {
 					}),
 				});
 				if (!response.ok) {
+					if (response.status === 429) RPC_METRICS.http429 += 1;
+					if (response.status >= 500) RPC_METRICS.http5xx += 1;
 					if (response.status === 429 || response.status >= 500) {
 						lastError = new Error(`RPC HTTP ${response.status} at ${endpoint}`);
+						RPC_METRICS.lastError = lastError.message;
 						continue;
 					}
 					throw new Error(`RPC HTTP ${response.status} at ${endpoint}`);
@@ -182,13 +197,16 @@ async function nearRpc(method, params) {
 						msg.toLowerCase().includes("timeout")
 					) {
 						lastError = new Error(msg);
+						RPC_METRICS.lastError = msg;
 						continue;
 					}
 					throw new Error(msg);
 				}
+				RPC_METRICS.lastSuccessEndpoint = endpoint;
 				return { result: payload.result, endpoint };
 			} catch (error) {
 				lastError = error instanceof Error ? error : new Error(String(error));
+				RPC_METRICS.lastError = lastError.message;
 			}
 		}
 		if (round < rounds - 1) {
@@ -504,6 +522,13 @@ async function buildSnapshot(accountId) {
 		worker: localSignals.worker,
 		recentTxs: localSignals.recentTxs,
 		actionHistory: ACTION_HISTORY,
+		rpcMetrics: {
+			...RPC_METRICS,
+			retryRate:
+				RPC_METRICS.totalAttempts > 0
+					? RPC_METRICS.totalRetries / RPC_METRICS.totalAttempts
+					: 0,
+		},
 		rebalanceMetrics: {
 			...REBALANCE_METRICS,
 			recent: REBALANCE_METRICS.recent,
