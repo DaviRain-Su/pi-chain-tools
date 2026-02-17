@@ -2931,10 +2931,45 @@ async function getBscLendingMarketCompare() {
 	const bestUsdc = protocolRows.reduce((best, row) =>
 		row.usdc > best.usdc ? row : best,
 	);
+	const marketHealth = Object.fromEntries(
+		["venus", "aave", "lista", "wombat"].map((protocol) => {
+			const row =
+				protocol === "venus"
+					? venus
+					: protocol === "aave"
+						? aave
+						: protocol === "lista"
+							? lista
+							: wombat;
+			const updatedAt = String(row?.updatedAt || "").trim();
+			const ts = Date.parse(updatedAt);
+			const ageMs = Number.isFinite(ts) ? Date.now() - ts : null;
+			const status =
+				ageMs == null
+					? "unknown"
+					: ageMs <= 6 * 60 * 60 * 1000
+						? "fresh"
+						: "stale";
+			const source =
+				protocol === "lista" || protocol === "wombat"
+					? "env-json"
+					: String(row?.source || protocol);
+			return [
+				protocol,
+				{
+					status,
+					source,
+					updatedAt: updatedAt || null,
+					ageMs,
+				},
+			];
+		}),
+	);
 	return {
 		ok: true,
 		chain: "bsc",
 		markets: { venus, aave, lista, wombat },
+		marketHealth,
 		recommendation: {
 			bestUsdtSupply: {
 				protocol: bestUsdt.protocol,
@@ -5026,6 +5061,22 @@ const server = http.createServer(async (req, res) => {
 						? now - BSC_APR_CACHE.aave.ts
 						: null,
 					cacheTtlMs: BSC_APR_CACHE_TTL_MS,
+				},
+				lista: {
+					source: "env-json",
+					lastSuccessAt: compare?.markets?.lista?.updatedAt || null,
+					lastErrorAt: null,
+					lastError: null,
+					cacheAgeMs: null,
+					cacheTtlMs: null,
+				},
+				wombat: {
+					source: "env-json",
+					lastSuccessAt: compare?.markets?.wombat?.updatedAt || null,
+					lastErrorAt: null,
+					lastError: null,
+					cacheAgeMs: null,
+					cacheTtlMs: null,
 				},
 			};
 			return json(res, 200, {
