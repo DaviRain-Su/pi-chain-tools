@@ -242,6 +242,15 @@
       </div>
 
       <div class="card" style="margin-top:16px">
+        <h3>Payments</h3>
+        <div id="paymentsMeta" class="muted">-</div>
+        <table style="margin-top:8px">
+          <thead><tr><th>Time</th><th>PaymentId</th><th>Status</th><th>Strategy</th><th>Buyer</th><th>Amount</th></tr></thead>
+          <tbody id="paymentsRows"></tbody>
+        </table>
+      </div>
+
+      <div class="card" style="margin-top:16px">
         <h3>Strategy DSL Validate (Preflight)</h3>
         <p class="muted">Validate strategy DSL without persisting (schema + semantic policy checks).</p>
         <textarea id="strategyDslInput" rows="8" style="width:100%;border-radius:8px;border:1px solid #2d3656;background:#0e1529;color:#e8eefc;padding:8px"></textarea>
@@ -352,6 +361,8 @@
       const acpAsyncMetaEl = document.getElementById("acpAsyncMeta");
       const acpAsyncStatusEl = document.getElementById("acpAsyncStatus");
       const strategyEl = document.getElementById("strategy");
+      const paymentsMetaEl = document.getElementById("paymentsMeta");
+      const paymentsRowsEl = document.getElementById("paymentsRows");
       const strategyDslInputEl = document.getElementById("strategyDslInput");
       const fillStrategyDslSampleBtn = document.getElementById("fillStrategyDslSample");
       const validateStrategyDslBtn = document.getElementById("validateStrategyDsl");
@@ -679,16 +690,18 @@
       async function load() {
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
-        const [snapRes, acpStatusRes, acpSummaryRes, acpJobsRes] = await Promise.all([
+        const [snapRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes] = await Promise.all([
           fetch(`/api/snapshot${query}`),
           fetch("/api/acp/status"),
           fetch("/api/acp/jobs/summary"),
           fetch("/api/acp/jobs"),
+          fetch("/api/payments"),
         ]);
         const data = await snapRes.json();
         const acpStatus = await acpStatusRes.json().catch(() => ({ ok: false }));
         const acpSummary = await acpSummaryRes.json().catch(() => ({ ok: false }));
         const acpJobs = await acpJobsRes.json().catch(() => ({ ok: false, jobs: [] }));
+        const payments = await paymentsRes.json().catch(() => ({ ok: false, payments: [] }));
         if (!snapRes.ok) {
           metaEl.textContent = `Error: ${data.error || "Unknown"}`;
           return;
@@ -846,6 +859,20 @@
           strategyEl.innerHTML = `${data.strategy.recommendation}<br/><br/><span class="muted">Stable collateral APR ranking</span><br/>${rows || "none"}`;
         } else {
           strategyEl.innerHTML = `<span class="warn">No strategy data</span>`;
+        }
+
+        const payRows = Array.isArray(payments?.payments) ? payments.payments : [];
+        const byPayStatus = payRows.reduce((acc, row) => {
+          const k = String(row?.status || "unknown");
+          acc[k] = (acc[k] || 0) + 1;
+          return acc;
+        }, {});
+        paymentsMetaEl.textContent = `total=${payRows.length} byStatus=${JSON.stringify(byPayStatus)}`;
+        paymentsRowsEl.innerHTML = "";
+        for (const row of payRows.slice(0, 20)) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${new Date(row.createdAt || Date.now()).toLocaleString()}</td><td>${row.paymentId || "-"}</td><td>${row.status || "-"}</td><td>${row.strategyId || "-"}</td><td>${row.buyer || "-"}</td><td>${row.amountUsd || "-"} ${row.currency || ""}</td>`;
+          paymentsRowsEl.appendChild(tr);
         }
 
         tokensEl.innerHTML = "";

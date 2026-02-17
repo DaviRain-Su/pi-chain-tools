@@ -27,6 +27,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Execution Quality panel: success/failure/rollback/reconcile-warning counters + recent run summary
 - ACP Ops panel: ACP connectivity (`/api/acp/status`) + ACP job summary (`/api/acp/jobs/summary`) + recent ACP job list (`/api/acp/jobs`) in dashboard UI
 - ACP Ops now includes async submit controls (strategyId/buyer/amountRaw) and live polling for submitted async job status (`/api/acp/job/submit` + `/api/acp/jobs/:jobId`)
+- Dashboard includes Payments panel (`/api/payments`) with status breakdown (`pending/paid/failed`) and recent payment rows
 - ACP recent jobs table supports status filtering and NEAR tx explorer links when `txHash` is present
 - ACP recent jobs table now also shows `strategyId` / `buyer` / `remainingUses` to trace entitlement consumption during execution
 - ACP recent jobs supports local filters by `status` + `buyer` + `strategyId` for faster ops triage
@@ -49,6 +50,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - returns normalized `receipt` (`runId/identityChain/targetChain/intentType/amountRaw/amountUsd/status/txHash?/adapterMode`)
     - enforces policy `constraints.minRebalanceUsd`
     - entitlement gate: when execute request carries `strategyId`, it must include `buyer` and a valid active entitlement (`remainingUses > 0`, not expired), otherwise blocked
+    - execute receipts/history include entitlement trace field `entitlementSourcePaymentId` when entitlement originated from payment confirmation
     - for chains still in adapter plan-only mode (e.g. current bsc path), receipt `status=planned` and `adapterMode=plan-only`
   - `GET /api/acp/jobs` -> recent ACP job history (dry-run/executed/planned/blocked/error) + async queue snapshot
   - `GET /api/acp/jobs/:jobId` -> async job status/result/error by id

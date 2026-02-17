@@ -991,6 +991,7 @@ function grantStrategyEntitlement({
 	uses,
 	expiresAt,
 	sourceReceiptId,
+	sourcePaymentId,
 }) {
 	const keyStrategy = String(strategyId || "");
 	const keyBuyer = String(buyer || "");
@@ -1007,6 +1008,7 @@ function grantStrategyEntitlement({
 			remainingUses: Number(prev?.remainingUses || 0) + nextUses,
 			expiresAt,
 			sourceReceiptId,
+			sourcePaymentId,
 			updatedAt: new Date().toISOString(),
 		};
 		return STRATEGY_ENTITLEMENTS[idx];
@@ -1018,6 +1020,7 @@ function grantStrategyEntitlement({
 		remainingUses: nextUses,
 		expiresAt,
 		sourceReceiptId,
+		sourcePaymentId,
 		createdAt: new Date().toISOString(),
 		updatedAt: new Date().toISOString(),
 	};
@@ -1184,6 +1187,7 @@ async function executeAcpJob(payload) {
 		txHash,
 		adapterMode: result?.mode || "execute",
 		remainingUses: entitlementAfter?.remainingUses,
+		entitlementSourcePaymentId: entitlementAfter?.sourcePaymentId,
 	});
 	return {
 		ok: true,
@@ -1198,6 +1202,7 @@ async function executeAcpJob(payload) {
 			txHash,
 			adapterMode: result?.mode || "execute",
 			remainingUses: entitlementAfter?.remainingUses,
+			entitlementSourcePaymentId: entitlementAfter?.sourcePaymentId,
 		},
 	};
 }
@@ -2474,6 +2479,7 @@ const server = http.createServer(async (req, res) => {
 					uses: entitlementUses,
 					expiresAt,
 					sourceReceiptId: payment.paymentId,
+					sourcePaymentId: payment.paymentId,
 				});
 			}
 			await saveMarketplaceToDisk();
