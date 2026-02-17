@@ -43,7 +43,12 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `GET /api/portfolio/unified` -> aggregates current NEAR execution portfolio + ACP identity layer status + BSC scaffold status in one schema
 - Portfolio policy center (cross-chain target + constraints):
   - `GET /api/policy` -> current policy
-  - `POST /api/policy` (`confirm=true`) -> patch `targetAllocation` / `constraints` and persist to disk
+  - `POST /api/policy` (`confirm=true`) -> patch `targetAllocation` / `constraints` / `monetization` and persist to disk
+- Strategy marketplace bootstrap:
+  - `GET /api/strategies` -> list strategies
+  - `POST /api/strategies` (`confirm=true`) -> create/update strategy metadata (`id/name/creator/priceUsd/...`)
+  - `POST /api/strategies/purchase` (`confirm=true`) -> simulate paid purchase + compute platform fee and creator payout
+  - `GET /api/strategies/purchases` -> recent purchase receipts
 - Metrics persistence: rebalance + rpc reliability metrics survive dashboard restarts via local json file (`NEAR_DASHBOARD_METRICS_PATH`)
 - Basic PnL trend proxy: tracks stable collateral total delta before/after each successful rebalance
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
@@ -94,6 +99,7 @@ Open:
 - `ACP_WORKDIR` - working directory to run ACP CLI from (default: current repo root)
 - `NEAR_DASHBOARD_METRICS_PATH` - metrics persistence path (default: `apps/dashboard/data/rebalance-metrics.json`)
 - `NEAR_DASHBOARD_POLICY_PATH` - policy persistence path (default: `apps/dashboard/data/portfolio-policy.json`)
+- `NEAR_DASHBOARD_MARKETPLACE_PATH` - strategy marketplace persistence path (default: `apps/dashboard/data/strategy-marketplace.json`)
 
 Example:
 

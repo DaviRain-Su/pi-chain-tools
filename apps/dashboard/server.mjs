@@ -31,6 +31,9 @@ const METRICS_PATH =
 const POLICY_PATH =
 	process.env.NEAR_DASHBOARD_POLICY_PATH ||
 	path.join(__dirname, "data", "portfolio-policy.json");
+const MARKETPLACE_PATH =
+	process.env.NEAR_DASHBOARD_MARKETPLACE_PATH ||
+	path.join(__dirname, "data", "strategy-marketplace.json");
 const ALERT_WEBHOOK_URL = process.env.NEAR_REBAL_ALERT_WEBHOOK_URL || "";
 const ALERT_TELEGRAM_BOT_TOKEN =
 	process.env.NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN || "";
@@ -121,6 +124,8 @@ const ACP_JOB_STATE = {
 	dailyWindowDay: "",
 	dailyCount: 0,
 };
+const STRATEGY_CATALOG = [];
+const STRATEGY_PURCHASES = [];
 const PORTFOLIO_POLICY = {
 	targetAllocation: { near: 0.6, bsc: 0.4 },
 	constraints: {
@@ -128,6 +133,10 @@ const PORTFOLIO_POLICY = {
 		maxSingleTokenExposure: 0.5,
 		minRebalanceUsd: 50,
 		maxDailyRebalanceRuns: 10,
+	},
+	monetization: {
+		settlementToken: "USDC",
+		platformTakeRate: 0.15,
 	},
 	updatedAt: null,
 };
@@ -235,9 +244,52 @@ async function loadPolicyFromDisk() {
 				...parsed.constraints,
 			};
 		}
+		if (parsed.monetization && typeof parsed.monetization === "object") {
+			PORTFOLIO_POLICY.monetization = {
+				...PORTFOLIO_POLICY.monetization,
+				...parsed.monetization,
+			};
+		}
 		PORTFOLIO_POLICY.updatedAt = parsed.updatedAt || null;
 	} catch {
 		// ignore missing/corrupt policy file
+	}
+}
+
+async function saveMarketplaceToDisk() {
+	try {
+		await mkdir(path.dirname(MARKETPLACE_PATH), { recursive: true });
+		await writeFile(
+			MARKETPLACE_PATH,
+			JSON.stringify(
+				{
+					strategies: STRATEGY_CATALOG,
+					purchases: STRATEGY_PURCHASES,
+				},
+				null,
+				2,
+			),
+		);
+	} catch {
+		// best-effort persistence
+	}
+}
+
+async function loadMarketplaceFromDisk() {
+	try {
+		const raw = await readFile(MARKETPLACE_PATH, "utf8");
+		const parsed = JSON.parse(raw);
+		if (!parsed || typeof parsed !== "object") return;
+		STRATEGY_CATALOG.length = 0;
+		STRATEGY_PURCHASES.length = 0;
+		if (Array.isArray(parsed.strategies)) {
+			STRATEGY_CATALOG.push(...parsed.strategies.slice(0, 200));
+		}
+		if (Array.isArray(parsed.purchases)) {
+			STRATEGY_PURCHASES.push(...parsed.purchases.slice(0, 500));
+		}
+	} catch {
+		// ignore missing/corrupt marketplace file
 	}
 }
 
@@ -2014,9 +2066,108 @@ const server = http.createServer(async (req, res) => {
 						...payload.constraints,
 					};
 				}
+				if (payload.monetization && typeof payload.monetization === "object") {
+					PORTFOLIO_POLICY.monetization = {
+						...PORTFOLIO_POLICY.monetization,
+						...payload.monetization,
+					};
+				}
 				await savePolicyToDisk();
 				return json(res, 200, { ok: true, policy: PORTFOLIO_POLICY });
 			}
+		}
+
+		if (url.pathname === "/api/strategies") {
+			if (req.method === "GET") {
+				return json(res, 200, { ok: true, strategies: STRATEGY_CATALOG });
+			}
+			if (req.method === "POST") {
+				const chunks = [];
+				for await (const chunk of req) chunks.push(chunk);
+				const text = Buffer.concat(chunks).toString("utf8") || "{}";
+				const payload = JSON.parse(text);
+				if (payload.confirm !== true) {
+					return json(res, 400, { ok: false, error: "Missing confirm=true" });
+				}
+				const id = String(payload.id || "").trim();
+				const name = String(payload.name || "").trim();
+				const creator = String(payload.creator || "").trim();
+				const priceUsd = Number(payload.priceUsd || 0);
+				if (
+					!id ||
+					!name ||
+					!creator ||
+					!Number.isFinite(priceUsd) ||
+					priceUsd <= 0
+				) {
+					return json(res, 400, {
+						ok: false,
+						error: "id/name/creator and positive priceUsd are required",
+					});
+				}
+				const row = {
+					id,
+					name,
+					creator,
+					priceUsd,
+					targetChain: payload.targetChain || "near",
+					intentType: payload.intentType || "rebalance",
+					riskProfile: payload.riskProfile || "balanced",
+					updatedAt: new Date().toISOString(),
+				};
+				const idx = STRATEGY_CATALOG.findIndex((x) => x.id === id);
+				if (idx >= 0) STRATEGY_CATALOG[idx] = row;
+				else STRATEGY_CATALOG.unshift(row);
+				if (STRATEGY_CATALOG.length > 200) STRATEGY_CATALOG.length = 200;
+				await saveMarketplaceToDisk();
+				return json(res, 200, { ok: true, strategy: row });
+			}
+		}
+
+		if (url.pathname === "/api/strategies/purchase" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const strategyId = String(payload.strategyId || "").trim();
+			const buyer = String(payload.buyer || "").trim() || "anonymous";
+			const strategy = STRATEGY_CATALOG.find((x) => x.id === strategyId);
+			if (!strategy) {
+				return json(res, 404, {
+					ok: false,
+					error: `strategy '${strategyId}' not found`,
+				});
+			}
+			const takeRate = Number(
+				PORTFOLIO_POLICY?.monetization?.platformTakeRate || 0.15,
+			);
+			const amountUsd = Number(strategy.priceUsd || 0);
+			const platformFeeUsd = amountUsd * takeRate;
+			const creatorPayoutUsd = amountUsd - platformFeeUsd;
+			const receipt = {
+				id: `purchase-${Date.now()}`,
+				strategyId,
+				strategyName: strategy.name,
+				buyer,
+				amountUsd,
+				settlementToken:
+					PORTFOLIO_POLICY?.monetization?.settlementToken || "USDC",
+				platformTakeRate: takeRate,
+				platformFeeUsd,
+				creatorPayoutUsd,
+				createdAt: new Date().toISOString(),
+			};
+			STRATEGY_PURCHASES.unshift(receipt);
+			if (STRATEGY_PURCHASES.length > 500) STRATEGY_PURCHASES.length = 500;
+			await saveMarketplaceToDisk();
+			return json(res, 200, { ok: true, receipt });
+		}
+
+		if (url.pathname === "/api/strategies/purchases") {
+			return json(res, 200, { ok: true, purchases: STRATEGY_PURCHASES });
 		}
 
 		if (url.pathname === "/api/acp/route-preview" && req.method === "POST") {
@@ -2121,7 +2272,11 @@ const server = http.createServer(async (req, res) => {
 	}
 });
 
-Promise.all([loadMetricsFromDisk(), loadPolicyFromDisk()]).finally(() => {
+Promise.all([
+	loadMetricsFromDisk(),
+	loadPolicyFromDisk(),
+	loadMarketplaceFromDisk(),
+]).finally(() => {
 	server.listen(PORT, () => {
 		console.log(`NEAR dashboard listening on http://127.0.0.1:${PORT}`);
 	});
