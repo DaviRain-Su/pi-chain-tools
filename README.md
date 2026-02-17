@@ -728,7 +728,7 @@ CI workflow (npm, via GitHub Actions):
 ```bash
 npm ci
 npm run ci
-# optional bounded retry wrapper for transient host/network flakes
+# bounded retry wrapper for transient host/network flakes (local/dev helper)
 npm run ci:retry
 ```
 

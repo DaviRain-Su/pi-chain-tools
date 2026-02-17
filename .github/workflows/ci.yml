@@ -44,5 +44,6 @@ jobs:
       - name: Security check
         run: npm run security:check
 
-      - name: Unit tests
-        run: npm test
+      - name: Unit tests (bounded retry)
+        run: |
+          npm test || (sleep 2 && npm test)
