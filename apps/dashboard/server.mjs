@@ -3193,6 +3193,10 @@ async function computeBscYieldPlan(input = {}) {
 		getBscWalletStableBalances(account),
 		getBscLendingMarketCompare(),
 	]);
+	const netYieldInsight = await buildBscDexNetYieldInsight(compare, {
+		amountUsd: input.amountUsd,
+		rebalanceIntervalDays: input.rebalanceIntervalDays,
+	});
 	const requestedProtocol = String(
 		input.executionProtocol || BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT || "venus",
 	)
@@ -3301,6 +3305,10 @@ async function computeBscYieldPlan(input = {}) {
 		"# safe defaults",
 		...safeDefaults,
 	].join("\n");
+	const recommendedProtocol =
+		netYieldInsight?.netYieldDelta?.preferredProtocol ||
+		compare?.recommendation?.bestUsdcSupply?.protocol ||
+		"venus";
 	const executeReadiness = {
 		requestedProtocol: executionProtocol,
 		venusEnabled: true,
@@ -3314,6 +3322,7 @@ async function computeBscYieldPlan(input = {}) {
 					? "ok"
 					: "aave_precheck_failed",
 		blockers: executionProtocol === "aave" ? aaveBlockers : [],
+		recommendedProtocol,
 		fixPack:
 			executionProtocol === "aave"
 				? {
@@ -3331,6 +3340,7 @@ async function computeBscYieldPlan(input = {}) {
 		balances,
 		aprHints,
 		marketCompare: compare,
+		netYieldInsight,
 		executionProtocol,
 		executeReadiness,
 		minAprDeltaBps,
@@ -4900,6 +4910,9 @@ const server = http.createServer(async (req, res) => {
 				minDriftBps: url.searchParams.get("minDriftBps") || undefined,
 				maxStepUsd: url.searchParams.get("maxStepUsd") || undefined,
 				minAprDeltaBps: url.searchParams.get("minAprDeltaBps") || undefined,
+				amountUsd: url.searchParams.get("amountUsd") || undefined,
+				rebalanceIntervalDays:
+					url.searchParams.get("rebalanceIntervalDays") || undefined,
 				executionProtocol:
 					url.searchParams.get("executionProtocol") || undefined,
 			});
@@ -4956,6 +4969,8 @@ const server = http.createServer(async (req, res) => {
 				minDriftBps: payload.minDriftBps,
 				minAprDeltaBps: payload.minAprDeltaBps,
 				maxStepUsd: payload.maxStepUsd,
+				amountUsd: payload.amountUsd,
+				rebalanceIntervalDays: payload.rebalanceIntervalDays,
 				executionProtocol: payload.executionProtocol,
 			});
 			if (plan.plan.action !== "rebalance_usdt_to_usdc") {

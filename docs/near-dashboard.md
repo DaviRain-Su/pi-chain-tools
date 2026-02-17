@@ -104,7 +104,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
 - BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can execute in two built-in adapter modes:
   - includes stable-yield agent v1 APIs:
-    - `GET /api/bsc/yield/plan` (supports `executionProtocol=venus|aave`; returns `executeReadiness.blockers` for aave precheck)
+    - `GET /api/bsc/yield/plan` (supports `executionProtocol=venus|aave`; returns `executeReadiness.blockers/recommendedProtocol` for aave precheck and includes `netYieldInsight`)
     - `GET /api/bsc/yield/markets` (returns Venus/Aave read-only compare + best protocol recommendation + `sourceHealth` + `netYieldInsight`; supports query `amountUsd` and `rebalanceIntervalDays`)
     - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave`; `aave` requires enable flag)
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
@@ -124,7 +124,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - dead-letter quick presets: `Aave post failures`, `Main failures`, `Clear presets`
   - ACP ops header includes clickable failure heatmap summary (`phase/type:count`) with time window selector (`1h|24h|7d`) and can jump directly to dead-letter phase/type filters
   - Yield Health card now includes BSC protocol position health/subtotals (`Aave`, `Venus`, `total`, `fetchedAt`)
-  - Yield Health card also shows Aave execute readiness from `/api/bsc/yield/plan` (`canExecute/reason/aaveMode/blockers/fixPack`), highlights `primary` blocker + `fix-order`, and provides one-click `Copy blockers` + `Copy env snippet` + `Copy full fix pack` (grouped, annotated `.env` template)
+  - Yield Health card also shows Aave execute readiness from `/api/bsc/yield/plan` (`canExecute/reason/aaveMode/blockers/recommendedProtocol/fixPack`), highlights `primary` blocker + `fix-order`, and provides one-click `Copy blockers` + `Copy env snippet` + `Copy full fix pack` (grouped, annotated `.env` template)
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`
