@@ -193,6 +193,7 @@ Common mapping examples:
 - `bsc.lista.enabled` ↔ `BSC_LISTA_EXECUTE_ENABLED`
 - `bsc.lista.mode` ↔ `BSC_LISTA_EXECUTE_MODE`
 - `bsc.lista.nativeEnabled` ↔ `BSC_LISTA_NATIVE_EXECUTE_ENABLED`
+- `bsc.lista.nativeExecuteCommand` ↔ `BSC_LISTA_NATIVE_EXECUTE_COMMAND`
 - `bsc.lista.executeCommand` ↔ `BSC_LISTA_EXECUTE_COMMAND`
 - `bsc.lista.executeTimeoutMs` ↔ `BSC_LISTA_EXECUTE_TIMEOUT_MS`
 - `bsc.lista.maxAmountRaw` ↔ `BSC_LISTA_MAX_AMOUNT_RAW`
@@ -200,6 +201,7 @@ Common mapping examples:
 - `bsc.wombat.enabled` ↔ `BSC_WOMBAT_EXECUTE_ENABLED`
 - `bsc.wombat.mode` ↔ `BSC_WOMBAT_EXECUTE_MODE`
 - `bsc.wombat.nativeEnabled` ↔ `BSC_WOMBAT_NATIVE_EXECUTE_ENABLED`
+- `bsc.wombat.nativeExecuteCommand` ↔ `BSC_WOMBAT_NATIVE_EXECUTE_COMMAND`
 - `bsc.wombat.executeCommand` ↔ `BSC_WOMBAT_EXECUTE_COMMAND`
 - `bsc.wombat.executeTimeoutMs` ↔ `BSC_WOMBAT_EXECUTE_TIMEOUT_MS`
 - `bsc.wombat.maxAmountRaw` ↔ `BSC_WOMBAT_MAX_AMOUNT_RAW`
@@ -257,6 +259,7 @@ Common mapping examples:
 - `BSC_LISTA_EXECUTE_ENABLED` - gate for Lista execute path (default: `false`)
 - `BSC_LISTA_EXECUTE_MODE` - `auto|native|command` (default: `auto`; native slot exists and will fallback in `auto`, but `native` mode requires native slot implementation)
 - `BSC_LISTA_NATIVE_EXECUTE_ENABLED` - native slot readiness gate for Lista execute (default: `false`)
+- `BSC_LISTA_NATIVE_EXECUTE_COMMAND` - native-slot bridge command template (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`; required placeholders: `{amountRaw}`, `{runId}`)
 - `BSC_LISTA_EXECUTE_COMMAND` - command template for post-swap Lista supply (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`; required placeholders: `{amountRaw}`, `{runId}`)
 - `BSC_LISTA_EXECUTE_TIMEOUT_MS` - timeout for Lista command-mode execute (default: `120000`)
 - `BSC_LISTA_MAX_AMOUNT_RAW` - max raw amount allowed per Lista supply action (default: `20000000000000000000000`)
@@ -264,6 +267,7 @@ Common mapping examples:
 - `BSC_WOMBAT_EXECUTE_ENABLED` - gate for Wombat execute path (default: `false`)
 - `BSC_WOMBAT_EXECUTE_MODE` - `auto|native|command` (default: `auto`; native slot exists and will fallback in `auto`, but `native` mode requires native slot implementation)
 - `BSC_WOMBAT_NATIVE_EXECUTE_ENABLED` - native slot readiness gate for Wombat execute (default: `false`)
+- `BSC_WOMBAT_NATIVE_EXECUTE_COMMAND` - native-slot bridge command template (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`; required placeholders: `{amountRaw}`, `{runId}`)
 - `BSC_WOMBAT_EXECUTE_COMMAND` - command template for post-swap Wombat supply (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`; required placeholders: `{amountRaw}`, `{runId}`)
 - `BSC_WOMBAT_EXECUTE_TIMEOUT_MS` - timeout for Wombat command-mode execute (default: `120000`)
 - `BSC_WOMBAT_MAX_AMOUNT_RAW` - max raw amount allowed per Wombat supply action (default: `20000000000000000000000`)

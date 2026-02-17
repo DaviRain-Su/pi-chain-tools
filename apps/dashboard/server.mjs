@@ -352,6 +352,13 @@ const BSC_LISTA_NATIVE_EXECUTE_ENABLED =
 			"false",
 		),
 	).toLowerCase() === "true";
+const BSC_LISTA_NATIVE_EXECUTE_COMMAND = String(
+	envOrCfg(
+		"BSC_LISTA_NATIVE_EXECUTE_COMMAND",
+		"bsc.lista.nativeExecuteCommand",
+		"",
+	),
+).trim();
 const BSC_LISTA_EXECUTE_TIMEOUT_MS = Math.max(
 	1_000,
 	Number.parseInt(
@@ -402,6 +409,13 @@ const BSC_WOMBAT_NATIVE_EXECUTE_ENABLED =
 			"false",
 		),
 	).toLowerCase() === "true";
+const BSC_WOMBAT_NATIVE_EXECUTE_COMMAND = String(
+	envOrCfg(
+		"BSC_WOMBAT_NATIVE_EXECUTE_COMMAND",
+		"bsc.wombat.nativeExecuteCommand",
+		"",
+	),
+).trim();
 const BSC_WOMBAT_EXECUTE_TIMEOUT_MS = Math.max(
 	1_000,
 	Number.parseInt(
@@ -2216,16 +2230,96 @@ async function executeBscWombatSupplyViaCommand(params) {
 	}
 }
 
-async function executeBscListaSupplyViaNativeSlot(_params) {
-	throw new Error(
-		"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_native_slot_not_implemented",
-	);
+async function executeBscListaSupplyViaNativeSlot(params) {
+	if (!BSC_LISTA_NATIVE_EXECUTE_COMMAND) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_native_slot_not_implemented",
+		);
+	}
+	if (
+		!hasRequiredPlaceholders(BSC_LISTA_NATIVE_EXECUTE_COMMAND, [
+			"{amountRaw}",
+			"{runId}",
+		])
+	) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_native_execute_command_missing_required_placeholders",
+		);
+	}
+	const token = String(params?.token || "")
+		.trim()
+		.toLowerCase();
+	const amountRaw = String(params?.amountRaw || "0").trim();
+	const replacements = {
+		"{amountRaw}": amountRaw,
+		"{token}": token,
+		"{rpcUrl}": String(params.rpcUrl || BSC_RPC_URL || ""),
+		"{chainId}": String(params.chainId || BSC_CHAIN_ID || ""),
+		"{runId}": String(params.runId || ""),
+	};
+	let cmd = BSC_LISTA_NATIVE_EXECUTE_COMMAND;
+	for (const [k, v] of Object.entries(replacements)) {
+		cmd = cmd.split(k).join(v);
+	}
+	const output = await runCommand("bash", ["-lc", cmd], {
+		env: process.env,
+		cwd: ACP_WORKDIR,
+		timeoutMs: BSC_LISTA_EXECUTE_TIMEOUT_MS,
+	});
+	const txHash = String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
+	return {
+		ok: true,
+		mode: "execute",
+		provider: "lista-native-slot-command",
+		output,
+		txHash,
+	};
 }
 
-async function executeBscWombatSupplyViaNativeSlot(_params) {
-	throw new Error(
-		"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_native_slot_not_implemented",
-	);
+async function executeBscWombatSupplyViaNativeSlot(params) {
+	if (!BSC_WOMBAT_NATIVE_EXECUTE_COMMAND) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_native_slot_not_implemented",
+		);
+	}
+	if (
+		!hasRequiredPlaceholders(BSC_WOMBAT_NATIVE_EXECUTE_COMMAND, [
+			"{amountRaw}",
+			"{runId}",
+		])
+	) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_native_execute_command_missing_required_placeholders",
+		);
+	}
+	const token = String(params?.token || "")
+		.trim()
+		.toLowerCase();
+	const amountRaw = String(params?.amountRaw || "0").trim();
+	const replacements = {
+		"{amountRaw}": amountRaw,
+		"{token}": token,
+		"{rpcUrl}": String(params.rpcUrl || BSC_RPC_URL || ""),
+		"{chainId}": String(params.chainId || BSC_CHAIN_ID || ""),
+		"{runId}": String(params.runId || ""),
+	};
+	let cmd = BSC_WOMBAT_NATIVE_EXECUTE_COMMAND;
+	for (const [k, v] of Object.entries(replacements)) {
+		cmd = cmd.split(k).join(v);
+	}
+	const output = await runCommand("bash", ["-lc", cmd], {
+		env: process.env,
+		cwd: ACP_WORKDIR,
+		timeoutMs: BSC_WOMBAT_EXECUTE_TIMEOUT_MS,
+	});
+	const txHash = String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
+	return {
+		ok: true,
+		mode: "execute",
+		provider: "wombat-native-slot-command",
+		output,
+		txHash,
+	};
 }
 
 function isNativeSlotNotImplementedError(error) {
@@ -4246,8 +4340,17 @@ async function computeBscYieldPlan(input = {}) {
 		if (BSC_LISTA_EXECUTE_MODE === "native") {
 			if (!BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
 				listaBlockers.push("lista_native_execute_not_enabled");
-			} else {
+			} else if (!BSC_LISTA_NATIVE_EXECUTE_COMMAND) {
 				listaBlockers.push("lista_native_slot_not_implemented");
+			} else if (
+				!hasRequiredPlaceholders(BSC_LISTA_NATIVE_EXECUTE_COMMAND, [
+					"{amountRaw}",
+					"{runId}",
+				])
+			) {
+				listaBlockers.push(
+					"bsc_lista_native_execute_command_missing_required_placeholders",
+				);
 			}
 		}
 		if (BSC_LISTA_EXECUTE_MODE !== "native") {
@@ -4289,8 +4392,17 @@ async function computeBscYieldPlan(input = {}) {
 		if (BSC_WOMBAT_EXECUTE_MODE === "native") {
 			if (!BSC_WOMBAT_NATIVE_EXECUTE_ENABLED) {
 				wombatBlockers.push("wombat_native_execute_not_enabled");
-			} else {
+			} else if (!BSC_WOMBAT_NATIVE_EXECUTE_COMMAND) {
 				wombatBlockers.push("wombat_native_slot_not_implemented");
+			} else if (
+				!hasRequiredPlaceholders(BSC_WOMBAT_NATIVE_EXECUTE_COMMAND, [
+					"{amountRaw}",
+					"{runId}",
+				])
+			) {
+				wombatBlockers.push(
+					"bsc_wombat_native_execute_command_missing_required_placeholders",
+				);
 			}
 		}
 		if (BSC_WOMBAT_EXECUTE_MODE !== "native") {
@@ -4346,7 +4458,9 @@ async function computeBscYieldPlan(input = {}) {
 		lista_execute_disabled: "BSC_LISTA_EXECUTE_ENABLED=true",
 		lista_native_execute_not_enabled: "BSC_LISTA_NATIVE_EXECUTE_ENABLED=true",
 		lista_native_slot_not_implemented:
-			"# native slot reserved: keep BSC_LISTA_EXECUTE_MODE=command or auto until native adapter lands",
+			"BSC_LISTA_NATIVE_EXECUTE_COMMAND='node scripts/lista-native-slot.mjs --amount {amountRaw} --run {runId}'",
+		bsc_lista_native_execute_command_missing_required_placeholders:
+			"BSC_LISTA_NATIVE_EXECUTE_COMMAND='node scripts/lista-native-slot.mjs --amount {amountRaw} --run {runId}'",
 		missing_bsc_lista_execute_command:
 			"BSC_LISTA_EXECUTE_COMMAND='node scripts/lista-supply.mjs --amount {amountRaw} --run {runId}'",
 		bsc_usdc_not_in_lista_allowed_tokens:
@@ -4358,7 +4472,9 @@ async function computeBscYieldPlan(input = {}) {
 		wombat_execute_disabled: "BSC_WOMBAT_EXECUTE_ENABLED=true",
 		wombat_native_execute_not_enabled: "BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=true",
 		wombat_native_slot_not_implemented:
-			"# native slot reserved: keep BSC_WOMBAT_EXECUTE_MODE=command or auto until native adapter lands",
+			"BSC_WOMBAT_NATIVE_EXECUTE_COMMAND='node scripts/wombat-native-slot.mjs --amount {amountRaw} --run {runId}'",
+		bsc_wombat_native_execute_command_missing_required_placeholders:
+			"BSC_WOMBAT_NATIVE_EXECUTE_COMMAND='node scripts/wombat-native-slot.mjs --amount {amountRaw} --run {runId}'",
 		missing_bsc_wombat_execute_command:
 			"BSC_WOMBAT_EXECUTE_COMMAND='node scripts/wombat-supply.mjs --amount {amountRaw} --run {runId}'",
 		bsc_usdc_not_in_wombat_allowed_tokens:
@@ -4391,7 +4507,7 @@ async function computeBscYieldPlan(input = {}) {
 				? BSC_LISTA_EXECUTE_MODE === "native"
 					? [
 							"BSC_LISTA_EXECUTE_MODE=native",
-							"# requires: BSC_LISTA_NATIVE_EXECUTE_ENABLED=true (native slot currently routes via command fallback)",
+							"# requires: BSC_LISTA_NATIVE_EXECUTE_ENABLED=true + BSC_LISTA_NATIVE_EXECUTE_COMMAND",
 						]
 					: BSC_LISTA_EXECUTE_MODE === "command"
 						? [
@@ -4406,7 +4522,7 @@ async function computeBscYieldPlan(input = {}) {
 					? BSC_WOMBAT_EXECUTE_MODE === "native"
 						? [
 								"BSC_WOMBAT_EXECUTE_MODE=native",
-								"# requires: BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=true (native slot currently routes via command fallback)",
+								"# requires: BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=true + BSC_WOMBAT_NATIVE_EXECUTE_COMMAND",
 							]
 						: BSC_WOMBAT_EXECUTE_MODE === "command"
 							? [
@@ -4428,9 +4544,11 @@ async function computeBscYieldPlan(input = {}) {
 		`BSC_LISTA_EXECUTE_TIMEOUT_MS=${BSC_LISTA_EXECUTE_TIMEOUT_MS}`,
 		`BSC_LISTA_EXECUTE_MODE=${BSC_LISTA_EXECUTE_MODE}`,
 		`BSC_LISTA_NATIVE_EXECUTE_ENABLED=${BSC_LISTA_NATIVE_EXECUTE_ENABLED}`,
+		`BSC_LISTA_NATIVE_EXECUTE_COMMAND=${BSC_LISTA_NATIVE_EXECUTE_COMMAND || "<set_when_native>"}`,
 		`BSC_WOMBAT_EXECUTE_TIMEOUT_MS=${BSC_WOMBAT_EXECUTE_TIMEOUT_MS}`,
 		`BSC_WOMBAT_EXECUTE_MODE=${BSC_WOMBAT_EXECUTE_MODE}`,
 		`BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=${BSC_WOMBAT_NATIVE_EXECUTE_ENABLED}`,
+		`BSC_WOMBAT_NATIVE_EXECUTE_COMMAND=${BSC_WOMBAT_NATIVE_EXECUTE_COMMAND || "<set_when_native>"}`,
 		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT=venus",
 	];
 	const fullFixPack = [
