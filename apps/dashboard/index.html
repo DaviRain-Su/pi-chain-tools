@@ -946,8 +946,18 @@
           .sort((a, b) => b.cnt - a.cnt)
           .slice(0, 8);
         acpFailureHeatmapEl.innerHTML = heatmapEntries.length > 0
-          ? `failure heatmap (24h): ${heatmapEntries.map((x) => `<span class="warn">${x.phase}/${x.type}:${x.cnt}</span>`).join(" · ")}`
+          ? `failure heatmap (24h): ${heatmapEntries.map((x) => `<button data-heatmap-chip="1" data-phase="${x.phase}" data-type="${x.type}" class="warn" style="margin-right:6px">${x.phase}/${x.type}:${x.cnt}</button>`).join("")}`
           : "failure heatmap (24h): none";
+        acpFailureHeatmapEl.querySelectorAll('button[data-heatmap-chip="1"]').forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const phase = String(btn.getAttribute("data-phase") || "all");
+            const type = String(btn.getAttribute("data-type") || "all");
+            if (acpDeadPhaseFilterEl) acpDeadPhaseFilterEl.value = phase;
+            if (acpDeadTypeFilterEl) acpDeadTypeFilterEl.value = type;
+            syncAcpFiltersToUrl();
+            load().catch(() => {});
+          });
+        });
 
         const deadLetters = Array.isArray(acpDead?.deadLetters) ? acpDead.deadLetters : [];
         const deadPhaseFilter = (acpDeadPhaseFilterEl?.value || "all").trim();
