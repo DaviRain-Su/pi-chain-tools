@@ -32,6 +32,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - ACP recent jobs supports local filters by `status` + `buyer` + `strategyId` for faster ops triage
 - ACP recent jobs includes `only failed` quick toggle (status in `error|blocked`)
 - ACP filter state (`status/buyer/strategyId/onlyFailed`) is synced to URL query params for refresh/share persistence
+- ACP filters bar includes `Copy filter link` for one-click sharing of the current triage view
 - ACP recent jobs row supports click-to-expand detail view (raw job JSON, including receipt/error-related fields when present)
 - Expanded detail view includes quick actions: `Copy JSON`, `Copy runId/jobId`, `Copy txHash`, and `Open explorer` (NEAR/BSC tx links)
 - Expanded detail now renders structured blocks (`receipt` / `result` / `error` / `raw`) for faster troubleshooting

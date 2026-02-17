@@ -199,6 +199,7 @@
             <input id="acpBuyerFilter" placeholder="buyer filter" size="16" />
             <input id="acpStrategyFilter" placeholder="strategyId filter" size="16" />
             <label class="muted" style="display:flex;align-items:center;gap:4px"><input id="acpOnlyFailed" type="checkbox" />only failed</label>
+            <button id="copyAcpFilterLink">Copy filter link</button>
           </div>
           <table style="margin-top:8px">
             <thead><tr><th>Time</th><th>RunId</th><th>Status</th><th>Chain</th><th>Intent</th><th>Strategy</th><th>Buyer</th><th>Remaining</th><th>AmountRaw</th><th>Tx</th></tr></thead>
@@ -339,6 +340,7 @@
       const acpBuyerFilterEl = document.getElementById("acpBuyerFilter");
       const acpStrategyFilterEl = document.getElementById("acpStrategyFilter");
       const acpOnlyFailedEl = document.getElementById("acpOnlyFailed");
+      const copyAcpFilterLinkBtn = document.getElementById("copyAcpFilterLink");
       const acpAsyncStrategyIdEl = document.getElementById("acpAsyncStrategyId");
       const acpAsyncBuyerEl = document.getElementById("acpAsyncBuyer");
       const acpAsyncAmountRawEl = document.getElementById("acpAsyncAmountRaw");
@@ -1342,6 +1344,16 @@
       acpOnlyFailedEl?.addEventListener("change", () => {
         syncAcpFiltersToUrl();
         load().catch(() => {});
+      });
+      copyAcpFilterLinkBtn?.addEventListener("click", async () => {
+        syncAcpFiltersToUrl();
+        const full = window.location.href;
+        try {
+          await navigator.clipboard.writeText(full);
+          acpAsyncMetaEl.textContent = "Filter link copied";
+        } catch {
+          acpAsyncMetaEl.textContent = "Copy filter link failed";
+        }
       });
       applyAcpFiltersFromUrl();
       load().catch((e) => (metaEl.textContent = e.message));
