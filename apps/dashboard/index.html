@@ -804,7 +804,39 @@
         const blockers = Array.isArray(readiness?.blockers) ? readiness.blockers : [];
         const blockerText = blockers.length ? blockers.join(", ") : "-";
         const readyClass = readiness?.canExecute === true ? "ok" : "warn";
-        bscYieldReadinessEl.innerHTML = `BSC execute readiness(aave): <span class="${readyClass}">${readiness?.canExecute === true ? "ready" : "blocked"}</span> · reason=${readiness?.reason || "-"} · mode=${readiness?.aaveMode || "-"}<br/><span class="muted">blockers=${blockerText}</span>`;
+        const envHints = {
+          aave_execute_disabled: "BSC_AAVE_EXECUTE_ENABLED=true",
+          missing_bsc_aave_pool: "BSC_AAVE_POOL=0x...",
+          missing_bsc_aave_execute_private_key: "BSC_AAVE_EXECUTE_PRIVATE_KEY=0x...",
+          missing_bsc_aave_execute_command: "BSC_AAVE_EXECUTE_COMMAND='node scripts/aave-supply.mjs --amount {amountRaw} --run {runId}'",
+          bsc_usdc_not_in_aave_allowed_tokens: "BSC_AAVE_ALLOWED_TOKENS=0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955",
+          recommended_amount_exceeds_bsc_aave_max_amount_raw: "BSC_AAVE_MAX_AMOUNT_RAW=<larger_raw_cap>",
+        };
+        const envLines = blockers.map((b) => envHints[b]).filter(Boolean);
+        const envSnippet = envLines.length ? envLines.join("\n") : "# no env changes needed";
+        bscYieldReadinessEl.innerHTML = `BSC execute readiness(aave): <span class="${readyClass}">${readiness?.canExecute === true ? "ready" : "blocked"}</span> · reason=${readiness?.reason || "-"} · mode=${readiness?.aaveMode || "-"}<br/><span class="muted">blockers=${blockerText}</span><br/><span class="muted"><button data-copy-blockers="1">Copy blockers</button> <button data-copy-env-snippet="1">Copy env snippet</button></span>`;
+        const copyBlockersBtn = bscYieldReadinessEl.querySelector('[data-copy-blockers="1"]');
+        const copyEnvBtn = bscYieldReadinessEl.querySelector('[data-copy-env-snippet="1"]');
+        copyBlockersBtn?.addEventListener("click", async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          try {
+            await navigator.clipboard.writeText(blockers.join("\n") || "-");
+            cmdMetaEl.textContent = "Copied blockers";
+          } catch {
+            cmdMetaEl.textContent = "Copy blockers failed";
+          }
+        });
+        copyEnvBtn?.addEventListener("click", async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          try {
+            await navigator.clipboard.writeText(envSnippet);
+            cmdMetaEl.textContent = "Copied env snippet";
+          } catch {
+            cmdMetaEl.textContent = "Copy env snippet failed";
+          }
+        });
         const acpOk = acpStatus?.ok ? "ok" : "warn";
         const who = acpStatus?.whoami?.name || acpStatus?.whoami?.agentName || "-";
         const totalJobs = Number(acpSummary?.summary?.total || 0);

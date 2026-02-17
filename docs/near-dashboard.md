@@ -124,7 +124,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - dead-letter quick presets: `Aave post failures`, `Main failures`, `Clear presets`
   - ACP ops header includes clickable failure heatmap summary (`phase/type:count`) with time window selector (`1h|24h|7d`) and can jump directly to dead-letter phase/type filters
   - Yield Health card now includes BSC protocol position health/subtotals (`Aave`, `Venus`, `total`, `fetchedAt`)
-  - Yield Health card also shows Aave execute readiness from `/api/bsc/yield/plan` (`canExecute/reason/aaveMode/blockers`)
+  - Yield Health card also shows Aave execute readiness from `/api/bsc/yield/plan` (`canExecute/reason/aaveMode/blockers`) and provides one-click `Copy blockers` + `Copy env snippet`
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`
