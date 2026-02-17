@@ -3197,15 +3197,35 @@ async function computeBscYieldPlan(input = {}) {
 		amountUsd: input.amountUsd,
 		rebalanceIntervalDays: input.rebalanceIntervalDays,
 	});
-	const requestedProtocol = String(
-		input.executionProtocol || BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT || "venus",
+	const explicitProtocol = String(input.executionProtocol || "")
+		.trim()
+		.toLowerCase();
+	const hasExplicitProtocol =
+		explicitProtocol === "aave" || explicitProtocol === "venus";
+	const envDefaultProtocol = String(
+		BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT || "venus",
 	)
 		.trim()
 		.toLowerCase();
-	const executionProtocol =
-		requestedProtocol === "aave" || requestedProtocol === "venus"
-			? requestedProtocol
+	const fallbackProtocol =
+		envDefaultProtocol === "aave" || envDefaultProtocol === "venus"
+			? envDefaultProtocol
 			: "venus";
+	const recommendedProtocolFromNet = String(
+		netYieldInsight?.netYieldDelta?.preferredProtocol ||
+			compare?.recommendation?.bestUsdcSupply?.protocol ||
+			fallbackProtocol,
+	)
+		.trim()
+		.toLowerCase();
+	const recommendedProtocol =
+		recommendedProtocolFromNet === "aave" ||
+		recommendedProtocolFromNet === "venus"
+			? recommendedProtocolFromNet
+			: fallbackProtocol;
+	const executionProtocol = hasExplicitProtocol
+		? explicitProtocol
+		: recommendedProtocol;
 	const aprHints = {
 		source: "best-of-venus-aave",
 		usdtSupplyAprBps: Math.max(
@@ -3305,12 +3325,8 @@ async function computeBscYieldPlan(input = {}) {
 		"# safe defaults",
 		...safeDefaults,
 	].join("\n");
-	const recommendedProtocol =
-		netYieldInsight?.netYieldDelta?.preferredProtocol ||
-		compare?.recommendation?.bestUsdcSupply?.protocol ||
-		"venus";
 	const executeReadiness = {
-		requestedProtocol: executionProtocol,
+		requestedProtocol: hasExplicitProtocol ? explicitProtocol : "auto",
 		venusEnabled: true,
 		aaveEnabled: BSC_AAVE_EXECUTE_ENABLED,
 		aaveMode: BSC_AAVE_EXECUTE_MODE,

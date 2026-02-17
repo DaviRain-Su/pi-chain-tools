@@ -104,7 +104,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - Multi-chain UX skeleton: draft/action-console supports `near|bsc` selector
 - BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can execute in two built-in adapter modes:
   - includes stable-yield agent v1 APIs:
-    - `GET /api/bsc/yield/plan` (supports `executionProtocol=venus|aave`; returns `executeReadiness.blockers/recommendedProtocol` for aave precheck and includes `netYieldInsight`)
+    - `GET /api/bsc/yield/plan` (supports `executionProtocol=venus|aave`; when omitted, defaults to net-yield `recommendedProtocol`; returns `executeReadiness.blockers/recommendedProtocol` and includes `netYieldInsight`)
     - `GET /api/bsc/yield/markets` (returns Venus/Aave read-only compare + best protocol recommendation + `sourceHealth` + `netYieldInsight`; supports query `amountUsd` and `rebalanceIntervalDays`)
     - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave`; `aave` requires enable flag)
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
