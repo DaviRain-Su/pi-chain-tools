@@ -179,12 +179,34 @@ function formatUnits(raw, decimals) {
 	return `${whole}.${fractionText}`.replace(/\.0+$/, "").replace(/\.$/, "");
 }
 
+function getRpcEndpointsByHealth() {
+	const ranked = Object.entries(RPC_METRICS.endpointStats)
+		.map(([endpoint, stats]) => {
+			const attempts = Number(stats?.attempts || 0);
+			const success = Number(stats?.success || 0);
+			const errors = Number(stats?.errors || 0);
+			const score = attempts > 0 ? (success - errors) / attempts : 0;
+			return { endpoint, attempts, score };
+		})
+		.sort((a, b) => {
+			if (b.score !== a.score) return b.score - a.score;
+			return b.attempts - a.attempts;
+		})
+		.map((row) => row.endpoint);
+	if (ranked.length === 0) return [...RPC_ENDPOINTS];
+	const missing = RPC_ENDPOINTS.filter(
+		(endpoint) => !ranked.includes(endpoint),
+	);
+	return [...ranked, ...missing];
+}
+
 async function nearRpc(method, params) {
 	RPC_METRICS.totalCalls += 1;
 	let lastError = null;
 	const rounds = Math.max(1, NEAR_RPC_RETRY_ROUNDS + 1);
 	for (let round = 0; round < rounds; round += 1) {
-		for (const endpoint of RPC_ENDPOINTS) {
+		const orderedEndpoints = getRpcEndpointsByHealth();
+		for (const endpoint of orderedEndpoints) {
 			RPC_METRICS.totalAttempts += 1;
 			if (round > 0) RPC_METRICS.totalRetries += 1;
 			if (!RPC_METRICS.endpointStats[endpoint]) {
