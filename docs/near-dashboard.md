@@ -150,7 +150,9 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - read-only API: `GET /api/ops/ci-signatures?limit=50` (returns newest-first rows)
 - deBridge MCP readiness (cross-chain integration hook):
   - `GET /api/crosschain/debridge/readiness` (returns `enabled/commandConfigured/canExecute/blockers/hints`)
+  - `POST /api/crosschain/debridge/quote` (dry-run quote bridge; requires `originChain/destinationChain/tokenIn/tokenOut/amount`; returns `mode=quote|blocked` + `quote/rawOutput`)
   - config: `crosschain.debridge.enabled|command|timeoutMs` (`DEBRIDGE_MCP_ENABLED|DEBRIDGE_MCP_COMMAND|DEBRIDGE_MCP_TIMEOUT_MS`)
+  - command placeholders (if used in command template): `{originChain} {destinationChain} {tokenIn} {tokenOut} {amount} {recipient} {account}`
 - Rebalance risk guards (env-tunable): max amount, min quote out, max slippage, cooldown, and daily execution cap (`NEAR_REBAL_*`)
   - `NEAR_REBAL_MAX_AMOUNT_RAW` (default `5000000`)
   - `NEAR_REBAL_MIN_QUOTE_OUT_RAW` (default `500000`)

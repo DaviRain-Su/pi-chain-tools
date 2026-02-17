@@ -140,6 +140,23 @@ const DEBRIDGE_MCP_TIMEOUT_MS = Math.max(
 		10,
 	) || 120_000,
 );
+
+function tryExtractJsonFromText(text) {
+	const source = String(text || "").trim();
+	if (!source) return null;
+	try {
+		return JSON.parse(source);
+	} catch {}
+	const start = source.indexOf("{");
+	const end = source.lastIndexOf("}");
+	if (start >= 0 && end > start) {
+		const candidate = source.slice(start, end + 1);
+		try {
+			return JSON.parse(candidate);
+		} catch {}
+	}
+	return null;
+}
 const ALERT_WEBHOOK_URL = String(
 	envOrCfg("NEAR_REBAL_ALERT_WEBHOOK_URL", "alerts.webhookUrl", ""),
 );
@@ -6256,6 +6273,91 @@ const server = http.createServer(async (req, res) => {
 						"DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp --help'",
 				},
 			});
+		}
+
+		if (
+			url.pathname === "/api/crosschain/debridge/quote" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			const blockers = [];
+			if (!DEBRIDGE_MCP_ENABLED) blockers.push("debridge_mcp_disabled");
+			if (!DEBRIDGE_MCP_COMMAND) blockers.push("missing_debridge_mcp_command");
+			const originChain = String(payload.originChain || "").trim();
+			const destinationChain = String(payload.destinationChain || "").trim();
+			const tokenIn = String(payload.tokenIn || "").trim();
+			const tokenOut = String(payload.tokenOut || "").trim();
+			const amount = String(payload.amount || "").trim();
+			if (!originChain) blockers.push("missing_origin_chain");
+			if (!destinationChain) blockers.push("missing_destination_chain");
+			if (!tokenIn) blockers.push("missing_token_in");
+			if (!tokenOut) blockers.push("missing_token_out");
+			if (!amount) blockers.push("missing_amount");
+			if (blockers.length > 0) {
+				return json(res, 200, {
+					ok: true,
+					mode: "blocked",
+					provider: "debridge-mcp",
+					blockers,
+					hints: {
+						debridge_mcp_disabled: "DEBRIDGE_MCP_ENABLED=true",
+						missing_debridge_mcp_command:
+							"DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp --help'",
+						missing_origin_chain: "originChain=<source chain id>",
+						missing_destination_chain: "destinationChain=<target chain id>",
+						missing_token_in: "tokenIn=<source token address/symbol>",
+						missing_token_out: "tokenOut=<target token address/symbol>",
+						missing_amount: "amount=<raw amount>",
+					},
+				});
+			}
+
+			const replacements = {
+				"{originChain}": originChain,
+				"{destinationChain}": destinationChain,
+				"{tokenIn}": tokenIn,
+				"{tokenOut}": tokenOut,
+				"{amount}": amount,
+				"{recipient}": String(payload.recipient || "").trim(),
+				"{account}": String(payload.account || "").trim(),
+			};
+			let cmd = DEBRIDGE_MCP_COMMAND;
+			for (const [k, v] of Object.entries(replacements)) {
+				cmd = cmd.split(k).join(v);
+			}
+			try {
+				const output = await runCommand("bash", ["-lc", cmd], {
+					env: process.env,
+					cwd: ACP_WORKDIR,
+					timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
+				});
+				return json(res, 200, {
+					ok: true,
+					mode: "quote",
+					provider: "debridge-mcp",
+					request: {
+						originChain,
+						destinationChain,
+						tokenIn,
+						tokenOut,
+						amount,
+						recipient: String(payload.recipient || "").trim() || null,
+					},
+					quote: tryExtractJsonFromText(output),
+					rawOutput: output,
+				});
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : String(error);
+				return json(res, 500, {
+					ok: false,
+					provider: "debridge-mcp",
+					error: "debridge_quote_failed",
+					message: msg,
+				});
+			}
 		}
 
 		if (url.pathname === "/api/bsc/yield/plan") {
