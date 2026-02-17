@@ -485,7 +485,11 @@
         const retryRate = Number(r.retryRate || 0) * 100;
         const rpcText = `RPC attempts=${Number(r.totalAttempts || 0)} retries=${Number(r.totalRetries || 0)} retryRate=${retryRate.toFixed(1)}% 429=${Number(r.http429 || 0)} 5xx=${Number(r.http5xx || 0)}`;
         const rpcDetail = `lastOK=${r.lastSuccessEndpoint || "-"} lastErr=${r.lastError || "-"}`;
-        return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText} · ${pnlText} · ${rpcText} · ${rpcDetail}`;
+        const top = (r.ranking || [])[0] || null;
+        const topText = top
+          ? `best=${top.endpoint} score=${Number(top.score || 0).toFixed(2)}`
+          : "best=-";
+        return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText} · ${pnlText} · ${rpcText} · ${rpcDetail} · ${topText}`;
       }
 
       function toCsv(snapshot) {

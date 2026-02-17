@@ -90,6 +90,12 @@ const RPC_METRICS = {
 	http5xx: 0,
 	lastSuccessEndpoint: null,
 	lastError: null,
+	endpointStats: Object.fromEntries(
+		RPC_ENDPOINTS.map((endpoint) => [
+			endpoint,
+			{ attempts: 0, success: 0, errors: 0, http429: 0, http5xx: 0 },
+		]),
+	),
 };
 const REBALANCE_METRICS = {
 	totalRuns: 0,
@@ -181,6 +187,17 @@ async function nearRpc(method, params) {
 		for (const endpoint of RPC_ENDPOINTS) {
 			RPC_METRICS.totalAttempts += 1;
 			if (round > 0) RPC_METRICS.totalRetries += 1;
+			if (!RPC_METRICS.endpointStats[endpoint]) {
+				RPC_METRICS.endpointStats[endpoint] = {
+					attempts: 0,
+					success: 0,
+					errors: 0,
+					http429: 0,
+					http5xx: 0,
+				};
+			}
+			const es = RPC_METRICS.endpointStats[endpoint];
+			es.attempts += 1;
 			try {
 				const response = await fetch(endpoint, {
 					method: "POST",
@@ -193,8 +210,15 @@ async function nearRpc(method, params) {
 					}),
 				});
 				if (!response.ok) {
-					if (response.status === 429) RPC_METRICS.http429 += 1;
-					if (response.status >= 500) RPC_METRICS.http5xx += 1;
+					es.errors += 1;
+					if (response.status === 429) {
+						RPC_METRICS.http429 += 1;
+						es.http429 += 1;
+					}
+					if (response.status >= 500) {
+						RPC_METRICS.http5xx += 1;
+						es.http5xx += 1;
+					}
 					if (response.status === 429 || response.status >= 500) {
 						lastError = new Error(`RPC HTTP ${response.status} at ${endpoint}`);
 						RPC_METRICS.lastError = lastError.message;
@@ -204,6 +228,7 @@ async function nearRpc(method, params) {
 				}
 				const payload = await response.json();
 				if (payload.error) {
+					es.errors += 1;
 					const msg = String(
 						payload.error?.message || `RPC error at ${endpoint}`,
 					);
@@ -217,6 +242,7 @@ async function nearRpc(method, params) {
 					}
 					throw new Error(msg);
 				}
+				es.success += 1;
 				RPC_METRICS.lastSuccessEndpoint = endpoint;
 				return { result: payload.result, endpoint };
 			} catch (error) {
@@ -557,6 +583,15 @@ async function buildSnapshot(accountId) {
 				RPC_METRICS.totalAttempts > 0
 					? RPC_METRICS.totalRetries / RPC_METRICS.totalAttempts
 					: 0,
+			ranking: Object.entries(RPC_METRICS.endpointStats)
+				.map(([endpoint, stats]) => {
+					const attempts = Number(stats?.attempts || 0);
+					const success = Number(stats?.success || 0);
+					const errors = Number(stats?.errors || 0);
+					const score = attempts > 0 ? (success - errors) / attempts : 0;
+					return { endpoint, ...stats, score };
+				})
+				.sort((a, b) => b.score - a.score),
 		},
 		rebalanceMetrics: {
 			...REBALANCE_METRICS,
