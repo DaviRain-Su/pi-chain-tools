@@ -134,6 +134,9 @@ const BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT = String(
 )
 	.trim()
 	.toLowerCase();
+const BSC_AAVE_EXECUTE_COMMAND = String(
+	process.env.BSC_AAVE_EXECUTE_COMMAND || "",
+).trim();
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(process.env.ACP_DISMISSED_PURGE_ENABLED || "false").toLowerCase() ===
 	"true";
@@ -1266,6 +1269,45 @@ async function executeBscSwap(params) {
 	throw new Error(
 		"BSC_EXECUTE_CONFIG retryable=false message=missing_native_key_and_command",
 	);
+}
+
+async function executeBscAaveSupplyViaCommand(params) {
+	if (!BSC_AAVE_EXECUTE_COMMAND) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_aave_execute_command_missing",
+		);
+	}
+	const replacements = {
+		"{amountRaw}": String(params.amountRaw || ""),
+		"{token}": String(params.token || BSC_USDC || ""),
+		"{rpcUrl}": String(params.rpcUrl || BSC_RPC_URL || ""),
+		"{chainId}": String(params.chainId || BSC_CHAIN_ID || ""),
+		"{runId}": String(params.runId || ""),
+	};
+	let cmd = BSC_AAVE_EXECUTE_COMMAND;
+	for (const [k, v] of Object.entries(replacements)) {
+		cmd = cmd.split(k).join(v);
+	}
+	try {
+		const output = await runCommand("bash", ["-lc", cmd], {
+			env: process.env,
+			cwd: ACP_WORKDIR,
+		});
+		const txHash = String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
+		return {
+			ok: true,
+			mode: "execute",
+			provider: "aave-command",
+			output,
+			txHash,
+		};
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		const retryable = isTransientExecError(error);
+		throw new Error(
+			`BSC_EXECUTE_FAILED retryable=${retryable ? "true" : "false"} message=${msg}`,
+		);
+	}
 }
 
 function buildAcpExecutionPlan(payload) {
@@ -4243,15 +4285,44 @@ const server = http.createServer(async (req, res) => {
 					reason: plan.executeReadiness?.reason || "execute_not_ready",
 				});
 			}
+			const runId = payload.runId || `bsc-yield-${Date.now()}`;
 			const result = await executeAction({
 				action: "rebalance_usdt_to_usdce_txn",
 				chain: "bsc",
 				amountRaw: plan.plan.recommendedAmountRaw,
 				slippageBps: Number.parseInt(String(payload.slippageBps || 50), 10),
-				runId: payload.runId || `bsc-yield-${Date.now()}`,
+				runId,
 				step: payload.step || "bsc-stable-yield-execute",
 			});
-			return json(res, 200, { ok: true, mode: "execute", plan, result });
+			let postAction = null;
+			if (plan.executionProtocol === "aave") {
+				const supplyAmountRaw = String(
+					result?.execution?.receipt?.tokenOutDeltaRaw ||
+						result?.plan?.quotedOutRaw ||
+						"0",
+				);
+				if (/^\d+$/.test(supplyAmountRaw) && BigInt(supplyAmountRaw) > 0n) {
+					postAction = await executeBscAaveSupplyViaCommand({
+						amountRaw: supplyAmountRaw,
+						token: BSC_USDC,
+						rpcUrl: BSC_RPC_URL,
+						chainId: BSC_CHAIN_ID,
+						runId,
+					});
+				} else {
+					postAction = {
+						ok: false,
+						reason: "aave_supply_amount_unavailable",
+					};
+				}
+			}
+			return json(res, 200, {
+				ok: true,
+				mode: "execute",
+				plan,
+				result,
+				postAction,
+			});
 		}
 
 		if (
