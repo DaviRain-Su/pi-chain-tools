@@ -174,6 +174,11 @@
       </div>
 
       <div class="card" style="margin-top:16px">
+        <h3>ACP Ops</h3>
+        <div id="acpOps" class="muted">-</div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
         <h3>Target Allocation Alert</h3>
         <div class="row" style="margin-bottom:8px">
           <input id="targetUsdt" type="number" min="0" max="100" step="0.1" placeholder="USDt target %" size="14" />
@@ -286,6 +291,7 @@
       const workerEl = document.getElementById("worker");
       const yieldHealthEl = document.getElementById("yieldHealth");
       const execQualityEl = document.getElementById("execQuality");
+      const acpOpsEl = document.getElementById("acpOps");
       const strategyEl = document.getElementById("strategy");
       const targetUsdtEl = document.getElementById("targetUsdt");
       const targetUsdceEl = document.getElementById("targetUsdce");
@@ -519,9 +525,15 @@
       async function load() {
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
-        const res = await fetch(`/api/snapshot${query}`);
-        const data = await res.json();
-        if (!res.ok) {
+        const [snapRes, acpStatusRes, acpSummaryRes] = await Promise.all([
+          fetch(`/api/snapshot${query}`),
+          fetch("/api/acp/status"),
+          fetch("/api/acp/jobs/summary"),
+        ]);
+        const data = await snapRes.json();
+        const acpStatus = await acpStatusRes.json().catch(() => ({ ok: false }));
+        const acpSummary = await acpSummaryRes.json().catch(() => ({ ok: false }));
+        if (!snapRes.ok) {
           metaEl.textContent = `Error: ${data.error || "Unknown"}`;
           return;
         }
@@ -535,6 +547,13 @@
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
         yieldHealthEl.textContent = computeYieldHealth(data);
         execQualityEl.textContent = computeExecutionQuality(data);
+        const acpOk = acpStatus?.ok ? "ok" : "warn";
+        const who = acpStatus?.whoami?.name || acpStatus?.whoami?.agentName || "-";
+        const totalJobs = Number(acpSummary?.summary?.total || 0);
+        const byStatus = acpSummary?.summary?.byStatus || {};
+        const daily = acpSummary?.summary?.dailyState || {};
+        const dailyLimit = Number(acpSummary?.summary?.policyDailyLimit || 0);
+        acpOpsEl.innerHTML = `<span class="${acpOk}">${acpStatus?.ok ? "connected" : "not connected"}</span> · agent=${who}<br/><span class="muted">jobs=${totalJobs} byStatus=${JSON.stringify(byStatus)} daily=${Number(daily.dailyCount || 0)}/${dailyLimit || "-"}</span>`;
         targetAlertEl.innerHTML = computeTargetAlert(data, targetConfig);
         const plan = computeRebalancePlan(data, targetConfig);
         lastRebalancePlan = plan;
