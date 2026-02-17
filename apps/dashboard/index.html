@@ -168,6 +168,7 @@
         <div id="yieldHealth" class="muted">-</div>
         <div id="bscProtocolHealth" class="muted" style="margin-top:6px">BSC protocol: -</div>
         <div id="bscYieldReadiness" class="muted" style="margin-top:6px">BSC execute readiness: -</div>
+        <div id="bscMarketHealth" class="muted" style="margin-top:6px">BSC market health: -</div>
       </div>
 
       <div class="card" style="margin-top:16px">
@@ -380,6 +381,7 @@
       const yieldHealthEl = document.getElementById("yieldHealth");
       const bscProtocolHealthEl = document.getElementById("bscProtocolHealth");
       const bscYieldReadinessEl = document.getElementById("bscYieldReadiness");
+      const bscMarketHealthEl = document.getElementById("bscMarketHealth");
       const execQualityEl = document.getElementById("execQuality");
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
@@ -760,10 +762,11 @@
       async function load() {
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
-        const [snapRes, unifiedRes, bscYieldPlanRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes] = await Promise.all([
+        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes] = await Promise.all([
           fetch(`/api/snapshot${query}`),
           fetch(`/api/portfolio/unified${query}`),
           fetch(`/api/bsc/yield/plan${query ? `${query}&executionProtocol=aave` : "?executionProtocol=aave"}`),
+          fetch(`/api/bsc/yield/markets${query || ""}`),
           fetch("/api/acp/status"),
           fetch("/api/acp/jobs/summary"),
           fetch("/api/acp/jobs"),
@@ -774,6 +777,7 @@
         const data = await snapRes.json();
         const unified = await unifiedRes.json().catch(() => ({ ok: false }));
         const bscYieldPlan = await bscYieldPlanRes.json().catch(() => ({ ok: false }));
+        const bscYieldMarkets = await bscYieldMarketsRes.json().catch(() => ({ ok: false }));
         const acpStatus = await acpStatusRes.json().catch(() => ({ ok: false }));
         const acpSummary = await acpSummaryRes.json().catch(() => ({ ok: false }));
         const acpJobs = await acpJobsRes.json().catch(() => ({ ok: false, jobs: [] }));
@@ -866,6 +870,17 @@
             cmdMetaEl.textContent = "Copy full fix pack failed";
           }
         });
+        const marketHealth = bscYieldMarkets?.marketHealth || {};
+        const protocols = ["venus", "aave", "lista", "wombat"];
+        const marketHealthText = protocols
+          .map((p) => {
+            const row = marketHealth?.[p] || {};
+            const status = String(row?.status || "unknown");
+            const ageMin = Number.isFinite(Number(row?.ageMs)) ? Math.round(Number(row.ageMs) / 60000) : null;
+            return `${p}:${status}${ageMin != null ? `(${ageMin}m)` : ""}`;
+          })
+          .join(" · ");
+        bscMarketHealthEl.innerHTML = `BSC market health: <span class="muted">${marketHealthText || "-"}</span>`;
         const acpOk = acpStatus?.ok ? "ok" : "warn";
         const who = acpStatus?.whoami?.name || acpStatus?.whoami?.agentName || "-";
         const totalJobs = Number(acpSummary?.summary?.total || 0);
