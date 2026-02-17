@@ -877,10 +877,14 @@
             const row = marketHealth?.[p] || {};
             const status = String(row?.status || "unknown");
             const ageMin = Number.isFinite(Number(row?.ageMs)) ? Math.round(Number(row.ageMs) / 60000) : null;
-            return `${p}:${status}${ageMin != null ? `(${ageMin}m)` : ""}`;
+            const cls = status === "fresh" ? "ok" : status === "stale" ? "warn" : "muted";
+            const source = String(row?.source || "-");
+            const updatedAt = row?.updatedAt ? new Date(row.updatedAt).toLocaleString() : "-";
+            const title = `${p} source=${source} updated=${updatedAt} ageMin=${ageMin != null ? ageMin : "-"}`;
+            return `<span class="${cls}" title="${title}">${p}:${status}${ageMin != null ? `(${ageMin}m)` : ""}</span>`;
           })
           .join(" · ");
-        bscMarketHealthEl.innerHTML = `BSC market health: <span class="muted">${marketHealthText || "-"}</span>`;
+        bscMarketHealthEl.innerHTML = `BSC market health: ${marketHealthText || "<span class=\"muted\">-</span>"}`;
         const acpOk = acpStatus?.ok ? "ok" : "warn";
         const who = acpStatus?.whoami?.name || acpStatus?.whoami?.agentName || "-";
         const totalJobs = Number(acpSummary?.summary?.total || 0);
