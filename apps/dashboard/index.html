@@ -806,7 +806,33 @@
         const readyClass = readiness?.canExecute === true ? "ok" : "warn";
         const envSnippet = String(readiness?.fixPack?.envLines?.join("\n") || "# no env changes needed\n");
         const fullFixPack = String(readiness?.fixPack?.fullTemplate || "# no full fix pack available\n");
-        bscYieldReadinessEl.innerHTML = `BSC execute readiness(aave): <span class="${readyClass}">${readiness?.canExecute === true ? "ready" : "blocked"}</span> · reason=${readiness?.reason || "-"} · mode=${readiness?.aaveMode || "-"}<br/><span class="muted">blockers=${blockerText}</span><br/><span class="muted"><button data-copy-blockers="1">Copy blockers</button> <button data-copy-env-snippet="1">Copy env snippet</button> <button data-copy-full-fix-pack="1">Copy full fix pack</button></span>`;
+        const blockerPriority = [
+          "aave_execute_disabled",
+          "missing_bsc_aave_pool",
+          "missing_bsc_aave_execute_private_key",
+          "missing_bsc_aave_execute_command",
+          "bsc_usdc_not_in_aave_allowed_tokens",
+          "recommended_amount_exceeds_bsc_aave_max_amount_raw",
+        ];
+        const blockerHint = {
+          aave_execute_disabled: "Enable gate: BSC_AAVE_EXECUTE_ENABLED=true",
+          missing_bsc_aave_pool: "Set BSC_AAVE_POOL",
+          missing_bsc_aave_execute_private_key: "Set BSC_AAVE_EXECUTE_PRIVATE_KEY (native mode)",
+          missing_bsc_aave_execute_command: "Set BSC_AAVE_EXECUTE_COMMAND (command mode)",
+          bsc_usdc_not_in_aave_allowed_tokens: "Include USDC in BSC_AAVE_ALLOWED_TOKENS",
+          recommended_amount_exceeds_bsc_aave_max_amount_raw: "Increase BSC_AAVE_MAX_AMOUNT_RAW or lower amount",
+        };
+        const orderedBlockers = blockers.slice().sort((a, b) => {
+          const ia = blockerPriority.indexOf(a);
+          const ib = blockerPriority.indexOf(b);
+          return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+        });
+        const primaryBlocker = orderedBlockers[0] || "-";
+        const primaryHint = blockerHint[primaryBlocker] || "-";
+        const fixOrderText = orderedBlockers.length
+          ? orderedBlockers.map((b, i) => `${i + 1}. ${b}`).join(" | ")
+          : "-";
+        bscYieldReadinessEl.innerHTML = `BSC execute readiness(aave): <span class="${readyClass}">${readiness?.canExecute === true ? "ready" : "blocked"}</span> · reason=${readiness?.reason || "-"} · mode=${readiness?.aaveMode || "-"}<br/><span class="muted">blockers=${blockerText}</span><br/><span class="${readiness?.canExecute === true ? "ok" : "warn"}">primary=${primaryBlocker}</span> <span class="muted">hint=${primaryHint}</span><br/><span class="muted">fix-order=${fixOrderText}</span><br/><span class="muted"><button data-copy-blockers="1">Copy blockers</button> <button data-copy-env-snippet="1">Copy env snippet</button> <button data-copy-full-fix-pack="1">Copy full fix pack</button></span>`;
         const copyBlockersBtn = bscYieldReadinessEl.querySelector('[data-copy-blockers="1"]');
         const copyEnvBtn = bscYieldReadinessEl.querySelector('[data-copy-env-snippet="1"]');
         const copyFullFixPackBtn = bscYieldReadinessEl.querySelector('[data-copy-full-fix-pack="1"]');
