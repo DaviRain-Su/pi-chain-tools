@@ -36,6 +36,23 @@ function getSchemaDir(workspace: string) {
 	return path.join(workspace, "docs", "schemas");
 }
 
+function writeValidSchemaFile(schemaDir: string, fileName: string) {
+	const payload = {
+		$schema: "https://json-schema.org/draft/2020-12/schema",
+		$id: `test/${fileName}`,
+		title: fileName,
+		type: "object",
+		properties: {
+			ok: { type: "boolean" },
+		},
+	};
+	writeFileSync(
+		path.join(schemaDir, fileName),
+		JSON.stringify(payload),
+		"utf8",
+	);
+}
+
 describe("validate-openclaw-schemas CLI list modes", () => {
 	const workspaces: string[] = [];
 
@@ -179,5 +196,46 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		expect(result.status).toBe(1);
 		expect(result.stderr).toContain("Unknown options");
 		expect(result.stdout + result.stderr).toContain("Usage:");
+	});
+
+	it("fails content validation when BSC artifact schema JSON is malformed", () => {
+		const workspace = createWorkspace(REQUIRED_FILES);
+		workspaces.push(workspace);
+		const schemaDir = getSchemaDir(workspace);
+		for (const fileName of REQUIRED_FILES) {
+			writeValidSchemaFile(schemaDir, fileName);
+		}
+		writeFileSync(
+			path.join(schemaDir, "bsc-post-action-supply-artifact.v1.schema.json"),
+			"{ invalid-json",
+			"utf8",
+		);
+
+		const result = runValidator(workspace, ["--json"]);
+		expect(result.status).toBe(1);
+		const payload = JSON.parse(result.stderr);
+		expect(payload.status).toBe("failed");
+		expect(payload.errors).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					file: "bsc-post-action-supply-artifact.v1.schema.json",
+					code: "invalid_json",
+				}),
+			]),
+		);
+	});
+
+	it("passes content validation when BSC artifact schema is well-formed", () => {
+		const workspace = createWorkspace(REQUIRED_FILES);
+		workspaces.push(workspace);
+		const schemaDir = getSchemaDir(workspace);
+		for (const fileName of REQUIRED_FILES) {
+			writeValidSchemaFile(schemaDir, fileName);
+		}
+
+		const result = runValidator(workspace, ["--json"]);
+		expect(result.status).toBe(0);
+		const payload = JSON.parse(result.stdout);
+		expect(payload.status).toBe("ok");
 	});
 });
