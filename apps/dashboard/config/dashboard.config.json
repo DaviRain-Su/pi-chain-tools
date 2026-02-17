@@ -40,7 +40,9 @@
 			"aprCacheTtlMs": 60000,
 			"executionProtocolDefault": "venus",
 			"rebalanceIntervalDays": 7,
-			"defaultQuoteUsd": 100
+			"defaultQuoteUsd": 100,
+			"listaAprHintsJson": "",
+			"wombatAprHintsJson": ""
 		},
 		"aave": {
 			"enabled": false,

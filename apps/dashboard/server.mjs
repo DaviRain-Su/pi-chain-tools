@@ -276,6 +276,12 @@ const BSC_STABLE_APR_HINTS_JSON = String(
 const BSC_AAVE_APR_HINTS_JSON = String(
 	envOrCfg("BSC_AAVE_APR_HINTS_JSON", "bsc.yield.aaveAprHintsJson", ""),
 ).trim();
+const BSC_LISTA_APR_HINTS_JSON = String(
+	envOrCfg("BSC_LISTA_APR_HINTS_JSON", "bsc.yield.listaAprHintsJson", ""),
+).trim();
+const BSC_WOMBAT_APR_HINTS_JSON = String(
+	envOrCfg("BSC_WOMBAT_APR_HINTS_JSON", "bsc.yield.wombatAprHintsJson", ""),
+).trim();
 const BSC_VENUS_APR_API_URL = String(
 	envOrCfg("BSC_VENUS_APR_API_URL", "bsc.yield.venusAprApiUrl", ""),
 ).trim();
@@ -2895,28 +2901,48 @@ async function getBscLendingMarketCompare() {
 		getBscStableAprHints(),
 		getBscAaveAprHints(),
 	]);
-	const bestUsdtProtocol =
-		venus.usdtSupplyAprBps >= aave.usdtSupplyAprBps ? "venus" : "aave";
-	const bestUsdcProtocol =
-		venus.usdcSupplyAprBps >= aave.usdcSupplyAprBps ? "venus" : "aave";
+	const lista = parseAprHintsFromJson(BSC_LISTA_APR_HINTS_JSON, "lista");
+	const wombat = parseAprHintsFromJson(BSC_WOMBAT_APR_HINTS_JSON, "wombat");
+	const protocolRows = [
+		{
+			protocol: "venus",
+			usdt: venus.usdtSupplyAprBps,
+			usdc: venus.usdcSupplyAprBps,
+		},
+		{
+			protocol: "aave",
+			usdt: aave.usdtSupplyAprBps,
+			usdc: aave.usdcSupplyAprBps,
+		},
+		{
+			protocol: "lista",
+			usdt: lista.usdtSupplyAprBps,
+			usdc: lista.usdcSupplyAprBps,
+		},
+		{
+			protocol: "wombat",
+			usdt: wombat.usdtSupplyAprBps,
+			usdc: wombat.usdcSupplyAprBps,
+		},
+	];
+	const bestUsdt = protocolRows.reduce((best, row) =>
+		row.usdt > best.usdt ? row : best,
+	);
+	const bestUsdc = protocolRows.reduce((best, row) =>
+		row.usdc > best.usdc ? row : best,
+	);
 	return {
 		ok: true,
 		chain: "bsc",
-		markets: { venus, aave },
+		markets: { venus, aave, lista, wombat },
 		recommendation: {
 			bestUsdtSupply: {
-				protocol: bestUsdtProtocol,
-				aprBps:
-					bestUsdtProtocol === "venus"
-						? venus.usdtSupplyAprBps
-						: aave.usdtSupplyAprBps,
+				protocol: bestUsdt.protocol,
+				aprBps: bestUsdt.usdt,
 			},
 			bestUsdcSupply: {
-				protocol: bestUsdcProtocol,
-				aprBps:
-					bestUsdcProtocol === "venus"
-						? venus.usdcSupplyAprBps
-						: aave.usdcSupplyAprBps,
+				protocol: bestUsdc.protocol,
+				aprBps: bestUsdc.usdc,
 			},
 		},
 	};
@@ -3264,14 +3290,18 @@ async function computeBscYieldPlan(input = {}) {
 		? explicitProtocol
 		: recommendedProtocol;
 	const aprHints = {
-		source: "best-of-venus-aave",
+		source: "best-of-venus-aave-lista-wombat",
 		usdtSupplyAprBps: Math.max(
-			compare.markets.venus.usdtSupplyAprBps,
-			compare.markets.aave.usdtSupplyAprBps,
+			Number(compare?.markets?.venus?.usdtSupplyAprBps || 0),
+			Number(compare?.markets?.aave?.usdtSupplyAprBps || 0),
+			Number(compare?.markets?.lista?.usdtSupplyAprBps || 0),
+			Number(compare?.markets?.wombat?.usdtSupplyAprBps || 0),
 		),
 		usdcSupplyAprBps: Math.max(
-			compare.markets.venus.usdcSupplyAprBps,
-			compare.markets.aave.usdcSupplyAprBps,
+			Number(compare?.markets?.venus?.usdcSupplyAprBps || 0),
+			Number(compare?.markets?.aave?.usdcSupplyAprBps || 0),
+			Number(compare?.markets?.lista?.usdcSupplyAprBps || 0),
+			Number(compare?.markets?.wombat?.usdcSupplyAprBps || 0),
 		),
 		updatedAt: new Date().toISOString(),
 	};
