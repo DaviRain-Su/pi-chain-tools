@@ -418,6 +418,66 @@ const BSC_VENUS_VTOKEN_USDC = String(
 const BSC_VENUS_VTOKEN_USDT = String(
 	envOrCfg("BSC_VENUS_VTOKEN_USDT", "bsc.positions.venusVtokenUsdt", ""),
 ).trim();
+const BSC_LISTA_TOKEN_USDC = String(
+	envOrCfg("BSC_LISTA_TOKEN_USDC", "bsc.positions.listaTokenUsdc", ""),
+).trim();
+const BSC_LISTA_TOKEN_USDT = String(
+	envOrCfg("BSC_LISTA_TOKEN_USDT", "bsc.positions.listaTokenUsdt", ""),
+).trim();
+const BSC_WOMBAT_TOKEN_USDC = String(
+	envOrCfg("BSC_WOMBAT_TOKEN_USDC", "bsc.positions.wombatTokenUsdc", ""),
+).trim();
+const BSC_WOMBAT_TOKEN_USDT = String(
+	envOrCfg("BSC_WOMBAT_TOKEN_USDT", "bsc.positions.wombatTokenUsdt", ""),
+).trim();
+const BSC_LISTA_USDC_EXCHANGE_RATE = Math.max(
+	0,
+	Number.parseFloat(
+		String(
+			envOrCfg(
+				"BSC_LISTA_USDC_EXCHANGE_RATE",
+				"bsc.positions.listaUsdcExchangeRate",
+				"1",
+			),
+		),
+	) || 1,
+);
+const BSC_LISTA_USDT_EXCHANGE_RATE = Math.max(
+	0,
+	Number.parseFloat(
+		String(
+			envOrCfg(
+				"BSC_LISTA_USDT_EXCHANGE_RATE",
+				"bsc.positions.listaUsdtExchangeRate",
+				"1",
+			),
+		),
+	) || 1,
+);
+const BSC_WOMBAT_USDC_EXCHANGE_RATE = Math.max(
+	0,
+	Number.parseFloat(
+		String(
+			envOrCfg(
+				"BSC_WOMBAT_USDC_EXCHANGE_RATE",
+				"bsc.positions.wombatUsdcExchangeRate",
+				"1",
+			),
+		),
+	) || 1,
+);
+const BSC_WOMBAT_USDT_EXCHANGE_RATE = Math.max(
+	0,
+	Number.parseFloat(
+		String(
+			envOrCfg(
+				"BSC_WOMBAT_USDT_EXCHANGE_RATE",
+				"bsc.positions.wombatUsdtExchangeRate",
+				"1",
+			),
+		),
+	) || 1,
+);
 const ACP_DISMISSED_PURGE_ENABLED =
 	String(
 		envOrCfg(
@@ -3325,7 +3385,9 @@ async function getBscProtocolPositions(account) {
 		return {
 			aave: {},
 			venus: {},
-			subtotalsUsdApprox: { aave: 0, venus: 0 },
+			lista: {},
+			wombat: {},
+			subtotalsUsdApprox: { aave: 0, venus: 0, lista: 0, wombat: 0 },
 			totalUsdApprox: 0,
 			health: { status: "degraded", reason: "missing_account" },
 			fetchedAt: new Date().toISOString(),
@@ -3338,13 +3400,15 @@ async function getBscProtocolPositions(account) {
 	const erc20Iface = new Interface([
 		"function balanceOf(address owner) view returns (uint256)",
 	]);
-	const readMaybe = async (token, decimals, configKey) => {
+	const readMaybe = async (token, decimals, configKey, exchangeRate = 1) => {
 		if (!token) {
 			return {
 				token: null,
 				configKey,
 				missingConfig: true,
 				balanceUi: 0,
+				normalizedUsdApprox: 0,
+				exchangeRate,
 			};
 		}
 		try {
@@ -3353,17 +3417,38 @@ async function getBscProtocolPositions(account) {
 			const bal = erc20Iface
 				.decodeFunctionResult("balanceOf", raw)[0]
 				.toString();
+			const balanceUi = rawToUi(bal, decimals);
 			return {
 				token,
 				balanceRaw: bal,
-				balanceUi: rawToUi(bal, decimals),
+				balanceUi,
+				normalizedUsdApprox: Number(
+					(Number(balanceUi) * Number(exchangeRate || 1)).toFixed(6),
+				),
+				exchangeRate,
 				ok: true,
 			};
 		} catch {
-			return { token, error: "read_failed", balanceUi: 0, ok: false };
+			return {
+				token,
+				error: "read_failed",
+				balanceUi: 0,
+				normalizedUsdApprox: 0,
+				exchangeRate,
+				ok: false,
+			};
 		}
 	};
-	const [aaveUsdc, aaveUsdt, venusUsdc, venusUsdt] = await Promise.all([
+	const [
+		aaveUsdc,
+		aaveUsdt,
+		venusUsdc,
+		venusUsdt,
+		listaUsdc,
+		listaUsdt,
+		wombatUsdc,
+		wombatUsdt,
+	] = await Promise.all([
 		readMaybe(BSC_AAVE_ATOKEN_USDC, BSC_USDC_DECIMALS, "BSC_AAVE_ATOKEN_USDC"),
 		readMaybe(BSC_AAVE_ATOKEN_USDT, BSC_USDT_DECIMALS, "BSC_AAVE_ATOKEN_USDT"),
 		readMaybe(
@@ -3376,13 +3461,55 @@ async function getBscProtocolPositions(account) {
 			BSC_USDT_DECIMALS,
 			"BSC_VENUS_VTOKEN_USDT",
 		),
+		readMaybe(
+			BSC_LISTA_TOKEN_USDC,
+			BSC_USDC_DECIMALS,
+			"BSC_LISTA_TOKEN_USDC",
+			BSC_LISTA_USDC_EXCHANGE_RATE,
+		),
+		readMaybe(
+			BSC_LISTA_TOKEN_USDT,
+			BSC_USDT_DECIMALS,
+			"BSC_LISTA_TOKEN_USDT",
+			BSC_LISTA_USDT_EXCHANGE_RATE,
+		),
+		readMaybe(
+			BSC_WOMBAT_TOKEN_USDC,
+			BSC_USDC_DECIMALS,
+			"BSC_WOMBAT_TOKEN_USDC",
+			BSC_WOMBAT_USDC_EXCHANGE_RATE,
+		),
+		readMaybe(
+			BSC_WOMBAT_TOKEN_USDT,
+			BSC_USDT_DECIMALS,
+			"BSC_WOMBAT_TOKEN_USDT",
+			BSC_WOMBAT_USDT_EXCHANGE_RATE,
+		),
 	]);
 	const subtotalAave =
-		Number(aaveUsdc?.balanceUi || 0) + Number(aaveUsdt?.balanceUi || 0);
+		Number(aaveUsdc?.normalizedUsdApprox || 0) +
+		Number(aaveUsdt?.normalizedUsdApprox || 0);
 	const subtotalVenus =
-		Number(venusUsdc?.balanceUi || 0) + Number(venusUsdt?.balanceUi || 0);
-	const totalUsdApprox = subtotalAave + subtotalVenus;
-	const rows = [aaveUsdc, aaveUsdt, venusUsdc, venusUsdt];
+		Number(venusUsdc?.normalizedUsdApprox || 0) +
+		Number(venusUsdt?.normalizedUsdApprox || 0);
+	const subtotalLista =
+		Number(listaUsdc?.normalizedUsdApprox || 0) +
+		Number(listaUsdt?.normalizedUsdApprox || 0);
+	const subtotalWombat =
+		Number(wombatUsdc?.normalizedUsdApprox || 0) +
+		Number(wombatUsdt?.normalizedUsdApprox || 0);
+	const totalUsdApprox =
+		subtotalAave + subtotalVenus + subtotalLista + subtotalWombat;
+	const rows = [
+		aaveUsdc,
+		aaveUsdt,
+		venusUsdc,
+		venusUsdt,
+		listaUsdc,
+		listaUsdt,
+		wombatUsdc,
+		wombatUsdt,
+	];
 	const hasReadError = rows.some((r) => r && r.ok === false);
 	const missingAnyConfig = rows.some((r) => r?.missingConfig);
 	const missingConfigKeys = rows
@@ -3393,6 +3520,7 @@ async function getBscProtocolPositions(account) {
 		.filter((r) => r && r.ok === false)
 		.map((r) => String(r?.token || ""))
 		.filter(Boolean);
+	const hasNormalized = rows.some((r) => Number(r?.exchangeRate || 1) !== 1);
 	const health = hasReadError
 		? {
 				status: "error",
@@ -3409,11 +3537,24 @@ async function getBscProtocolPositions(account) {
 							? `missing=${missingConfigKeys.join(",")}`
 							: "-",
 				}
-			: { status: "ok", reason: "all_configured_reads_ok", detail: "-" };
+			: {
+					status: "ok",
+					reason: hasNormalized
+						? "all_configured_reads_ok_with_normalization"
+						: "all_configured_reads_ok",
+					detail: hasNormalized ? "includes_exchange_rate_normalization" : "-",
+				};
 	return {
 		aave: { usdc: aaveUsdc, usdt: aaveUsdt },
 		venus: { usdc: venusUsdc, usdt: venusUsdt },
-		subtotalsUsdApprox: { aave: subtotalAave, venus: subtotalVenus },
+		lista: { usdc: listaUsdc, usdt: listaUsdt },
+		wombat: { usdc: wombatUsdc, usdt: wombatUsdt },
+		subtotalsUsdApprox: {
+			aave: subtotalAave,
+			venus: subtotalVenus,
+			lista: subtotalLista,
+			wombat: subtotalWombat,
+		},
 		totalUsdApprox,
 		health,
 		fetchedAt: new Date().toISOString(),

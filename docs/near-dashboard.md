@@ -249,9 +249,17 @@ Common mapping examples:
 - `BSC_AAVE_ATOKEN_USDT` - optional Aave aToken address for USDT position read in unified portfolio
 - `BSC_VENUS_VTOKEN_USDC` - optional Venus vToken address for USDC position read in unified portfolio
 - `BSC_VENUS_VTOKEN_USDT` - optional Venus vToken address for USDT position read in unified portfolio
+- `BSC_LISTA_TOKEN_USDC` - optional Lista position token address for USDC-side position read in unified portfolio
+- `BSC_LISTA_TOKEN_USDT` - optional Lista position token address for USDT-side position read in unified portfolio
+- `BSC_WOMBAT_TOKEN_USDC` - optional Wombat position token address for USDC-side position read in unified portfolio
+- `BSC_WOMBAT_TOKEN_USDT` - optional Wombat position token address for USDT-side position read in unified portfolio
+- `BSC_LISTA_USDC_EXCHANGE_RATE` - optional normalization rate from Lista position token to USDC underlying (default `1`)
+- `BSC_LISTA_USDT_EXCHANGE_RATE` - optional normalization rate from Lista position token to USDT underlying (default `1`)
+- `BSC_WOMBAT_USDC_EXCHANGE_RATE` - optional normalization rate from Wombat position token to USDC underlying (default `1`)
+- `BSC_WOMBAT_USDT_EXCHANGE_RATE` - optional normalization rate from Wombat position token to USDT underlying (default `1`)
 - `BSC_AAVE_EXECUTE_COMMAND` - command template for optional post-swap Aave supply action in aave execution mode (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`)
   - required placeholders: `{amountRaw}`, `{runId}` (missing placeholders block execution)
-- `BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT` - default execution protocol for BSC yield plan/worker (`venus|aave`, default: `venus`)
+- `BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT` - default execution protocol for BSC yield plan/worker (`venus|aave|lista|wombat`, default: `venus`)
 - Worker runtime options (request payload, not env): `dryRun`, `intervalMs`, `targetUsdcBps`, `minDriftBps`, `minAprDeltaBps`, `maxStepUsd`
 - `ACP_DISMISSED_PURGE_ENABLED` - enable automatic dismissed-archive purge scheduler (`true|false`, default: `false`)
 - `ACP_DISMISSED_PURGE_DAYS` - purge threshold in days for dismissed jobs (default: `7`)
