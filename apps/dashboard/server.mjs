@@ -2998,6 +2998,23 @@ async function getBscLendingMarketCompare() {
 			return [protocol, band];
 		}),
 	);
+	const riskScores = Object.values(marketRiskScore).map((x) => Number(x || 0));
+	const avgRiskScore =
+		riskScores.length > 0
+			? Number(
+					(
+						riskScores.reduce((acc, n) => acc + n, 0) / riskScores.length
+					).toFixed(1),
+				)
+			: 0;
+	const maxRiskScore = riskScores.length > 0 ? Math.max(...riskScores) : 0;
+	const aggregateRiskBand =
+		avgRiskScore >= 70 ? "high" : avgRiskScore >= 40 ? "medium" : "low";
+	const aggregateRisk = {
+		avgScore: avgRiskScore,
+		maxScore: maxRiskScore,
+		band: aggregateRiskBand,
+	};
 	return {
 		ok: true,
 		chain: "bsc",
@@ -3006,6 +3023,7 @@ async function getBscLendingMarketCompare() {
 		marketRiskTags,
 		marketRiskScore,
 		marketRiskBand,
+		aggregateRisk,
 		recommendation: {
 			bestUsdtSupply: {
 				protocol: bestUsdt.protocol,

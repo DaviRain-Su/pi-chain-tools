@@ -796,7 +796,13 @@
 
         burrowRegEl.innerHTML = data.burrow.registered ? `<span class="ok">Registered</span>` : `<span class="warn">Not registered</span>`;
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
-        yieldHealthEl.textContent = computeYieldHealth(data);
+        const yieldHealthText = computeYieldHealth(data);
+        const aggregateRisk = bscYieldMarkets?.aggregateRisk || {};
+        const aggregateBand = String(aggregateRisk?.band || "unknown");
+        const aggregateCls = aggregateBand === "high" ? "warn" : aggregateBand === "medium" ? "muted" : aggregateBand === "low" ? "ok" : "muted";
+        const aggregateAvg = Number.isFinite(Number(aggregateRisk?.avgScore)) ? Number(aggregateRisk.avgScore) : null;
+        const aggregateMax = Number.isFinite(Number(aggregateRisk?.maxScore)) ? Number(aggregateRisk.maxScore) : null;
+        yieldHealthEl.innerHTML = `Portfolio aggregate risk: <span class="${aggregateCls}">${aggregateBand}</span> · avg=${aggregateAvg != null ? aggregateAvg : "-"} · max=${aggregateMax != null ? aggregateMax : "-"}<br/><span class="muted">${yieldHealthText}</span>`;
         execQualityEl.textContent = computeExecutionQuality(data);
         const bscLayer = (unified?.portfolio?.executionLayers || []).find((x) => String(x?.chain || "").toLowerCase() === "bsc");
         const protocolPos = bscLayer?.positions?.protocols || {};

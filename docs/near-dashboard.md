@@ -105,7 +105,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can execute in two built-in adapter modes:
   - includes stable-yield agent v1 APIs:
     - `GET /api/bsc/yield/plan` (supports `executionProtocol=venus|aave|lista|wombat`; when omitted, defaults to net-yield `recommendedProtocol`; returns `executeReadiness.blockers/recommendedProtocol` and includes `netYieldInsight`)
-    - `GET /api/bsc/yield/markets` (returns Venus/Aave/Lista/Wombat read-only compare + best protocol recommendation + `sourceHealth` + `marketHealth(status/source/updatedAt/ageMs)` + `marketRiskTags` + `marketRiskScore(0-100)` + `marketRiskBand(low|medium|high)` + `netYieldInsight`; includes Pancake V2 read-only quote signal and `dexQuoteCompare{bestSource,conservativeSource,spreadBps}` in `netYieldInsight.quote`; supports query `amountUsd` and `rebalanceIntervalDays`)
+    - `GET /api/bsc/yield/markets` (returns Venus/Aave/Lista/Wombat read-only compare + best protocol recommendation + `sourceHealth` + `marketHealth(status/source/updatedAt/ageMs)` + `marketRiskTags` + `marketRiskScore(0-100)` + `marketRiskBand(low|medium|high)` + `aggregateRisk{avgScore,maxScore,band}` + `netYieldInsight`; includes Pancake V2 read-only quote signal and `dexQuoteCompare{bestSource,conservativeSource,spreadBps}` in `netYieldInsight.quote`; supports query `amountUsd` and `rebalanceIntervalDays`)
     - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista/wombat` currently return readiness-blocked until execute adapters are implemented)
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
     - `POST /api/bsc/yield/worker/stop` (`confirm=true`)
@@ -125,7 +125,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - ACP ops header includes clickable failure heatmap summary (`phase/type:count`) with time window selector (`1h|24h|7d`) and can jump directly to dead-letter phase/type filters
   - Yield Health card now includes BSC protocol position health/subtotals (`Aave`, `Venus`, `total`, `fetchedAt`)
   - Yield Health card also shows Aave execute readiness from `/api/bsc/yield/plan` (`canExecute/reason/aaveMode/blockers/recommendedProtocol/fixPack`), highlights `primary` blocker + `fix-order`, and provides one-click `Copy blockers` + `Copy env snippet` + `Copy full fix pack` (grouped, annotated `.env` template)
-  - Yield Health card now surfaces BSC market health summary (`venus/aave/lista/wombat`) from `/api/bsc/yield/markets.marketHealth` with status coloring (`fresh/stale/unknown`) and hover details (`source/updatedAt/age`)
+  - Yield Health card now surfaces portfolio-level aggregate risk (`band/avg/max`) from `/api/bsc/yield/markets.aggregateRisk`
+  - Yield Health card also surfaces BSC market health summary (`venus/aave/lista/wombat`) from `/api/bsc/yield/markets.marketHealth` with status coloring (`fresh/stale/unknown`) and hover details (`source/updatedAt/age`)
 - Optional alert push on rollback/failure/reconcile-warning:
   - `NEAR_REBAL_ALERT_WEBHOOK_URL`
   - `NEAR_REBAL_ALERT_TELEGRAM_BOT_TOKEN`
