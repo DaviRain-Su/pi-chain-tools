@@ -187,6 +187,10 @@
           <textarea id="rebalanceDraft" rows="6" style="width:100%;border-radius:8px;border:1px solid #2d3656;background:#0e1529;color:#e8eefc;padding:8px" placeholder="Rebalance execution draft will appear here"></textarea>
         </div>
         <div class="row" style="margin-top:8px">
+          <select id="rebalanceChain">
+            <option value="near">near</option>
+            <option value="bsc">bsc</option>
+          </select>
           <button id="buildRebalanceDraft">Build execution draft</button>
           <button id="copyRebalanceDraft">Copy draft</button>
           <button id="fillActionConsole">Fill Action Console</button>
@@ -290,6 +294,7 @@
       const targetAlertEl = document.getElementById("targetAlert");
       const targetPlanEl = document.getElementById("targetPlan");
       const rebalanceDraftEl = document.getElementById("rebalanceDraft");
+      const rebalanceChainEl = document.getElementById("rebalanceChain");
       const buildRebalanceDraftBtn = document.getElementById("buildRebalanceDraft");
       const copyRebalanceDraftBtn = document.getElementById("copyRebalanceDraft");
       const fillActionConsoleBtn = document.getElementById("fillActionConsole");
@@ -715,7 +720,7 @@
           : "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.factory.bridge.near";
       }
 
-      function buildRebalanceDraft(snapshot, targets) {
+      function buildRebalanceDraft(snapshot, targets, chain = "near") {
         const plan = computeRebalancePlan(snapshot, targets);
         if (!plan.from || !plan.to || plan.amount <= 0) {
           return { plan, text: "# No executable rebalance draft\n# Reason: " + plan.text };
@@ -724,6 +729,20 @@
         const fromToken = tokenIdFromSymbol(plan.from);
         const toToken = tokenIdFromSymbol(plan.to);
         const raw = toRaw6(plan.amount);
+
+        if (chain === "bsc") {
+          return {
+            plan,
+            text: [
+              `# Rebalance draft (${plan.from} -> ${plan.to}) [BSC skeleton]`,
+              `# Estimated move amount: ${plan.amount.toFixed(6)} (${raw} raw-equivalent)`,
+              `1) Withdraw source asset from lending protocol (BSC adapter)`,
+              `2) Swap on Pancake/aggregator (BSC adapter) with slippage guard`,
+              `3) Re-supply target asset to lending protocol (BSC adapter)`,
+              `# Note: one-click transaction orchestration for BSC is not enabled yet in this dashboard backend.`,
+            ].join("\n"),
+          };
+        }
 
         return {
           plan,
@@ -737,13 +756,25 @@
         };
       }
 
-      function buildActionConsoleFromPlan(plan) {
+      function buildActionConsoleFromPlan(plan, chain = "near") {
         if (!plan || !plan.from || !plan.to || plan.amount <= 0) {
           return "# No executable plan to fill\n# Refresh snapshot and confirm target settings.";
         }
         const fromToken = tokenIdFromSymbol(plan.from);
         const toToken = tokenIdFromSymbol(plan.to);
         const raw = toRaw6(plan.amount);
+        if (chain === "bsc") {
+          return [
+            `# Checklist [BSC skeleton]`,
+            `# 1) chain: bsc`,
+            `# 2) amount: ${plan.amount.toFixed(6)} (${raw} raw-equivalent)`,
+            `# 3) route through BSC adapter`,
+            ``,
+            `# TODO: bsc_withdraw`,
+            `# TODO: bsc_swap`,
+            `# TODO: bsc_supply`,
+          ].join("\n");
+        }
         return [
           `# Checklist`,
           `# 1) account: ${currentAccount()}`,
@@ -762,10 +793,11 @@
           rebalanceMetaEl.textContent = "No snapshot loaded";
           return;
         }
-        const draft = buildRebalanceDraft(lastSnapshot, targetConfig);
+        const chain = (rebalanceChainEl.value || "near").trim();
+        const draft = buildRebalanceDraft(lastSnapshot, targetConfig, chain);
         lastRebalancePlan = draft.plan;
         rebalanceDraftEl.value = draft.text;
-        rebalanceMetaEl.textContent = "Draft built";
+        rebalanceMetaEl.textContent = `Draft built (${chain})`;
       });
 
       copyRebalanceDraftBtn.addEventListener("click", async () => {
@@ -778,11 +810,17 @@
       });
 
       fillActionConsoleBtn.addEventListener("click", () => {
-        cmdOutEl.value = buildActionConsoleFromPlan(lastRebalancePlan);
-        cmdMetaEl.textContent = "Filled from rebalance plan";
+        const chain = (rebalanceChainEl.value || "near").trim();
+        cmdOutEl.value = buildActionConsoleFromPlan(lastRebalancePlan, chain);
+        cmdMetaEl.textContent = `Filled from rebalance plan (${chain})`;
       });
 
       execRebalanceTxnBtn.addEventListener("click", () => {
+        const chain = (rebalanceChainEl.value || "near").trim();
+        if (chain !== "near") {
+          rebalanceMetaEl.textContent = "One-click transactional execution is currently enabled for near only.";
+          return;
+        }
         const p = getPlanTokensAndRaw(lastRebalancePlan);
         if (!p) {
           rebalanceMetaEl.textContent = "No executable rebalance plan";
@@ -794,6 +832,7 @@
         }
         executeAction({
           action: "rebalance_usdt_to_usdce_txn",
+          chain,
           amountRaw: p.raw,
           slippageBps: 50,
           poolId: 3725,

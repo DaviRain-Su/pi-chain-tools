@@ -895,6 +895,14 @@ async function executeAction(payload) {
 			return result;
 		}
 		if (payload.action === "rebalance_usdt_to_usdce_txn") {
+			const chain = String(payload.chain || "near")
+				.trim()
+				.toLowerCase();
+			if (chain !== "near") {
+				throw new Error(
+					`chain '${chain}' is not enabled for transactional rebalance yet (skeleton only).`,
+				);
+			}
 			const stepBase = String(payload.step || "rebalance").trim();
 			const runId = String(payload.runId || `run-${Date.now()}`).trim();
 			beginRebalanceRun(runId);
