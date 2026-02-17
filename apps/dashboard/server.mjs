@@ -160,6 +160,7 @@ async function saveMetricsToDisk() {
 					rebalanceMetrics: REBALANCE_METRICS,
 					rpcMetrics: RPC_METRICS,
 					acpJobHistory: ACP_JOB_HISTORY,
+					acpAsyncJobs: ACP_ASYNC_JOBS,
 				},
 				null,
 				2,
@@ -194,6 +195,23 @@ async function loadMetricsFromDisk() {
 		if (Array.isArray(acpHistory)) {
 			ACP_JOB_HISTORY.length = 0;
 			ACP_JOB_HISTORY.push(...acpHistory.slice(0, 50));
+		}
+
+		const acpAsyncJobs = parsed.acpAsyncJobs;
+		if (Array.isArray(acpAsyncJobs)) {
+			ACP_ASYNC_JOBS.length = 0;
+			for (const row of acpAsyncJobs.slice(0, 200)) {
+				const status = String(row?.status || "queued");
+				ACP_ASYNC_JOBS.push({
+					jobId: String(row?.jobId || `acp-job-${Date.now()}`),
+					status: status === "running" ? "queued" : status,
+					createdAt: row?.createdAt || new Date().toISOString(),
+					updatedAt: row?.updatedAt || new Date().toISOString(),
+					payload: row?.payload || {},
+					result: row?.result || null,
+					error: row?.error || null,
+				});
+			}
 		}
 
 		const rpc = parsed.rpcMetrics;
@@ -1191,6 +1209,7 @@ function enqueueAcpAsyncJob(payload) {
 	};
 	ACP_ASYNC_JOBS.unshift(record);
 	if (ACP_ASYNC_JOBS.length > 200) ACP_ASYNC_JOBS.length = 200;
+	void saveMetricsToDisk();
 	void processAcpAsyncQueue();
 	return record;
 }
@@ -1204,6 +1223,7 @@ async function processAcpAsyncQueue() {
 			if (!next) break;
 			next.status = "running";
 			next.updatedAt = new Date().toISOString();
+			void saveMetricsToDisk();
 			try {
 				const result = await executeAcpJob(next.payload || {});
 				next.status = "done";
@@ -1214,6 +1234,7 @@ async function processAcpAsyncQueue() {
 				next.error = error instanceof Error ? error.message : String(error);
 			}
 			next.updatedAt = new Date().toISOString();
+			void saveMetricsToDisk();
 		}
 	} finally {
 		ACP_ASYNC_WORKER_ACTIVE = false;
@@ -2595,6 +2616,7 @@ Promise.all([
 	loadPolicyFromDisk(),
 	loadMarketplaceFromDisk(),
 ]).finally(() => {
+	void processAcpAsyncQueue();
 	server.listen(PORT, () => {
 		console.log(`NEAR dashboard listening on http://127.0.0.1:${PORT}`);
 	});
