@@ -199,7 +199,14 @@
           <button id="acpDeadPresetAll">Preset: Clear presets</button>
         </div>
         <div id="acpDismissed" class="muted" style="margin-top:4px">dismissed: -</div>
-        <div id="acpFailureHeatmap" class="muted" style="margin-top:6px">failure heatmap: -</div>
+        <div class="row" style="margin-top:6px">
+          <div id="acpFailureHeatmap" class="muted" style="flex:1">failure heatmap: -</div>
+          <select id="acpHeatmapWindow" style="width:130px">
+            <option value="1h">1h</option>
+            <option value="24h" selected>24h</option>
+            <option value="7d">7d</option>
+          </select>
+        </div>
         <div class="row" style="margin-top:4px">
           <input id="acpDismissedPurgeDays" type="number" min="0" value="7" style="width:88px" />
           <button id="acpDismissedPurgeBtn">Purge dismissed older than days</button>
@@ -389,6 +396,7 @@
       const acpDeadLettersEl = document.getElementById("acpDeadLetters");
       const acpDismissedEl = document.getElementById("acpDismissed");
       const acpFailureHeatmapEl = document.getElementById("acpFailureHeatmap");
+      const acpHeatmapWindowEl = document.getElementById("acpHeatmapWindow");
       const acpDeadPhaseFilterEl = document.getElementById("acpDeadPhaseFilter");
       const acpDeadTypeFilterEl = document.getElementById("acpDeadTypeFilter");
       const acpDeadPresetAaveBtn = document.getElementById("acpDeadPresetAave");
@@ -460,6 +468,7 @@
           if (acpPhaseFilterEl && s.acpPhase) acpPhaseFilterEl.value = s.acpPhase;
           if (acpDeadPhaseFilterEl && s.acpDeadPhase) acpDeadPhaseFilterEl.value = s.acpDeadPhase;
           if (acpDeadTypeFilterEl && s.acpDeadType) acpDeadTypeFilterEl.value = s.acpDeadType;
+          if (acpHeatmapWindowEl && s.acpHeatmapWindow) acpHeatmapWindowEl.value = s.acpHeatmapWindow;
           if (acpExpandErrorsEl) acpExpandErrorsEl.checked = s.acpExpandErrors !== false;
         } catch {}
       }
@@ -474,6 +483,7 @@
         if (acpPhaseFilterEl && p.get("acpPhase")) acpPhaseFilterEl.value = p.get("acpPhase");
         if (acpDeadPhaseFilterEl && p.get("acpDeadPhase")) acpDeadPhaseFilterEl.value = p.get("acpDeadPhase");
         if (acpDeadTypeFilterEl && p.get("acpDeadType")) acpDeadTypeFilterEl.value = p.get("acpDeadType");
+        if (acpHeatmapWindowEl && p.get("acpHeatmapWindow")) acpHeatmapWindowEl.value = p.get("acpHeatmapWindow");
       }
 
       function saveAcpFiltersToStorage() {
@@ -485,6 +495,7 @@
           acpPhase: acpPhaseFilterEl?.value || "all",
           acpDeadPhase: acpDeadPhaseFilterEl?.value || "all",
           acpDeadType: acpDeadTypeFilterEl?.value || "all",
+          acpHeatmapWindow: acpHeatmapWindowEl?.value || "24h",
           acpExpandErrors: !!acpExpandErrorsEl?.checked,
         };
         localStorage.setItem(ACP_FILTERS_KEY, JSON.stringify(payload));
@@ -504,6 +515,7 @@
         setOrDelete("acpPhase", acpPhaseFilterEl?.value || "all");
         setOrDelete("acpDeadPhase", acpDeadPhaseFilterEl?.value || "all");
         setOrDelete("acpDeadType", acpDeadTypeFilterEl?.value || "all");
+        setOrDelete("acpHeatmapWindow", acpHeatmapWindowEl?.value || "24h");
         const next = `${window.location.pathname}?${qp.toString()}`.replace(/\?$/, "");
         window.history.replaceState(null, "", next);
       }
@@ -516,6 +528,7 @@
         if (acpPhaseFilterEl) acpPhaseFilterEl.value = "all";
         if (acpDeadPhaseFilterEl) acpDeadPhaseFilterEl.value = "all";
         if (acpDeadTypeFilterEl) acpDeadTypeFilterEl.value = "all";
+        if (acpHeatmapWindowEl) acpHeatmapWindowEl.value = "24h";
         if (acpExpandErrorsEl) acpExpandErrorsEl.checked = true;
         syncAcpFiltersToUrl();
       }
@@ -928,10 +941,16 @@
           return "unknown";
         };
 
-        const last24h = Date.now() - 24 * 60 * 60 * 1000;
+        const heatmapWindow = String(acpHeatmapWindowEl?.value || "24h").trim();
+        const windowMs = heatmapWindow === "1h"
+          ? 60 * 60 * 1000
+          : heatmapWindow === "7d"
+            ? 7 * 24 * 60 * 60 * 1000
+            : 24 * 60 * 60 * 1000;
+        const windowStart = Date.now() - windowMs;
         const failureRows = (acpJobs?.jobs || []).filter((row) => {
           const ts = Date.parse(String(row?.timestamp || ""));
-          if (!Number.isFinite(ts) || ts < last24h) return false;
+          if (!Number.isFinite(ts) || ts < windowStart) return false;
           return ["error", "blocked"].includes(String(row?.status || "").toLowerCase());
         });
         const heatmap = {};
@@ -946,8 +965,8 @@
           .sort((a, b) => b.cnt - a.cnt)
           .slice(0, 8);
         acpFailureHeatmapEl.innerHTML = heatmapEntries.length > 0
-          ? `failure heatmap (24h): ${heatmapEntries.map((x) => `<button data-heatmap-chip="1" data-phase="${x.phase}" data-type="${x.type}" class="warn" style="margin-right:6px">${x.phase}/${x.type}:${x.cnt}</button>`).join("")}`
-          : "failure heatmap (24h): none";
+          ? `failure heatmap (${heatmapWindow}): ${heatmapEntries.map((x) => `<button data-heatmap-chip="1" data-phase="${x.phase}" data-type="${x.type}" class="warn" style="margin-right:6px">${x.phase}/${x.type}:${x.cnt}</button>`).join("")}`
+          : `failure heatmap (${heatmapWindow}): none`;
         acpFailureHeatmapEl.querySelectorAll('button[data-heatmap-chip="1"]').forEach((btn) => {
           btn.addEventListener("click", () => {
             const phase = String(btn.getAttribute("data-phase") || "all");
@@ -1702,6 +1721,10 @@
         load().catch(() => {});
       });
       acpDeadTypeFilterEl?.addEventListener("change", () => {
+        syncAcpFiltersToUrl();
+        load().catch(() => {});
+      });
+      acpHeatmapWindowEl?.addEventListener("change", () => {
         syncAcpFiltersToUrl();
         load().catch(() => {});
       });
