@@ -58,7 +58,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `GET /api/acp/jobs` -> recent ACP job history (dry-run/executed/planned/blocked/error) + async queue snapshot (includes `attemptCount/maxAttempts/nextAttemptAt/lastErrorAt`)
   - `GET /api/acp/jobs/:jobId` -> async job status/result/error by id (includes retry/dead-letter metadata)
   - `GET /api/acp/jobs/dead-letter` -> async jobs exhausted after max attempts
-  - `GET /api/acp/jobs/summary` -> status distribution + daily execution counters/limit
+  - `POST /api/acp/jobs/retry` (`confirm=true`, `jobId`) -> manually requeue a dead-letter/error async job
+  - `GET /api/acp/jobs/summary` -> status distribution + queue status breakdown + daily execution counters/limit
   - execute mode applies policy daily guard `constraints.maxDailyRebalanceRuns`
 - Unified multi-chain portfolio bootstrap:
   - `GET /api/portfolio/unified` -> aggregates current NEAR execution portfolio + ACP identity layer status + BSC scaffold status in one schema

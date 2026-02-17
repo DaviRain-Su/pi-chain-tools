@@ -1294,6 +1294,18 @@ function getAcpAsyncJobById(jobId) {
 	);
 }
 
+function retryAcpAsyncJob(jobId) {
+	const row = getAcpAsyncJobById(jobId);
+	if (!row) return null;
+	row.status = "queued";
+	row.error = null;
+	row.nextAttemptAt = null;
+	row.updatedAt = new Date().toISOString();
+	void saveMetricsToDisk();
+	void processAcpAsyncQueue();
+	return row;
+}
+
 function enqueueAcpAsyncJob(payload) {
 	const jobId = String(payload?.jobId || `acp-job-${Date.now()}`).trim();
 	const maxAttempts = Math.max(
@@ -2765,6 +2777,34 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, { ok: true, deadLetters });
 		}
 
+		if (url.pathname === "/api/acp/jobs/retry" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const jobId = String(payload.jobId || "").trim();
+			if (!jobId) {
+				return json(res, 400, { ok: false, error: "Missing jobId" });
+			}
+			const row = retryAcpAsyncJob(jobId);
+			if (!row) {
+				return json(res, 404, { ok: false, error: `job '${jobId}' not found` });
+			}
+			return json(res, 200, {
+				ok: true,
+				job: {
+					jobId: row.jobId,
+					status: row.status,
+					updatedAt: row.updatedAt,
+					attemptCount: Number(row.attemptCount || 0),
+					maxAttempts: Number(row.maxAttempts || 3),
+				},
+			});
+		}
+
 		if (url.pathname.startsWith("/api/acp/jobs/")) {
 			const jobId = decodeURIComponent(
 				url.pathname.replace("/api/acp/jobs/", ""),
@@ -2814,11 +2854,20 @@ const server = http.createServer(async (req, res) => {
 				acc[key] = (acc[key] || 0) + 1;
 				return acc;
 			}, {});
+			const queueByStatus = ACP_ASYNC_JOBS.reduce((acc, row) => {
+				const key = String(row?.status || "unknown");
+				acc[key] = (acc[key] || 0) + 1;
+				return acc;
+			}, {});
 			return json(res, 200, {
 				ok: true,
 				summary: {
 					total: ACP_JOB_HISTORY.length,
 					byStatus,
+					queue: {
+						total: ACP_ASYNC_JOBS.length,
+						byStatus: queueByStatus,
+					},
 					dailyState: ACP_JOB_STATE,
 					policyDailyLimit: Number(
 						PORTFOLIO_POLICY?.constraints?.maxDailyRebalanceRuns || 10,
