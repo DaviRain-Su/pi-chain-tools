@@ -673,7 +673,22 @@
             }
           }
           tr.innerHTML = `<td>${new Date(row.timestamp).toLocaleString()}</td><td>${row.runId || "-"}</td><td>${row.status || "-"}</td><td>${row.targetChain || "-"}</td><td>${row.intentType || "-"}</td><td>${row.strategyId || "-"}</td><td>${row.buyer || "-"}</td><td>${row.remainingUses ?? "-"}</td><td>${row.amountRaw || "-"}</td><td>${tx}</td>`;
+          tr.style.cursor = "pointer";
+          tr.title = "Click to expand job details";
+
+          const detailTr = document.createElement("tr");
+          detailTr.style.display = "none";
+          const detailTd = document.createElement("td");
+          detailTd.colSpan = 10;
+          detailTd.innerHTML = `<pre class="muted" style="white-space:pre-wrap;margin:0">${JSON.stringify(row, null, 2)}</pre>`;
+          detailTr.appendChild(detailTd);
+
+          tr.addEventListener("click", () => {
+            detailTr.style.display = detailTr.style.display === "none" ? "table-row" : "none";
+          });
+
           acpJobsEl.appendChild(tr);
+          acpJobsEl.appendChild(detailTr);
         }
         if (lastAcpAsyncJobId) {
           const inQueue = (acpJobs?.queue || []).find((x) => String(x?.jobId || "") === String(lastAcpAsyncJobId));
