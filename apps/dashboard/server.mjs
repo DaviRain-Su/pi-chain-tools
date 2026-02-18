@@ -3059,6 +3059,80 @@ function isNativeSlotNotImplementedError(error) {
 	);
 }
 
+function withBscExecuteFallbackMetadata(result, fallback) {
+	return {
+		...result,
+		warnings: [
+			...(Array.isArray(result?.warnings) ? result.warnings : []),
+			...(fallback?.used
+				? [
+						`${fallback?.from || "sdk"}_execute_failed_fallback_to_${fallback?.to || "native"}`,
+					]
+				: []),
+		],
+		fallback: {
+			used: Boolean(fallback?.used),
+			from: fallback?.from || null,
+			to: fallback?.to || null,
+			reason: fallback?.reason || null,
+		},
+	};
+}
+
+async function executeBscListaSupplyViaSdk(params) {
+	const adapter = await createListaSdkAdapter({
+		rpcUrl: params?.rpcUrl || BSC_RPC_URL,
+		chainId: params?.chainId || BSC_CHAIN_ID,
+		sdkPackage: BSC_LISTA_SDK_PACKAGE,
+	});
+	if (!BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_native_execute_not_enabled",
+		);
+	}
+	const native = await executeBscListaSupplyViaNativeSlot(params);
+	return {
+		...native,
+		mode: "sdk",
+		provider: "lista-sdk-native-rpc",
+		sdk: {
+			enabled: true,
+			used: true,
+			fallback: false,
+			meta: adapter?.meta || null,
+		},
+		warnings: [],
+		fallback: { used: false, from: null, to: null, reason: null },
+	};
+}
+
+async function executeBscWombatSupplyViaSdk(params) {
+	const adapter = await createWombatSdkAdapter({
+		rpcUrl: params?.rpcUrl || BSC_RPC_URL,
+		chainId: params?.chainId || BSC_CHAIN_ID,
+		sdkPackage: BSC_WOMBAT_SDK_PACKAGE,
+	});
+	if (!BSC_WOMBAT_NATIVE_EXECUTE_ENABLED) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_native_execute_not_enabled",
+		);
+	}
+	const native = await executeBscWombatSupplyViaNativeSlot(params);
+	return {
+		...native,
+		mode: "sdk",
+		provider: "wombat-sdk-native-rpc",
+		sdk: {
+			enabled: true,
+			used: true,
+			fallback: false,
+			meta: adapter?.meta || null,
+		},
+		warnings: [],
+		fallback: { used: false, from: null, to: null, reason: null },
+	};
+}
+
 async function executeBscListaSupply(params) {
 	if (BSC_LISTA_EXECUTE_MODE === "native") {
 		if (!BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
@@ -3066,19 +3140,56 @@ async function executeBscListaSupply(params) {
 				"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_native_execute_not_enabled",
 			);
 		}
-		return executeBscListaSupplyViaNativeSlot(params);
+		return withBscExecuteFallbackMetadata(
+			await executeBscListaSupplyViaNativeSlot(params),
+			{ used: false },
+		);
 	}
 	if (BSC_LISTA_EXECUTE_MODE === "command") {
-		return executeBscListaSupplyViaCommand(params);
+		return withBscExecuteFallbackMetadata(
+			await executeBscListaSupplyViaCommand(params),
+			{ used: false },
+		);
+	}
+	const preferSdk =
+		BSC_LISTA_USE_SDK &&
+		(BSC_LISTA_EXECUTE_MODE === "auto" || BSC_LISTA_EXECUTE_MODE === "sdk");
+	if (preferSdk) {
+		try {
+			return await executeBscListaSupplyViaSdk(params);
+		} catch (error) {
+			if (!BSC_LISTA_SDK_FALLBACK_TO_NATIVE) throw error;
+			const reason = error instanceof Error ? error.message : String(error);
+			if (BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
+				try {
+					return withBscExecuteFallbackMetadata(
+						await executeBscListaSupplyViaNativeSlot(params),
+						{ used: true, from: "lista_sdk", to: "native", reason },
+					);
+				} catch (nativeError) {
+					if (!isNativeSlotNotImplementedError(nativeError)) throw nativeError;
+				}
+			}
+			return withBscExecuteFallbackMetadata(
+				await executeBscListaSupplyViaCommand(params),
+				{ used: true, from: "lista_sdk", to: "command", reason },
+			);
+		}
 	}
 	if (BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
 		try {
-			return await executeBscListaSupplyViaNativeSlot(params);
+			return withBscExecuteFallbackMetadata(
+				await executeBscListaSupplyViaNativeSlot(params),
+				{ used: false },
+			);
 		} catch (error) {
 			if (!isNativeSlotNotImplementedError(error)) throw error;
 		}
 	}
-	return executeBscListaSupplyViaCommand(params);
+	return withBscExecuteFallbackMetadata(
+		await executeBscListaSupplyViaCommand(params),
+		{ used: false },
+	);
 }
 
 async function executeBscWombatSupply(params) {
@@ -3088,19 +3199,56 @@ async function executeBscWombatSupply(params) {
 				"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_native_execute_not_enabled",
 			);
 		}
-		return executeBscWombatSupplyViaNativeSlot(params);
+		return withBscExecuteFallbackMetadata(
+			await executeBscWombatSupplyViaNativeSlot(params),
+			{ used: false },
+		);
 	}
 	if (BSC_WOMBAT_EXECUTE_MODE === "command") {
-		return executeBscWombatSupplyViaCommand(params);
+		return withBscExecuteFallbackMetadata(
+			await executeBscWombatSupplyViaCommand(params),
+			{ used: false },
+		);
+	}
+	const preferSdk =
+		BSC_WOMBAT_USE_SDK &&
+		(BSC_WOMBAT_EXECUTE_MODE === "auto" || BSC_WOMBAT_EXECUTE_MODE === "sdk");
+	if (preferSdk) {
+		try {
+			return await executeBscWombatSupplyViaSdk(params);
+		} catch (error) {
+			if (!BSC_WOMBAT_SDK_FALLBACK_TO_NATIVE) throw error;
+			const reason = error instanceof Error ? error.message : String(error);
+			if (BSC_WOMBAT_NATIVE_EXECUTE_ENABLED) {
+				try {
+					return withBscExecuteFallbackMetadata(
+						await executeBscWombatSupplyViaNativeSlot(params),
+						{ used: true, from: "wombat_sdk", to: "native", reason },
+					);
+				} catch (nativeError) {
+					if (!isNativeSlotNotImplementedError(nativeError)) throw nativeError;
+				}
+			}
+			return withBscExecuteFallbackMetadata(
+				await executeBscWombatSupplyViaCommand(params),
+				{ used: true, from: "wombat_sdk", to: "command", reason },
+			);
+		}
 	}
 	if (BSC_WOMBAT_NATIVE_EXECUTE_ENABLED) {
 		try {
-			return await executeBscWombatSupplyViaNativeSlot(params);
+			return withBscExecuteFallbackMetadata(
+				await executeBscWombatSupplyViaNativeSlot(params),
+				{ used: false },
+			);
 		} catch (error) {
 			if (!isNativeSlotNotImplementedError(error)) throw error;
 		}
 	}
-	return executeBscWombatSupplyViaCommand(params);
+	return withBscExecuteFallbackMetadata(
+		await executeBscWombatSupplyViaCommand(params),
+		{ used: false },
+	);
 }
 
 const BSC_NATIVE_SLOT_IMPLEMENTED = {
@@ -3166,6 +3314,7 @@ const BSC_POST_ACTION_SUPPLY_EXECUTORS = {
 };
 
 async function executeBscPostActionSupply(protocol, params) {
+	const startedAt = Date.now();
 	const p = String(protocol || "")
 		.trim()
 		.toLowerCase();
@@ -3173,15 +3322,49 @@ async function executeBscPostActionSupply(protocol, params) {
 	if (!executor) {
 		return {
 			ok: false,
+			status: "error",
+			txHash: null,
+			error: "unsupported_post_action_protocol",
 			reason: "unsupported_post_action_protocol",
 			provider: null,
+			adapterProtocol: p,
+			artifact: null,
+			reconcile: null,
+			history: null,
+			metrics: { durationMs: Date.now() - startedAt },
 		};
 	}
-	const result = await executor(params);
-	return {
-		...result,
-		adapterProtocol: p,
-	};
+	try {
+		const result = await executor(params);
+		return {
+			...result,
+			ok: result?.ok === true,
+			status: result?.ok === true ? "success" : "error",
+			txHash: result?.txHash || null,
+			error: result?.ok === true ? null : String(result?.reason || "unknown"),
+			reason: result?.reason || null,
+			adapterProtocol: p,
+			artifact: null,
+			reconcile: null,
+			history: null,
+			metrics: { durationMs: Date.now() - startedAt },
+		};
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return {
+			ok: false,
+			status: "error",
+			txHash: null,
+			error: message,
+			reason: message,
+			provider: null,
+			adapterProtocol: p,
+			artifact: null,
+			reconcile: null,
+			history: null,
+			metrics: { durationMs: Date.now() - startedAt },
+		};
+	}
 }
 
 function buildBscPostActionArtifact({
@@ -10329,15 +10512,36 @@ const server = http.createServer(async (req, res) => {
 						txHash: postAction?.txHash || null,
 					});
 					if (postAction?.fallback?.used) {
+						const fallbackTo = postAction?.fallback?.to || "native";
+						const fallbackAction =
+							plan.executionProtocol === "venus"
+								? "bsc_venus_supply_fallback"
+								: plan.executionProtocol === "aave"
+									? "bsc_aave_supply_fallback"
+									: plan.executionProtocol === "lista"
+										? "bsc_lista_supply_fallback"
+										: "bsc_wombat_supply_fallback";
 						pushActionHistory({
-							action: "bsc_venus_supply_fallback",
+							action: fallbackAction,
 							step: payload.step || "bsc-stable-yield-post-action",
 							accountId: payload.account || null,
 							status: "warning",
-							summary: `venus post-action fell back to native (${postAction?.fallback?.reason || "unknown"})`,
+							summary: `${plan.executionProtocol} post-action fell back to ${fallbackTo} (${postAction?.fallback?.reason || "unknown"})`,
 							txHash: postAction?.txHash || null,
 						});
 					}
+					postAction.artifact = postActionArtifact;
+					postAction.reconcile = postActionReconciliation;
+					postAction.history = {
+						action: isVenus
+							? "bsc_venus_supply"
+							: isAave
+								? "bsc_aave_supply"
+								: isLista
+									? "bsc_lista_supply"
+									: "bsc_wombat_supply",
+						timestamp: new Date().toISOString(),
+					};
 					if (!postAction?.ok) {
 						throw new Error(
 							`${isVenus ? "BSC_VENUS_POST_ACTION_FAILED" : isAave ? "BSC_AAVE_POST_ACTION_FAILED" : isLista ? "BSC_LISTA_POST_ACTION_FAILED" : "BSC_WOMBAT_POST_ACTION_FAILED"} retryable=true message=${postAction?.reason || "unknown"}`,

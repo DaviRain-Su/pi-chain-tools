@@ -93,7 +93,7 @@ describe("package.json script contracts", () => {
 
 	it("keeps schema scripts independent from check pipeline", () => {
 		expect(scripts?.check).toBe(
-			"npm run lint && npm run typecheck && npm run schema:validate",
+			"node scripts/normalize-runtime-metrics.mjs && npm run lint && npm run typecheck && npm run schema:validate",
 		);
 		expect(scripts?.ci).toContain("npm run check");
 		expect(scripts?.ci).toContain("npm test");

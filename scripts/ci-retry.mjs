@@ -17,24 +17,50 @@ function runCiOnce() {
 			env: process.env,
 			shell: process.platform === "win32",
 		});
-		child.on("exit", (code) => resolve(code ?? 1));
+		child.on("close", (code, signal) => {
+			resolve({ code: code ?? (signal ? 143 : 1), signal: signal || null });
+		});
 	});
 }
 
+let sigtermRetries = 0;
+const maxSigtermRetries = Math.max(
+	1,
+	Number.parseInt(process.env.CI_RETRY_SIGTERM_MAX || "2", 10),
+);
+
 for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
 	console.log(`\n[ci-retry] attempt ${attempt}/${maxAttempts}`);
-	const code = await runCiOnce();
-	if (code === 0) {
+	const result = await runCiOnce();
+	if (result.code === 0) {
 		console.log("[ci-retry] success");
 		process.exit(0);
 	}
-	if (attempt < maxAttempts) {
-		console.log(
-			`[ci-retry] ci:resilient failed with code=${code}, retrying in ${retryDelayMs}ms...`,
+	if (result.code === 2) {
+		console.error(
+			"[ci-retry] non-retryable precheck failure detected (code=2); stopping retries",
 		);
-		await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+		process.exit(result.code);
+	}
+	if (result.signal === "SIGTERM" || result.code === 143) {
+		sigtermRetries += 1;
+		if (sigtermRetries > maxSigtermRetries) {
+			console.error(
+				`[ci-retry] exceeded SIGTERM retry budget (${sigtermRetries - 1}/${maxSigtermRetries})`,
+			);
+			process.exit(result.code);
+		}
+	}
+	if (attempt < maxAttempts) {
+		const backoffMs =
+			retryDelayMs *
+			Math.max(1, result.signal === "SIGTERM" || result.code === 143 ? 2 : 1);
+		console.log(
+			`[ci-retry] ci:resilient failed with code=${result.code}${result.signal ? ` signal=${result.signal}` : ""}, retrying in ${backoffMs}ms...`,
+		);
+		await new Promise((resolve) => setTimeout(resolve, backoffMs));
 	} else {
 		console.error(`[ci-retry] failed after ${maxAttempts} attempts`);
-		process.exit(code);
+		process.exit(result.code);
 	}
 }

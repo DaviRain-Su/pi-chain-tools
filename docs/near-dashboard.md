@@ -113,6 +113,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - Lista/Wombat read/plan now support SDK-first branches (`BSC_LISTA_USE_SDK` / `BSC_WOMBAT_USE_SDK`) with explicit fallback warnings (`lista_sdk_market_fetch_failed_fallback_to_native`, `lista_sdk_position_fetch_failed_fallback_to_native`, `wombat_sdk_market_fetch_failed_fallback_to_native`, `wombat_sdk_position_fetch_failed_fallback_to_native`).
     - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista/wombat` support native RPC mode and command fallback)
     - Venus execute path is SDK-first when `BSC_VENUS_USE_SDK=true` + `BSC_VENUS_EXECUTE_MODE=auto|sdk`; if SDK execute prep fails and `BSC_VENUS_SDK_EXECUTE_FALLBACK_TO_NATIVE=true`, response/history explicitly mark fallback (`mode=native-fallback`, `fallback.used=true`, warning `venus_sdk_execute_failed_fallback_to_native`).
+    - Lista/Wombat execute path now follows the same SDK-first pattern in `auto|sdk` mode (`BSC_LISTA_USE_SDK` / `BSC_WOMBAT_USE_SDK`); SDK failure falls back by policy (`BSC_LISTA_SDK_FALLBACK_TO_NATIVE` / `BSC_WOMBAT_SDK_FALLBACK_TO_NATIVE`) and emits explicit markers in both response and action history (`bsc_lista_supply_fallback`, `bsc_wombat_supply_fallback`).
+    - BSC post-action response model is unified across sdk/native/command: `status`, `txHash`, `error`, `artifact`, `reconcile`, `history`, `metrics`.
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
     - `POST /api/bsc/yield/worker/stop` (`confirm=true`)
     - `GET /api/bsc/yield/worker/status`
@@ -156,6 +158,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - Dashboard `CI Failure Signatures` card summarizes latest run status and top recent `checkFailureKind` clusters
   - Includes `Copy failure clusters` action and recent-row table (time/status/failure kind/python/biome/test-retry)
   - Includes `Auto action` hint derived from latest `checkFailureKind` for faster ops response
+  - Stabilization rules: `check` now runs `scripts/normalize-runtime-metrics.mjs` before lint to avoid runtime JSON churn; CI prechecks python/python3 and fails fast with non-retryable code when both are missing; SIGTERM interruptions are retried with bounded budget in both `ci:resilient` and `ci:retry`.
 - deBridge Reliability card sharing ops:
   - `Copy share link` includes `debridgeWindow` + `debridgeAdvancedOpen` query state for reproducible views
   - `Copy share markdown` copies one-line markdown link

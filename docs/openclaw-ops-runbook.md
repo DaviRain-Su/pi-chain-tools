@@ -189,7 +189,10 @@ export DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS=1200
 - 统一走：`npm run check` / `npm run ci`（当前 `ci` 已切到 `ci:resilient`）。
 - 本地一键稳态流程：`npm run ci:resilient`（内置 python 预检 + check 热修复重跑 + test 单次重试）。
 - `npm run ci:retry` 现在会重试 `ci:resilient`（而不是裸 `ci`），进一步减少 `python missing` / biome io 漂移导致的误失败。
-- `ci:resilient` 在 check 失败时会输出标准化 `checkFailureKind`（如 `python-missing|lint-biome-io|lint|typecheck|schema-validate|check-unknown`）并写入 CI signatures 便于后续聚类治理。
+- `ci:resilient` 在 check 失败时会输出标准化 `checkFailureKind`（如 `python-missing|sigterm|lint-biome-io|lint|typecheck|schema-validate|check-unknown`）并写入 CI signatures 便于后续聚类治理。
+- Python 预检现在为 fail-fast：若 `python` 和 `python3` 都缺失，会返回明确 precheck 阻断（退出码 `2`），`ci:retry` 将停止盲重试，避免失败循环。
+- 运行前会先执行 `node scripts/normalize-runtime-metrics.mjs`，对 `apps/dashboard/data/rebalance-metrics.json` 做确定性格式化，减少 lint 漂移抖动。
+- `ci:resilient` / `ci:retry` 均增强了 SIGTERM 处理：step 级一次重试 + retry 脚本信号预算（`CI_RETRY_SIGTERM_MAX`）。
 
 ### 5.2 `edit` 精确匹配失败
 - 先 `rg` / `sed -n` 定位上下文，再缩小替换块。
@@ -300,6 +303,8 @@ Phase-1（本期，已完成）
 - 包选择说明：`@venusprotocol/sdk` 目前无可用 npm 发布，Phase-1 改用 Venus 官方 `@venusprotocol/chains` 作为 canonical client package（链/市场/vToken 元数据），读链路继续由 provider ABI 调用承接。
 - Wombat SDK Phase-1：默认使用官方 `@wombat-exchange/configx` 提供资产配置与规范化入口；若 SDK 读失败，响应会显式标记 `dataSource=native-fallback` 并附带 `wombat_sdk_*_fallback_to_native` warning。
 - Lista SDK Phase-1：官方 SDK 包当前未在 npm 发布，暂以 canonical client `ethers` + Lista/Wombat 统一 ABI 读路径承接，响应携带 `official_lista_sdk_not_available_using_canonical_ethers_client_path`，并在失败时输出 `lista_sdk_*_fallback_to_native` warning。
+- Lista/Wombat execute 已补齐 SDK-first 路由（`mode=auto|sdk`）：优先 SDK 路径，失败后按 `*_SDK_FALLBACK_TO_NATIVE` 回退 native/command，并在返回与 actionHistory 中写入明确 fallback 标记（如 `bsc_lista_supply_fallback` / `bsc_wombat_supply_fallback`）。
+- BSC post-action execute 返回模型统一：`status/txHash/error/artifact/reconcile/history/metrics` 在 sdk/native/command 分支下结构一致，便于审计与告警聚类。
 
 Phase-2（下期，最小目标）
 - native slot 协议级用例继续扩充（真实链路回放 + 异常分类覆盖）

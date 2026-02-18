@@ -32,10 +32,30 @@ function run(command, args, label, env = process.env) {
 			output += text;
 			process.stderr.write(text);
 		});
-		child.on("exit", (code) => {
-			resolve({ code: code ?? 1, output, label });
+		child.on("close", (code, signal) => {
+			if (signal) {
+				output += `\n[ci-resilient] process interrupted by signal=${signal}\n`;
+			}
+			resolve({
+				code: code ?? (signal ? 143 : 1),
+				signal: signal || null,
+				output,
+				label,
+			});
 		});
 	});
+}
+
+async function runWithSigtermRetry(command, args, label, env, signatures) {
+	let result = await run(command, args, label, env);
+	if (result.signal === "SIGTERM") {
+		signatures.sigtermDetections += 1;
+		console.warn(
+			`[ci-resilient] ${label} interrupted by SIGTERM, retrying once`,
+		);
+		result = await run(command, args, `${label}(sigterm-retry)`, env);
+	}
+	return result;
 }
 
 function commandPath(bin, env = process.env) {
@@ -106,6 +126,7 @@ function hasPythonMissingSignature(output) {
 
 function classifyCheckFailure(output) {
 	const lower = String(output || "").toLowerCase();
+	if (lower.includes("signal=sigterm")) return "sigterm";
 	if (hasPythonMissingSignature(lower)) return "python-missing";
 	if (lower.includes("npm run lint") || lower.includes("biome check")) {
 		if (lower.includes("internalerror/io")) return "lint-biome-io";
@@ -177,10 +198,12 @@ async function main() {
 	const signatures = {
 		pythonShimApplied: 0,
 		pythonMissingDetections: 0,
+		pythonPrecheckBlocked: 0,
 		biomeIoDetections: 0,
 		biomeHotfixRuns: 0,
 		testRetryCount: 0,
 		testFlakeRecovered: 0,
+		sigtermDetections: 0,
 		checkFailureKind: "",
 	};
 
@@ -192,15 +215,31 @@ async function main() {
 		);
 	} else if (runtime.strategy === "python-missing") {
 		signatures.pythonMissingDetections += 1;
-		console.warn(
-			"[ci-resilient] warning: neither python nor python3 found in PATH",
+		signatures.pythonPrecheckBlocked += 1;
+		failWithSummary(
+			2,
+			"[ci-resilient] precheck blocked: neither python nor python3 found in PATH. Install python3 (or provide python alias) and rerun.",
+			signatures,
 		);
 	}
 
+	await runWithSigtermRetry(
+		"node",
+		["scripts/normalize-runtime-metrics.mjs"],
+		"normalize-runtime-metrics",
+		runtime.env,
+		signatures,
+	);
 	await applyBiomeHotfix(runtime.env, signatures, "proactive");
 
 	console.log("[ci-resilient] step 1/3: npm run check");
-	let check = await run("npm", ["run", "check"], "check", runtime.env);
+	let check = await runWithSigtermRetry(
+		"npm",
+		["run", "check"],
+		"check",
+		runtime.env,
+		signatures,
+	);
 	if (hasPythonMissingSignature(check.output)) {
 		signatures.pythonMissingDetections += 1;
 	}
@@ -211,7 +250,13 @@ async function main() {
 		);
 		await applyBiomeHotfix(runtime.env, signatures, "check-retry");
 		console.log("[ci-resilient] re-running npm run check after hotfix");
-		check = await run("npm", ["run", "check"], "check(retry)", runtime.env);
+		check = await runWithSigtermRetry(
+			"npm",
+			["run", "check"],
+			"check(retry)",
+			runtime.env,
+			signatures,
+		);
 		if (hasPythonMissingSignature(check.output)) {
 			signatures.pythonMissingDetections += 1;
 		}
@@ -226,11 +271,12 @@ async function main() {
 	}
 
 	console.log("[ci-resilient] step 2/3: npm run security:check");
-	const security = await run(
+	const security = await runWithSigtermRetry(
 		"npm",
 		["run", "security:check"],
 		"security",
 		runtime.env,
+		signatures,
 	);
 	if (hasPythonMissingSignature(security.output)) {
 		signatures.pythonMissingDetections += 1;
@@ -244,14 +290,26 @@ async function main() {
 	}
 
 	console.log("[ci-resilient] step 3/3: npm test (with one retry for flake)");
-	let test = await run("npm", ["test"], "test", runtime.env);
+	let test = await runWithSigtermRetry(
+		"npm",
+		["test"],
+		"test",
+		runtime.env,
+		signatures,
+	);
 	if (hasPythonMissingSignature(test.output)) {
 		signatures.pythonMissingDetections += 1;
 	}
 	if (test.code !== 0) {
 		signatures.testRetryCount += 1;
 		console.log("[ci-resilient] first npm test failed, retrying once...");
-		test = await run("npm", ["test"], "test(retry)", runtime.env);
+		test = await runWithSigtermRetry(
+			"npm",
+			["test"],
+			"test(retry)",
+			runtime.env,
+			signatures,
+		);
 		if (hasPythonMissingSignature(test.output)) {
 			signatures.pythonMissingDetections += 1;
 		}

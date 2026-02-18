@@ -41,6 +41,20 @@ describe("bsc lista/wombat sdk-first read/plan routing", () => {
 		expect(serverSource).toContain("warnings:");
 	});
 
+	it("contains lista/wombat sdk-first execute routing + explicit fallback markers", () => {
+		expect(serverSource).toContain("executeBscListaSupplyViaSdk");
+		expect(serverSource).toContain("executeBscWombatSupplyViaSdk");
+		expect(serverSource).toContain("BSC_LISTA_EXECUTE_MODE");
+		expect(serverSource).toContain("BSC_WOMBAT_EXECUTE_MODE");
+		expect(serverSource).toContain("BSC_LISTA_SDK_FALLBACK_TO_NATIVE");
+		expect(serverSource).toContain("BSC_WOMBAT_SDK_FALLBACK_TO_NATIVE");
+		expect(serverSource).toContain("bsc_lista_supply_fallback");
+		expect(serverSource).toContain("bsc_wombat_supply_fallback");
+		expect(serverSource).toContain("adapterProtocol");
+		expect(serverSource).toContain('status: "success"');
+		expect(serverSource).toContain("metrics: { durationMs");
+	});
+
 	it("documents lista/wombat sdk config in dashboard config example", () => {
 		expect(configExample?.bsc?.lista?.useSdk).toBeTypeOf("boolean");
 		expect(configExample?.bsc?.lista?.sdk?.package).toBeTypeOf("string");
