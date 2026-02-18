@@ -825,6 +825,7 @@
       let lastRebalancePlan = null;
       let lastAcpAsyncJobId = "";
       const BSC_READINESS_PROTOCOL_KEY = "near_dashboard.bsc.readinessProtocol";
+      const DEBRIDGE_WINDOW_KEY = "near_dashboard.debridge.window";
       let targetConfig = loadTargets();
       targetUsdtEl.value = targetConfig.usdt;
       targetUsdceEl.value = targetConfig.usdce;
@@ -836,6 +837,13 @@
       }
       if (strategyDslInputEl && !strategyDslInputEl.value) {
         strategyDslInputEl.value = JSON.stringify(buildStrategyDslSample(), null, 2);
+      }
+      if (debridgeWindowEl) {
+        const savedDebridgeWindow = String(localStorage.getItem(DEBRIDGE_WINDOW_KEY) || "24h").toLowerCase();
+        const allowedDebridgeWindows = ["1h", "24h", "7d"];
+        debridgeWindowEl.value = allowedDebridgeWindows.includes(savedDebridgeWindow)
+          ? savedDebridgeWindow
+          : "24h";
       }
 
       function buildStrategyDslSample() {
@@ -1979,10 +1987,12 @@
         load().catch(() => {});
       });
       debridgeWindowEl?.addEventListener("change", () => {
+        const nextWindow = String(debridgeWindowEl.value || "24h");
+        localStorage.setItem(DEBRIDGE_WINDOW_KEY, nextWindow);
         if (!lastSnapshot) return;
         debridgeReliabilityEl.textContent = computeDebridgeReliability(
           lastSnapshot,
-          String(debridgeWindowEl.value || "24h"),
+          nextWindow,
         );
       });
       acpStatusFilterEl?.addEventListener("change", () => {
