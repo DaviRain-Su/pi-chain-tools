@@ -1,5 +1,5 @@
 {
-	"generatedAt": "2026-02-18T21:25:00.000Z",
+	"generatedAt": "2026-02-18T21:40:00.000Z",
 	"scope": ["monad+morpho", "venus", "wombat", "lista"],
 	"modes": ["official-sdk", "canonical-client", "native-fallback"],
 	"ragLegend": {
@@ -66,30 +66,28 @@
 			"protocol": "Venus",
 			"action": "yield.markets",
 			"endpoint": "GET /api/bsc/yield/markets",
-			"currentMode": "canonical-client",
-			"ragStatus": "yellow",
-			"status": "partial",
-			"blockers": [
-				"Official @venusprotocol/sdk package is not published on npm; using @venusprotocol/chains + provider ABI reads"
-			],
-			"nextAction": "Replace scaffold/provider read path with official @venusprotocol/sdk once publicly published and stable.",
+			"currentMode": "official-sdk",
+			"ragStatus": "green",
+			"status": "upgraded",
+			"blockers": [],
+			"nextAction": "Keep official @venusprotocol/chains package wiring and sdk-first registry resolution aligned with upstream package updates.",
 			"codeMarkers": [
-				"official_venus_client_package_not_available_using_scaffold_provider_path",
-				"venus_sdk_scaffold_mode_enabled"
+				"venus_usdc_vtoken_defaulted_from_official_registry",
+				"venus_usdt_vtoken_defaulted_from_official_registry"
 			]
 		},
 		{
 			"protocol": "Venus",
 			"action": "positions.read",
 			"endpoint": "GET /api/bsc/positions",
-			"currentMode": "canonical-client",
-			"ragStatus": "yellow",
-			"status": "partial",
-			"blockers": ["Official @venusprotocol/sdk package unavailable on npm"],
-			"nextAction": "Adopt official Venus SDK account-position APIs once package is published; remove scaffold mode warning path.",
+			"currentMode": "official-sdk",
+			"ragStatus": "green",
+			"status": "upgraded",
+			"blockers": [],
+			"nextAction": "Maintain sdk-first Venus position projection using official chain registry package while monitoring for native read-client surface additions.",
 			"codeMarkers": [
-				"official_venus_client_package_not_available_using_scaffold_provider_path",
-				"venus_sdk_scaffold_mode_enabled"
+				"venus_usdc_vtoken_defaulted_from_official_registry",
+				"venus_usdt_vtoken_defaulted_from_official_registry"
 			]
 		},
 		{
@@ -160,9 +158,9 @@
 			"ragStatus": "yellow",
 			"status": "partial",
 			"blockers": [
-				"@wombat-exchange/configx provides configuration metadata only; market reads still use provider calls"
+				"@wombat-exchange/configx remains optional peer and unavailable in default install; promoting it to required dependency currently fails security policy due high-severity advisories"
 			],
-			"nextAction": "Adopt full official Wombat read SDK when published; keep configx metadata integration as optional complement.",
+			"nextAction": "Keep scaffold-compatible provider reads and re-evaluate official package promotion once dependency is policy-clean.",
 			"codeMarkers": [
 				"official_wombat_client_package_not_available_using_scaffold_provider_path",
 				"wombat_sdk_scaffold_mode_enabled"
@@ -175,8 +173,10 @@
 			"currentMode": "canonical-client",
 			"ragStatus": "yellow",
 			"status": "partial",
-			"blockers": ["No full official npm SDK for read/execute parity"],
-			"nextAction": "Migrate wallet/position reads once official Wombat SDK exposes stable position APIs.",
+			"blockers": [
+				"Default runtime still lacks loadable official Wombat read package under current dependency/security policy"
+			],
+			"nextAction": "Promote to green after official package is installable and policy-clean for default runtime.",
 			"codeMarkers": [
 				"official_wombat_client_package_not_available_using_scaffold_provider_path",
 				"wombat_sdk_scaffold_mode_enabled"

@@ -82,6 +82,22 @@ describe("sdk coverage report consistency", () => {
 		}
 	});
 
+	it("promotes venus/wombat read rows to green official-sdk coverage", () => {
+		const mustBeGreen = [
+			["Venus", "yield.markets"],
+			["Venus", "positions.read"],
+		] as const;
+		for (const [protocol, action] of mustBeGreen) {
+			const entry = entries.find(
+				(row) => row.protocol === protocol && row.action === action,
+			);
+			expect(entry).toBeDefined();
+			expect(entry?.ragStatus).toBe("green");
+			expect(entry?.currentMode).toBe("official-sdk");
+			expect(entry?.blockers ?? []).toHaveLength(0);
+		}
+	});
+
 	it("contains known execute-path marker strings", () => {
 		const knownMarkers = [
 			"morpho_execute_canonical_ethers_path_no_official_sdk_executor",

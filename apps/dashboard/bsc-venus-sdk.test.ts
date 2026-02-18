@@ -3,9 +3,20 @@ import { describe, expect, it } from "vitest";
 import {
 	collectVenusSdkMarketView,
 	collectVenusSdkPositionView,
+	createVenusSdkAdapter,
 } from "./bsc-venus-sdk.mjs";
 
 describe("bsc venus sdk scaffold adapter", () => {
+	it("wires official venus package for sdk-first reads", async () => {
+		const adapter = await createVenusSdkAdapter({
+			rpcUrl: "http://127.0.0.1:8545",
+			chainId: 56,
+			sdkPackage: "@venusprotocol/chains",
+		});
+		expect(adapter.meta.officialSdkWired).toBe(true);
+		expect(adapter.meta.client).toBe("venus-sdk");
+		expect(adapter.meta.sdkPackage).toBe("@venusprotocol/chains");
+	});
 	it("normalizes market view into dashboard-compatible venus shape", async () => {
 		const adapter = {
 			provider: {
