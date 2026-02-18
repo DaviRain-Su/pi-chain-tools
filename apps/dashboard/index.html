@@ -1115,8 +1115,16 @@
           : "24h";
       }
       if (debridgeAdvancedToolsEl) {
+        const qp = new URLSearchParams(window.location.search || "");
+        const qsOpen = qp.get("debridgeAdvancedOpen");
         const savedOpen = String(localStorage.getItem(DEBRIDGE_ADVANCED_OPEN_KEY) || "false").toLowerCase() === "true";
-        debridgeAdvancedToolsEl.open = savedOpen;
+        if (qsOpen === "1" || String(qsOpen || "").toLowerCase() === "true") {
+          debridgeAdvancedToolsEl.open = true;
+        } else if (qsOpen === "0" || String(qsOpen || "").toLowerCase() === "false") {
+          debridgeAdvancedToolsEl.open = false;
+        } else {
+          debridgeAdvancedToolsEl.open = savedOpen;
+        }
       }
 
       function buildStrategyDslSample() {
@@ -2269,10 +2277,12 @@
         );
       });
       debridgeAdvancedToolsEl?.addEventListener("toggle", () => {
-        localStorage.setItem(
-          DEBRIDGE_ADVANCED_OPEN_KEY,
-          debridgeAdvancedToolsEl.open ? "true" : "false",
-        );
+        const isOpen = debridgeAdvancedToolsEl.open;
+        localStorage.setItem(DEBRIDGE_ADVANCED_OPEN_KEY, isOpen ? "true" : "false");
+        const qp = new URLSearchParams(window.location.search || "");
+        qp.set("debridgeAdvancedOpen", isOpen ? "1" : "0");
+        const next = `${window.location.pathname}?${qp.toString()}`.replace(/\?$/, "");
+        window.history.replaceState(null, "", next);
       });
       copyDebridgeReliabilityBtn?.addEventListener("click", async () => {
         const text = String(debridgeReliabilityEl?.textContent || "").trim();
