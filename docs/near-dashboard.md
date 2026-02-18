@@ -106,8 +106,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can execute in two built-in adapter modes:
   - includes stable-yield agent v1 APIs:
     - `GET /api/bsc/yield/plan` (supports `executionProtocol=venus|aave|lista|wombat`; when omitted, defaults to net-yield `recommendedProtocol`; returns `executeReadiness.blockers/recommendedProtocol` and includes `netYieldInsight`)
-    - `GET /api/bsc/yield/markets` (returns Venus/Aave/Lista/Wombat read-only compare + best protocol recommendation + `sourceHealth` + `marketHealth(status/source/updatedAt/ageMs)` + `marketRiskTags` + `marketRiskScore(0-100)` + `marketRiskBand(low|medium|high)` + `aggregateRisk{avgScore,maxScore,band}` + `netYieldInsight`; includes Pancake V2 read-only quote signal and `dexQuoteCompare{bestSource,conservativeSource,spreadBps}` in `netYieldInsight.quote`; supports query `amountUsd` and `rebalanceIntervalDays`; `executionReadiness.nativeSlotImplemented` exposes per-protocol native slot status, where Lista is `true` only when native RPC config is present (`BSC_LISTA_POOL` + `BSC_LISTA_EXECUTE_PRIVATE_KEY`), and Wombat remains command-bridge native-slot gating)
-    - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista/wombat` require enable flag + command adapter)
+    - `GET /api/bsc/yield/markets` (returns Venus/Aave/Lista/Wombat read-only compare + best protocol recommendation + `sourceHealth` + `marketHealth(status/source/updatedAt/ageMs)` + `marketRiskTags` + `marketRiskScore(0-100)` + `marketRiskBand(low|medium|high)` + `aggregateRisk{avgScore,maxScore,band}` + `netYieldInsight`; includes Pancake V2 read-only quote signal and `dexQuoteCompare{bestSource,conservativeSource,spreadBps}` in `netYieldInsight.quote`; supports query `amountUsd` and `rebalanceIntervalDays`; `executionReadiness.nativeSlotImplemented` exposes per-protocol native slot status, where Lista and Wombat are `true` only when native RPC config is present (`POOL` + protocol private key)
+    - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista/wombat` support native RPC mode and command fallback)
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
     - `POST /api/bsc/yield/worker/stop` (`confirm=true`)
     - `GET /api/bsc/yield/worker/status`
@@ -220,7 +220,11 @@ Common mapping examples:
 - `bsc.wombat.enabled` ↔ `BSC_WOMBAT_EXECUTE_ENABLED`
 - `bsc.wombat.mode` ↔ `BSC_WOMBAT_EXECUTE_MODE`
 - `bsc.wombat.nativeEnabled` ↔ `BSC_WOMBAT_NATIVE_EXECUTE_ENABLED`
-- `bsc.wombat.nativeExecuteCommand` ↔ `BSC_WOMBAT_NATIVE_EXECUTE_COMMAND`
+- `bsc.wombat.pool` ↔ `BSC_WOMBAT_POOL`
+- `bsc.wombat.privateKey` ↔ `BSC_WOMBAT_EXECUTE_PRIVATE_KEY`
+- `bsc.wombat.minLiquidityRaw` ↔ `BSC_WOMBAT_MIN_LIQUIDITY_RAW`
+- `bsc.wombat.deadlineSeconds` ↔ `BSC_WOMBAT_DEADLINE_SECONDS`
+- `bsc.wombat.shouldStake` ↔ `BSC_WOMBAT_SHOULD_STAKE`
 - `bsc.wombat.executeCommand` ↔ `BSC_WOMBAT_EXECUTE_COMMAND`
 - `bsc.wombat.executeTimeoutMs` ↔ `BSC_WOMBAT_EXECUTE_TIMEOUT_MS`
 - `bsc.wombat.maxAmountRaw` ↔ `BSC_WOMBAT_MAX_AMOUNT_RAW`
@@ -287,9 +291,13 @@ Common mapping examples:
 - `BSC_LISTA_MAX_AMOUNT_RAW` - max raw amount allowed per Lista supply action (default: `20000000000000000000000`)
 - `BSC_LISTA_ALLOWED_TOKENS` - comma-separated token allowlist for Lista supply (default: `${BSC_USDC},${BSC_USDT}`)
 - `BSC_WOMBAT_EXECUTE_ENABLED` - gate for Wombat execute path (default: `false`)
-- `BSC_WOMBAT_EXECUTE_MODE` - `auto|native|command` (default: `auto`; native slot exists and will fallback in `auto`, but `native` mode requires native slot implementation)
-- `BSC_WOMBAT_NATIVE_EXECUTE_ENABLED` - native slot readiness gate for Wombat execute (default: `false`)
-- `BSC_WOMBAT_NATIVE_EXECUTE_COMMAND` - native-slot bridge command template (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`; required placeholders: `{amountRaw}`, `{runId}`)
+- `BSC_WOMBAT_EXECUTE_MODE` - `auto|native|command` (default: `auto`; native path is in-process ethers RPC and `auto` falls back to command when native config is incomplete)
+- `BSC_WOMBAT_NATIVE_EXECUTE_ENABLED` - native readiness gate for Wombat execute (default: `false`)
+- `BSC_WOMBAT_POOL` - Wombat pool contract address for native `deposit` calls
+- `BSC_WOMBAT_EXECUTE_PRIVATE_KEY` - signer private key for Wombat native mode (fallback: `BSC_EXECUTE_PRIVATE_KEY`)
+- `BSC_WOMBAT_MIN_LIQUIDITY_RAW` - optional `minimumLiquidity` raw value for native Wombat deposit (default: `0`)
+- `BSC_WOMBAT_DEADLINE_SECONDS` - deposit deadline offset seconds for native Wombat deposit (default: `1800`)
+- `BSC_WOMBAT_SHOULD_STAKE` - native Wombat deposit `shouldStake` flag (`true|false`, default: `false`)
 - `BSC_WOMBAT_EXECUTE_COMMAND` - command template for post-swap Wombat supply (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`; required placeholders: `{amountRaw}`, `{runId}`)
 - `BSC_WOMBAT_EXECUTE_TIMEOUT_MS` - timeout for Wombat command-mode execute (default: `120000`)
 - `BSC_WOMBAT_MAX_AMOUNT_RAW` - max raw amount allowed per Wombat supply action (default: `20000000000000000000000`)

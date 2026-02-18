@@ -511,13 +511,36 @@ const BSC_WOMBAT_NATIVE_EXECUTE_ENABLED =
 			"false",
 		),
 	).toLowerCase() === "true";
-const BSC_WOMBAT_NATIVE_EXECUTE_COMMAND = String(
+const BSC_WOMBAT_POOL = String(
+	envOrCfg("BSC_WOMBAT_POOL", "bsc.wombat.pool", ""),
+).trim();
+const BSC_WOMBAT_EXECUTE_PRIVATE_KEY = String(
 	envOrCfg(
-		"BSC_WOMBAT_NATIVE_EXECUTE_COMMAND",
-		"bsc.wombat.nativeExecuteCommand",
-		"",
+		"BSC_WOMBAT_EXECUTE_PRIVATE_KEY",
+		"bsc.wombat.privateKey",
+		BSC_EXECUTE_PRIVATE_KEY || "",
 	),
 ).trim();
+const BSC_WOMBAT_MIN_LIQUIDITY_RAW = String(
+	envOrCfg("BSC_WOMBAT_MIN_LIQUIDITY_RAW", "bsc.wombat.minLiquidityRaw", "0"),
+).trim();
+const BSC_WOMBAT_DEADLINE_SECONDS = Math.max(
+	30,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"BSC_WOMBAT_DEADLINE_SECONDS",
+				"bsc.wombat.deadlineSeconds",
+				"1800",
+			),
+		),
+		10,
+	) || 1800,
+);
+const BSC_WOMBAT_SHOULD_STAKE =
+	String(
+		envOrCfg("BSC_WOMBAT_SHOULD_STAKE", "bsc.wombat.shouldStake", "false"),
+	).toLowerCase() === "true";
 const BSC_WOMBAT_EXECUTE_TIMEOUT_MS = Math.max(
 	1_000,
 	Number.parseInt(
@@ -2111,6 +2134,32 @@ function validateBscListaSupplyInput(params) {
 	return { token, amountRaw };
 }
 
+function validateBscWombatSupplyInput(params) {
+	const token = String(params?.token || "")
+		.trim()
+		.toLowerCase();
+	const amountRaw = String(params?.amountRaw || "0").trim();
+	if (!/^\d+$/.test(amountRaw) || BigInt(amountRaw) <= 0n) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_amount_invalid",
+		);
+	}
+	const maxRaw = /^\d+$/.test(BSC_WOMBAT_MAX_AMOUNT_RAW)
+		? BigInt(BSC_WOMBAT_MAX_AMOUNT_RAW)
+		: 0n;
+	if (maxRaw > 0n && BigInt(amountRaw) > maxRaw) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_amount_exceeds_limit",
+		);
+	}
+	if (!token || !BSC_WOMBAT_ALLOWED_TOKENS.includes(token)) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_token_not_allowed",
+		);
+	}
+	return { token, amountRaw };
+}
+
 async function executeBscAaveSupplyViaCommand(params) {
 	if (!BSC_AAVE_EXECUTE_COMMAND) {
 		throw new Error(
@@ -2318,28 +2367,7 @@ async function executeBscWombatSupplyViaCommand(params) {
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_execute_command_missing_required_placeholders",
 		);
 	}
-	const token = String(params?.token || "")
-		.trim()
-		.toLowerCase();
-	const amountRaw = String(params?.amountRaw || "0").trim();
-	if (!/^\d+$/.test(amountRaw) || BigInt(amountRaw) <= 0n) {
-		throw new Error(
-			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_amount_invalid",
-		);
-	}
-	const maxRaw = /^\d+$/.test(BSC_WOMBAT_MAX_AMOUNT_RAW)
-		? BigInt(BSC_WOMBAT_MAX_AMOUNT_RAW)
-		: 0n;
-	if (maxRaw > 0n && BigInt(amountRaw) > maxRaw) {
-		throw new Error(
-			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_amount_exceeds_limit",
-		);
-	}
-	if (!token || !BSC_WOMBAT_ALLOWED_TOKENS.includes(token)) {
-		throw new Error(
-			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_token_not_allowed",
-		);
-	}
+	const { token, amountRaw } = validateBscWombatSupplyInput(params);
 	const replacements = {
 		"{amountRaw}": amountRaw,
 		"{token}": token,
@@ -2454,49 +2482,88 @@ async function executeBscListaSupplyViaNativeSlot(params) {
 }
 
 async function executeBscWombatSupplyViaNativeSlot(params) {
-	if (!BSC_WOMBAT_NATIVE_EXECUTE_COMMAND) {
+	const { token, amountRaw } = validateBscWombatSupplyInput(params);
+	if (!BSC_WOMBAT_POOL) {
 		throw new Error(
-			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_native_slot_not_implemented",
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_pool_missing",
 		);
 	}
-	if (
-		!hasRequiredPlaceholders(BSC_WOMBAT_NATIVE_EXECUTE_COMMAND, [
-			"{amountRaw}",
-			"{runId}",
-		])
-	) {
+	if (!BSC_WOMBAT_EXECUTE_PRIVATE_KEY) {
 		throw new Error(
-			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_native_execute_command_missing_required_placeholders",
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_private_key_missing",
 		);
 	}
-	const token = String(params?.token || "")
-		.trim()
-		.toLowerCase();
-	const amountRaw = String(params?.amountRaw || "0").trim();
-	const replacements = {
-		"{amountRaw}": amountRaw,
-		"{token}": token,
-		"{rpcUrl}": String(params.rpcUrl || BSC_RPC_URL || ""),
-		"{chainId}": String(params.chainId || BSC_CHAIN_ID || ""),
-		"{runId}": String(params.runId || ""),
-	};
-	let cmd = BSC_WOMBAT_NATIVE_EXECUTE_COMMAND;
-	for (const [k, v] of Object.entries(replacements)) {
-		cmd = cmd.split(k).join(v);
-	}
-	const output = await runCommand("bash", ["-lc", cmd], {
-		env: process.env,
-		cwd: ACP_WORKDIR,
-		timeoutMs: BSC_WOMBAT_EXECUTE_TIMEOUT_MS,
+	const minLiquidityRaw = /^\d+$/.test(BSC_WOMBAT_MIN_LIQUIDITY_RAW)
+		? BSC_WOMBAT_MIN_LIQUIDITY_RAW
+		: "0";
+	const deadline =
+		Math.floor(Date.now() / 1000) + Math.max(30, BSC_WOMBAT_DEADLINE_SECONDS);
+	const provider = new JsonRpcProvider(params.rpcUrl || BSC_RPC_URL, {
+		name: "bsc",
+		chainId: Number(params.chainId || BSC_CHAIN_ID),
 	});
-	const txHash = String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
-	return {
-		ok: true,
-		mode: "execute",
-		provider: "wombat-native-slot-command",
-		output,
-		txHash,
-	};
+	const wallet = new Wallet(BSC_WOMBAT_EXECUTE_PRIVATE_KEY, provider);
+	const erc20Iface = new Interface([
+		"function allowance(address owner,address spender) view returns (uint256)",
+		"function approve(address spender,uint256 value) returns (bool)",
+	]);
+	const wombatPoolIface = new Interface([
+		"function deposit(address token,uint256 amount,uint256 minimumLiquidity,address to,uint256 deadline,bool shouldStake)",
+	]);
+	try {
+		const allowanceRaw = await provider.call({
+			to: token,
+			data: erc20Iface.encodeFunctionData("allowance", [
+				wallet.address,
+				BSC_WOMBAT_POOL,
+			]),
+		});
+		const allowance = erc20Iface.decodeFunctionResult(
+			"allowance",
+			allowanceRaw,
+		)[0];
+		if (allowance.lt(amountRaw)) {
+			const approveTx = await wallet.sendTransaction({
+				to: token,
+				data: erc20Iface.encodeFunctionData("approve", [
+					BSC_WOMBAT_POOL,
+					MaxUint256,
+				]),
+				value: 0,
+			});
+			await approveTx.wait(BSC_EXECUTE_CONFIRMATIONS);
+		}
+		const tx = await wallet.sendTransaction({
+			to: BSC_WOMBAT_POOL,
+			data: wombatPoolIface.encodeFunctionData("deposit", [
+				token,
+				amountRaw,
+				minLiquidityRaw,
+				wallet.address,
+				deadline,
+				BSC_WOMBAT_SHOULD_STAKE,
+			]),
+			value: 0,
+		});
+		const receipt = await tx.wait(BSC_EXECUTE_CONFIRMATIONS);
+		return {
+			ok: true,
+			mode: "execute",
+			provider: "wombat-native-rpc",
+			txHash: tx.hash,
+			receipt: {
+				status: receipt?.status,
+				blockNumber: receipt?.blockNumber,
+				gasUsed: receipt?.gasUsed?.toString?.() || null,
+			},
+		};
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		const retryable = isTransientExecError(error);
+		throw new Error(
+			`BSC_EXECUTE_FAILED retryable=${retryable ? "true" : "false"} message=${msg}`,
+		);
+	}
 }
 
 function isNativeSlotNotImplementedError(error) {
@@ -2507,7 +2574,9 @@ function isNativeSlotNotImplementedError(error) {
 		msg.includes("native_slot_not_implemented") ||
 		msg.includes("native_execute_not_enabled") ||
 		msg.includes("bsc_lista_pool_missing") ||
-		msg.includes("bsc_lista_private_key_missing")
+		msg.includes("bsc_lista_private_key_missing") ||
+		msg.includes("bsc_wombat_pool_missing") ||
+		msg.includes("bsc_wombat_private_key_missing")
 	);
 }
 
@@ -2555,18 +2624,10 @@ async function executeBscWombatSupply(params) {
 	return executeBscWombatSupplyViaCommand(params);
 }
 
-function isNativeSlotCommandImplemented(commandTemplate, required = []) {
-	if (!String(commandTemplate || "").trim()) return false;
-	return hasRequiredPlaceholders(commandTemplate, required);
-}
-
 const BSC_NATIVE_SLOT_IMPLEMENTED = {
 	aave: true,
 	lista: Boolean(BSC_LISTA_POOL && BSC_LISTA_EXECUTE_PRIVATE_KEY),
-	wombat: isNativeSlotCommandImplemented(BSC_WOMBAT_NATIVE_EXECUTE_COMMAND, [
-		"{amountRaw}",
-		"{runId}",
-	]),
+	wombat: Boolean(BSC_WOMBAT_POOL && BSC_WOMBAT_EXECUTE_PRIVATE_KEY),
 };
 
 const BSC_POST_ACTION_SUPPLY_EXECUTORS = {
@@ -4608,17 +4669,10 @@ async function computeBscYieldPlan(input = {}) {
 		if (BSC_WOMBAT_EXECUTE_MODE === "native") {
 			if (!BSC_WOMBAT_NATIVE_EXECUTE_ENABLED) {
 				wombatBlockers.push("wombat_native_execute_not_enabled");
-			} else if (!BSC_WOMBAT_NATIVE_EXECUTE_COMMAND) {
-				wombatBlockers.push("wombat_native_slot_not_implemented");
-			} else if (
-				!hasRequiredPlaceholders(BSC_WOMBAT_NATIVE_EXECUTE_COMMAND, [
-					"{amountRaw}",
-					"{runId}",
-				])
-			) {
-				wombatBlockers.push(
-					"bsc_wombat_native_execute_command_missing_required_placeholders",
-				);
+			} else if (!BSC_WOMBAT_POOL) {
+				wombatBlockers.push("missing_bsc_wombat_pool");
+			} else if (!BSC_WOMBAT_EXECUTE_PRIVATE_KEY) {
+				wombatBlockers.push("missing_bsc_wombat_execute_private_key");
 			}
 		}
 		if (BSC_WOMBAT_EXECUTE_MODE !== "native") {
@@ -4686,10 +4740,9 @@ async function computeBscYieldPlan(input = {}) {
 			"BSC_LISTA_EXECUTE_COMMAND='node scripts/lista-supply.mjs --amount {amountRaw} --run {runId}'",
 		wombat_execute_disabled: "BSC_WOMBAT_EXECUTE_ENABLED=true",
 		wombat_native_execute_not_enabled: "BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=true",
-		wombat_native_slot_not_implemented:
-			"BSC_WOMBAT_NATIVE_EXECUTE_COMMAND='node scripts/wombat-native-slot.mjs --amount {amountRaw} --run {runId}'",
-		bsc_wombat_native_execute_command_missing_required_placeholders:
-			"BSC_WOMBAT_NATIVE_EXECUTE_COMMAND='node scripts/wombat-native-slot.mjs --amount {amountRaw} --run {runId}'",
+		missing_bsc_wombat_pool: "BSC_WOMBAT_POOL=0x...",
+		missing_bsc_wombat_execute_private_key:
+			"BSC_WOMBAT_EXECUTE_PRIVATE_KEY=0x...",
 		missing_bsc_wombat_execute_command:
 			"BSC_WOMBAT_EXECUTE_COMMAND='node scripts/wombat-supply.mjs --amount {amountRaw} --run {runId}'",
 		bsc_usdc_not_in_wombat_allowed_tokens:
@@ -4737,7 +4790,7 @@ async function computeBscYieldPlan(input = {}) {
 					? BSC_WOMBAT_EXECUTE_MODE === "native"
 						? [
 								"BSC_WOMBAT_EXECUTE_MODE=native",
-								"# requires: BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=true + BSC_WOMBAT_NATIVE_EXECUTE_COMMAND",
+								"# requires: BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=true + BSC_WOMBAT_POOL + BSC_WOMBAT_EXECUTE_PRIVATE_KEY",
 							]
 						: BSC_WOMBAT_EXECUTE_MODE === "command"
 							? [
@@ -4764,7 +4817,11 @@ async function computeBscYieldPlan(input = {}) {
 		`BSC_WOMBAT_EXECUTE_TIMEOUT_MS=${BSC_WOMBAT_EXECUTE_TIMEOUT_MS}`,
 		`BSC_WOMBAT_EXECUTE_MODE=${BSC_WOMBAT_EXECUTE_MODE}`,
 		`BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=${BSC_WOMBAT_NATIVE_EXECUTE_ENABLED}`,
-		`BSC_WOMBAT_NATIVE_EXECUTE_COMMAND=${BSC_WOMBAT_NATIVE_EXECUTE_COMMAND || "<set_when_native>"}`,
+		`BSC_WOMBAT_POOL=${BSC_WOMBAT_POOL || "<set_when_native>"}`,
+		`BSC_WOMBAT_EXECUTE_PRIVATE_KEY=${BSC_WOMBAT_EXECUTE_PRIVATE_KEY ? "<redacted:set>" : "<set_when_native>"}`,
+		`BSC_WOMBAT_MIN_LIQUIDITY_RAW=${BSC_WOMBAT_MIN_LIQUIDITY_RAW}`,
+		`BSC_WOMBAT_DEADLINE_SECONDS=${BSC_WOMBAT_DEADLINE_SECONDS}`,
+		`BSC_WOMBAT_SHOULD_STAKE=${BSC_WOMBAT_SHOULD_STAKE}`,
 		"BSC_YIELD_EXECUTION_PROTOCOL_DEFAULT=venus",
 	];
 	const fullFixPack = [
