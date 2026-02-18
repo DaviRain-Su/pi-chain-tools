@@ -149,13 +149,13 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `scripts/ci-resilient.mjs` appends JSONL records to `apps/dashboard/data/ci-signatures.jsonl` (override via `CI_SIGNATURES_JSONL_PATH`)
   - read-only API: `GET /api/ops/ci-signatures?limit=50` (returns newest-first rows)
 - deBridge MCP readiness (cross-chain integration hook):
-  - `GET /api/crosschain/debridge/readiness` (returns `enabled/commandConfigured/executeEnabled/executeCommandConfigured/canExecute/blockers/hints`)
+  - `GET /api/crosschain/debridge/readiness` (returns `enabled/commandConfigured/executeEnabled/executeCommandConfigured/executeRetry/canExecute/blockers/hints`)
   - `POST /api/crosschain/debridge/plan` (returns `canQuote/canExecute/blockers/executeBlockers/hints/fixPack` + `next=/api/crosschain/debridge/quote`)
   - `POST /api/crosschain/debridge/quote` (dry-run quote bridge; requires `originChain/destinationChain/tokenIn/tokenOut/amount`; returns `mode=quote|blocked` + `quote/rawOutput`)
   - `POST /api/crosschain/debridge/execute` (`confirm=true` required; gated by `DEBRIDGE_MCP_EXECUTE_ENABLED` + execute command; returns `executionArtifact/executionReconciliation`)
   - execute 路径包含 runtime validator：artifact/reconciliation 不合法会返回 `debridge_execution_artifact_invalid` 或 `debridge_execution_reconciliation_invalid`
   - execute 失败错误会按类型归一化（`error` + `retryable` + `category`），例如 timeout/rate_limit/network/funds/request/auth/unknown
-  - config: `crosschain.debridge.enabled|command|executeEnabled|executeCommand|timeoutMs` (`DEBRIDGE_MCP_ENABLED|DEBRIDGE_MCP_COMMAND|DEBRIDGE_MCP_EXECUTE_ENABLED|DEBRIDGE_MCP_EXECUTE_COMMAND|DEBRIDGE_MCP_TIMEOUT_MS`)
+  - config: `crosschain.debridge.enabled|command|executeEnabled|executeCommand|timeoutMs|executeRetry.maxAttempts|executeRetry.backoffMs` (`DEBRIDGE_MCP_ENABLED|DEBRIDGE_MCP_COMMAND|DEBRIDGE_MCP_EXECUTE_ENABLED|DEBRIDGE_MCP_EXECUTE_COMMAND|DEBRIDGE_MCP_TIMEOUT_MS|DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS|DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS`)
   - command placeholders (if used in command template): `{originChain} {destinationChain} {tokenIn} {tokenOut} {amount} {recipient} {account}`
 - Rebalance risk guards (env-tunable): max amount, min quote out, max slippage, cooldown, and daily execution cap (`NEAR_REBAL_*`)
   - `NEAR_REBAL_MAX_AMOUNT_RAW` (default `5000000`)

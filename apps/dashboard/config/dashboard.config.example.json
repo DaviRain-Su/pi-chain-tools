@@ -95,7 +95,13 @@
 		"debridge": {
 			"enabled": false,
 			"command": "",
-			"timeoutMs": 120000
+			"executeEnabled": false,
+			"executeCommand": "",
+			"timeoutMs": 120000,
+			"executeRetry": {
+				"maxAttempts": 1,
+				"backoffMs": 1200
+			}
 		}
 	},
 	"acp": {

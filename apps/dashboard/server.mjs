@@ -162,6 +162,32 @@ const DEBRIDGE_MCP_TIMEOUT_MS = Math.max(
 		10,
 	) || 120_000,
 );
+const DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS = Math.max(
+	1,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS",
+				"crosschain.debridge.executeRetry.maxAttempts",
+				"1",
+			),
+		),
+		10,
+	) || 1,
+);
+const DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS = Math.max(
+	100,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS",
+				"crosschain.debridge.executeRetry.backoffMs",
+				"1200",
+			),
+		),
+		10,
+	) || 1200,
+);
 
 function tryExtractJsonFromText(text) {
 	const source = String(text || "").trim();
@@ -6289,6 +6315,10 @@ const server = http.createServer(async (req, res) => {
 				executeEnabled: DEBRIDGE_MCP_EXECUTE_ENABLED,
 				executeCommandConfigured: Boolean(DEBRIDGE_MCP_EXECUTE_COMMAND),
 				timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
+				executeRetry: {
+					maxAttempts: DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS,
+					backoffMs: DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS,
+				},
 				canExecute: blockers.length === 0,
 				blockers,
 				hints: {
@@ -6550,12 +6580,44 @@ const server = http.createServer(async (req, res) => {
 			for (const [k, v] of Object.entries(replacements)) {
 				cmd = cmd.split(k).join(v);
 			}
-			try {
-				const output = await runCommand("bash", ["-lc", cmd], {
-					env: process.env,
-					cwd: ACP_WORKDIR,
-					timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
-				});
+			let output = null;
+			let lastError = null;
+			let executionError = null;
+			let attemptUsed = 0;
+			for (
+				let attempt = 1;
+				attempt <= DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS;
+				attempt += 1
+			) {
+				try {
+					attemptUsed = attempt;
+					output = await runCommand("bash", ["-lc", cmd], {
+						env: process.env,
+						cwd: ACP_WORKDIR,
+						timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
+					});
+					lastError = null;
+					break;
+				} catch (error) {
+					const msg = error instanceof Error ? error.message : String(error);
+					executionError = classifyDebridgeExecuteError(msg);
+					lastError = error;
+					if (
+						!executionError.retryable ||
+						attempt >= DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS
+					) {
+						break;
+					}
+					await new Promise((resolve) =>
+						setTimeout(
+							resolve,
+							DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS * attempt,
+						),
+					);
+				}
+			}
+
+			if (output !== null) {
 				const txHash =
 					String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
 				const executionArtifact = buildDebridgeExecutionArtifact({
@@ -6585,6 +6647,7 @@ const server = http.createServer(async (req, res) => {
 					status: "ok",
 					provider: "debridge-mcp",
 					txHash,
+					attemptUsed,
 					request: {
 						originChain,
 						destinationChain,
@@ -6600,62 +6663,66 @@ const server = http.createServer(async (req, res) => {
 					mode: "execute",
 					provider: "debridge-mcp",
 					txHash,
+					attemptUsed,
 					result: tryExtractJsonFromText(output),
 					rawOutput: output,
 					executionArtifact,
 					executionReconciliation,
 				});
-			} catch (error) {
-				const msg = error instanceof Error ? error.message : String(error);
-				const executionError = classifyDebridgeExecuteError(msg);
-				const executionArtifact = buildDebridgeExecutionArtifact({
-					payload,
-					status: "error",
-					error: msg,
-				});
-				const executionReconciliation =
-					reconcileDebridgeExecutionArtifact(executionArtifact);
-				if (!validateDebridgeExecutionArtifactV1(executionArtifact)) {
-					return json(res, 500, {
-						ok: false,
-						error: "debridge_execution_artifact_invalid",
-					});
-				}
-				if (
-					!validateDebridgeExecutionReconciliationV1(executionReconciliation)
-				) {
-					return json(res, 500, {
-						ok: false,
-						error: "debridge_execution_reconciliation_invalid",
-					});
-				}
-				pushActionHistory({
-					action: "debridge_execute",
-					status: "error",
-					provider: "debridge-mcp",
-					request: {
-						originChain,
-						destinationChain,
-						tokenIn,
-						tokenOut,
-						amount,
-					},
-					error: msg,
-					executionError,
-					executionArtifact,
-					executionReconciliation,
-				});
+			}
+
+			const msg =
+				lastError instanceof Error
+					? lastError.message
+					: String(lastError || "");
+			executionError = executionError || classifyDebridgeExecuteError(msg);
+			const executionArtifact = buildDebridgeExecutionArtifact({
+				payload,
+				status: "error",
+				error: msg,
+			});
+			const executionReconciliation =
+				reconcileDebridgeExecutionArtifact(executionArtifact);
+			if (!validateDebridgeExecutionArtifactV1(executionArtifact)) {
 				return json(res, 500, {
 					ok: false,
-					provider: "debridge-mcp",
-					error: executionError.code,
-					retryable: executionError.retryable,
-					category: executionError.category,
-					message: msg,
-					executionArtifact,
-					executionReconciliation,
+					error: "debridge_execution_artifact_invalid",
 				});
 			}
+			if (!validateDebridgeExecutionReconciliationV1(executionReconciliation)) {
+				return json(res, 500, {
+					ok: false,
+					error: "debridge_execution_reconciliation_invalid",
+				});
+			}
+			pushActionHistory({
+				action: "debridge_execute",
+				status: "error",
+				provider: "debridge-mcp",
+				attemptUsed: attemptUsed || DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS,
+				request: {
+					originChain,
+					destinationChain,
+					tokenIn,
+					tokenOut,
+					amount,
+				},
+				error: msg,
+				executionError,
+				executionArtifact,
+				executionReconciliation,
+			});
+			return json(res, 500, {
+				ok: false,
+				provider: "debridge-mcp",
+				error: executionError.code,
+				retryable: executionError.retryable,
+				category: executionError.category,
+				attemptUsed: attemptUsed || DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS,
+				message: msg,
+				executionArtifact,
+				executionReconciliation,
+			});
 		}
 
 		if (url.pathname === "/api/bsc/yield/plan") {
