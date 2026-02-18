@@ -808,6 +808,20 @@
         return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})\nRecent(20): ${trendLabel}\n${windowKey} TopErrors: ${topErrorsWindow}\nSuccess trend: ${arrow} ${latestRate.toFixed(1)}% vs ${prevRate.toFixed(1)}% (Δ ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}pp)`;
       }
 
+      function debridgeSuggestedActionsFromTopErrors(errors) {
+        const actions = [];
+        for (const [code] of errors) {
+          if (code === "debridge_execute_timeout") actions.push("Increase DEBRIDGE_MCP_TIMEOUT_MS or lower route complexity/amount.");
+          else if (code === "debridge_execute_rate_limited") actions.push("Add backoff and reduce trigger rate; review provider/API quota.");
+          else if (code === "debridge_execute_network_error") actions.push("Check MCP host network/DNS and retry policy settings.");
+          else if (code === "debridge_execute_insufficient_funds") actions.push("Top up source wallet and verify gas + token balances.");
+          else if (code === "debridge_execute_invalid_request") actions.push("Validate token/chain/amount params against deBridge route constraints.");
+          else if (code === "debridge_execute_unauthorized") actions.push("Re-check credentials/permissions for deBridge MCP execute lane.");
+        }
+        if (actions.length === 0) actions.push("No immediate fix hints; inspect rawOutput + executionArtifact for edge-case failures.");
+        return actions.slice(0, 3);
+      }
+
       function buildDebridgeIncidentSummary(snapshot, windowKey = "24h") {
         const d = snapshot?.debridgeExecuteMetrics || {};
         const now = Date.now();
@@ -833,11 +847,15 @@
             acc[key] = (acc[key] || 0) + 1;
             return acc;
           }, {});
-        const topErrors = Object.entries(errorBuckets)
+        const topErrorEntries = Object.entries(errorBuckets)
           .sort((a, b) => b[1] - a[1])
-          .slice(0, 5)
+          .slice(0, 5);
+        const topErrors = topErrorEntries
           .map(([k, v]) => `- ${k}: ${v}`)
           .join("\n") || "- none";
+        const suggestedActions = debridgeSuggestedActionsFromTopErrors(topErrorEntries)
+          .map((x, i) => `${i + 1}. ${x}`)
+          .join("\n");
         const trend = rows
           .slice(0, 20)
           .map((r) => {
@@ -860,6 +878,7 @@
           topErrors,
           `recentTrend(20): ${trend}`,
           `conclusion: ${error > success ? "degraded" : error > 0 ? "warning" : "healthy"}`,
+          `nextActions:\n${suggestedActions}`,
         ].join("\n");
       }
 
