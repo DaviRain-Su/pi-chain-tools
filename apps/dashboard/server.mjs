@@ -795,6 +795,18 @@ const PAYMENT_WEBHOOK_METRICS = {
 	lastProvider: null,
 	lastError: null,
 };
+const DEBRIDGE_EXECUTE_METRICS = {
+	total: 0,
+	success: 0,
+	blocked: 0,
+	error: 0,
+	retryAttempts: 0,
+	retryRecovered: 0,
+	lastErrorCode: null,
+	lastErrorCategory: null,
+	lastErrorAt: null,
+	recent: [],
+};
 const ACP_JOB_HISTORY = [];
 const ACP_JOB_STATE = {
 	dailyWindowDay: "",
@@ -862,6 +874,7 @@ async function saveMetricsToDisk() {
 					rebalanceMetrics: REBALANCE_METRICS,
 					rpcMetrics: RPC_METRICS,
 					paymentWebhookMetrics: PAYMENT_WEBHOOK_METRICS,
+					debridgeExecuteMetrics: DEBRIDGE_EXECUTE_METRICS,
 					acpJobHistory: ACP_JOB_HISTORY,
 					acpAsyncJobs: ACP_ASYNC_JOBS,
 				},
@@ -902,6 +915,26 @@ async function loadMetricsFromDisk() {
 			PAYMENT_WEBHOOK_METRICS.lastEventAt = webhook.lastEventAt || null;
 			PAYMENT_WEBHOOK_METRICS.lastProvider = webhook.lastProvider || null;
 			PAYMENT_WEBHOOK_METRICS.lastError = webhook.lastError || null;
+		}
+		const debridge = parsed.debridgeExecuteMetrics;
+		if (debridge && typeof debridge === "object") {
+			DEBRIDGE_EXECUTE_METRICS.total = Number(debridge.total || 0);
+			DEBRIDGE_EXECUTE_METRICS.success = Number(debridge.success || 0);
+			DEBRIDGE_EXECUTE_METRICS.blocked = Number(debridge.blocked || 0);
+			DEBRIDGE_EXECUTE_METRICS.error = Number(debridge.error || 0);
+			DEBRIDGE_EXECUTE_METRICS.retryAttempts = Number(
+				debridge.retryAttempts || 0,
+			);
+			DEBRIDGE_EXECUTE_METRICS.retryRecovered = Number(
+				debridge.retryRecovered || 0,
+			);
+			DEBRIDGE_EXECUTE_METRICS.lastErrorCode = debridge.lastErrorCode || null;
+			DEBRIDGE_EXECUTE_METRICS.lastErrorCategory =
+				debridge.lastErrorCategory || null;
+			DEBRIDGE_EXECUTE_METRICS.lastErrorAt = debridge.lastErrorAt || null;
+			DEBRIDGE_EXECUTE_METRICS.recent = Array.isArray(debridge.recent)
+				? debridge.recent.slice(0, 50)
+				: [];
 		}
 
 		const acpHistory = parsed.acpJobHistory;
@@ -3246,6 +3279,39 @@ function pushAcpJobHistory(entry) {
 	});
 	if (ACP_JOB_HISTORY.length > 50) {
 		ACP_JOB_HISTORY.length = 50;
+	}
+	void saveMetricsToDisk();
+}
+
+function recordDebridgeExecuteMetric({
+	status,
+	errorCode = null,
+	errorCategory = null,
+	attemptUsed = 1,
+	recoveredAfterRetry = false,
+}) {
+	DEBRIDGE_EXECUTE_METRICS.total += 1;
+	if (status === "success") DEBRIDGE_EXECUTE_METRICS.success += 1;
+	if (status === "blocked") DEBRIDGE_EXECUTE_METRICS.blocked += 1;
+	if (status === "error") DEBRIDGE_EXECUTE_METRICS.error += 1;
+	const retries = Math.max(0, Number(attemptUsed || 1) - 1);
+	DEBRIDGE_EXECUTE_METRICS.retryAttempts += retries;
+	if (recoveredAfterRetry) DEBRIDGE_EXECUTE_METRICS.retryRecovered += 1;
+	if (status === "error") {
+		DEBRIDGE_EXECUTE_METRICS.lastErrorCode = errorCode || null;
+		DEBRIDGE_EXECUTE_METRICS.lastErrorCategory = errorCategory || null;
+		DEBRIDGE_EXECUTE_METRICS.lastErrorAt = new Date().toISOString();
+	}
+	DEBRIDGE_EXECUTE_METRICS.recent.unshift({
+		timestamp: new Date().toISOString(),
+		status,
+		errorCode: errorCode || null,
+		errorCategory: errorCategory || null,
+		attemptUsed: Number(attemptUsed || 1),
+		recoveredAfterRetry: Boolean(recoveredAfterRetry),
+	});
+	if (DEBRIDGE_EXECUTE_METRICS.recent.length > 50) {
+		DEBRIDGE_EXECUTE_METRICS.recent.length = 50;
 	}
 	void saveMetricsToDisk();
 }
@@ -6303,6 +6369,20 @@ const server = http.createServer(async (req, res) => {
 			}
 		}
 
+		if (url.pathname === "/api/ops/debridge-execute-metrics") {
+			const limit = Math.min(
+				200,
+				Math.max(1, Number.parseInt(url.searchParams.get("limit") || "30", 10)),
+			);
+			return json(res, 200, {
+				ok: true,
+				metrics: {
+					...DEBRIDGE_EXECUTE_METRICS,
+					recent: DEBRIDGE_EXECUTE_METRICS.recent.slice(0, limit),
+				},
+			});
+		}
+
 		if (url.pathname === "/api/crosschain/debridge/readiness") {
 			const blockers = [];
 			if (!DEBRIDGE_MCP_ENABLED) blockers.push("debridge_mcp_disabled");
@@ -6541,6 +6621,12 @@ const server = http.createServer(async (req, res) => {
 						error: "debridge_execution_reconciliation_invalid",
 					});
 				}
+				recordDebridgeExecuteMetric({
+					status: "blocked",
+					errorCode: executionError.code,
+					errorCategory: executionError.category,
+					attemptUsed: 1,
+				});
 				pushActionHistory({
 					action: "debridge_execute",
 					status: "blocked",
@@ -6642,6 +6728,11 @@ const server = http.createServer(async (req, res) => {
 						error: "debridge_execution_reconciliation_invalid",
 					});
 				}
+				recordDebridgeExecuteMetric({
+					status: "success",
+					attemptUsed,
+					recoveredAfterRetry: attemptUsed > 1,
+				});
 				pushActionHistory({
 					action: "debridge_execute",
 					status: "ok",
@@ -6695,6 +6786,12 @@ const server = http.createServer(async (req, res) => {
 					error: "debridge_execution_reconciliation_invalid",
 				});
 			}
+			recordDebridgeExecuteMetric({
+				status: "error",
+				errorCode: executionError.code,
+				errorCategory: executionError.category,
+				attemptUsed: attemptUsed || DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS,
+			});
 			pushActionHistory({
 				action: "debridge_execute",
 				status: "error",

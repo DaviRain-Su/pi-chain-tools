@@ -143,6 +143,12 @@ curl -s -X POST 'http://127.0.0.1:4173/api/crosschain/debridge/execute' \
 - `retryable`：是否可重试
 - `category`：timeout/rate_limit/network/funds/request/auth/unknown
 
+可观测性：
+```bash
+curl -s 'http://127.0.0.1:4173/api/ops/debridge-execute-metrics?limit=30'
+```
+返回 deBridge execute 的累计成功/失败、重试次数与最近执行记录（含分类错误码）。
+
 建议最小配置：
 ```bash
 export DEBRIDGE_MCP_ENABLED=true
