@@ -231,10 +231,11 @@ Phase-1（本期，已完成）
 - `POST /api/bsc/yield/execute` + post-action artifact/reconcile 统一链路
 - Lista/Wombat command-mode 执行守卫（mode/timeout/max/token/placeholders）
 - 执行与 reconcile 双 registry（便于替换单协议 adapter）
-- native readiness 公开：`executionReadiness.nativeSlotImplemented`（Lista/Wombat 由 native bridge command 配置驱动）
+- Lista native RPC 执行路径已落地（ethers provider+wallet，approve+supply 上链发送）
+- native readiness 公开：`executionReadiness.nativeSlotImplemented`（Lista 由 `BSC_LISTA_POOL` + `BSC_LISTA_EXECUTE_PRIVATE_KEY` 驱动；Wombat 仍由 native bridge command 配置驱动）
 - CI resilient 自愈 + signature telemetry（JSONL + `/api/ops/ci-signatures`）
 
 Phase-2（下期，最小目标）
-- 落地一个协议的 native slot 真实实现（建议 Lista）
+- Wombat native slot 真实实现（替换 command bridge）
 - native slot 协议级单测（success/failure/retryable 分类）
 - Dashboard readiness 卡片显式展示 native slot implemented 状态

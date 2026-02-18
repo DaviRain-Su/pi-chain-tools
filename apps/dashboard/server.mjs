@@ -437,6 +437,23 @@ const BSC_LISTA_NATIVE_EXECUTE_ENABLED =
 			"false",
 		),
 	).toLowerCase() === "true";
+const BSC_LISTA_POOL = String(
+	envOrCfg("BSC_LISTA_POOL", "bsc.lista.pool", ""),
+).trim();
+const BSC_LISTA_EXECUTE_PRIVATE_KEY = String(
+	envOrCfg(
+		"BSC_LISTA_EXECUTE_PRIVATE_KEY",
+		"bsc.lista.privateKey",
+		BSC_EXECUTE_PRIVATE_KEY || "",
+	),
+).trim();
+const BSC_LISTA_REFERRAL_CODE = Math.max(
+	0,
+	Number.parseInt(
+		String(envOrCfg("BSC_LISTA_REFERRAL_CODE", "bsc.lista.referralCode", "0")),
+		10,
+	) || 0,
+);
 const BSC_LISTA_NATIVE_EXECUTE_COMMAND = String(
 	envOrCfg(
 		"BSC_LISTA_NATIVE_EXECUTE_COMMAND",
@@ -2068,6 +2085,32 @@ function validateBscAaveSupplyInput(params) {
 	return { token, amountRaw };
 }
 
+function validateBscListaSupplyInput(params) {
+	const token = String(params?.token || "")
+		.trim()
+		.toLowerCase();
+	const amountRaw = String(params?.amountRaw || "0").trim();
+	if (!/^\d+$/.test(amountRaw) || BigInt(amountRaw) <= 0n) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_amount_invalid",
+		);
+	}
+	const maxRaw = /^\d+$/.test(BSC_LISTA_MAX_AMOUNT_RAW)
+		? BigInt(BSC_LISTA_MAX_AMOUNT_RAW)
+		: 0n;
+	if (maxRaw > 0n && BigInt(amountRaw) > maxRaw) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_amount_exceeds_limit",
+		);
+	}
+	if (!token || !BSC_LISTA_ALLOWED_TOKENS.includes(token)) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_token_not_allowed",
+		);
+	}
+	return { token, amountRaw };
+}
+
 async function executeBscAaveSupplyViaCommand(params) {
 	if (!BSC_AAVE_EXECUTE_COMMAND) {
 		throw new Error(
@@ -2224,28 +2267,7 @@ async function executeBscListaSupplyViaCommand(params) {
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_execute_command_missing_required_placeholders",
 		);
 	}
-	const token = String(params?.token || "")
-		.trim()
-		.toLowerCase();
-	const amountRaw = String(params?.amountRaw || "0").trim();
-	if (!/^\d+$/.test(amountRaw) || BigInt(amountRaw) <= 0n) {
-		throw new Error(
-			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_amount_invalid",
-		);
-	}
-	const maxRaw = /^\d+$/.test(BSC_LISTA_MAX_AMOUNT_RAW)
-		? BigInt(BSC_LISTA_MAX_AMOUNT_RAW)
-		: 0n;
-	if (maxRaw > 0n && BigInt(amountRaw) > maxRaw) {
-		throw new Error(
-			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_amount_exceeds_limit",
-		);
-	}
-	if (!token || !BSC_LISTA_ALLOWED_TOKENS.includes(token)) {
-		throw new Error(
-			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_token_not_allowed",
-		);
-	}
+	const { token, amountRaw } = validateBscListaSupplyInput(params);
 	const replacements = {
 		"{amountRaw}": amountRaw,
 		"{token}": token,
@@ -2353,49 +2375,82 @@ async function executeBscWombatSupplyViaCommand(params) {
 }
 
 async function executeBscListaSupplyViaNativeSlot(params) {
-	if (!BSC_LISTA_NATIVE_EXECUTE_COMMAND) {
+	const { token, amountRaw } = validateBscListaSupplyInput(params);
+	if (!BSC_LISTA_POOL) {
 		throw new Error(
-			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_native_slot_not_implemented",
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_pool_missing",
 		);
 	}
-	if (
-		!hasRequiredPlaceholders(BSC_LISTA_NATIVE_EXECUTE_COMMAND, [
-			"{amountRaw}",
-			"{runId}",
-		])
-	) {
+	if (!BSC_LISTA_EXECUTE_PRIVATE_KEY) {
 		throw new Error(
-			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_native_execute_command_missing_required_placeholders",
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_private_key_missing",
 		);
 	}
-	const token = String(params?.token || "")
-		.trim()
-		.toLowerCase();
-	const amountRaw = String(params?.amountRaw || "0").trim();
-	const replacements = {
-		"{amountRaw}": amountRaw,
-		"{token}": token,
-		"{rpcUrl}": String(params.rpcUrl || BSC_RPC_URL || ""),
-		"{chainId}": String(params.chainId || BSC_CHAIN_ID || ""),
-		"{runId}": String(params.runId || ""),
-	};
-	let cmd = BSC_LISTA_NATIVE_EXECUTE_COMMAND;
-	for (const [k, v] of Object.entries(replacements)) {
-		cmd = cmd.split(k).join(v);
-	}
-	const output = await runCommand("bash", ["-lc", cmd], {
-		env: process.env,
-		cwd: ACP_WORKDIR,
-		timeoutMs: BSC_LISTA_EXECUTE_TIMEOUT_MS,
+	const provider = new JsonRpcProvider(params.rpcUrl || BSC_RPC_URL, {
+		name: "bsc",
+		chainId: Number(params.chainId || BSC_CHAIN_ID),
 	});
-	const txHash = String(output.match(/0x[a-fA-F0-9]{64}/)?.[0] || "") || null;
-	return {
-		ok: true,
-		mode: "execute",
-		provider: "lista-native-slot-command",
-		output,
-		txHash,
-	};
+	const wallet = new Wallet(BSC_LISTA_EXECUTE_PRIVATE_KEY, provider);
+	const erc20Iface = new Interface([
+		"function allowance(address owner,address spender) view returns (uint256)",
+		"function approve(address spender,uint256 value) returns (bool)",
+	]);
+	const poolIface = new Interface([
+		"function supply(address asset,uint256 amount,address onBehalfOf,uint16 referralCode)",
+	]);
+	try {
+		const allowanceRaw = await provider.call({
+			to: token,
+			data: erc20Iface.encodeFunctionData("allowance", [
+				wallet.address,
+				BSC_LISTA_POOL,
+			]),
+		});
+		const allowance = erc20Iface.decodeFunctionResult(
+			"allowance",
+			allowanceRaw,
+		)[0];
+		if (allowance.lt(amountRaw)) {
+			const approveTx = await wallet.sendTransaction({
+				to: token,
+				data: erc20Iface.encodeFunctionData("approve", [
+					BSC_LISTA_POOL,
+					MaxUint256,
+				]),
+				value: 0,
+			});
+			await approveTx.wait(BSC_EXECUTE_CONFIRMATIONS);
+		}
+		const data = poolIface.encodeFunctionData("supply", [
+			token,
+			String(amountRaw),
+			wallet.address,
+			BSC_LISTA_REFERRAL_CODE,
+		]);
+		const tx = await wallet.sendTransaction({
+			to: BSC_LISTA_POOL,
+			data,
+			value: 0,
+		});
+		const receipt = await tx.wait(BSC_EXECUTE_CONFIRMATIONS);
+		return {
+			ok: true,
+			mode: "execute",
+			provider: "lista-native-rpc",
+			txHash: tx.hash,
+			receipt: {
+				status: receipt?.status,
+				blockNumber: receipt?.blockNumber,
+				gasUsed: receipt?.gasUsed?.toString?.() || null,
+			},
+		};
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		const retryable = isTransientExecError(error);
+		throw new Error(
+			`BSC_EXECUTE_FAILED retryable=${retryable ? "true" : "false"} message=${msg}`,
+		);
+	}
 }
 
 async function executeBscWombatSupplyViaNativeSlot(params) {
@@ -2448,7 +2503,12 @@ function isNativeSlotNotImplementedError(error) {
 	const msg = String(
 		error instanceof Error ? error.message : error || "",
 	).toLowerCase();
-	return msg.includes("native_slot_not_implemented");
+	return (
+		msg.includes("native_slot_not_implemented") ||
+		msg.includes("native_execute_not_enabled") ||
+		msg.includes("bsc_lista_pool_missing") ||
+		msg.includes("bsc_lista_private_key_missing")
+	);
 }
 
 async function executeBscListaSupply(params) {
@@ -2502,10 +2562,7 @@ function isNativeSlotCommandImplemented(commandTemplate, required = []) {
 
 const BSC_NATIVE_SLOT_IMPLEMENTED = {
 	aave: true,
-	lista: isNativeSlotCommandImplemented(BSC_LISTA_NATIVE_EXECUTE_COMMAND, [
-		"{amountRaw}",
-		"{runId}",
-	]),
+	lista: Boolean(BSC_LISTA_POOL && BSC_LISTA_EXECUTE_PRIVATE_KEY),
 	wombat: isNativeSlotCommandImplemented(BSC_WOMBAT_NATIVE_EXECUTE_COMMAND, [
 		"{amountRaw}",
 		"{runId}",
@@ -4506,17 +4563,10 @@ async function computeBscYieldPlan(input = {}) {
 		if (BSC_LISTA_EXECUTE_MODE === "native") {
 			if (!BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
 				listaBlockers.push("lista_native_execute_not_enabled");
-			} else if (!BSC_LISTA_NATIVE_EXECUTE_COMMAND) {
-				listaBlockers.push("lista_native_slot_not_implemented");
-			} else if (
-				!hasRequiredPlaceholders(BSC_LISTA_NATIVE_EXECUTE_COMMAND, [
-					"{amountRaw}",
-					"{runId}",
-				])
-			) {
-				listaBlockers.push(
-					"bsc_lista_native_execute_command_missing_required_placeholders",
-				);
+			} else if (!BSC_LISTA_POOL) {
+				listaBlockers.push("missing_bsc_lista_pool");
+			} else if (!BSC_LISTA_EXECUTE_PRIVATE_KEY) {
+				listaBlockers.push("missing_bsc_lista_execute_private_key");
 			}
 		}
 		if (BSC_LISTA_EXECUTE_MODE !== "native") {
@@ -4623,10 +4673,9 @@ async function computeBscYieldPlan(input = {}) {
 			"BSC_AAVE_MAX_AMOUNT_RAW=<larger_raw_cap>",
 		lista_execute_disabled: "BSC_LISTA_EXECUTE_ENABLED=true",
 		lista_native_execute_not_enabled: "BSC_LISTA_NATIVE_EXECUTE_ENABLED=true",
-		lista_native_slot_not_implemented:
-			"BSC_LISTA_NATIVE_EXECUTE_COMMAND='node scripts/lista-native-slot.mjs --amount {amountRaw} --run {runId}'",
-		bsc_lista_native_execute_command_missing_required_placeholders:
-			"BSC_LISTA_NATIVE_EXECUTE_COMMAND='node scripts/lista-native-slot.mjs --amount {amountRaw} --run {runId}'",
+		missing_bsc_lista_pool: "BSC_LISTA_POOL=0x...",
+		missing_bsc_lista_execute_private_key:
+			"BSC_LISTA_EXECUTE_PRIVATE_KEY=0x...",
 		missing_bsc_lista_execute_command:
 			"BSC_LISTA_EXECUTE_COMMAND='node scripts/lista-supply.mjs --amount {amountRaw} --run {runId}'",
 		bsc_usdc_not_in_lista_allowed_tokens:
@@ -4673,7 +4722,7 @@ async function computeBscYieldPlan(input = {}) {
 				? BSC_LISTA_EXECUTE_MODE === "native"
 					? [
 							"BSC_LISTA_EXECUTE_MODE=native",
-							"# requires: BSC_LISTA_NATIVE_EXECUTE_ENABLED=true + BSC_LISTA_NATIVE_EXECUTE_COMMAND",
+							"# requires: BSC_LISTA_NATIVE_EXECUTE_ENABLED=true + BSC_LISTA_POOL + BSC_LISTA_EXECUTE_PRIVATE_KEY",
 						]
 					: BSC_LISTA_EXECUTE_MODE === "command"
 						? [
@@ -4682,7 +4731,7 @@ async function computeBscYieldPlan(input = {}) {
 							]
 						: [
 								"BSC_LISTA_EXECUTE_MODE=auto",
-								"# auto prefers native slot when enabled, falls back to command",
+								"# auto prefers native rpc when enabled/configured, falls back to command",
 							]
 				: executionProtocol === "wombat"
 					? BSC_WOMBAT_EXECUTE_MODE === "native"
@@ -4710,7 +4759,8 @@ async function computeBscYieldPlan(input = {}) {
 		`BSC_LISTA_EXECUTE_TIMEOUT_MS=${BSC_LISTA_EXECUTE_TIMEOUT_MS}`,
 		`BSC_LISTA_EXECUTE_MODE=${BSC_LISTA_EXECUTE_MODE}`,
 		`BSC_LISTA_NATIVE_EXECUTE_ENABLED=${BSC_LISTA_NATIVE_EXECUTE_ENABLED}`,
-		`BSC_LISTA_NATIVE_EXECUTE_COMMAND=${BSC_LISTA_NATIVE_EXECUTE_COMMAND || "<set_when_native>"}`,
+		`BSC_LISTA_POOL=${BSC_LISTA_POOL || "<set_when_native>"}`,
+		`BSC_LISTA_EXECUTE_PRIVATE_KEY=${BSC_LISTA_EXECUTE_PRIVATE_KEY ? "<redacted:set>" : "<set_when_native>"}`,
 		`BSC_WOMBAT_EXECUTE_TIMEOUT_MS=${BSC_WOMBAT_EXECUTE_TIMEOUT_MS}`,
 		`BSC_WOMBAT_EXECUTE_MODE=${BSC_WOMBAT_EXECUTE_MODE}`,
 		`BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=${BSC_WOMBAT_NATIVE_EXECUTE_ENABLED}`,

@@ -106,7 +106,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - BSC mode supports quote+minOut planning for `rebalance_usdt_to_usdce_txn` (`chain=bsc`), and can execute in two built-in adapter modes:
   - includes stable-yield agent v1 APIs:
     - `GET /api/bsc/yield/plan` (supports `executionProtocol=venus|aave|lista|wombat`; when omitted, defaults to net-yield `recommendedProtocol`; returns `executeReadiness.blockers/recommendedProtocol` and includes `netYieldInsight`)
-    - `GET /api/bsc/yield/markets` (returns Venus/Aave/Lista/Wombat read-only compare + best protocol recommendation + `sourceHealth` + `marketHealth(status/source/updatedAt/ageMs)` + `marketRiskTags` + `marketRiskScore(0-100)` + `marketRiskBand(low|medium|high)` + `aggregateRisk{avgScore,maxScore,band}` + `netYieldInsight`; includes Pancake V2 read-only quote signal and `dexQuoteCompare{bestSource,conservativeSource,spreadBps}` in `netYieldInsight.quote`; supports query `amountUsd` and `rebalanceIntervalDays`; `executionReadiness.nativeSlotImplemented` exposes per-protocol native slot status, where Lista/Wombat become `true` only when native slot command template is configured with required placeholders `{amountRaw}` + `{runId}`)
+    - `GET /api/bsc/yield/markets` (returns Venus/Aave/Lista/Wombat read-only compare + best protocol recommendation + `sourceHealth` + `marketHealth(status/source/updatedAt/ageMs)` + `marketRiskTags` + `marketRiskScore(0-100)` + `marketRiskBand(low|medium|high)` + `aggregateRisk{avgScore,maxScore,band}` + `netYieldInsight`; includes Pancake V2 read-only quote signal and `dexQuoteCompare{bestSource,conservativeSource,spreadBps}` in `netYieldInsight.quote`; supports query `amountUsd` and `rebalanceIntervalDays`; `executionReadiness.nativeSlotImplemented` exposes per-protocol native slot status, where Lista is `true` only when native RPC config is present (`BSC_LISTA_POOL` + `BSC_LISTA_EXECUTE_PRIVATE_KEY`), and Wombat remains command-bridge native-slot gating)
     - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista/wombat` require enable flag + command adapter)
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
     - `POST /api/bsc/yield/worker/stop` (`confirm=true`)
@@ -209,7 +209,10 @@ Common mapping examples:
 - `bsc.lista.enabled` ↔ `BSC_LISTA_EXECUTE_ENABLED`
 - `bsc.lista.mode` ↔ `BSC_LISTA_EXECUTE_MODE`
 - `bsc.lista.nativeEnabled` ↔ `BSC_LISTA_NATIVE_EXECUTE_ENABLED`
-- `bsc.lista.nativeExecuteCommand` ↔ `BSC_LISTA_NATIVE_EXECUTE_COMMAND`
+- `bsc.lista.pool` ↔ `BSC_LISTA_POOL`
+- `bsc.lista.privateKey` ↔ `BSC_LISTA_EXECUTE_PRIVATE_KEY`
+- `bsc.lista.referralCode` ↔ `BSC_LISTA_REFERRAL_CODE`
+- `bsc.lista.nativeExecuteCommand` ↔ `BSC_LISTA_NATIVE_EXECUTE_COMMAND` (legacy command-bridge compatibility; not used by native RPC path)
 - `bsc.lista.executeCommand` ↔ `BSC_LISTA_EXECUTE_COMMAND`
 - `bsc.lista.executeTimeoutMs` ↔ `BSC_LISTA_EXECUTE_TIMEOUT_MS`
 - `bsc.lista.maxAmountRaw` ↔ `BSC_LISTA_MAX_AMOUNT_RAW`
@@ -273,10 +276,13 @@ Common mapping examples:
 - `BSC_APR_CACHE_TTL_MS` - APR compare cache TTL (default: `60000`)
 - `BSC_AAVE_EXECUTE_ENABLED` - allow BSC yield execute path to proceed when `executionProtocol=aave` (default: `false`, safety-gated)
 - `BSC_LISTA_EXECUTE_ENABLED` - gate for Lista execute path (default: `false`)
-- `BSC_LISTA_EXECUTE_MODE` - `auto|native|command` (default: `auto`; native slot exists and will fallback in `auto`, but `native` mode requires native slot implementation)
-- `BSC_LISTA_NATIVE_EXECUTE_ENABLED` - native slot readiness gate for Lista execute (default: `false`)
-- `BSC_LISTA_NATIVE_EXECUTE_COMMAND` - native-slot bridge command template (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`; required placeholders: `{amountRaw}`, `{runId}`)
-- `BSC_LISTA_EXECUTE_COMMAND` - command template for post-swap Lista supply (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`; required placeholders: `{amountRaw}`, `{runId}`)
+- `BSC_LISTA_EXECUTE_MODE` - `auto|native|command` (default: `auto`; `native` is in-process ethers RPC execution, `auto` prefers native when enabled+configured and falls back to command)
+- `BSC_LISTA_NATIVE_EXECUTE_ENABLED` - gate for Lista native RPC path (default: `false`)
+- `BSC_LISTA_POOL` - Lista supply contract/pool address required by native mode
+- `BSC_LISTA_EXECUTE_PRIVATE_KEY` - signer private key for Lista native mode (fallback: `BSC_EXECUTE_PRIVATE_KEY`)
+- `BSC_LISTA_REFERRAL_CODE` - optional referral code for Lista `supply(asset,amount,onBehalfOf,referralCode)` (default: `0`)
+- `BSC_LISTA_NATIVE_EXECUTE_COMMAND` - legacy native-slot command-bridge template (compatibility only; native RPC path does not require this)
+- `BSC_LISTA_EXECUTE_COMMAND` - command template for post-swap Lista supply fallback (`{amountRaw} {token} {rpcUrl} {chainId} {runId}`; required placeholders: `{amountRaw}`, `{runId}`)
 - `BSC_LISTA_EXECUTE_TIMEOUT_MS` - timeout for Lista command-mode execute (default: `120000`)
 - `BSC_LISTA_MAX_AMOUNT_RAW` - max raw amount allowed per Lista supply action (default: `20000000000000000000000`)
 - `BSC_LISTA_ALLOWED_TOKENS` - comma-separated token allowlist for Lista supply (default: `${BSC_USDC},${BSC_USDT}`)

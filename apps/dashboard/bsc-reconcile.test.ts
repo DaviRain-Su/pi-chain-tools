@@ -22,6 +22,22 @@ describe("bsc post-action reconciliation router", () => {
 		expect(result.checks?.providerOk).toBe(true);
 	});
 
+	it("accepts lista native-rpc provider label", () => {
+		const result = reconcileBscExecutionArtifact({
+			type: "bsc_post_action_supply",
+			version: "v1",
+			protocol: "lista",
+			status: "success",
+			amountRaw: "12345",
+			txHash: `0x${"f".repeat(64)}`,
+			provider: "lista-native-rpc",
+			token: "usdc",
+		});
+		expect(result.ok).toBe(true);
+		expect(result.route).toBe("bsc_post_action_supply_v1:lista");
+		expect(result.checks?.providerOk).toBe(true);
+	});
+
 	it("flags provider mismatch for protocol adapter", () => {
 		const result = reconcileBscExecutionArtifact({
 			type: "bsc_post_action_supply",
