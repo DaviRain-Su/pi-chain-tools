@@ -187,7 +187,7 @@
 
       <div class="card" style="margin-top:16px">
         <h3>deBridge Execute Reliability</h3>
-        <div id="debridgeReliability" class="muted">-</div>
+        <div id="debridgeReliability" class="muted" style="white-space:pre-wrap">-</div>
       </div>
 
       <div class="card" style="margin-top:16px">
@@ -744,7 +744,18 @@
           .slice(0, 3)
           .map(([k, v]) => `${k}:${v}`)
           .join(" · ") || "-";
-        return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})`;
+        const trend = recent
+          .slice(0, 20)
+          .map((r) => {
+            const s = String(r?.status || "");
+            if (s === "success") return "🟩";
+            if (s === "blocked") return "🟨";
+            if (s === "error") return "🟥";
+            return "⬜";
+          })
+          .join("");
+        const trendLabel = trend || "-";
+        return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})\nRecent(20): ${trendLabel}`;
       }
 
       function toCsv(snapshot) {
