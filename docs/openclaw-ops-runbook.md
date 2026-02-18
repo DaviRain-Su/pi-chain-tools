@@ -208,6 +208,15 @@ npm run security:check
 npm test
 ```
 
+### 5.5 dashboard 进程出现 SIGTERM/SIGKILL（轮换重启场景）
+- 当前服务已支持 `SIGTERM/SIGINT` 的 graceful shutdown：先停 worker，再关闭 HTTP server。
+- 在频繁部署轮换中看到 `Exec failed (signal SIGTERM)` 可能是旧进程被替换，不等同于业务异常。
+- 仍建议确认最新会话已正常监听：
+```bash
+npm run dashboard:start
+# 看到: NEAR dashboard listening on http://127.0.0.1:4173
+```
+
 ---
 
 ## 6) 当前能力边界（2026-02）

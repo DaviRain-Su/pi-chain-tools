@@ -7202,6 +7202,26 @@ const server = http.createServer(async (req, res) => {
 	}
 });
 
+let shuttingDown = false;
+
+function gracefulShutdown(signal) {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	console.log(`[dashboard] received ${signal}, shutting down gracefully...`);
+	stopBscYieldWorker();
+	server.close(() => {
+		console.log("[dashboard] http server closed");
+		process.exit(0);
+	});
+	setTimeout(() => {
+		console.warn("[dashboard] force exit after shutdown timeout");
+		process.exit(0);
+	}, 3_000).unref();
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
 Promise.all([
 	loadMetricsFromDisk(),
 	loadPolicyFromDisk(),
