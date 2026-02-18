@@ -14,7 +14,7 @@ Mode definitions:
 | Monad+Morpho | earn.markets | `GET /api/monad/morpho/earn/markets` | official-sdk | upgraded | — |
 | Monad+Morpho | earn.strategy | `GET /api/monad/morpho/earn/strategy` | official-sdk | upgraded | — |
 | Monad+Morpho | earn.rewards | `GET /api/monad/morpho/earn/rewards` | official-sdk | upgraded | — |
-| Monad+Morpho | earn.execute.deposit | `POST /api/monad/morpho/earn/execute` | canonical-client | partial | blue-sdk currently has no full tx signer/executor flow for vault deposit |
+| Monad+Morpho | earn.execute.deposit | `POST /api/monad/morpho/earn/execute` | canonical-client | partial | sdk-first execute now uses official `@morpho-org/blue-sdk` for vault math/projection (`VaultUtils.toShares`) + metadata, but tx submit still requires canonical ethers signer path (no public blue-sdk signer/executor) with explicit `remainingNonSdkPath` + fallback markers |
 | Venus | yield.markets | `GET /api/bsc/yield/markets` | canonical-client | partial | `@venusprotocol/sdk` not published on npm; using `@venusprotocol/chains` + ABI/provider |
 | Venus | positions.read | `GET /api/bsc/positions` | canonical-client | partial | same as above |
 | Venus | yield.execute | `POST /api/bsc/yield/execute` | canonical-client | partial | sdk-first market/vToken resolution now wired through official `@venusprotocol/chains`; tx submit remains canonical ethers signer path (no public official execute SDK), with explicit `native-fallback` markers |

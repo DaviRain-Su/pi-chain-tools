@@ -7175,6 +7175,7 @@ function buildMonadMorphoExecuteResult({
 		from: null,
 		to: null,
 	},
+	remainingNonSdkPath = null,
 	error = null,
 }) {
 	const executionArtifact = buildMonadMorphoExecutionArtifact({
@@ -7202,6 +7203,7 @@ function buildMonadMorphoExecuteResult({
 		mode,
 		fallback,
 		warnings,
+		remainingNonSdkPath,
 		error,
 		receipt,
 		executionArtifact,
@@ -7344,7 +7346,15 @@ async function executeMonadMorphoDepositNative({ runId, amountRaw }) {
 			from: null,
 			to: null,
 		},
-		warnings: [],
+		warnings: [
+			"morpho_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor",
+			"morpho_execute_path_native_mode_active",
+		],
+		remainingNonSdkPath: {
+			active: true,
+			marker: "morpho_execute_non_sdk_native_mode",
+			reason: "sdk_disabled_or_execute_mode_native",
+		},
 	});
 }
 
@@ -7401,7 +7411,8 @@ async function executeMonadMorphoDeposit(payload = {}) {
 					from: null,
 					to: null,
 				},
-				warnings: [],
+				warnings: Array.isArray(sdkResult.warnings) ? sdkResult.warnings : [],
+				remainingNonSdkPath: sdkResult.remainingNonSdkPath || null,
 			});
 			recordMonadMorphoExecuteMetrics({
 				status: "success",
@@ -7442,7 +7453,17 @@ async function executeMonadMorphoDeposit(payload = {}) {
 				from: "sdk",
 				to: "native",
 			};
-			native.warnings = [fallbackWarning];
+			native.warnings = [
+				...(Array.isArray(native.warnings) ? native.warnings : []),
+				fallbackWarning,
+				"morpho_execute_path_native_fallback_active",
+				"morpho_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor",
+			];
+			native.remainingNonSdkPath = {
+				active: true,
+				marker: "morpho_execute_non_sdk_native_fallback_path",
+				reason: native.fallback.reason || "sdk_execute_failed",
+			};
 			recordMonadMorphoExecuteMetrics({
 				status: "success",
 				runId,

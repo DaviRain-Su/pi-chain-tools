@@ -2,6 +2,7 @@ import { Interface } from "@ethersproject/abi";
 import { MaxUint256 } from "@ethersproject/constants";
 import { JsonRpcProvider } from "@ethersproject/providers";
 import { Wallet } from "@ethersproject/wallet";
+import { VaultUtils } from "@morpho-org/blue-sdk";
 
 const DEFAULT_MORPHO_SDK_PACKAGE = "@morpho-org/blue-sdk";
 
@@ -30,6 +31,26 @@ function riskBandFromScore(score) {
 
 function isHexAddress(value) {
 	return /^0x[a-fA-F0-9]{40}$/.test(String(value || "").trim());
+}
+
+function buildMorphoRemainingNonSdkPath({
+	sdkEnabled,
+	sdkFallbackUsed,
+	sdkError,
+} = {}) {
+	return {
+		active: true,
+		marker: sdkFallbackUsed
+			? "morpho_execute_non_sdk_native_fallback_path"
+			: sdkEnabled
+				? "morpho_execute_canonical_ethers_path_no_official_sdk_executor"
+				: "morpho_execute_non_sdk_native_mode",
+		reason: sdkFallbackUsed
+			? sdkError || "sdk_execute_failed"
+			: sdkEnabled
+				? "official_morpho_blue_sdk_has_no_public_execute_signer_pipeline"
+				: "sdk_disabled_or_execute_mode_native",
+	};
 }
 
 function parseRewardsJsonInput(input) {
@@ -512,6 +533,8 @@ export async function executeMorphoDepositWithSdk(
 	const vaultIface = new Interface([
 		"function deposit(uint256 assets,address receiver) returns (uint256 shares)",
 		"function balanceOf(address owner) view returns (uint256)",
+		"function totalAssets() view returns (uint256)",
+		"function totalSupply() view returns (uint256)",
 	]);
 	const readBalance = async () => {
 		const [assetRawData, sharesRawData] = await Promise.all([
@@ -535,7 +558,35 @@ export async function executeMorphoDepositWithSdk(
 					?.toString() || "0",
 		};
 	};
+	const readVaultTotals = async () => {
+		const [totalAssetsRawData, totalSupplyRawData] = await Promise.all([
+			adapter.provider.call({
+				to: resolvedVault,
+				data: vaultIface.encodeFunctionData("totalAssets", []),
+			}),
+			adapter.provider.call({
+				to: resolvedVault,
+				data: vaultIface.encodeFunctionData("totalSupply", []),
+			}),
+		]);
+		return {
+			totalAssetsRaw:
+				vaultIface
+					.decodeFunctionResult("totalAssets", totalAssetsRawData)?.[0]
+					?.toString() || "0",
+			totalSupplyRaw:
+				vaultIface
+					.decodeFunctionResult("totalSupply", totalSupplyRawData)?.[0]
+					?.toString() || "0",
+		};
+	};
 	const before = await readBalance();
+	const vaultTotalsBefore = await readVaultTotals();
+	const projectedSharesRaw = VaultUtils.toShares(safeAmountRaw, {
+		totalAssets: vaultTotalsBefore.totalAssetsRaw,
+		totalSupply: vaultTotalsBefore.totalSupplyRaw,
+		decimalsOffset: 0,
+	}).toString();
 	const allowanceRawData = await adapter.provider.call({
 		to: resolvedAsset,
 		data: erc20Iface.encodeFunctionData("allowance", [account, resolvedVault]),
@@ -563,6 +614,17 @@ export async function executeMorphoDepositWithSdk(
 	});
 	const receipt = await depositTx.wait(Math.max(1, Number(confirmations || 1)));
 	const after = await readBalance();
+	const remainingNonSdkPath = buildMorphoRemainingNonSdkPath({
+		sdkEnabled: true,
+		sdkFallbackUsed: false,
+		sdkError: null,
+	});
+	const executeWarnings = [
+		"morpho_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor",
+	];
+	if (!adapter?.meta?.officialSdkWired) {
+		executeWarnings.push("morpho_execute_sdk_scaffold_mode_active");
+	}
 	return {
 		mode: adapter.meta.officialSdkWired ? "sdk" : "sdk-scaffold",
 		sdk: {
@@ -579,6 +641,14 @@ export async function executeMorphoDepositWithSdk(
 		amountRaw: safeAmountRaw,
 		before,
 		after,
+		warnings: executeWarnings,
+		remainingNonSdkPath,
+		sdkExecution: {
+			txSubmitPath: "canonical-ethers-signer",
+			projectedSharesRaw,
+			vaultTotalsBefore,
+			officialSdkMath: "@morpho-org/blue-sdk:VaultUtils.toShares",
+		},
 		receipt: {
 			transactionHash: receipt?.transactionHash || depositTx.hash,
 			blockNumber: receipt?.blockNumber || null,
@@ -587,3 +657,7 @@ export async function executeMorphoDepositWithSdk(
 		},
 	};
 }
+
+export const __morphoSdkInternals = {
+	buildMorphoRemainingNonSdkPath,
+};

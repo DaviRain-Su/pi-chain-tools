@@ -1,5 +1,5 @@
 {
-	"generatedAt": "2026-02-18T20:20:00.000Z",
+	"generatedAt": "2026-02-18T20:55:00.000Z",
 	"scope": ["monad+morpho", "venus", "wombat", "lista"],
 	"modes": ["official-sdk", "canonical-client", "native-fallback"],
 	"entries": [
@@ -34,7 +34,7 @@
 			"currentMode": "canonical-client",
 			"status": "partial",
 			"blockers": [
-				"@morpho-org/blue-sdk does not expose a full tx execution/signer pipeline for vault deposit; ethers signer remains canonical execute client"
+				"SDK-first execute now consumes @morpho-org/blue-sdk for vault conversion math/projection + metadata, but @morpho-org/blue-sdk still does not expose a public tx signer/executor pipeline for vault deposit; ethers signer remains canonical execute client with explicit remainingNonSdkPath/fallback markers"
 			]
 		},
 		{

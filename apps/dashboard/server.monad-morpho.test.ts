@@ -39,6 +39,14 @@ describe("monad morpho earn mvp", () => {
 		);
 		expect(serverSource).toContain('mode: "native-fallback"');
 		expect(serverSource).toContain("fallback: {");
+		expect(serverSource).toContain("remainingNonSdkPath");
+		expect(serverSource).toContain(
+			"morpho_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor",
+		);
+		expect(serverSource).toContain(
+			"morpho_execute_non_sdk_native_fallback_path",
+		);
+		expect(serverSource).toContain("morpho_execute_non_sdk_native_mode");
 		expect(serverSource).toContain("function executeMonadMorphoDepositNative(");
 		expect(serverSource).toContain("MONAD_DELEGATION_GATE_BLOCKED");
 		expect(serverSource).toContain("delegation_gate_blocked");
