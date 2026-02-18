@@ -51,6 +51,25 @@ describe("monad morpho earn mvp", () => {
 		expect(serverSource).toContain("dataSource: strategyView.mode");
 	});
 
+	it("contains sdk rewards read/claim branch with fallback + normalized errors", () => {
+		expect(serverSource).toContain("collectMonadMorphoRewardsWithSdkFallback");
+		expect(serverSource).toContain("fetchRewards(");
+		expect(serverSource).toContain("buildRewardsClaimRequest(");
+		expect(serverSource).toContain(
+			"morpho_sdk_rewards_fetch_failed_fallback_to_native",
+		);
+		expect(serverSource).toContain(
+			"morpho_sdk_rewards_claim_build_failed_fallback_to_native",
+		);
+		expect(serverSource).toContain("classifyMonadMorphoRewardsClaimError");
+		expect(serverSource).toContain("executionArtifact");
+		expect(serverSource).toContain("executionReconciliation");
+		expect(serverSource).toContain("monadMorphoRewardsClaimMetrics");
+		expect(serverSource).toContain(
+			'action: "monad_morpho_rewards_claim_execute"',
+		);
+	});
+
 	it("documents monad config in dashboard config example", () => {
 		expect(configExample?.monad?.rpcUrl).toBeTypeOf("string");
 		expect(configExample?.monad?.execute?.enabled).toBeTypeOf("boolean");
@@ -59,6 +78,10 @@ describe("monad morpho earn mvp", () => {
 		expect(configExample?.monad?.morpho?.useSdk).toBeTypeOf("boolean");
 		expect(configExample?.monad?.morpho?.sdk?.apiBaseUrl).toBeTypeOf("string");
 		expect(configExample?.monad?.morpho?.sdk?.package).toBeTypeOf("string");
+		expect(configExample?.monad?.morpho?.sdk?.rewardsSource).toBeTypeOf(
+			"string",
+		);
+		expect(configExample?.monad?.morpho?.sdk?.claimMode).toBeTypeOf("string");
 		expect(configExample?.monad?.morpho?.maxAmountRaw).toBeTypeOf("string");
 		expect(configExample?.monad?.morpho?.cooldownSeconds).toBeTypeOf("number");
 		expect(configExample?.monad?.morpho?.dailyCapRaw).toBeTypeOf("string");

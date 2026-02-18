@@ -25,7 +25,12 @@ import {
 	createDelegationIntentPayload,
 	verifyDelegationIntentPayload,
 } from "./monad-agent.mjs";
-import { collectMonadMorphoSdkSnapshot } from "./monad-morpho-sdk.mjs";
+import {
+	buildRewardsClaimRequest,
+	collectMonadMorphoSdkSnapshot,
+	createMorphoSdkAdapter,
+	fetchRewards,
+} from "./monad-morpho-sdk.mjs";
 import {
 	buildStrategyDslFromLegacy,
 	validateStrategyDslV1,
@@ -1022,6 +1027,15 @@ const MONAD_MORPHO_EXECUTE_METRICS = {
 	lastErrorCategory: null,
 	lastErrorAt: null,
 };
+const MONAD_MORPHO_REWARDS_CLAIM_METRICS = {
+	total: 0,
+	success: 0,
+	error: 0,
+	recent: [],
+	lastErrorCode: null,
+	lastErrorCategory: null,
+	lastErrorAt: null,
+};
 const MONAD_MORPHO_EXECUTE_STATE = {
 	lastExecuteAt: null,
 	dailyWindowDay: "",
@@ -1159,6 +1173,9 @@ async function saveMetricsToDisk() {
 								MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw.toString(),
 						},
 					},
+					monadMorphoRewardsClaimMetrics: {
+						...MONAD_MORPHO_REWARDS_CLAIM_METRICS,
+					},
 					acpJobHistory: ACP_JOB_HISTORY,
 					acpAsyncJobs: ACP_ASYNC_JOBS,
 					monadAgentMetrics: MONAD_AGENT_STATE.metrics,
@@ -1251,6 +1268,32 @@ async function loadMetricsFromDisk() {
 					MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw = 0n;
 				}
 			}
+		}
+		const monadMorphoRewardsClaim = parsed.monadMorphoRewardsClaimMetrics;
+		if (
+			monadMorphoRewardsClaim &&
+			typeof monadMorphoRewardsClaim === "object"
+		) {
+			MONAD_MORPHO_REWARDS_CLAIM_METRICS.total = Number(
+				monadMorphoRewardsClaim.total || 0,
+			);
+			MONAD_MORPHO_REWARDS_CLAIM_METRICS.success = Number(
+				monadMorphoRewardsClaim.success || 0,
+			);
+			MONAD_MORPHO_REWARDS_CLAIM_METRICS.error = Number(
+				monadMorphoRewardsClaim.error || 0,
+			);
+			MONAD_MORPHO_REWARDS_CLAIM_METRICS.lastErrorCode =
+				monadMorphoRewardsClaim.lastErrorCode || null;
+			MONAD_MORPHO_REWARDS_CLAIM_METRICS.lastErrorCategory =
+				monadMorphoRewardsClaim.lastErrorCategory || null;
+			MONAD_MORPHO_REWARDS_CLAIM_METRICS.lastErrorAt =
+				monadMorphoRewardsClaim.lastErrorAt || null;
+			MONAD_MORPHO_REWARDS_CLAIM_METRICS.recent = Array.isArray(
+				monadMorphoRewardsClaim.recent,
+			)
+				? monadMorphoRewardsClaim.recent.slice(0, 50)
+				: [];
 		}
 
 		const acpHistory = parsed.acpJobHistory;
@@ -1914,6 +1957,10 @@ async function buildSnapshot(accountId) {
 		monadMorphoExecuteMetrics: {
 			...MONAD_MORPHO_EXECUTE_METRICS,
 			recent: MONAD_MORPHO_EXECUTE_METRICS.recent,
+		},
+		monadMorphoRewardsClaimMetrics: {
+			...MONAD_MORPHO_REWARDS_CLAIM_METRICS,
+			recent: MONAD_MORPHO_REWARDS_CLAIM_METRICS.recent,
 		},
 		monadMorphoWorker: {
 			...MONAD_MORPHO_WORKER,
@@ -5622,7 +5669,18 @@ function parseMonadMorphoRewardsSource() {
 		return parsed
 			.map((row, index) => ({
 				index,
-				rewardToken: String(row?.rewardToken || row?.token || "").trim(),
+				campaign: String(
+					row?.campaign ||
+						row?.campaignId ||
+						row?.campaignName ||
+						`campaign-${index}`,
+				).trim(),
+				rewardToken: String(
+					row?.rewardToken || row?.token || row?.tokenAddress || "",
+				).trim(),
+				token: String(
+					row?.token || row?.rewardToken || row?.tokenAddress || "",
+				).trim(),
 				vault: String(row?.vault || "").trim(),
 				claimableRaw: String(row?.claimableRaw || row?.amountRaw || "0").trim(),
 				claimable: String(row?.claimable || "").trim() || null,
@@ -5654,6 +5712,196 @@ function buildMonadMorphoRewardsSnapshot() {
 		rewards,
 		updatedAt: new Date().toISOString(),
 	};
+}
+
+function classifyMonadMorphoRewardsClaimError(error) {
+	const msg = String(error?.message || error || "");
+	const lower = msg.toLowerCase();
+	if (lower.includes("confirm")) {
+		return {
+			code: "MONAD_MORPHO_CONFIRM_REQUIRED",
+			retryable: false,
+			category: "input",
+		};
+	}
+	if (
+		lower.includes("invalid_vault") ||
+		lower.includes("vault must") ||
+		lower.includes("claim command") ||
+		lower.includes("disabled")
+	) {
+		return {
+			code: "MONAD_MORPHO_REWARDS_CLAIM_BLOCKED",
+			retryable: false,
+			category: "config",
+		};
+	}
+	if (lower.includes("timeout") || lower.includes("temporarily")) {
+		return {
+			code: "MONAD_MORPHO_REWARDS_CLAIM_FAILED",
+			retryable: true,
+			category: "runtime",
+		};
+	}
+	return {
+		code: "MONAD_MORPHO_REWARDS_CLAIM_FAILED",
+		retryable: false,
+		category: "runtime",
+	};
+}
+
+function buildMonadMorphoRewardsClaimArtifact({
+	status,
+	txHash = null,
+	vault,
+	account = null,
+	campaign = null,
+	token = null,
+	runId = null,
+	mode = "command",
+	error = null,
+	commandPreview = null,
+}) {
+	return {
+		type: "monad_morpho_rewards_claim_execute",
+		version: "1.0.0",
+		protocol: "morpho-earn",
+		chain: "monad",
+		status,
+		txHash,
+		vault,
+		account,
+		campaign,
+		token,
+		runId,
+		mode,
+		timestamp: new Date().toISOString(),
+		error,
+		commandPreview,
+	};
+}
+
+function reconcileMonadMorphoRewardsClaim({ before, after, artifact }) {
+	const beforeTotal = BigInt(before?.tracking?.totalClaimableRaw || "0");
+	const afterTotal = BigInt(after?.tracking?.totalClaimableRaw || "0");
+	const claimedDelta = beforeTotal - afterTotal;
+	const reconcileOk =
+		artifact?.status === "success"
+			? claimedDelta >= 0n && Boolean(artifact?.txHash || claimedDelta > 0n)
+			: true;
+	return {
+		protocol: "morpho-earn",
+		chain: "monad",
+		reconcileOk,
+		mismatchReason: reconcileOk
+			? null
+			: !artifact?.txHash
+				? "tx_hash_missing"
+				: "claimable_not_reduced",
+		txHash: artifact?.txHash || null,
+		beforeTotalClaimableRaw: beforeTotal.toString(),
+		afterTotalClaimableRaw: afterTotal.toString(),
+		claimedDeltaRaw: claimedDelta.toString(),
+	};
+}
+
+function extractTxHashFromText(input) {
+	const match = String(input || "").match(/0x[a-fA-F0-9]{64}/);
+	return match ? match[0] : null;
+}
+
+function recordMonadMorphoRewardsClaimMetrics({
+	status,
+	runId,
+	txHash = null,
+	errorCode = null,
+	errorCategory = null,
+	vault,
+	mode,
+}) {
+	MONAD_MORPHO_REWARDS_CLAIM_METRICS.total += 1;
+	if (status === "success") {
+		MONAD_MORPHO_REWARDS_CLAIM_METRICS.success += 1;
+		MONAD_MORPHO_REWARDS_CLAIM_METRICS.lastErrorCode = null;
+		MONAD_MORPHO_REWARDS_CLAIM_METRICS.lastErrorCategory = null;
+		MONAD_MORPHO_REWARDS_CLAIM_METRICS.lastErrorAt = null;
+	} else {
+		MONAD_MORPHO_REWARDS_CLAIM_METRICS.error += 1;
+		MONAD_MORPHO_REWARDS_CLAIM_METRICS.lastErrorCode = errorCode;
+		MONAD_MORPHO_REWARDS_CLAIM_METRICS.lastErrorCategory = errorCategory;
+		MONAD_MORPHO_REWARDS_CLAIM_METRICS.lastErrorAt = new Date().toISOString();
+	}
+	MONAD_MORPHO_REWARDS_CLAIM_METRICS.recent.unshift({
+		timestamp: new Date().toISOString(),
+		status,
+		runId,
+		txHash,
+		errorCode,
+		errorCategory,
+		vault,
+		mode,
+	});
+	if (MONAD_MORPHO_REWARDS_CLAIM_METRICS.recent.length > 30) {
+		MONAD_MORPHO_REWARDS_CLAIM_METRICS.recent.length = 30;
+	}
+}
+
+async function collectMonadMorphoRewardsWithSdkFallback({
+	accountAddress = "",
+	vault = "",
+} = {}) {
+	if (!MONAD_MORPHO_USE_SDK) {
+		return {
+			...buildMonadMorphoRewardsSnapshot(),
+			mode: "native",
+			warnings: [],
+			sdk: { enabled: false, used: false, fallback: false },
+		};
+	}
+	try {
+		const adapter = createMorphoSdkAdapter({
+			rpcUrl: MONAD_RPC_URL,
+			chainId: MONAD_CHAIN_ID,
+			vaults: MONAD_MORPHO_VAULTS,
+			asset: MONAD_MORPHO_ASSET,
+			assetDecimals: MONAD_MORPHO_ASSET_DECIMALS,
+			rewardsJson: MONAD_MORPHO_REWARDS_JSON,
+			rewardsClaimCommand: MONAD_MORPHO_REWARDS_CLAIM_COMMAND,
+			sdkApiBaseUrl: MONAD_MORPHO_SDK_API_BASE_URL,
+			sdkPackage: MONAD_MORPHO_SDK_PACKAGE,
+		});
+		const rewardsSnapshot = await fetchRewards(adapter, {
+			accountAddress,
+			vault,
+		});
+		return {
+			chain: "monad",
+			protocol: "morpho-earn",
+			rewards: rewardsSnapshot.rewards,
+			tracking: rewardsSnapshot.tracking,
+			updatedAt: new Date().toISOString(),
+			mode: rewardsSnapshot.mode,
+			warnings: rewardsSnapshot.warnings || [],
+			sdk: {
+				enabled: true,
+				used: true,
+				fallback: false,
+				meta: rewardsSnapshot.meta,
+			},
+		};
+	} catch (error) {
+		return {
+			...buildMonadMorphoRewardsSnapshot(),
+			mode: "native-fallback",
+			warnings: ["morpho_sdk_rewards_fetch_failed_fallback_to_native"],
+			sdk: {
+				enabled: true,
+				used: false,
+				fallback: true,
+				error: error instanceof Error ? error.message : String(error),
+			},
+		};
+	}
 }
 
 function clampUnitInterval(value) {
@@ -8802,7 +9050,16 @@ const server = http.createServer(async (req, res) => {
 		}
 
 		if (url.pathname === "/api/monad/morpho/earn/rewards") {
-			const snapshot = buildMonadMorphoRewardsSnapshot();
+			const accountAddress = String(
+				url.searchParams.get("account") ||
+					url.searchParams.get("accountAddress") ||
+					"",
+			).trim();
+			const requestedVault = String(url.searchParams.get("vault") || "").trim();
+			const snapshot = await collectMonadMorphoRewardsWithSdkFallback({
+				accountAddress,
+				vault: requestedVault,
+			});
 			return json(res, 200, {
 				ok: true,
 				...snapshot,
@@ -8811,6 +9068,7 @@ const server = http.createServer(async (req, res) => {
 					commandConfigured: Boolean(MONAD_MORPHO_REWARDS_CLAIM_COMMAND),
 					endpoint: "/api/monad/morpho/earn/rewards/claim",
 				},
+				dataSource: snapshot.mode,
 			});
 		}
 
@@ -8898,9 +9156,17 @@ const server = http.createServer(async (req, res) => {
 					},
 				});
 			}
+			const runId = String(
+				payload.runId || `monad-morpho-rewards-claim-${Date.now()}`,
+			);
 			const requestedVault = String(
 				payload.vault || MONAD_MORPHO_VAULTS[0] || "",
 			).trim();
+			const accountAddress = String(
+				payload.account || payload.accountAddress || "",
+			).trim();
+			const campaign = String(payload.campaign || "").trim();
+			const token = String(payload.token || payload.rewardToken || "").trim();
 			if (!isHexAddress(requestedVault)) {
 				return json(res, 400, {
 					ok: false,
@@ -8910,11 +9176,59 @@ const server = http.createServer(async (req, res) => {
 					message: "vault must be a valid 0x address",
 				});
 			}
-			const command = MONAD_MORPHO_REWARDS_CLAIM_COMMAND.replaceAll(
+			let mode = "native";
+			let warnings = [];
+			let command = MONAD_MORPHO_REWARDS_CLAIM_COMMAND.replaceAll(
 				"{account}",
-				String(payload.account || ""),
-			).replaceAll("{vault}", requestedVault);
-			const before = buildMonadMorphoRewardsSnapshot();
+				String(accountAddress || ""),
+			)
+				.replaceAll("{vault}", requestedVault)
+				.replaceAll("{campaign}", campaign)
+				.replaceAll("{token}", token)
+				.replaceAll("{runId}", runId);
+			if (MONAD_MORPHO_USE_SDK) {
+				try {
+					const adapter = createMorphoSdkAdapter({
+						rpcUrl: MONAD_RPC_URL,
+						chainId: MONAD_CHAIN_ID,
+						vaults: MONAD_MORPHO_VAULTS,
+						asset: MONAD_MORPHO_ASSET,
+						assetDecimals: MONAD_MORPHO_ASSET_DECIMALS,
+						rewardsJson: MONAD_MORPHO_REWARDS_JSON,
+						rewardsClaimCommand: MONAD_MORPHO_REWARDS_CLAIM_COMMAND,
+						sdkApiBaseUrl: MONAD_MORPHO_SDK_API_BASE_URL,
+						sdkPackage: MONAD_MORPHO_SDK_PACKAGE,
+					});
+					const claimRequest = buildRewardsClaimRequest(adapter, {
+						accountAddress,
+						vault: requestedVault,
+						campaign,
+						token,
+						runId,
+					});
+					if (!claimRequest?.ok) {
+						return json(res, 400, {
+							ok: false,
+							mode: "blocked",
+							error: claimRequest?.code || "MONAD_MORPHO_REWARDS_CLAIM_BLOCKED",
+							retryable: Boolean(claimRequest?.retryable),
+							category: claimRequest?.category || "config",
+							message: claimRequest?.message || "Rewards claim execute blocked",
+						});
+					}
+					command = claimRequest.command;
+					mode = claimRequest.mode || "sdk";
+				} catch (error) {
+					mode = "native-fallback";
+					warnings = [
+						"morpho_sdk_rewards_claim_build_failed_fallback_to_native",
+					];
+				}
+			}
+			const before = await collectMonadMorphoRewardsWithSdkFallback({
+				accountAddress,
+				vault: requestedVault,
+			});
 			let stdout = "";
 			let ok = true;
 			let errorMessage = null;
@@ -8926,36 +9240,79 @@ const server = http.createServer(async (req, res) => {
 				ok = false;
 				errorMessage = error instanceof Error ? error.message : String(error);
 			}
-			const after = buildMonadMorphoRewardsSnapshot();
-			const reconciliation = {
-				beforeTotalClaimableRaw: before.tracking.totalClaimableRaw,
-				afterTotalClaimableRaw: after.tracking.totalClaimableRaw,
-				changed:
-					before.tracking.totalClaimableRaw !==
-					after.tracking.totalClaimableRaw,
-			};
+			const after = await collectMonadMorphoRewardsWithSdkFallback({
+				accountAddress,
+				vault: requestedVault,
+			});
+			const txHash = extractTxHashFromText(stdout);
+			const normalizedError = ok
+				? null
+				: classifyMonadMorphoRewardsClaimError(errorMessage);
+			const executionArtifact = buildMonadMorphoRewardsClaimArtifact({
+				status: ok ? "success" : "error",
+				txHash,
+				vault: requestedVault,
+				account: accountAddress || null,
+				campaign: campaign || null,
+				token: token || null,
+				runId,
+				mode,
+				error: ok
+					? null
+					: {
+							code: normalizedError?.code,
+							category: normalizedError?.category,
+							message: errorMessage,
+						},
+				commandPreview: command.slice(0, 180),
+			});
+			const executionReconciliation = reconcileMonadMorphoRewardsClaim({
+				before,
+				after,
+				artifact: executionArtifact,
+			});
+			recordMonadMorphoRewardsClaimMetrics({
+				status: ok ? "success" : "error",
+				runId,
+				txHash,
+				errorCode: normalizedError?.code || null,
+				errorCategory: normalizedError?.category || null,
+				vault: requestedVault,
+				mode,
+			});
 			pushActionHistory({
 				action: "monad_morpho_rewards_claim_execute",
 				status: ok ? "success" : "error",
+				runId,
+				txHash,
 				summary: ok ? "monad morpho rewards claim" : errorMessage,
 				detail: {
 					vault: requestedVault,
-					reconciliation,
+					mode,
+					warnings,
 					commandPreview: command.slice(0, 180),
 				},
+				executionArtifact,
+				executionReconciliation,
 			});
+			void saveMetricsToDisk();
 			return json(res, ok ? 200 : 500, {
 				ok,
 				chain: "monad",
 				protocol: "morpho-earn",
 				action: "rewards-claim",
+				runId,
 				vault: requestedVault,
+				dataSource: mode,
+				warnings,
+				txHash,
 				stdout,
-				error: ok ? null : "MONAD_MORPHO_REWARDS_CLAIM_FAILED",
-				retryable: false,
-				category: ok ? null : "runtime",
+				error: ok ? null : normalizedError?.code,
+				retryable: ok ? false : Boolean(normalizedError?.retryable),
+				category: ok ? null : normalizedError?.category,
 				message: ok ? "ok" : errorMessage,
-				reconciliation,
+				executionArtifact,
+				executionReconciliation,
 				telemetry: {
 					at: new Date().toISOString(),
 					commandPreview: command.slice(0, 140),

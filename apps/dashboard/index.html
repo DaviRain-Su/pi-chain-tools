@@ -187,11 +187,13 @@
         <div id="monadMorphoStrategy" class="muted" style="margin-top:6px">strategy: -</div>
         <div id="monadMorphoWorker" class="muted" style="margin-top:6px">worker: -</div>
         <div id="monadMorphoRewards" class="muted" style="margin-top:6px">rewards: -</div>
+        <div id="monadMorphoRewardsClaim" class="muted" style="margin-top:6px">rewards claim: -</div>
         <div id="monadMorphoLast" class="muted" style="margin-top:6px">last execute: -</div>
         <div id="monadMorphoTrend" class="muted" style="margin-top:6px">trend: -</div>
         <div class="row" style="margin-top:8px">
           <input id="monadMorphoAmountRaw" placeholder="amountRaw" size="24" />
           <button id="execMonadMorphoDeposit">Execute deposit (confirm)</button>
+          <button id="claimMonadMorphoRewards">Claim rewards (confirm)</button>
           <button id="startMonadMorphoWorker">Start worker (dry-run)</button>
           <button id="stopMonadMorphoWorker">Stop worker</button>
           <button id="copyMonadMorphoIncident">Copy Monad incident</button>
@@ -488,6 +490,7 @@
       const monadMorphoStrategyEl = document.getElementById("monadMorphoStrategy");
       const monadMorphoWorkerEl = document.getElementById("monadMorphoWorker");
       const monadMorphoRewardsEl = document.getElementById("monadMorphoRewards");
+      const monadMorphoRewardsClaimEl = document.getElementById("monadMorphoRewardsClaim");
       const monadMorphoLastEl = document.getElementById("monadMorphoLast");
       const monadMorphoTrendEl = document.getElementById("monadMorphoTrend");
       const monadAgentProfileEl = document.getElementById("monadAgentProfile");
@@ -507,6 +510,7 @@
       const revokeMonadDelegationBtn = document.getElementById("revokeMonadDelegation");
       const monadMorphoAmountRawEl = document.getElementById("monadMorphoAmountRaw");
       const execMonadMorphoDepositBtn = document.getElementById("execMonadMorphoDeposit");
+      const claimMonadMorphoRewardsBtn = document.getElementById("claimMonadMorphoRewards");
       const startMonadMorphoWorkerBtn = document.getElementById("startMonadMorphoWorker");
       const stopMonadMorphoWorkerBtn = document.getElementById("stopMonadMorphoWorker");
       const copyMonadMorphoIncidentBtn = document.getElementById("copyMonadMorphoIncident");
@@ -1421,8 +1425,14 @@
         monadMorphoWorkerEl.innerHTML = `worker: ${(monadMorphoWorker?.worker?.running ? "running" : "stopped")} · dryRun=${monadMorphoWorker?.worker?.dryRun !== false} · intervalMs=${monadMorphoWorker?.worker?.intervalMs || "-"} · last=${monadMorphoWorker?.worker?.lastRunAt || "-"}`;
         const monadRewards = Array.isArray(monadMorphoRewards?.rewards) ? monadMorphoRewards.rewards : [];
         monadMorphoRewardsEl.innerHTML = monadRewards.length
-          ? `rewards: count=${monadRewards.length} · totalRaw=${monadMorphoRewards?.tracking?.totalClaimableRaw || "0"} · top=${monadRewards.slice(0, 2).map((r) => `${r.rewardToken || "token"}:${r.claimableRaw || "0"}`).join(", ")}`
+          ? `rewards: count=${monadRewards.length} · totalRaw=${monadMorphoRewards?.tracking?.totalClaimableRaw || "0"} · detail=${monadRewards.slice(0, 3).map((r) => `${r.campaign || "campaign"}/${r.token || r.rewardToken || "token"}:${r.claimable || r.claimableRaw || "0"}`).join(" | ")}`
           : "rewards: -";
+        const monadRewardClaims = (data.actionHistory || []).filter((row) => String(row?.action || "") === "monad_morpho_rewards_claim_execute");
+        const monadLastClaim = monadRewardClaims[0];
+        const claimReconcile = monadLastClaim?.executionReconciliation || {};
+        monadMorphoRewardsClaimEl.innerHTML = monadLastClaim
+          ? `rewards claim: <span class="${monadLastClaim.status === "success" ? "ok" : "warn"}">${monadLastClaim.status}</span> · tx=${monadLastClaim.txHash || monadLastClaim?.executionArtifact?.txHash || "-"} · ΔclaimableRaw=${claimReconcile?.claimedDeltaRaw || "-"} · reconcile=${claimReconcile?.reconcileOk === true ? "ok" : claimReconcile?.reconcileOk === false ? "mismatch" : "-"}`
+          : "rewards claim: -";
         const monadActions = (data.actionHistory || []).filter((row) => String(row?.action || "") === "monad_morpho_earn_execute");
         const monadLast = monadActions[0];
         monadMorphoLastEl.innerHTML = monadLast
@@ -2684,6 +2694,25 @@
           await load();
         } catch (error) {
           cmdMetaEl.textContent = `Monad execute failed: ${error?.message || error}`;
+        }
+      });
+      claimMonadMorphoRewardsBtn?.addEventListener("click", async () => {
+        try {
+          const res = await fetch("/api/monad/morpho/earn/rewards/claim", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm: true }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || payload?.ok === false) {
+            cmdMetaEl.textContent = `Rewards claim failed: ${payload?.error || payload?.message || res.status}`;
+            return;
+          }
+          const rec = payload?.executionReconciliation || payload?.reconciliation || {};
+          cmdMetaEl.textContent = `Rewards claim ok: tx=${payload?.txHash || "-"} · ΔclaimableRaw=${rec?.claimedDeltaRaw || "-"}`;
+          await load();
+        } catch (error) {
+          cmdMetaEl.textContent = `Rewards claim failed: ${error?.message || error}`;
         }
       });
       startMonadMorphoWorkerBtn?.addEventListener("click", async () => {

@@ -24,6 +24,29 @@ function riskBandFromScore(score) {
 	return "low";
 }
 
+function isHexAddress(value) {
+	return /^0x[a-fA-F0-9]{40}$/.test(String(value || "").trim());
+}
+
+function parseRewardsJsonInput(input) {
+	if (Array.isArray(input)) return input;
+	if (typeof input === "string" && input.trim()) {
+		try {
+			const parsed = JSON.parse(input);
+			return Array.isArray(parsed) ? parsed : [];
+		} catch {
+			return [];
+		}
+	}
+	return [];
+}
+
+function shellQuote(value) {
+	const text = String(value ?? "");
+	if (!text) return "''";
+	return `'${text.replace(/'/g, `'"'"'`)}'`;
+}
+
 export function createMorphoSdkAdapter({
 	rpcUrl,
 	chainId,
@@ -35,6 +58,8 @@ export function createMorphoSdkAdapter({
 	liquidityCapRaw = "",
 	sdkApiBaseUrl = "",
 	sdkPackage = "",
+	rewardsJson = [],
+	rewardsClaimCommand = "",
 } = {}) {
 	const provider = new JsonRpcProvider(String(rpcUrl || ""), {
 		name: "monad",
@@ -53,6 +78,8 @@ export function createMorphoSdkAdapter({
 			liquidityCapRaw: String(liquidityCapRaw || "").trim() || null,
 			sdkApiBaseUrl: String(sdkApiBaseUrl || "").trim() || null,
 			sdkPackage: String(sdkPackage || "").trim() || null,
+			rewardsJson: parseRewardsJsonInput(rewardsJson),
+			rewardsClaimCommand: String(rewardsClaimCommand || "").trim(),
 		},
 		meta: {
 			client: "adapter-scaffold",
@@ -151,6 +178,132 @@ export async function fetchUserPositions(
 		}
 	}
 	return rows;
+}
+
+export async function fetchRewards(
+	adapter,
+	{ accountAddress = "", vault = "" } = {},
+) {
+	const requestedVault = String(vault || "")
+		.trim()
+		.toLowerCase();
+	const rows = parseRewardsJsonInput(adapter?.config?.rewardsJson);
+	const normalized = rows
+		.map((row, index) => {
+			const rewardVault = String(row?.vault || "").trim();
+			const rewardToken = String(
+				row?.rewardToken || row?.token || row?.tokenAddress || "",
+			).trim();
+			const campaign = String(
+				row?.campaign ||
+					row?.campaignId ||
+					row?.campaignName ||
+					`campaign-${index}`,
+			).trim();
+			const claimableRaw = String(
+				row?.claimableRaw || row?.amountRaw || row?.claimable || "0",
+			).trim();
+			const decimals = Number.isFinite(Number(row?.decimals))
+				? Number(row.decimals)
+				: Number(adapter?.config?.assetDecimals || 18);
+			return {
+				campaign,
+				token: rewardToken,
+				rewardToken,
+				vault: rewardVault,
+				account: String(accountAddress || row?.account || "").trim() || null,
+				claimableRaw,
+				claimable: formatUnits(claimableRaw, Math.max(0, decimals)),
+				decimals,
+				source: String(row?.source || "config").trim(),
+			};
+		})
+		.filter((row) => {
+			if (!requestedVault) return true;
+			return String(row?.vault || "").toLowerCase() === requestedVault;
+		});
+	const totalClaimableRaw = normalized
+		.reduce((acc, row) => acc + safeBigInt(row?.claimableRaw || "0"), 0n)
+		.toString();
+	const warnings = [];
+	if (!adapter?.meta?.officialSdkWired) {
+		warnings.push("sdk_scaffold_mode_enabled");
+	}
+	if (!accountAddress)
+		warnings.push("account_not_provided_rewards_best_effort");
+	return {
+		mode: adapter?.meta?.officialSdkWired ? "sdk" : "sdk-scaffold",
+		warnings,
+		meta: adapter?.meta || null,
+		rewards: normalized,
+		tracking: {
+			source: "sdk-adapter",
+			count: normalized.length,
+			totalClaimableRaw,
+		},
+		filters: {
+			accountAddress: accountAddress || null,
+			vault: vault || null,
+		},
+	};
+}
+
+export function buildRewardsClaimRequest(
+	adapter,
+	{
+		accountAddress = "",
+		vault = "",
+		campaign = "",
+		token = "",
+		runId = "",
+	} = {},
+) {
+	const resolvedVault = String(vault || "").trim();
+	if (!isHexAddress(resolvedVault)) {
+		return {
+			ok: false,
+			code: "MONAD_MORPHO_REWARDS_CLAIM_INVALID_VAULT",
+			retryable: false,
+			category: "input",
+			message: "vault must be a valid 0x address",
+		};
+	}
+	const commandTemplate = String(
+		adapter?.config?.rewardsClaimCommand || "",
+	).trim();
+	if (!commandTemplate) {
+		return {
+			ok: false,
+			code: "MONAD_MORPHO_REWARDS_CLAIM_BLOCKED",
+			retryable: false,
+			category: "config",
+			message: "rewards claim command template is not configured",
+		};
+	}
+	const replacements = {
+		"{account}": shellQuote(accountAddress || ""),
+		"{vault}": shellQuote(resolvedVault),
+		"{campaign}": shellQuote(campaign || ""),
+		"{token}": shellQuote(token || ""),
+		"{runId}": shellQuote(runId || ""),
+	};
+	let command = commandTemplate;
+	for (const [key, value] of Object.entries(replacements)) {
+		command = command.replaceAll(key, value);
+	}
+	return {
+		ok: true,
+		mode: adapter?.meta?.officialSdkWired ? "sdk" : "sdk-scaffold",
+		claimRequest: {
+			accountAddress: accountAddress || null,
+			vault: resolvedVault,
+			campaign: campaign || null,
+			token: token || null,
+			runId: runId || null,
+		},
+		command,
+		commandPreview: command.slice(0, 180),
+	};
 }
 
 export function normalizeMorphoMarketData(

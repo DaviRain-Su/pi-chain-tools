@@ -110,7 +110,9 @@
 			"useSdk": false,
 			"sdk": {
 				"apiBaseUrl": "",
-				"package": ""
+				"package": "",
+				"rewardsSource": "config-json",
+				"claimMode": "command-template"
 			},
 			"maxAmountRaw": "1000000000000000000000",
 			"cooldownSeconds": 0,

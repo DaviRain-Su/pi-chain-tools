@@ -224,17 +224,26 @@ curl -s -X POST http://127.0.0.1:4173/api/monad/morpho/worker/stop -H 'content-t
 npm run monad:morpho:replay
 ```
 
-### 5.6 Monad Morpho SDK 模式异常排查（Phase-1）
-- markets/strategy 支持双轨：
-  - `MONAD_MORPHO_USE_SDK=true`：走 SDK adapter（当前为 provider-backed scaffold）
-  - `MONAD_MORPHO_USE_SDK=false`：走原生 native read 路径
-- 当 SDK 分支异常时，接口会自动回退到 native，并返回：
-  - `warnings` 包含 `morpho_sdk_fetch_failed_fallback_to_native`
-  - `sdk.fallback=true`，`sdk.error` 带错误摘要
+### 5.6 Monad Morpho SDK 模式异常排查（Phase-2：含 rewards）
+- markets/strategy/rewards 支持双轨：
+  - `MONAD_MORPHO_USE_SDK=true`：优先 SDK adapter（当前 provider-backed scaffold）
+  - `MONAD_MORPHO_USE_SDK=false`：原生 native 路径
+- SDK 分支异常时自动回退 native，并输出显式 warning：
+  - markets/strategy：`morpho_sdk_fetch_failed_fallback_to_native`
+  - rewards read：`morpho_sdk_rewards_fetch_failed_fallback_to_native`
+  - rewards claim build：`morpho_sdk_rewards_claim_build_failed_fallback_to_native`
+- rewards claim 成功后必须检查：`txHash`、`executionArtifact`、`executionReconciliation.reconcileOk`、以及 actionHistory 是否写入 `monad_morpho_rewards_claim_execute`
 - 快速核验：
 ```bash
 curl -s 'http://127.0.0.1:4173/api/monad/morpho/earn/markets' | jq '.dataSource,.sdk,.warnings'
 curl -s 'http://127.0.0.1:4173/api/monad/morpho/earn/strategy' | jq '.dataSource,.sdk,.warnings'
+curl -s 'http://127.0.0.1:4173/api/monad/morpho/earn/rewards' | jq '.dataSource,.sdk,.warnings,.tracking'
+```
+- claim 核验（需 confirm=true）：
+```bash
+curl -s -X POST 'http://127.0.0.1:4173/api/monad/morpho/earn/rewards/claim' \
+  -H 'content-type: application/json' \
+  -d '{"confirm":true}' | jq '.ok,.txHash,.dataSource,.warnings,.executionReconciliation'
 ```
 - 建议配置：
 ```bash

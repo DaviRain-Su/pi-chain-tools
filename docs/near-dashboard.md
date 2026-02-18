@@ -175,8 +175,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - response includes `dataSource`, `sdk`, `warnings`; SDK read failure auto-falls back to native path with explicit warning
   - `GET /api/monad/morpho/earn/strategy` -> explainable scorer across vaults (`apy/liquidity/risk` factors + allocation recommendation)
     - strategy input normalization is enforced in SDK mode (`apyBps/tvlRaw/liquidityRaw/risk.score`) before scorer
-  - `GET /api/monad/morpho/earn/rewards` -> read-only rewards tracking snapshot (env-fed discovery/tracking)
-  - `POST /api/monad/morpho/earn/rewards/claim` (`confirm=true`) -> minimal claim execute endpoint with safe config gate; returns blocked path + fixPack when onchain claim wiring is unavailable
+  - `GET /api/monad/morpho/earn/rewards` -> SDK-first rewards read when `MONAD_MORPHO_USE_SDK=true` (normalized `campaign/token/claimable` rows); SDK read failure auto-falls back to native env snapshot with warning `morpho_sdk_rewards_fetch_failed_fallback_to_native`
+  - `POST /api/monad/morpho/earn/rewards/claim` (`confirm=true`) -> SDK claim-request builder first when SDK mode is on; if builder fails, command-mode fallback remains available with warning `morpho_sdk_rewards_claim_build_failed_fallback_to_native`; response includes `txHash`, `executionArtifact`, `executionReconciliation`, and writes actionHistory + metrics consistently
   - `POST /api/monad/morpho/earn/execute` (`confirm=true`) -> native RPC wallet deposit path (approve + deposit) with normalized error (`error/retryable/category/message`) and `executionArtifact/executionReconciliation`
   - `POST /api/monad/morpho/worker/start|stop` + `GET /api/monad/morpho/worker/status` -> dry-run-first auto-rebalance worker control with interval guardrails
   - `npm run monad:morpho:replay` -> deterministic replay/pressure-test pack, writes `apps/dashboard/data/monad-morpho-replay-trend.json`
@@ -297,9 +297,9 @@ Common mapping examples:
 - `MONAD_MORPHO_MAX_AMOUNT_RAW` - risk cap for execute amount
 - `MONAD_MORPHO_COOLDOWN_SECONDS` - cooldown guard between Monad execute calls (default: `0`, disabled)
 - `MONAD_MORPHO_DAILY_CAP_RAW` - optional per-day execute raw amount cap (empty = disabled)
-- `MONAD_MORPHO_REWARDS_JSON` - rewards tracking source JSON array for `/api/monad/morpho/earn/rewards`
-- `MONAD_MORPHO_REWARDS_CLAIM_ENABLED` - enable minimal rewards claim execute endpoint (default: `false`)
-- `MONAD_MORPHO_REWARDS_CLAIM_COMMAND` - audited claim command template used by claim execute endpoint
+- `MONAD_MORPHO_REWARDS_JSON` - rewards tracking source JSON array for `/api/monad/morpho/earn/rewards` (SDK mode also consumes this scaffold source for normalized rewards rows)
+- `MONAD_MORPHO_REWARDS_CLAIM_ENABLED` - enable rewards claim execute endpoint (default: `false`)
+- `MONAD_MORPHO_REWARDS_CLAIM_COMMAND` - audited claim command template used by SDK claim-request builder (and native fallback)
 - `MONAD_MORPHO_APY_BPS` - APY hint in bps for dashboard display
 - `MONAD_MORPHO_RISK_SCORE` - risk score hint (0-100) for dashboard display banding
 - `MONAD_MORPHO_LIQUIDITY_CAP_RAW` - optional liquidity cap hint for display
