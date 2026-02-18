@@ -29,6 +29,7 @@ function isTransientExecError(error) {
  * Canonical execution path: ethers provider/signer transaction flow.
  * NOTE(sdk-coverage): official Venus npm tx executor SDK is not publicly available,
  * so execute remains on canonical ethers path even in sdk-first routing.
+ * Marker: venus_execute_canonical_ethers_path_no_official_sdk_executor
  */
 async function executeVenusSupplyViaCanonicalEthers(params) {
 	const {

@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -20,6 +21,16 @@ describe("sdk coverage report consistency", () => {
 	const report = JSON.parse(readFileSync(jsonPath, "utf8"));
 	const markdown = readFileSync(mdPath, "utf8");
 	const entries = report.entries as CoverageEntry[];
+	const repoFiles = execSync("git ls-files", { encoding: "utf8" })
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean);
+	const implementationFiles = repoFiles.filter(
+		(file) =>
+			(file.endsWith(".mjs") || file.endsWith(".ts")) &&
+			!file.endsWith(".test.ts") &&
+			!file.startsWith("docs/"),
+	);
 
 	it("contains supported mode enums and non-empty entries", () => {
 		expect(report?.modes).toEqual([
@@ -97,6 +108,30 @@ describe("sdk coverage report consistency", () => {
 			expect(entry?.ragStatus).toBe("green");
 			expect(entry?.currentMode).toBe("official-sdk");
 			expect(entry?.blockers ?? []).toHaveLength(0);
+		}
+	});
+
+	it("keeps yellow rows classified as partial execute or blocked non-execute", () => {
+		for (const entry of entries) {
+			if (entry.ragStatus !== "yellow") continue;
+			if (entry.action.includes("execute")) {
+				expect(entry.status).toBe("partial");
+			} else {
+				expect(entry.status).toBe("blocked");
+			}
+		}
+	});
+
+	it("ensures non-green markers are linked to implementation files", () => {
+		for (const entry of entries) {
+			if (entry.ragStatus === "green") continue;
+			for (const marker of entry.codeMarkers) {
+				const markerFoundInImplementation = implementationFiles.some((file) => {
+					const content = readFileSync(path.resolve(file), "utf8");
+					return content.includes(marker);
+				});
+				expect(markerFoundInImplementation).toBe(true);
+			}
 		}
 	});
 
