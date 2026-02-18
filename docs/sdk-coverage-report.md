@@ -20,7 +20,7 @@ Mode definitions:
 | Venus | yield.execute | `POST /api/bsc/yield/execute` | canonical-client | partial | sdk-first market/vToken resolution now wired through official `@venusprotocol/chains`; tx submit remains canonical ethers signer path (no public official execute SDK), with explicit `native-fallback` markers |
 | Lista | yield.markets | `GET /api/bsc/yield/markets` | canonical-client | blocked | no maintained official npm SDK currently available |
 | Lista | positions.read | `GET /api/bsc/positions` | canonical-client | blocked | no maintained official npm SDK currently available |
-| Lista | yield.execute | `POST /api/bsc/yield/execute` | canonical-client | partial | native/command path retained for safe operation |
+| Lista | yield.execute | `POST /api/bsc/yield/execute` | canonical-client | partial | sdk-first adapter now routes into canonical ethers signer/provider client with explicit `remainingNonSdkPath` + fallback markers; blocked on maintained official Lista execute SDK |
 | Wombat | yield.markets | `GET /api/bsc/yield/markets` | canonical-client | partial | `@wombat-exchange/configx` is metadata-oriented, not full execute SDK |
 | Wombat | positions.read | `GET /api/bsc/positions` | canonical-client | partial | no full official npm SDK for read/execute parity |
 | Wombat | yield.execute | `POST /api/bsc/yield/execute` | canonical-client | partial | execution kept on ethers-native/command bridge |

@@ -43,12 +43,19 @@ describe("bsc lista/wombat sdk-first read/plan routing", () => {
 
 	it("contains lista/wombat sdk-first execute routing + explicit fallback markers", () => {
 		expect(serverSource).toContain("executeBscListaSupplyViaSdk");
+		expect(serverSource).toContain("executeListaSupplySdkFirst");
 		expect(serverSource).toContain("executeBscWombatSupplyViaSdk");
 		expect(serverSource).toContain("BSC_LISTA_EXECUTE_MODE");
 		expect(serverSource).toContain("BSC_WOMBAT_EXECUTE_MODE");
 		expect(serverSource).toContain("BSC_LISTA_SDK_FALLBACK_TO_NATIVE");
 		expect(serverSource).toContain("BSC_WOMBAT_SDK_FALLBACK_TO_NATIVE");
 		expect(serverSource).toContain("bsc_lista_supply_fallback");
+		expect(serverSource).toContain(
+			"lista_execute_non_sdk_native_fallback_path",
+		);
+		expect(serverSource).toContain(
+			"lista_execute_non_sdk_command_fallback_path",
+		);
 		expect(serverSource).toContain("bsc_wombat_supply_fallback");
 		expect(serverSource).toContain("adapterProtocol");
 		expect(serverSource).toContain('status: "success"');

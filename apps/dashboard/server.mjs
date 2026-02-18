@@ -12,6 +12,7 @@ import { MaxUint256 } from "@ethersproject/constants";
 import { JsonRpcProvider } from "@ethersproject/providers";
 import { Wallet } from "@ethersproject/wallet";
 
+import { executeListaSupplySdkFirst } from "./bsc-lista-execute.mjs";
 import {
 	collectListaSdkMarketView,
 	collectListaSdkPositionView,
@@ -2897,10 +2898,12 @@ async function executeBscListaSupplyViaNativeSlot(params) {
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_private_key_missing",
 		);
 	}
-	const provider = new JsonRpcProvider(params.rpcUrl || BSC_RPC_URL, {
-		name: "bsc",
-		chainId: Number(params.chainId || BSC_CHAIN_ID),
-	});
+	const provider =
+		params?.providerOverride ||
+		new JsonRpcProvider(params.rpcUrl || BSC_RPC_URL, {
+			name: "bsc",
+			chainId: Number(params.chainId || BSC_CHAIN_ID),
+		});
 	const wallet = new Wallet(BSC_LISTA_EXECUTE_PRIVATE_KEY, provider);
 	const erc20Iface = new Interface([
 		"function allowance(address owner,address spender) view returns (uint256)",
@@ -3083,31 +3086,45 @@ function withBscExecuteFallbackMetadata(result, fallback) {
 	};
 }
 
+function withListaNonSdkMarkers(result, { marker, reason }) {
+	return {
+		...result,
+		warnings: [
+			...(Array.isArray(result?.warnings) ? result.warnings : []),
+			...(marker ? [marker] : []),
+		],
+		remainingNonSdkPath: {
+			active: true,
+			marker: marker || "lista_execute_non_sdk_path_active",
+			reason: reason || "official_lista_execute_sdk_not_available",
+		},
+	};
+}
+
 async function executeBscListaSupplyViaSdk(params) {
-	const adapter = await createListaSdkAdapter({
-		rpcUrl: params?.rpcUrl || BSC_RPC_URL,
-		chainId: params?.chainId || BSC_CHAIN_ID,
-		sdkPackage: BSC_LISTA_SDK_PACKAGE,
-	});
 	if (!BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
 		throw new Error(
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_native_execute_not_enabled",
 		);
 	}
-	const native = await executeBscListaSupplyViaNativeSlot(params);
-	return {
-		...native,
-		mode: "sdk",
-		provider: "lista-sdk-native-rpc",
-		sdk: {
-			enabled: true,
-			used: true,
-			fallback: false,
-			meta: adapter?.meta || null,
+	return executeListaSupplySdkFirst({
+		sdkEnabled: true,
+		fallbackToNative: false,
+		rpcUrl: params?.rpcUrl || BSC_RPC_URL,
+		chainId: params?.chainId || BSC_CHAIN_ID,
+		sdkPackage: BSC_LISTA_SDK_PACKAGE,
+		executeCanonical: async (context) => {
+			const native = await executeBscListaSupplyViaNativeSlot({
+				...params,
+				providerOverride: context?.providerOverride,
+			});
+			return {
+				...native,
+				provider: "lista-sdk-canonical-ethers",
+			};
 		},
-		warnings: [],
-		fallback: { used: false, from: null, to: null, reason: null },
-	};
+		createAdapter: createListaSdkAdapter,
+	});
 }
 
 async function executeBscWombatSupplyViaSdk(params) {
@@ -3144,15 +3161,27 @@ async function executeBscListaSupply(params) {
 				"BSC_EXECUTE_CONFIG retryable=false message=bsc_lista_native_execute_not_enabled",
 			);
 		}
-		return withBscExecuteFallbackMetadata(
-			await executeBscListaSupplyViaNativeSlot(params),
-			{ used: false },
+		return withListaNonSdkMarkers(
+			withBscExecuteFallbackMetadata(
+				await executeBscListaSupplyViaNativeSlot(params),
+				{ used: false },
+			),
+			{
+				marker: "lista_execute_non_sdk_native_mode_active",
+				reason: "execute_mode_native",
+			},
 		);
 	}
 	if (BSC_LISTA_EXECUTE_MODE === "command") {
-		return withBscExecuteFallbackMetadata(
-			await executeBscListaSupplyViaCommand(params),
-			{ used: false },
+		return withListaNonSdkMarkers(
+			withBscExecuteFallbackMetadata(
+				await executeBscListaSupplyViaCommand(params),
+				{ used: false },
+			),
+			{
+				marker: "lista_execute_non_sdk_command_mode_active",
+				reason: "execute_mode_command",
+			},
 		);
 	}
 	const preferSdk =
@@ -3166,33 +3195,57 @@ async function executeBscListaSupply(params) {
 			const reason = error instanceof Error ? error.message : String(error);
 			if (BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
 				try {
-					return withBscExecuteFallbackMetadata(
-						await executeBscListaSupplyViaNativeSlot(params),
-						{ used: true, from: "lista_sdk", to: "native", reason },
+					return withListaNonSdkMarkers(
+						withBscExecuteFallbackMetadata(
+							await executeBscListaSupplyViaNativeSlot(params),
+							{ used: true, from: "lista_sdk", to: "native", reason },
+						),
+						{
+							marker: "lista_execute_non_sdk_native_fallback_path",
+							reason,
+						},
 					);
 				} catch (nativeError) {
 					if (!isNativeSlotNotImplementedError(nativeError)) throw nativeError;
 				}
 			}
-			return withBscExecuteFallbackMetadata(
-				await executeBscListaSupplyViaCommand(params),
-				{ used: true, from: "lista_sdk", to: "command", reason },
+			return withListaNonSdkMarkers(
+				withBscExecuteFallbackMetadata(
+					await executeBscListaSupplyViaCommand(params),
+					{ used: true, from: "lista_sdk", to: "command", reason },
+				),
+				{
+					marker: "lista_execute_non_sdk_command_fallback_path",
+					reason,
+				},
 			);
 		}
 	}
 	if (BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
 		try {
-			return withBscExecuteFallbackMetadata(
-				await executeBscListaSupplyViaNativeSlot(params),
-				{ used: false },
+			return withListaNonSdkMarkers(
+				withBscExecuteFallbackMetadata(
+					await executeBscListaSupplyViaNativeSlot(params),
+					{ used: false },
+				),
+				{
+					marker: "lista_execute_non_sdk_native_auto_mode",
+					reason: "sdk_disabled_or_not_preferred",
+				},
 			);
 		} catch (error) {
 			if (!isNativeSlotNotImplementedError(error)) throw error;
 		}
 	}
-	return withBscExecuteFallbackMetadata(
-		await executeBscListaSupplyViaCommand(params),
-		{ used: false },
+	return withListaNonSdkMarkers(
+		withBscExecuteFallbackMetadata(
+			await executeBscListaSupplyViaCommand(params),
+			{ used: false },
+		),
+		{
+			marker: "lista_execute_non_sdk_command_auto_mode",
+			reason: "native_path_unavailable",
+		},
 	);
 }
 
