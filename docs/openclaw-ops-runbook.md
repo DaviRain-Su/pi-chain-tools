@@ -186,7 +186,7 @@ export DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS=1200
 
 ### 5.1 `python: 未找到命令`
 - 本仓库流程使用 Node/npm；不要依赖 `python`。
-- 统一走：`npm run check` / `npm run ci`。
+- 统一走：`npm run check` / `npm run ci`（当前 `ci` 已切到 `ci:resilient`）。
 - 本地一键稳态流程：`npm run ci:resilient`（内置 python 预检 + check 热修复重跑 + test 单次重试）。
 - `npm run ci:retry` 现在会重试 `ci:resilient`（而不是裸 `ci`），进一步减少 `python missing` / biome io 漂移导致的误失败。
 - `ci:resilient` 在 check 失败时会输出标准化 `checkFailureKind`（如 `python-missing|lint-biome-io|lint|typecheck|schema-validate|check-unknown`）并写入 CI signatures 便于后续聚类治理。
