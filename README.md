@@ -803,6 +803,8 @@ Quick references:
 - Dashboard doc: `docs/near-dashboard.md`
 - Ops runbook (ACP/Payments/DLQ): `docs/openclaw-ops-runbook.md`
 - Good Vibes Only submission template (BSC): `docs/hackathon-goodvibes-submission.md`
+- Monad × Morpho submission template: `docs/hackathon-monad-morpho-submission.md`
+- Monad × Morpho 3-day build plan: `docs/monad-morpho-build-plan.md`
 
 ### Local NEAR Dashboard (web)
 
