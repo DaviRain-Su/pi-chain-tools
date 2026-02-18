@@ -809,6 +809,7 @@ Quick references:
 - Morpho Earn integration checklist (file-level): `docs/monad-morpho-integration-checklist.md`
 - Hackathon final submission checklist: `docs/hackathon-final-submission-checklist.md`
 - Hackathon 5-min pitch script: `docs/hackathon-5min-pitch-script.md`
+- Monad + Morpho SDK integration plan: `docs/monad-morpho-sdk-integration-plan.md`
 
 ### Local NEAR Dashboard (web)
 
