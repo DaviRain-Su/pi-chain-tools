@@ -2495,10 +2495,21 @@ async function executeBscWombatSupply(params) {
 	return executeBscWombatSupplyViaCommand(params);
 }
 
+function isNativeSlotCommandImplemented(commandTemplate, required = []) {
+	if (!String(commandTemplate || "").trim()) return false;
+	return hasRequiredPlaceholders(commandTemplate, required);
+}
+
 const BSC_NATIVE_SLOT_IMPLEMENTED = {
 	aave: true,
-	lista: Boolean(BSC_LISTA_NATIVE_EXECUTE_COMMAND),
-	wombat: Boolean(BSC_WOMBAT_NATIVE_EXECUTE_COMMAND),
+	lista: isNativeSlotCommandImplemented(BSC_LISTA_NATIVE_EXECUTE_COMMAND, [
+		"{amountRaw}",
+		"{runId}",
+	]),
+	wombat: isNativeSlotCommandImplemented(BSC_WOMBAT_NATIVE_EXECUTE_COMMAND, [
+		"{amountRaw}",
+		"{runId}",
+	]),
 };
 
 const BSC_POST_ACTION_SUPPLY_EXECUTORS = {
