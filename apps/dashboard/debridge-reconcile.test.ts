@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	buildDebridgeExecutionArtifact,
+	classifyDebridgeExecuteError,
 	reconcileDebridgeExecutionArtifact,
 	validateDebridgeExecutionArtifactV1,
 	validateDebridgeExecutionReconciliationV1,
@@ -50,6 +51,25 @@ describe("debridge reconcile", () => {
 		expect(reconciliation.ok).toBe(true);
 		expect(reconciliation.txHashPresent).toBe(false);
 		expect(reconciliation.issues).toContain("tx_hash_missing");
+	});
+
+	it("classifies retryable/non-retryable execution errors", () => {
+		expect(
+			classifyDebridgeExecuteError("Request timed out after 120s"),
+		).toEqual(
+			expect.objectContaining({
+				code: "debridge_execute_timeout",
+				retryable: true,
+			}),
+		);
+		expect(
+			classifyDebridgeExecuteError("insufficient funds for transfer"),
+		).toEqual(
+			expect.objectContaining({
+				code: "debridge_execute_insufficient_funds",
+				retryable: false,
+			}),
+		);
 	});
 
 	it("rejects invalid artifact/reconciliation", () => {

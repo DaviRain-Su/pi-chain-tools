@@ -15,6 +15,7 @@ import { Wallet } from "@ethersproject/wallet";
 import { reconcileBscExecutionArtifact } from "./bsc-reconcile.mjs";
 import {
 	buildDebridgeExecutionArtifact,
+	classifyDebridgeExecuteError,
 	reconcileDebridgeExecutionArtifact,
 	validateDebridgeExecutionArtifactV1,
 	validateDebridgeExecutionReconciliationV1,
@@ -6484,6 +6485,11 @@ const server = http.createServer(async (req, res) => {
 			if (!tokenOut) blockers.push("missing_token_out");
 			if (!amount) blockers.push("missing_amount");
 			if (blockers.length > 0) {
+				const executionError = {
+					code: "debridge_execute_blocked",
+					retryable: false,
+					category: "guard",
+				};
 				const executionArtifact = buildDebridgeExecutionArtifact({
 					payload,
 					status: "blocked",
@@ -6517,6 +6523,7 @@ const server = http.createServer(async (req, res) => {
 						amount,
 					},
 					blockers,
+					executionError,
 					executionArtifact,
 					executionReconciliation,
 				});
@@ -6525,6 +6532,7 @@ const server = http.createServer(async (req, res) => {
 					mode: "blocked",
 					provider: "debridge-mcp",
 					blockers,
+					executionError,
 					executionArtifact,
 					executionReconciliation,
 				});
@@ -6599,6 +6607,7 @@ const server = http.createServer(async (req, res) => {
 				});
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
+				const executionError = classifyDebridgeExecuteError(msg);
 				const executionArtifact = buildDebridgeExecutionArtifact({
 					payload,
 					status: "error",
@@ -6632,13 +6641,16 @@ const server = http.createServer(async (req, res) => {
 						amount,
 					},
 					error: msg,
+					executionError,
 					executionArtifact,
 					executionReconciliation,
 				});
 				return json(res, 500, {
 					ok: false,
 					provider: "debridge-mcp",
-					error: "debridge_execute_failed",
+					error: executionError.code,
+					retryable: executionError.retryable,
+					category: executionError.category,
 					message: msg,
 					executionArtifact,
 					executionReconciliation,

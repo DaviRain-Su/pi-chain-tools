@@ -138,6 +138,11 @@ curl -s -X POST 'http://127.0.0.1:4173/api/crosschain/debridge/execute' \
 - `debridge_execution_artifact_invalid`
 - `debridge_execution_reconciliation_invalid`
 
+执行失败会返回归一化错误分类：
+- `error`：如 `debridge_execute_timeout` / `debridge_execute_rate_limited` / `debridge_execute_network_error` / `debridge_execute_insufficient_funds` / `debridge_execute_invalid_request` / `debridge_execute_unauthorized` / `debridge_execute_unknown_error`
+- `retryable`：是否可重试
+- `category`：timeout/rate_limit/network/funds/request/auth/unknown
+
 建议最小配置：
 ```bash
 export DEBRIDGE_MCP_ENABLED=true

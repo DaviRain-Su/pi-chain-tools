@@ -78,3 +78,59 @@ export function validateDebridgeExecutionReconciliationV1(reconciliation) {
 		return false;
 	return true;
 }
+
+export function classifyDebridgeExecuteError(errorLike) {
+	const message = String(errorLike || "").toLowerCase();
+	const matchers = [
+		{
+			pattern: /(timed out|timeout|etimedout)/,
+			code: "debridge_execute_timeout",
+			retryable: true,
+			category: "timeout",
+		},
+		{
+			pattern: /(rate limit|429|too many requests)/,
+			code: "debridge_execute_rate_limited",
+			retryable: true,
+			category: "rate_limit",
+		},
+		{
+			pattern: /(econnreset|econnrefused|enotfound|network|socket hang up)/,
+			code: "debridge_execute_network_error",
+			retryable: true,
+			category: "network",
+		},
+		{
+			pattern: /(insufficient|insufficient funds|balance too low)/,
+			code: "debridge_execute_insufficient_funds",
+			retryable: false,
+			category: "funds",
+		},
+		{
+			pattern: /(revert|invalid param|invalid argument|bad request)/,
+			code: "debridge_execute_invalid_request",
+			retryable: false,
+			category: "request",
+		},
+		{
+			pattern: /(permission|unauthorized|forbidden)/,
+			code: "debridge_execute_unauthorized",
+			retryable: false,
+			category: "auth",
+		},
+	];
+	for (const rule of matchers) {
+		if (rule.pattern.test(message)) {
+			return {
+				code: rule.code,
+				retryable: rule.retryable,
+				category: rule.category,
+			};
+		}
+	}
+	return {
+		code: "debridge_execute_unknown_error",
+		retryable: false,
+		category: "unknown",
+	};
+}

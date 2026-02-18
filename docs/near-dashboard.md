@@ -154,6 +154,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `POST /api/crosschain/debridge/quote` (dry-run quote bridge; requires `originChain/destinationChain/tokenIn/tokenOut/amount`; returns `mode=quote|blocked` + `quote/rawOutput`)
   - `POST /api/crosschain/debridge/execute` (`confirm=true` required; gated by `DEBRIDGE_MCP_EXECUTE_ENABLED` + execute command; returns `executionArtifact/executionReconciliation`)
   - execute 路径包含 runtime validator：artifact/reconciliation 不合法会返回 `debridge_execution_artifact_invalid` 或 `debridge_execution_reconciliation_invalid`
+  - execute 失败错误会按类型归一化（`error` + `retryable` + `category`），例如 timeout/rate_limit/network/funds/request/auth/unknown
   - config: `crosschain.debridge.enabled|command|executeEnabled|executeCommand|timeoutMs` (`DEBRIDGE_MCP_ENABLED|DEBRIDGE_MCP_COMMAND|DEBRIDGE_MCP_EXECUTE_ENABLED|DEBRIDGE_MCP_EXECUTE_COMMAND|DEBRIDGE_MCP_TIMEOUT_MS`)
   - command placeholders (if used in command template): `{originChain} {destinationChain} {tokenIn} {tokenOut} {amount} {recipient} {account}`
 - Rebalance risk guards (env-tunable): max amount, min quote out, max slippage, cooldown, and daily execution cap (`NEAR_REBAL_*`)
