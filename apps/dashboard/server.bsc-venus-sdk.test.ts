@@ -49,6 +49,12 @@ describe("bsc venus sdk-first read/plan routing", () => {
 		expect(serverSource).toContain("bsc_venus_supply_fallback");
 		expect(venusExecuteSource).toContain('"native-fallback"');
 		expect(venusExecuteSource).toContain("const fallback = {");
+		expect(venusExecuteSource).toContain(
+			"venus_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor",
+		);
+		expect(venusExecuteSource).toContain(
+			"venus_execute_non_sdk_native_fallback_path",
+		);
 	});
 
 	it("documents venus sdk config in dashboard config example", () => {

@@ -25,7 +25,12 @@ function isTransientExecError(error) {
 	);
 }
 
-async function executeVenusSupplyNative(params) {
+/**
+ * Canonical execution path: ethers provider/signer transaction flow.
+ * NOTE(sdk-coverage): official Venus npm tx executor SDK is not publicly available,
+ * so execute remains on canonical ethers path even in sdk-first routing.
+ */
+async function executeVenusSupplyViaCanonicalEthers(params) {
 	const {
 		rpcUrl,
 		chainId,
@@ -35,6 +40,7 @@ async function executeVenusSupplyNative(params) {
 		vTokenAddress,
 		confirmations = 1,
 		recipient,
+		providerOverride,
 	} = params;
 	if (!privateKey) {
 		throw new Error("bsc_venus_private_key_missing");
@@ -42,10 +48,12 @@ async function executeVenusSupplyNative(params) {
 	if (!vTokenAddress) {
 		throw new Error("bsc_venus_vtoken_missing");
 	}
-	const provider = new JsonRpcProvider(String(rpcUrl || ""), {
-		name: "bsc",
-		chainId: Number(chainId || 56),
-	});
+	const provider =
+		providerOverride ||
+		new JsonRpcProvider(String(rpcUrl || ""), {
+			name: "bsc",
+			chainId: Number(chainId || 56),
+		});
 	const wallet = new Wallet(String(privateKey), provider);
 	const owner = String(recipient || wallet.address);
 	const erc20 = new Interface([
@@ -106,48 +114,95 @@ async function executeVenusSupplyNative(params) {
 		},
 		account: owner,
 		vToken: vTokenAddress,
+		executePath: "canonical-ethers",
 	};
 }
 
-export async function executeVenusSupplySdkFirst(params) {
+async function resolveSdkExecuteContext(params) {
+	const sdkEnabled = params.sdkEnabled === true;
+	const fallbackToNative = params.fallbackToNative !== false;
 	const warnings = [];
 	const fallback = {
 		used: false,
 		from: null,
+		to: null,
 		reason: null,
 	};
-	const sdkEnabled = params.sdkEnabled === true;
-	const fallbackToNative = params.fallbackToNative !== false;
-	let resolvedVToken = String(params.vTokenAddress || "").trim();
 	let sdkMeta = null;
-	if (!resolvedVToken && sdkEnabled) {
-		try {
-			const adapter = await createVenusSdkAdapter({
-				rpcUrl: params.rpcUrl,
-				chainId: params.chainId,
-				comptroller: params.comptroller,
-				sdkPackage: params.sdkPackage,
-			});
-			sdkMeta = adapter?.meta || null;
-			const symbol = String(params.tokenSymbol || "USDC").toUpperCase();
-			const market = resolveDefaultBscVToken(symbol);
+	let adapter = null;
+	let resolvedVToken = String(params.vTokenAddress || "").trim();
+
+	if (!sdkEnabled) {
+		return {
+			sdkEnabled,
+			fallbackToNative,
+			warnings,
+			fallback,
+			sdkMeta,
+			adapter,
+			resolvedVToken,
+		};
+	}
+
+	try {
+		adapter = await createVenusSdkAdapter({
+			rpcUrl: params.rpcUrl,
+			chainId: params.chainId,
+			comptroller: params.comptroller,
+			sdkPackage: params.sdkPackage,
+		});
+		sdkMeta = adapter?.meta || null;
+		const symbol = String(params.tokenSymbol || "USDC").toUpperCase();
+		const market = resolveDefaultBscVToken(symbol);
+		if (!resolvedVToken) {
 			resolvedVToken = String(market?.address || "").trim();
 			if (!resolvedVToken) {
 				throw new Error(`venus_sdk_market_missing_for_${symbol.toLowerCase()}`);
 			}
-		} catch (error) {
-			if (!fallbackToNative) throw error;
-			fallback.used = true;
-			fallback.from = "sdk";
-			fallback.reason = toErrorMessage(error);
-			warnings.push("venus_sdk_execute_failed_fallback_to_native");
 		}
+		if (market?.address && resolvedVToken) {
+			const registryAddress = String(market.address).toLowerCase();
+			if (registryAddress !== resolvedVToken.toLowerCase()) {
+				warnings.push(
+					"venus_sdk_registry_vtoken_mismatch_using_requested_vtoken",
+				);
+			}
+		}
+	} catch (error) {
+		if (!fallbackToNative) throw error;
+		fallback.used = true;
+		fallback.from = "sdk";
+		fallback.to = "native";
+		fallback.reason = toErrorMessage(error);
+		warnings.push("venus_sdk_execute_failed_fallback_to_native");
 	}
+
 	if (!resolvedVToken) {
 		resolvedVToken = String(params.vTokenAddress || "").trim();
 	}
+
+	return {
+		sdkEnabled,
+		fallbackToNative,
+		warnings,
+		fallback,
+		sdkMeta,
+		adapter,
+		resolvedVToken,
+	};
+}
+
+export async function executeVenusSupplySdkFirst(params) {
+	const context = await resolveSdkExecuteContext(params);
+	const { sdkEnabled, warnings, fallback, sdkMeta, adapter, resolvedVToken } =
+		context;
+
+	if (!resolvedVToken) {
+		throw new Error("bsc_venus_vtoken_missing");
+	}
+
 	try {
-		const native = await executeVenusSupplyNative({
+		const native = await executeVenusSupplyViaCanonicalEthers({
 			rpcUrl: params.rpcUrl,
 			chainId: params.chainId,
 			privateKey: params.privateKey,
@@ -156,7 +211,16 @@ export async function executeVenusSupplySdkFirst(params) {
 			vTokenAddress: resolvedVToken,
 			confirmations: params.confirmations,
 			recipient: params.recipient,
+			providerOverride: adapter?.provider,
 		});
+		warnings.push(
+			"venus_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor",
+		);
+		if (fallback.used) {
+			warnings.push("venus_execute_path_native_fallback_active");
+		} else if (!sdkEnabled) {
+			warnings.push("venus_execute_path_native_mode_active");
+		}
 		return {
 			...native,
 			mode:
@@ -174,6 +238,19 @@ export async function executeVenusSupplySdkFirst(params) {
 			},
 			fallback,
 			error: null,
+			remainingNonSdkPath: {
+				active: !sdkEnabled || fallback.used,
+				marker: fallback.used
+					? "venus_execute_non_sdk_native_fallback_path"
+					: !sdkEnabled
+						? "venus_execute_non_sdk_native_mode"
+						: "venus_execute_non_sdk_path_inactive",
+				reason: !sdkEnabled
+					? "sdk_disabled_or_execute_mode_native"
+					: fallback.used
+						? fallback.reason || "sdk_unavailable_or_resolution_failed"
+						: null,
+			},
 		};
 	} catch (error) {
 		const msg = toErrorMessage(error);
@@ -183,3 +260,8 @@ export async function executeVenusSupplySdkFirst(params) {
 		);
 	}
 }
+
+export const __venusExecuteInternals = {
+	executeVenusSupplyViaCanonicalEthers,
+	resolveSdkExecuteContext,
+};

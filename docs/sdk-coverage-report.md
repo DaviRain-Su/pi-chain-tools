@@ -17,7 +17,7 @@ Mode definitions:
 | Monad+Morpho | earn.execute.deposit | `POST /api/monad/morpho/earn/execute` | canonical-client | partial | blue-sdk currently has no full tx signer/executor flow for vault deposit |
 | Venus | yield.markets | `GET /api/bsc/yield/markets` | canonical-client | partial | `@venusprotocol/sdk` not published on npm; using `@venusprotocol/chains` + ABI/provider |
 | Venus | positions.read | `GET /api/bsc/positions` | canonical-client | partial | same as above |
-| Venus | yield.execute | `POST /api/bsc/yield/execute` | canonical-client | partial | execution remains ethers-native path with fallback markers |
+| Venus | yield.execute | `POST /api/bsc/yield/execute` | canonical-client | partial | sdk-first market/vToken resolution now wired through official `@venusprotocol/chains`; tx submit remains canonical ethers signer path (no public official execute SDK), with explicit `native-fallback` markers |
 | Lista | yield.markets | `GET /api/bsc/yield/markets` | canonical-client | blocked | no maintained official npm SDK currently available |
 | Lista | positions.read | `GET /api/bsc/positions` | canonical-client | blocked | no maintained official npm SDK currently available |
 | Lista | yield.execute | `POST /api/bsc/yield/execute` | canonical-client | partial | native/command path retained for safe operation |

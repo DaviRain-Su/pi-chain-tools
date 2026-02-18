@@ -62,7 +62,7 @@
 			"currentMode": "canonical-client",
 			"status": "partial",
 			"blockers": [
-				"Execution uses canonical ethers signer path with sdk-first routing + fallback markers"
+				"SDK-first market/vToken resolution uses official @venusprotocol/chains, but transaction submission still relies on canonical ethers signer because no public official Venus execute SDK is published"
 			]
 		},
 		{
