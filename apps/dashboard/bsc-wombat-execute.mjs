@@ -1,5 +1,8 @@
 import { createWombatSdkAdapter } from "./bsc-wombat-sdk.mjs";
 
+const WOMBAT_EXECUTE_UNBLOCK_DETECTOR_MARKER =
+	"wombat_detector_hook_execute_sdk_surface_ready";
+
 function toErrorMessage(error) {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -74,6 +77,7 @@ export async function executeWombatSupplySdkFirst(params) {
 		error: null,
 		remainingNonSdkPath: {
 			active: true,
+			detectorHook: WOMBAT_EXECUTE_UNBLOCK_DETECTOR_MARKER,
 			marker: "wombat_execute_canonical_ethers_path_no_official_sdk_executor",
 			reason: fallback.used
 				? fallback.reason || "sdk_resolution_failed"

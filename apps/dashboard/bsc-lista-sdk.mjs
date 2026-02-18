@@ -9,6 +9,8 @@ const LISTA_OFFICIAL_SDK_CANDIDATES = [
 	"@lista-dao/contracts",
 	"@lista-dao/lista-sdk",
 ];
+const LISTA_PACKAGE_UNBLOCK_DETECTOR_MARKER =
+	"lista_detector_hook_official_sdk_package_published";
 
 function safeBigInt(value, fallback = 0n) {
 	try {
@@ -96,6 +98,7 @@ export async function createListaSdkAdapter({
 		meta: {
 			client: "lista-ethers-client",
 			officialSdkWired: candidateProbe.available.length > 0,
+			detectorHooks: [LISTA_PACKAGE_UNBLOCK_DETECTOR_MARKER],
 			sdkPackage:
 				candidateProbe.available.length > 0
 					? candidateProbe.available[0]

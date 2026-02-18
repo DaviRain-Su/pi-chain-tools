@@ -122,6 +122,31 @@ describe("sdk coverage report consistency", () => {
 		}
 	});
 
+	it("keeps expected rag split for sprint batch #4", () => {
+		const greens = entries.filter(
+			(entry) => entry.ragStatus === "green",
+		).length;
+		const yellows = entries.filter(
+			(entry) => entry.ragStatus === "yellow",
+		).length;
+		const reds = entries.filter((entry) => entry.ragStatus === "red").length;
+		expect(greens).toBe(7);
+		expect(yellows).toBe(6);
+		expect(reds).toBe(0);
+	});
+
+	it("requires detector hook markers + runbook language for yellow rows", () => {
+		for (const entry of entries) {
+			if (entry.ragStatus !== "yellow") continue;
+			const detectorMarkers = entry.codeMarkers.filter((marker) =>
+				marker.includes("_detector_hook_"),
+			);
+			expect(detectorMarkers.length).toBeGreaterThan(0);
+			expect(entry.nextAction).toContain("detector hook");
+			expect(entry.nextAction).toContain("promote");
+		}
+	});
+
 	it("ensures non-green markers are linked to implementation files", () => {
 		for (const entry of entries) {
 			if (entry.ragStatus === "green") continue;

@@ -1,5 +1,5 @@
 {
-	"generatedAt": "2026-02-18T13:37:24Z",
+	"generatedAt": "2026-02-18T23:48:24Z",
 	"scope": ["monad+morpho", "venus", "wombat", "lista"],
 	"modes": ["official-sdk", "canonical-client", "native-fallback"],
 	"ragLegend": {
@@ -55,11 +55,12 @@
 			"blockers": [
 				"`@morpho-org/blue-sdk` still has no public tx signer/executor for vault deposits; execute submit must remain on canonical ethers signer path (marker-linked)."
 			],
-			"nextAction": "Monitor Morpho Blue SDK releases for public execute signer/exported tx builder; migrate execute submit path and retire canonical execute markers once available.",
+			"nextAction": "Run detector hook `morpho_detector_hook_blue_sdk_execute_surface_ready` each release cycle (npm metadata + exported API probe for signer/tx builder); once it passes, switch execute submit to official SDK and remove canonical execute markers via sprint runbook step `sdk-coverage:promote morpho execute`.",
 			"codeMarkers": [
 				"morpho_execute_canonical_ethers_path_no_official_sdk_executor",
 				"morpho_execute_non_sdk_native_fallback_path",
-				"morpho_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor"
+				"morpho_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor",
+				"morpho_detector_hook_blue_sdk_execute_surface_ready"
 			]
 		},
 		{
@@ -100,11 +101,12 @@
 			"blockers": [
 				"Official `@venusprotocol/chains` covers market/vToken metadata, but there is still no public Venus execute SDK signer/tx-submit client; execute remains canonical ethers signer path (marker-linked)."
 			],
-			"nextAction": "Track official Venus SDK changelogs for execute signer client availability; migrate submit path and remove non-sdk execute marker when shipped.",
+			"nextAction": "Run detector hook `venus_detector_hook_execute_sdk_surface_ready` on each @venusprotocol release (check public signer/submit client export + docs); when passing, migrate execute submit path to official SDK and retire non-sdk execute markers using runbook step `sdk-coverage:promote venus execute`.",
 			"codeMarkers": [
 				"venus_execute_canonical_ethers_path_no_official_sdk_executor",
 				"venus_execute_non_sdk_native_fallback_path",
-				"venus_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor"
+				"venus_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor",
+				"venus_detector_hook_execute_sdk_surface_ready"
 			]
 		},
 		{
@@ -117,9 +119,10 @@
 			"blockers": [
 				"No maintained official Lista SDK package is currently published for read/account surfaces; reads remain canonical ethers client path (marker-linked)."
 			],
-			"nextAction": "Re-check official `@lista-dao/*` package availability each release cycle; promote to official-sdk mode only after maintained npm SDK is published.",
+			"nextAction": "Run detector hook `lista_detector_hook_official_sdk_package_published` each release cycle (`npm view @lista-dao/*` + import probe); when a maintained official SDK exists, migrate reads to sdk-first route and promote via `sdk-coverage:promote lista read`.",
 			"codeMarkers": [
-				"official_lista_sdk_not_available_using_canonical_ethers_client_path"
+				"official_lista_sdk_not_available_using_canonical_ethers_client_path",
+				"lista_detector_hook_official_sdk_package_published"
 			]
 		},
 		{
@@ -132,9 +135,10 @@
 			"blockers": [
 				"No maintained official Lista SDK package is currently published for read/account surfaces; reads remain canonical ethers client path (marker-linked)."
 			],
-			"nextAction": "Re-check official `@lista-dao/*` package availability each release cycle; promote to official-sdk mode only after maintained npm SDK is published.",
+			"nextAction": "Run detector hook `lista_detector_hook_official_sdk_package_published` each release cycle (`npm view @lista-dao/*` + import probe); when a maintained official SDK exists, migrate reads to sdk-first route and promote via `sdk-coverage:promote lista read`.",
 			"codeMarkers": [
-				"official_lista_sdk_not_available_using_canonical_ethers_client_path"
+				"official_lista_sdk_not_available_using_canonical_ethers_client_path",
+				"lista_detector_hook_official_sdk_package_published"
 			]
 		},
 		{
@@ -147,11 +151,13 @@
 			"blockers": [
 				"No maintained official Lista execute SDK is published; tx submit remains canonical ethers signer/provider with explicit non-sdk + fallback markers."
 			],
-			"nextAction": "Adopt official Lista execute SDK when a maintained package with signer/submit APIs is published; then retire canonical execute markers.",
+			"nextAction": "Run detector hooks `lista_detector_hook_official_sdk_package_published` + `lista_detector_hook_execute_sdk_surface_ready`; after both pass (maintained package + signer/submit API), switch execute to official SDK and remove canonical/fallback markers via `sdk-coverage:promote lista execute`.",
 			"codeMarkers": [
 				"lista_execute_canonical_ethers_path_no_official_sdk_executor",
 				"lista_sdk_execute_failed_fallback_to_native",
-				"lista_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor"
+				"lista_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor",
+				"lista_detector_hook_official_sdk_package_published",
+				"lista_detector_hook_execute_sdk_surface_ready"
 			]
 		},
 		{
@@ -192,11 +198,12 @@
 			"blockers": [
 				"No official Wombat execute SDK with signer/submit surface is published; execute remains canonical ethers signer/provider path with explicit fallback markers."
 			],
-			"nextAction": "Track official Wombat package releases for production-ready execute SDK surface; replace canonical submit path and remove execute non-sdk markers.",
+			"nextAction": "Run detector hook `wombat_detector_hook_execute_sdk_surface_ready` per Wombat package release (verify production-ready signer/submit API + security posture); when passing, replace canonical execute submit path and clear non-sdk markers using `sdk-coverage:promote wombat execute`.",
 			"codeMarkers": [
 				"wombat_execute_canonical_ethers_path_no_official_sdk_executor",
 				"wombat_sdk_execute_failed_fallback_to_native",
-				"wombat_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor"
+				"wombat_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor",
+				"wombat_detector_hook_execute_sdk_surface_ready"
 			]
 		}
 	]

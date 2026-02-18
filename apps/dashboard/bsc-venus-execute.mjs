@@ -7,6 +7,9 @@ import {
 	resolveDefaultBscVToken,
 } from "./bsc-venus-sdk.mjs";
 
+const VENUS_EXECUTE_UNBLOCK_DETECTOR_MARKER =
+	"venus_detector_hook_execute_sdk_surface_ready";
+
 function toErrorMessage(error) {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -241,6 +244,7 @@ export async function executeVenusSupplySdkFirst(params) {
 			error: null,
 			remainingNonSdkPath: {
 				active: !sdkEnabled || fallback.used,
+				detectorHook: VENUS_EXECUTE_UNBLOCK_DETECTOR_MARKER,
 				marker: fallback.used
 					? "venus_execute_non_sdk_native_fallback_path"
 					: !sdkEnabled

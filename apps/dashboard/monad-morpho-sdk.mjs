@@ -5,6 +5,8 @@ import { Wallet } from "@ethersproject/wallet";
 import { VaultUtils } from "@morpho-org/blue-sdk";
 
 const DEFAULT_MORPHO_SDK_PACKAGE = "@morpho-org/blue-sdk";
+const MORPHO_EXECUTE_UNBLOCK_DETECTOR_MARKER =
+	"morpho_detector_hook_blue_sdk_execute_surface_ready";
 
 function formatUnits(raw, decimals) {
 	const value = BigInt(raw || "0");
@@ -40,6 +42,7 @@ function buildMorphoRemainingNonSdkPath({
 } = {}) {
 	return {
 		active: true,
+		detectorHook: MORPHO_EXECUTE_UNBLOCK_DETECTOR_MARKER,
 		marker: sdkFallbackUsed
 			? "morpho_execute_non_sdk_native_fallback_path"
 			: sdkEnabled

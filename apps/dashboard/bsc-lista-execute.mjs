@@ -1,5 +1,8 @@
 import { createListaSdkAdapter } from "./bsc-lista-sdk.mjs";
 
+const LISTA_EXECUTE_UNBLOCK_DETECTOR_MARKER =
+	"lista_detector_hook_execute_sdk_surface_ready";
+
 function toErrorMessage(error) {
 	return error instanceof Error ? error.message : String(error);
 }
@@ -74,6 +77,7 @@ export async function executeListaSupplySdkFirst(params) {
 		error: null,
 		remainingNonSdkPath: {
 			active: true,
+			detectorHook: LISTA_EXECUTE_UNBLOCK_DETECTOR_MARKER,
 			marker: "lista_execute_canonical_ethers_path_no_official_sdk_executor",
 			reason: fallback.used
 				? fallback.reason || "sdk_resolution_failed"
