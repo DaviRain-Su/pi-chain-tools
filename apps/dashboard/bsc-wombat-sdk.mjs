@@ -1,6 +1,8 @@
 import { Interface } from "@ethersproject/abi";
 import { JsonRpcProvider } from "@ethersproject/providers";
 
+// TODO(sdk-coverage): migrate from configx metadata client to a full official Wombat execute/read SDK when available.
+// Current package provides canonical config metadata only; runtime still needs ethers RPC for balances/execution.
 const DEFAULT_WOMBAT_SDK_PACKAGE = "@wombat-exchange/configx";
 
 function safeBigInt(value, fallback = 0n) {

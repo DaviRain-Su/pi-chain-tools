@@ -2,17 +2,17 @@
 
 ## 1) Latest Commit
 
-- Hash: `cd155f60d981772870e27c0481d7b24932ff9cf4`
-- Commit Date (ISO): 2026-02-18T19:22:45+08:00
-- Subject: chore(security): decouple wombat sdk dependency and document policy
+- Hash: `41dcfac0804b8f17bddf1f4633f9d92ae4eec02f`
+- Commit Date (ISO): 2026-02-18T19:29:22+08:00
+- Subject: feat: add submission evidence automation and guarded monad-bsc demo
 
 ## 2) Quality Snapshot (best-effort)
 
 | Command | Status | Exit Code | Timestamp | Source Session |
 | --- | --- | --- | --- | --- |
-| npm run check | pass | 0 | 2026-02-18T11:28:56.580Z | 30cccd33-bb30-4920-8fc9-3eea2855cfa7 |
-| npm run test | unknown | - | - | - |
-| npm run security:check | pass | 0 | 2026-02-18T11:22:32.735Z | 82177e53-b993-41d8-8247-0f3d72995cfd |
+| npm run check | pass | 0 | 2026-02-18T11:39:08.377Z | c66d3ae8-56f9-4ec3-b1bc-d84fb319934e |
+| npm run test | pass | 0 | 2026-02-18T11:29:05.285Z | 30cccd33-bb30-4920-8fc9-3eea2855cfa7 |
+| npm run security:check | pass | 0 | 2026-02-18T11:39:12.768Z | c66d3ae8-56f9-4ec3-b1bc-d84fb319934e |
 
 ## 3) Key Endpoints / Session References (fill before submit)
 
@@ -24,9 +24,9 @@
 
 ## 4) Dashboard Runtime (local)
 
-- Dashboard status: stopped_or_unknown
+- Dashboard status: listening
 - Dashboard listen line: NEAR dashboard listening on http://127.0.0.1:4173
-- Latest OpenClaw session id: 30cccd33-bb30-4920-8fc9-3eea2855cfa7
+- Latest OpenClaw session id: c66d3ae8-56f9-4ec3-b1bc-d84fb319934e
 
 ## 5) Onchain Tx Proof Template
 

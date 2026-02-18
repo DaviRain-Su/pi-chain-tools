@@ -373,7 +373,11 @@ const MONAD_MORPHO_SDK_API_BASE_URL = String(
 	envOrCfg("MONAD_MORPHO_SDK_API_BASE_URL", "monad.morpho.sdk.apiBaseUrl", ""),
 ).trim();
 const MONAD_MORPHO_SDK_PACKAGE = String(
-	envOrCfg("MONAD_MORPHO_SDK_PACKAGE", "monad.morpho.sdk.package", ""),
+	envOrCfg(
+		"MONAD_MORPHO_SDK_PACKAGE",
+		"monad.morpho.sdk.package",
+		"@morpho-org/blue-sdk",
+	),
 ).trim();
 const MONAD_MORPHO_SDK_EXECUTE_FALLBACK_TO_NATIVE =
 	String(
@@ -6544,7 +6548,7 @@ async function collectMonadMorphoRewardsWithSdkFallback({
 		};
 	}
 	try {
-		const adapter = createMorphoSdkAdapter({
+		const adapter = await createMorphoSdkAdapter({
 			rpcUrl: MONAD_RPC_URL,
 			chainId: MONAD_CHAIN_ID,
 			vaults: MONAD_MORPHO_VAULTS,
@@ -10077,7 +10081,7 @@ const server = http.createServer(async (req, res) => {
 				.replaceAll("{runId}", runId);
 			if (MONAD_MORPHO_USE_SDK) {
 				try {
-					const adapter = createMorphoSdkAdapter({
+					const adapter = await createMorphoSdkAdapter({
 						rpcUrl: MONAD_RPC_URL,
 						chainId: MONAD_CHAIN_ID,
 						vaults: MONAD_MORPHO_VAULTS,

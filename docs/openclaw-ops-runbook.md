@@ -267,7 +267,7 @@ curl -s -X POST 'http://127.0.0.1:4173/api/monad/morpho/earn/rewards/claim' \
 ```bash
 export MONAD_MORPHO_USE_SDK=true
 export MONAD_MORPHO_SDK_API_BASE_URL=''
-export MONAD_MORPHO_SDK_PACKAGE=''
+export MONAD_MORPHO_SDK_PACKAGE='@morpho-org/blue-sdk'
 ```
 - 如果线上波动，先切回：
 ```bash

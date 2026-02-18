@@ -57,6 +57,8 @@
 		"@ethersproject/wallet": "^5.8.0",
 		"@jup-ag/api": "^6.0.48",
 		"@kaspa/wallet": "^1.4.27",
+		"@morpho-org/blue-sdk": "^5.16.0",
+		"@morpho-org/morpho-ts": "^2.4.6",
 		"@mysten/bcs": "^1.9.2",
 		"@mysten/sui": "^1.45.2",
 		"@mysten/utils": "^0.2.0",

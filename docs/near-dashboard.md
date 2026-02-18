@@ -337,7 +337,7 @@ Common mapping examples:
 - `MONAD_MORPHO_ASSET_DECIMALS` - asset decimals for display/amount conversion (default: `18`)
 - `MONAD_MORPHO_USE_SDK` - enable Morpho SDK adapter branch for markets/strategy (`true|false`, default: `false`)
 - `MONAD_MORPHO_SDK_API_BASE_URL` - optional SDK/provider API base URL hint for adapter scaffold
-- `MONAD_MORPHO_SDK_PACKAGE` - optional expected official SDK package name hint for telemetry/readiness
+- `MONAD_MORPHO_SDK_PACKAGE` - Morpho SDK package hint (default `@morpho-org/blue-sdk`) for sdk-first telemetry/readiness
 - `MONAD_MORPHO_MAX_AMOUNT_RAW` - risk cap for execute amount
 - `MONAD_MORPHO_COOLDOWN_SECONDS` - cooldown guard between Monad execute calls (default: `0`, disabled)
 - `MONAD_MORPHO_DAILY_CAP_RAW` - optional per-day execute raw amount cap (empty = disabled)

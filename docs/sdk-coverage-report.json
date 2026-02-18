@@ -1,0 +1,123 @@
+{
+	"generatedAt": "2026-02-18T00:00:00.000Z",
+	"scope": ["monad+morpho", "venus", "wombat", "lista"],
+	"modes": ["official-sdk", "canonical-client", "native-fallback"],
+	"entries": [
+		{
+			"protocol": "Monad+Morpho",
+			"action": "earn.markets",
+			"endpoint": "GET /api/monad/morpho/earn/markets",
+			"currentMode": "official-sdk",
+			"status": "upgraded",
+			"blockers": []
+		},
+		{
+			"protocol": "Monad+Morpho",
+			"action": "earn.strategy",
+			"endpoint": "GET /api/monad/morpho/earn/strategy",
+			"currentMode": "official-sdk",
+			"status": "upgraded",
+			"blockers": []
+		},
+		{
+			"protocol": "Monad+Morpho",
+			"action": "earn.rewards",
+			"endpoint": "GET /api/monad/morpho/earn/rewards",
+			"currentMode": "official-sdk",
+			"status": "upgraded",
+			"blockers": []
+		},
+		{
+			"protocol": "Monad+Morpho",
+			"action": "earn.execute.deposit",
+			"endpoint": "POST /api/monad/morpho/earn/execute",
+			"currentMode": "canonical-client",
+			"status": "partial",
+			"blockers": [
+				"@morpho-org/blue-sdk does not expose a full tx execution/signer pipeline for vault deposit; ethers signer remains canonical execute client"
+			]
+		},
+		{
+			"protocol": "Venus",
+			"action": "yield.markets",
+			"endpoint": "GET /api/bsc/yield/markets",
+			"currentMode": "canonical-client",
+			"status": "partial",
+			"blockers": [
+				"Official @venusprotocol/sdk package is not published on npm; using @venusprotocol/chains + provider ABI reads"
+			]
+		},
+		{
+			"protocol": "Venus",
+			"action": "positions.read",
+			"endpoint": "GET /api/bsc/positions",
+			"currentMode": "canonical-client",
+			"status": "partial",
+			"blockers": ["Official @venusprotocol/sdk package unavailable on npm"]
+		},
+		{
+			"protocol": "Venus",
+			"action": "yield.execute",
+			"endpoint": "POST /api/bsc/yield/execute",
+			"currentMode": "canonical-client",
+			"status": "partial",
+			"blockers": [
+				"Execution uses canonical ethers signer path with sdk-first routing + fallback markers"
+			]
+		},
+		{
+			"protocol": "Lista",
+			"action": "yield.markets",
+			"endpoint": "GET /api/bsc/yield/markets",
+			"currentMode": "canonical-client",
+			"status": "blocked",
+			"blockers": ["No maintained official Lista npm SDK currently available"]
+		},
+		{
+			"protocol": "Lista",
+			"action": "positions.read",
+			"endpoint": "GET /api/bsc/positions",
+			"currentMode": "canonical-client",
+			"status": "blocked",
+			"blockers": ["No maintained official Lista npm SDK currently available"]
+		},
+		{
+			"protocol": "Lista",
+			"action": "yield.execute",
+			"endpoint": "POST /api/bsc/yield/execute",
+			"currentMode": "canonical-client",
+			"status": "partial",
+			"blockers": [
+				"Native/command execution path retained for reliability and auditability"
+			]
+		},
+		{
+			"protocol": "Wombat",
+			"action": "yield.markets",
+			"endpoint": "GET /api/bsc/yield/markets",
+			"currentMode": "canonical-client",
+			"status": "partial",
+			"blockers": [
+				"@wombat-exchange/configx provides configuration metadata only; market reads still use provider calls"
+			]
+		},
+		{
+			"protocol": "Wombat",
+			"action": "positions.read",
+			"endpoint": "GET /api/bsc/positions",
+			"currentMode": "canonical-client",
+			"status": "partial",
+			"blockers": ["No full official npm SDK for read/execute parity"]
+		},
+		{
+			"protocol": "Wombat",
+			"action": "yield.execute",
+			"endpoint": "POST /api/bsc/yield/execute",
+			"currentMode": "canonical-client",
+			"status": "partial",
+			"blockers": [
+				"Execution relies on canonical ethers native/command bridge with fallback controls"
+			]
+		}
+	]
+}

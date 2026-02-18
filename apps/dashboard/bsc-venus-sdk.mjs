@@ -25,6 +25,8 @@ function formatUnits(raw, decimals) {
 	return `${whole}.${fractionText}`.replace(/\.0+$/, "").replace(/\.$/, "");
 }
 
+// TODO(sdk-coverage): switch to official @venusprotocol/sdk when it becomes publicly available on npm.
+// Current path uses official canonical metadata package + provider ABI reads/execution for safety.
 const DEFAULT_VENUS_SDK_PACKAGE = "@venusprotocol/chains";
 
 function normalizeSdkPackageName(input) {

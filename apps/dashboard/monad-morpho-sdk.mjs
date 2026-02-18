@@ -3,6 +3,8 @@ import { MaxUint256 } from "@ethersproject/constants";
 import { JsonRpcProvider } from "@ethersproject/providers";
 import { Wallet } from "@ethersproject/wallet";
 
+const DEFAULT_MORPHO_SDK_PACKAGE = "@morpho-org/blue-sdk";
+
 function formatUnits(raw, decimals) {
 	const value = BigInt(raw || "0");
 	const base = 10n ** BigInt(decimals);
@@ -49,7 +51,43 @@ function shellQuote(value) {
 	return `'${text.replace(/'/g, `'"'"'`)}'`;
 }
 
-export function createMorphoSdkAdapter({
+function normalizeSdkPackageName(input) {
+	const text = String(input || "").trim();
+	return text || DEFAULT_MORPHO_SDK_PACKAGE;
+}
+
+async function tryLoadMorphoSdk(packageName, chainId) {
+	const normalized = normalizeSdkPackageName(packageName);
+	try {
+		const mod = await import(normalized);
+		const chainIdNumber = Number(chainId || 0);
+		let chainAddresses = null;
+		if (typeof mod?.getChainAddresses === "function" && chainIdNumber > 0) {
+			try {
+				chainAddresses = mod.getChainAddresses(chainIdNumber) || null;
+			} catch {
+				chainAddresses = null;
+			}
+		}
+		return {
+			loaded: true,
+			packageName: normalized,
+			moduleKeys: Object.keys(mod || {}),
+			chainAddresses,
+			error: null,
+		};
+	} catch (error) {
+		return {
+			loaded: false,
+			packageName: normalized,
+			moduleKeys: [],
+			chainAddresses: null,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
+export async function createMorphoSdkAdapter({
 	rpcUrl,
 	chainId,
 	vaults = [],
@@ -63,15 +101,26 @@ export function createMorphoSdkAdapter({
 	rewardsJson = [],
 	rewardsClaimCommand = "",
 } = {}) {
+	const resolvedChainId = Number(chainId || 0);
 	const provider = new JsonRpcProvider(String(rpcUrl || ""), {
 		name: "monad",
-		chainId: Number(chainId || 0),
+		chainId: resolvedChainId,
 	});
+	const sdk = await tryLoadMorphoSdk(sdkPackage, resolvedChainId);
+	const warnings = [];
+	if (!sdk.loaded) {
+		warnings.push(
+			"official_morpho_sdk_not_available_using_canonical_ethers_client_path",
+		);
+	}
+	if (sdk.loaded && !sdk.chainAddresses) {
+		warnings.push("morpho_sdk_chain_addresses_not_available_for_chain");
+	}
 	return {
 		provider,
 		config: {
 			rpcUrl: String(rpcUrl || ""),
-			chainId: Number(chainId || 0),
+			chainId: resolvedChainId,
 			vaults: [...vaults],
 			asset: String(asset || ""),
 			assetDecimals: Number(assetDecimals || 18),
@@ -79,14 +128,18 @@ export function createMorphoSdkAdapter({
 			riskScore: Number(riskScore || 45),
 			liquidityCapRaw: String(liquidityCapRaw || "").trim() || null,
 			sdkApiBaseUrl: String(sdkApiBaseUrl || "").trim() || null,
-			sdkPackage: String(sdkPackage || "").trim() || null,
+			sdkPackage: sdk.packageName,
 			rewardsJson: parseRewardsJsonInput(rewardsJson),
 			rewardsClaimCommand: String(rewardsClaimCommand || "").trim(),
 		},
 		meta: {
-			client: "adapter-scaffold",
-			officialSdkWired: false,
-			warnings: ["official_morpho_sdk_not_wired_using_provider_scaffold"],
+			client: sdk.loaded ? "morpho-blue-sdk" : "morpho-ethers-canonical-client",
+			officialSdkWired: sdk.loaded,
+			sdkPackage: sdk.packageName,
+			sdkError: sdk.error,
+			moduleKeys: sdk.moduleKeys,
+			chainAddresses: sdk.chainAddresses,
+			warnings,
 		},
 	};
 }
@@ -389,7 +442,7 @@ export async function collectMonadMorphoSdkSnapshot(
 	config,
 	{ accountAddress = "" } = {},
 ) {
-	const adapter = createMorphoSdkAdapter(config);
+	const adapter = await createMorphoSdkAdapter(config);
 	const vaults = await fetchMorphoVaults(adapter);
 	const [metrics, userPositions] = await Promise.all([
 		fetchMorphoMarketMetrics(adapter, { vaults }),
@@ -422,11 +475,13 @@ export async function collectMonadMorphoSdkSnapshot(
 	};
 }
 
+// NOTE(sdk-coverage): Morpho official blue-sdk currently provides entities/addresses and not a full signer/executor.
+// Execute path remains canonical ethers signer with explicit SDK metadata + native fallback markers for safety.
 export async function executeMorphoDepositWithSdk(
 	config,
 	{ privateKey, amountRaw, vault, asset, confirmations = 1, runId = null } = {},
 ) {
-	const adapter = createMorphoSdkAdapter(config);
+	const adapter = await createMorphoSdkAdapter(config);
 	const resolvedVault = String(
 		vault || adapter?.config?.vaults?.[0] || "",
 	).trim();

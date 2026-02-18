@@ -133,7 +133,7 @@
 			"useSdk": false,
 			"sdk": {
 				"apiBaseUrl": "",
-				"package": "",
+				"package": "@morpho-org/blue-sdk",
 				"rewardsSource": "config-json",
 				"claimMode": "command-template",
 				"executeFallbackToNative": true

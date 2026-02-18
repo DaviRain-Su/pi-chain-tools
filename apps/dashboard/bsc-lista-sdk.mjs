@@ -2,6 +2,8 @@ import { Interface } from "@ethersproject/abi";
 import { JsonRpcProvider } from "@ethersproject/providers";
 
 const DEFAULT_LISTA_CLIENT_PACKAGE = "ethers";
+// TODO(sdk-coverage): replace canonical ethers client once Lista publishes a maintained official npm SDK.
+// Current status (2026-02): no stable official SDK package available on npm; keep fallback-safe path.
 const LISTA_OFFICIAL_SDK_CANDIDATES = [
 	"@lista-dao/sdk",
 	"@lista-dao/contracts",
