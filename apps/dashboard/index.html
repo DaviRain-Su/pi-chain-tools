@@ -186,6 +186,11 @@
       </div>
 
       <div class="card" style="margin-top:16px">
+        <h3>deBridge Execute Reliability</h3>
+        <div id="debridgeReliability" class="muted">-</div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
         <h3>ACP Ops</h3>
         <div id="acpOps" class="muted">-</div>
         <div class="row" style="margin-top:8px">
@@ -393,6 +398,7 @@
       const bscExecutionProtocolEl = document.getElementById("bscExecutionProtocol");
       const bscMarketHealthEl = document.getElementById("bscMarketHealth");
       const execQualityEl = document.getElementById("execQuality");
+      const debridgeReliabilityEl = document.getElementById("debridgeReliability");
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
@@ -714,6 +720,33 @@
         return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText} · ${pnlText} · ${rpcText} · ${rpcDetail} · ${topText} · ${webhookText} · ${debridgeText}`;
       }
 
+      function computeDebridgeReliability(snapshot) {
+        const d = snapshot?.debridgeExecuteMetrics || {};
+        const total = Number(d.total || 0);
+        if (total <= 0) return "No deBridge execute telemetry yet.";
+        const success = Number(d.success || 0);
+        const blocked = Number(d.blocked || 0);
+        const error = Number(d.error || 0);
+        const retries = Number(d.retryAttempts || 0);
+        const recovered = Number(d.retryRecovered || 0);
+        const successRate = total > 0 ? (success / total) * 100 : 0;
+        const recoveryRate = retries > 0 ? (recovered / retries) * 100 : 0;
+        const recent = Array.isArray(d.recent) ? d.recent : [];
+        const errorBuckets = recent
+          .filter((r) => String(r?.status || "") === "error")
+          .reduce((acc, r) => {
+            const key = String(r?.errorCode || "unknown");
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+          }, {});
+        const topErrors = Object.entries(errorBuckets)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(" · ") || "-";
+        return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})`;
+      }
+
       function toCsv(snapshot) {
         const lines = [
           ["section", "key", "value"],
@@ -823,6 +856,7 @@
         const aggregateMax = Number.isFinite(Number(aggregateRisk?.maxScore)) ? Number(aggregateRisk.maxScore) : null;
         yieldHealthEl.innerHTML = `Portfolio aggregate risk: <span class="${aggregateCls}">${aggregateBand}</span> · avg=${aggregateAvg != null ? aggregateAvg : "-"} · max=${aggregateMax != null ? aggregateMax : "-"}<br/><span class="muted">${yieldHealthText}</span>`;
         execQualityEl.textContent = computeExecutionQuality(data);
+        debridgeReliabilityEl.textContent = computeDebridgeReliability(data);
         const bscLayer = (unified?.portfolio?.executionLayers || []).find((x) => String(x?.chain || "").toLowerCase() === "bsc");
         const protocolPos = bscLayer?.positions?.protocols || {};
         const normalizationHealth = bscLayer?.positions?.normalizationHealth || {};
