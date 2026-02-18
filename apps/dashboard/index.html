@@ -197,6 +197,7 @@
           <button id="copyDebridgeReliability">Copy summary</button>
           <button id="copyDebridgeIncident">Copy incident format</button>
           <button id="fillDebridgeFixDraft">Fill fix draft</button>
+          <button id="appendDebridgeQuickFix">Append quick fix</button>
         </div>
         <div id="debridgeReliability" class="muted" style="white-space:pre-wrap">-</div>
       </div>
@@ -414,6 +415,7 @@
       const copyDebridgeReliabilityBtn = document.getElementById("copyDebridgeReliability");
       const copyDebridgeIncidentBtn = document.getElementById("copyDebridgeIncident");
       const fillDebridgeFixDraftBtn = document.getElementById("fillDebridgeFixDraft");
+      const appendDebridgeQuickFixBtn = document.getElementById("appendDebridgeQuickFix");
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
@@ -863,6 +865,56 @@
         }
         if (actions.length === 0) actions.push("No immediate fix hints; inspect rawOutput + executionArtifact for edge-case failures.");
         return actions.slice(0, 3);
+      }
+
+      function buildDebridgeQuickFixSnippet(code) {
+        const key = String(code || "");
+        if (key === "debridge_execute_timeout") {
+          return [
+            "# quick fix: timeout",
+            "export DEBRIDGE_MCP_TIMEOUT_MS=180000",
+          ].join("\n");
+        }
+        if (key === "debridge_execute_rate_limited") {
+          return [
+            "# quick fix: rate limit",
+            "export DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS=3",
+            "export DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS=2500",
+          ].join("\n");
+        }
+        if (key === "debridge_execute_network_error") {
+          return [
+            "# quick fix: network",
+            "export DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS=3",
+            "export DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS=2000",
+          ].join("\n");
+        }
+        if (key === "debridge_execute_insufficient_funds") {
+          return [
+            "# quick fix: insufficient funds",
+            "# top up gas + source token balance before retry",
+            "export DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS=1",
+          ].join("\n");
+        }
+        if (key === "debridge_execute_invalid_request") {
+          return [
+            "# quick fix: invalid request",
+            "# verify origin/destination/tokenIn/tokenOut/amount",
+            "export DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS=1",
+          ].join("\n");
+        }
+        if (key === "debridge_execute_unauthorized") {
+          return [
+            "# quick fix: unauthorized",
+            "export DEBRIDGE_MCP_EXECUTE_ENABLED=false",
+            "# re-enable after credential validation",
+          ].join("\n");
+        }
+        return [
+          "# quick fix: generic",
+          "export DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS=2",
+          "export DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS=1500",
+        ].join("\n");
       }
 
       function buildDebridgeFixDraft(snapshot, windowKey = "24h") {
@@ -2219,6 +2271,21 @@
         const draft = buildDebridgeFixDraft(lastSnapshot, windowKey);
         if (cmdOutEl) cmdOutEl.value = draft;
         cmdMetaEl.textContent = "Filled deBridge fix draft into Action Console";
+      });
+      appendDebridgeQuickFixBtn?.addEventListener("click", () => {
+        if (!lastSnapshot) {
+          cmdMetaEl.textContent = "No snapshot available for quick fix";
+          return;
+        }
+        const windowKey = String(debridgeWindowEl?.value || "24h");
+        const stats = getDebridgeWindowErrorStats(lastSnapshot, windowKey);
+        const code = String(stats.dominantError || lastSnapshot?.debridgeExecuteMetrics?.lastErrorCode || "");
+        const snippet = buildDebridgeQuickFixSnippet(code);
+        if (cmdOutEl) {
+          const prev = String(cmdOutEl.value || "").trim();
+          cmdOutEl.value = prev ? `${prev}\n\n${snippet}` : snippet;
+        }
+        cmdMetaEl.textContent = `Appended deBridge quick fix (${code || "generic"})`;
       });
       acpStatusFilterEl?.addEventListener("change", () => {
         syncAcpFiltersToUrl();
