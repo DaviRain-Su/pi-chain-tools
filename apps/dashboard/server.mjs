@@ -1583,6 +1583,10 @@ async function buildSnapshot(accountId) {
 		paymentWebhookMetrics: {
 			...PAYMENT_WEBHOOK_METRICS,
 		},
+		debridgeExecuteMetrics: {
+			...DEBRIDGE_EXECUTE_METRICS,
+			recent: DEBRIDGE_EXECUTE_METRICS.recent,
+		},
 	};
 }
 

@@ -709,7 +709,9 @@
           : "best=-";
         const w = snapshot?.paymentWebhookMetrics || {};
         const webhookText = `Webhook accepted=${Number(w.accepted || 0)} idempotent=${Number(w.idempotent || 0)} rejected=${Number(w.rejected || 0)} lastProvider=${w.lastProvider || '-'} lastErr=${w.lastError || '-'}`;
-        return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText} · ${pnlText} · ${rpcText} · ${rpcDetail} · ${topText} · ${webhookText}`;
+        const d = snapshot?.debridgeExecuteMetrics || {};
+        const debridgeText = `deBridge exec total=${Number(d.total || 0)} success=${Number(d.success || 0)} blocked=${Number(d.blocked || 0)} error=${Number(d.error || 0)} retries=${Number(d.retryAttempts || 0)} recovered=${Number(d.retryRecovered || 0)} lastErr=${d.lastErrorCode || '-'}(${d.lastErrorCategory || '-'})`;
+        return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText} · ${pnlText} · ${rpcText} · ${rpcDetail} · ${topText} · ${webhookText} · ${debridgeText}`;
       }
 
       function toCsv(snapshot) {
