@@ -148,6 +148,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - CI resilient failure-signature telemetry:
   - `scripts/ci-resilient.mjs` appends JSONL records to `apps/dashboard/data/ci-signatures.jsonl` (override via `CI_SIGNATURES_JSONL_PATH`)
   - read-only API: `GET /api/ops/ci-signatures?limit=50` (returns newest-first rows)
+  - Dashboard `CI Failure Signatures` card summarizes latest run status and top recent `checkFailureKind` clusters
 - deBridge Reliability card sharing ops:
   - `Copy share link` includes `debridgeWindow` + `debridgeAdvancedOpen` query state for reproducible views
   - `Copy share markdown` copies one-line markdown link
