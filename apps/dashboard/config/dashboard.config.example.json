@@ -112,7 +112,8 @@
 				"apiBaseUrl": "",
 				"package": "",
 				"rewardsSource": "config-json",
-				"claimMode": "command-template"
+				"claimMode": "command-template",
+				"executeFallbackToNative": true
 			},
 			"maxAmountRaw": "1000000000000000000000",
 			"cooldownSeconds": 0,

@@ -29,6 +29,7 @@ import {
 	buildRewardsClaimRequest,
 	collectMonadMorphoSdkSnapshot,
 	createMorphoSdkAdapter,
+	executeMorphoDepositWithSdk,
 	fetchRewards,
 } from "./monad-morpho-sdk.mjs";
 import {
@@ -358,6 +359,14 @@ const MONAD_MORPHO_SDK_API_BASE_URL = String(
 const MONAD_MORPHO_SDK_PACKAGE = String(
 	envOrCfg("MONAD_MORPHO_SDK_PACKAGE", "monad.morpho.sdk.package", ""),
 ).trim();
+const MONAD_MORPHO_SDK_EXECUTE_FALLBACK_TO_NATIVE =
+	String(
+		envOrCfg(
+			"MONAD_MORPHO_SDK_EXECUTE_FALLBACK_TO_NATIVE",
+			"monad.morpho.sdk.executeFallbackToNative",
+			"true",
+		),
+	).toLowerCase() === "true";
 const MONAD_MORPHO_APY_BPS = Number.parseInt(
 	String(envOrCfg("MONAD_MORPHO_APY_BPS", "monad.morpho.apyBps", "0")),
 	10,
@@ -6361,20 +6370,108 @@ function reconcileMonadMorphoExecutionArtifact({ before, after, artifact }) {
 	};
 }
 
-async function executeMonadMorphoDeposit(payload = {}) {
-	const runId = String(payload.runId || `monad-morpho-${Date.now()}`);
-	const amountRaw = payload.amountRaw
-		? parsePositiveRaw(payload.amountRaw, "amountRaw")
-		: toRawAmountFromDecimal(
-				payload.amount || "0",
-				MONAD_MORPHO_ASSET_DECIMALS,
-			);
-	const readiness = buildMonadMorphoReadiness({ amountRaw });
-	if (readiness.canExecute !== true) {
-		throw new Error(
-			`MONAD_MORPHO_CONFIG retryable=false message=${readiness.blockers[0] || "execute_not_ready"}`,
-		);
+function buildMonadMorphoExecuteResult({
+	status,
+	runId,
+	txHash = null,
+	vault,
+	asset,
+	amountRaw,
+	account,
+	before = null,
+	after = null,
+	receipt = null,
+	warnings = [],
+	mode = "native",
+	fallback = {
+		used: false,
+		reason: null,
+		from: null,
+		to: null,
+	},
+	error = null,
+}) {
+	const executionArtifact = buildMonadMorphoExecutionArtifact({
+		status,
+		txHash,
+		vault,
+		asset,
+		amountRaw,
+		account,
+		runId,
+		error,
+	});
+	const executionReconciliation = reconcileMonadMorphoExecutionArtifact({
+		before,
+		after,
+		artifact: executionArtifact,
+	});
+	return {
+		ok: status === "success",
+		chain: "monad",
+		protocol: "morpho-earn",
+		status,
+		runId,
+		txHash,
+		mode,
+		fallback,
+		warnings,
+		error,
+		receipt,
+		executionArtifact,
+		executionReconciliation,
+	};
+}
+
+function recordMonadMorphoExecuteMetrics({
+	status,
+	runId,
+	txHash = null,
+	amountRaw = null,
+	errorCode = null,
+	errorCategory = null,
+	mode = "native",
+	fallbackUsed = false,
+}) {
+	MONAD_MORPHO_EXECUTE_METRICS.total += 1;
+	if (status === "success") {
+		MONAD_MORPHO_EXECUTE_METRICS.success += 1;
+		MONAD_MORPHO_EXECUTE_METRICS.lastErrorCode = null;
+		MONAD_MORPHO_EXECUTE_METRICS.lastErrorCategory = null;
+		MONAD_MORPHO_EXECUTE_METRICS.lastErrorAt = null;
+	} else {
+		MONAD_MORPHO_EXECUTE_METRICS.error += 1;
+		MONAD_MORPHO_EXECUTE_METRICS.lastErrorCode = errorCode;
+		MONAD_MORPHO_EXECUTE_METRICS.lastErrorCategory = errorCategory;
+		MONAD_MORPHO_EXECUTE_METRICS.lastErrorAt = new Date().toISOString();
 	}
+	MONAD_MORPHO_EXECUTE_METRICS.recent.unshift({
+		timestamp: new Date().toISOString(),
+		status,
+		txHash,
+		runId,
+		action: "deposit",
+		amountRaw,
+		errorCode,
+		errorCategory,
+		mode,
+		fallbackUsed,
+	});
+	if (MONAD_MORPHO_EXECUTE_METRICS.recent.length > 30)
+		MONAD_MORPHO_EXECUTE_METRICS.recent.length = 30;
+}
+
+function updateMonadMorphoExecuteState(amountRaw) {
+	MONAD_MORPHO_EXECUTE_STATE.lastExecuteAt = new Date().toISOString();
+	const day = currentDayKey();
+	if (MONAD_MORPHO_EXECUTE_STATE.dailyWindowDay !== day) {
+		MONAD_MORPHO_EXECUTE_STATE.dailyWindowDay = day;
+		MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw = 0n;
+	}
+	MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw += BigInt(amountRaw);
+}
+
+async function executeMonadMorphoDepositNative({ runId, amountRaw }) {
 	const vault = MONAD_MORPHO_VAULTS[0];
 	const provider = new JsonRpcProvider(MONAD_RPC_URL, {
 		name: "monad",
@@ -6438,66 +6535,182 @@ async function executeMonadMorphoDeposit(payload = {}) {
 	});
 	const receipt = await depositTx.wait(MONAD_MORPHO_CONFIRMATIONS);
 	const after = await readBalance();
-	const executionArtifact = buildMonadMorphoExecutionArtifact({
+	return buildMonadMorphoExecuteResult({
 		status: "success",
+		runId,
 		txHash: depositTx.hash,
 		vault,
 		asset: MONAD_MORPHO_ASSET,
 		amountRaw,
 		account,
-		runId,
-	});
-	const executionReconciliation = reconcileMonadMorphoExecutionArtifact({
 		before,
 		after,
-		artifact: executionArtifact,
-	});
-	MONAD_MORPHO_EXECUTE_METRICS.total += 1;
-	MONAD_MORPHO_EXECUTE_METRICS.success += 1;
-	MONAD_MORPHO_EXECUTE_METRICS.lastErrorCode = null;
-	MONAD_MORPHO_EXECUTE_METRICS.lastErrorCategory = null;
-	MONAD_MORPHO_EXECUTE_METRICS.recent.unshift({
-		timestamp: new Date().toISOString(),
-		status: "success",
-		txHash: depositTx.hash,
-		runId,
-		action: "deposit",
-		amountRaw,
-	});
-	if (MONAD_MORPHO_EXECUTE_METRICS.recent.length > 30)
-		MONAD_MORPHO_EXECUTE_METRICS.recent.length = 30;
-	MONAD_MORPHO_EXECUTE_STATE.lastExecuteAt = new Date().toISOString();
-	const day = currentDayKey();
-	if (MONAD_MORPHO_EXECUTE_STATE.dailyWindowDay !== day) {
-		MONAD_MORPHO_EXECUTE_STATE.dailyWindowDay = day;
-		MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw = 0n;
-	}
-	MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw += BigInt(amountRaw);
-	pushActionHistory({
-		action: "monad_morpho_earn_execute",
-		status: "success",
-		step: payload.step || "deposit",
-		runId,
-		txHash: depositTx.hash,
-		summary: `monad morpho deposit ${amountRaw}`,
-		executionArtifact,
-		executionReconciliation,
-	});
-	return {
-		ok: true,
-		chain: "monad",
-		protocol: "morpho-earn",
-		runId,
-		txHash: depositTx.hash,
 		receipt: {
 			transactionHash: receipt?.transactionHash || depositTx.hash,
 			blockNumber: receipt?.blockNumber || null,
 			confirmations: MONAD_MORPHO_CONFIRMATIONS,
 			approveTxHashes: approveTxs,
 		},
-		executionArtifact,
-		executionReconciliation,
-	};
+		mode: "native",
+		fallback: {
+			used: false,
+			reason: null,
+			from: null,
+			to: null,
+		},
+		warnings: [],
+	});
+}
+
+async function executeMonadMorphoDeposit(payload = {}) {
+	const runId = String(payload.runId || `monad-morpho-${Date.now()}`);
+	const amountRaw = payload.amountRaw
+		? parsePositiveRaw(payload.amountRaw, "amountRaw")
+		: toRawAmountFromDecimal(
+				payload.amount || "0",
+				MONAD_MORPHO_ASSET_DECIMALS,
+			);
+	const readiness = buildMonadMorphoReadiness({ amountRaw });
+	if (readiness.canExecute !== true) {
+		throw new Error(
+			`MONAD_MORPHO_CONFIG retryable=false message=${readiness.blockers[0] || "execute_not_ready"}`,
+		);
+	}
+
+	const fallbackWarning = "morpho_sdk_execute_failed_fallback_to_native";
+	if (MONAD_MORPHO_USE_SDK) {
+		try {
+			const sdkResult = await executeMorphoDepositWithSdk(
+				{
+					rpcUrl: MONAD_RPC_URL,
+					chainId: MONAD_CHAIN_ID,
+					vaults: MONAD_MORPHO_VAULTS,
+					asset: MONAD_MORPHO_ASSET,
+					assetDecimals: MONAD_MORPHO_ASSET_DECIMALS,
+					sdkApiBaseUrl: MONAD_MORPHO_SDK_API_BASE_URL,
+					sdkPackage: MONAD_MORPHO_SDK_PACKAGE,
+				},
+				{
+					privateKey: MONAD_EXECUTE_PRIVATE_KEY,
+					amountRaw,
+					confirmations: MONAD_MORPHO_CONFIRMATIONS,
+					runId,
+				},
+			);
+			const result = buildMonadMorphoExecuteResult({
+				status: "success",
+				runId,
+				txHash: sdkResult.txHash,
+				vault: sdkResult.vault,
+				asset: sdkResult.asset,
+				amountRaw,
+				account: sdkResult.account,
+				before: sdkResult.before,
+				after: sdkResult.after,
+				receipt: sdkResult.receipt,
+				mode: sdkResult.mode || "sdk",
+				fallback: {
+					used: false,
+					reason: null,
+					from: null,
+					to: null,
+				},
+				warnings: [],
+			});
+			recordMonadMorphoExecuteMetrics({
+				status: "success",
+				runId,
+				txHash: result.txHash,
+				amountRaw,
+				mode: result.mode,
+				fallbackUsed: false,
+			});
+			updateMonadMorphoExecuteState(amountRaw);
+			pushActionHistory({
+				action: "monad_morpho_earn_execute",
+				status: "success",
+				step: payload.step || "deposit",
+				runId,
+				txHash: result.txHash,
+				summary: `monad morpho deposit ${amountRaw}`,
+				mode: result.mode,
+				fallback: result.fallback,
+				warnings: result.warnings,
+				executionArtifact: result.executionArtifact,
+				executionReconciliation: result.executionReconciliation,
+			});
+			return result;
+		} catch (sdkError) {
+			if (!MONAD_MORPHO_SDK_EXECUTE_FALLBACK_TO_NATIVE) {
+				throw sdkError;
+			}
+			const native = await executeMonadMorphoDepositNative({
+				runId,
+				amountRaw,
+				step: payload.step,
+			});
+			native.mode = "native-fallback";
+			native.fallback = {
+				used: true,
+				reason: sdkError instanceof Error ? sdkError.message : String(sdkError),
+				from: "sdk",
+				to: "native",
+			};
+			native.warnings = [fallbackWarning];
+			recordMonadMorphoExecuteMetrics({
+				status: "success",
+				runId,
+				txHash: native.txHash,
+				amountRaw,
+				mode: native.mode,
+				fallbackUsed: true,
+			});
+			updateMonadMorphoExecuteState(amountRaw);
+			pushActionHistory({
+				action: "monad_morpho_earn_execute",
+				status: "success",
+				step: payload.step || "deposit",
+				runId,
+				txHash: native.txHash,
+				summary: `monad morpho deposit ${amountRaw} (native fallback)`,
+				mode: native.mode,
+				fallback: native.fallback,
+				warnings: native.warnings,
+				executionArtifact: native.executionArtifact,
+				executionReconciliation: native.executionReconciliation,
+			});
+			return native;
+		}
+	}
+
+	const native = await executeMonadMorphoDepositNative({
+		runId,
+		amountRaw,
+		step: payload.step,
+	});
+	recordMonadMorphoExecuteMetrics({
+		status: "success",
+		runId,
+		txHash: native.txHash,
+		amountRaw,
+		mode: native.mode,
+		fallbackUsed: false,
+	});
+	updateMonadMorphoExecuteState(amountRaw);
+	pushActionHistory({
+		action: "monad_morpho_earn_execute",
+		status: "success",
+		step: payload.step || "deposit",
+		runId,
+		txHash: native.txHash,
+		summary: `monad morpho deposit ${amountRaw}`,
+		mode: native.mode,
+		fallback: native.fallback,
+		warnings: native.warnings,
+		executionArtifact: native.executionArtifact,
+		executionReconciliation: native.executionReconciliation,
+	});
+	return native;
 }
 
 function parsePositiveRaw(value, fieldName) {
@@ -9420,25 +9633,20 @@ const server = http.createServer(async (req, res) => {
 				return json(res, 200, result);
 			} catch (error) {
 				const normalized = classifyMonadMorphoExecuteError(error);
-				MONAD_MORPHO_EXECUTE_METRICS.total += 1;
-				MONAD_MORPHO_EXECUTE_METRICS.error += 1;
-				MONAD_MORPHO_EXECUTE_METRICS.lastErrorCode = normalized.code;
-				MONAD_MORPHO_EXECUTE_METRICS.lastErrorCategory = normalized.category;
-				MONAD_MORPHO_EXECUTE_METRICS.lastErrorAt = new Date().toISOString();
-				MONAD_MORPHO_EXECUTE_METRICS.recent.unshift({
-					timestamp: new Date().toISOString(),
+				recordMonadMorphoExecuteMetrics({
 					status: "error",
+					runId: payload?.runId || null,
 					errorCode: normalized.code,
-					retryable: normalized.retryable,
-					message: error instanceof Error ? error.message : String(error),
+					errorCategory: normalized.category,
+					mode: MONAD_MORPHO_USE_SDK ? "sdk" : "native",
+					fallbackUsed: false,
 				});
-				if (MONAD_MORPHO_EXECUTE_METRICS.recent.length > 30)
-					MONAD_MORPHO_EXECUTE_METRICS.recent.length = 30;
 				pushActionHistory({
 					action: "monad_morpho_earn_execute",
 					status: "error",
 					summary: error instanceof Error ? error.message : String(error),
 					error: normalized,
+					mode: MONAD_MORPHO_USE_SDK ? "sdk" : "native",
 				});
 				return json(res, 500, {
 					ok: false,

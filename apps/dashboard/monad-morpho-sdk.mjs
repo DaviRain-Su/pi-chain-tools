@@ -1,5 +1,7 @@
 import { Interface } from "@ethersproject/abi";
+import { MaxUint256 } from "@ethersproject/constants";
 import { JsonRpcProvider } from "@ethersproject/providers";
+import { Wallet } from "@ethersproject/wallet";
 
 function formatUnits(raw, decimals) {
 	const value = BigInt(raw || "0");
@@ -416,6 +418,117 @@ export async function collectMonadMorphoSdkSnapshot(
 			totalUserSharesRaw: markets
 				.reduce((acc, row) => acc + safeBigInt(row.userSharesRaw), 0n)
 				.toString(),
+		},
+	};
+}
+
+export async function executeMorphoDepositWithSdk(
+	config,
+	{ privateKey, amountRaw, vault, asset, confirmations = 1, runId = null } = {},
+) {
+	const adapter = createMorphoSdkAdapter(config);
+	const resolvedVault = String(
+		vault || adapter?.config?.vaults?.[0] || "",
+	).trim();
+	const resolvedAsset = String(asset || adapter?.config?.asset || "").trim();
+	if (!resolvedVault || !isHexAddress(resolvedVault)) {
+		throw new Error(
+			"MONAD_MORPHO_CONFIG retryable=false message=missing_monad_morpho_vault",
+		);
+	}
+	if (!resolvedAsset || !isHexAddress(resolvedAsset)) {
+		throw new Error(
+			"MONAD_MORPHO_CONFIG retryable=false message=missing_monad_morpho_asset",
+		);
+	}
+	const safeAmountRaw = String(amountRaw || "").trim();
+	if (!/^\d+$/.test(safeAmountRaw) || BigInt(safeAmountRaw) <= 0n) {
+		throw new Error(
+			"MONAD_MORPHO_CONFIG retryable=false message=amount_invalid",
+		);
+	}
+	const signer = new Wallet(String(privateKey || ""), adapter.provider);
+	const account = signer.address;
+	const erc20Iface = new Interface([
+		"function allowance(address owner,address spender) view returns (uint256)",
+		"function approve(address spender,uint256 value) returns (bool)",
+		"function balanceOf(address owner) view returns (uint256)",
+	]);
+	const vaultIface = new Interface([
+		"function deposit(uint256 assets,address receiver) returns (uint256 shares)",
+		"function balanceOf(address owner) view returns (uint256)",
+	]);
+	const readBalance = async () => {
+		const [assetRawData, sharesRawData] = await Promise.all([
+			adapter.provider.call({
+				to: resolvedAsset,
+				data: erc20Iface.encodeFunctionData("balanceOf", [account]),
+			}),
+			adapter.provider.call({
+				to: resolvedVault,
+				data: vaultIface.encodeFunctionData("balanceOf", [account]),
+			}),
+		]);
+		return {
+			assetRaw:
+				erc20Iface
+					.decodeFunctionResult("balanceOf", assetRawData)?.[0]
+					?.toString() || "0",
+			sharesRaw:
+				vaultIface
+					.decodeFunctionResult("balanceOf", sharesRawData)?.[0]
+					?.toString() || "0",
+		};
+	};
+	const before = await readBalance();
+	const allowanceRawData = await adapter.provider.call({
+		to: resolvedAsset,
+		data: erc20Iface.encodeFunctionData("allowance", [account, resolvedVault]),
+	});
+	const allowance = BigInt(
+		erc20Iface
+			.decodeFunctionResult("allowance", allowanceRawData)?.[0]
+			?.toString() || "0",
+	);
+	const approveTxHashes = [];
+	if (allowance < BigInt(safeAmountRaw)) {
+		const approveTx = await signer.sendTransaction({
+			to: resolvedAsset,
+			data: erc20Iface.encodeFunctionData("approve", [
+				resolvedVault,
+				MaxUint256,
+			]),
+		});
+		await approveTx.wait(Math.max(1, Number(confirmations || 1)));
+		approveTxHashes.push(approveTx.hash);
+	}
+	const depositTx = await signer.sendTransaction({
+		to: resolvedVault,
+		data: vaultIface.encodeFunctionData("deposit", [safeAmountRaw, account]),
+	});
+	const receipt = await depositTx.wait(Math.max(1, Number(confirmations || 1)));
+	const after = await readBalance();
+	return {
+		mode: adapter.meta.officialSdkWired ? "sdk" : "sdk-scaffold",
+		sdk: {
+			enabled: true,
+			used: true,
+			fallback: false,
+			meta: adapter.meta,
+		},
+		runId: runId || null,
+		txHash: depositTx.hash,
+		account,
+		vault: resolvedVault,
+		asset: resolvedAsset,
+		amountRaw: safeAmountRaw,
+		before,
+		after,
+		receipt: {
+			transactionHash: receipt?.transactionHash || depositTx.hash,
+			blockNumber: receipt?.blockNumber || null,
+			confirmations: Math.max(1, Number(confirmations || 1)),
+			approveTxHashes,
 		},
 	};
 }

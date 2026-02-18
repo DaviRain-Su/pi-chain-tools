@@ -28,13 +28,20 @@ describe("monad morpho earn mvp", () => {
 		expect(serverSource).toContain("Missing confirm=true");
 	});
 
-	it("contains native rpc deposit execution path + reconciliation", () => {
+	it("contains sdk-first execute routing with native emergency fallback + unified model", () => {
 		expect(serverSource).toContain("function executeMonadMorphoDeposit(");
+		expect(serverSource).toContain("executeMorphoDepositWithSdk(");
+		expect(serverSource).toContain(
+			"MONAD_MORPHO_SDK_EXECUTE_FALLBACK_TO_NATIVE",
+		);
+		expect(serverSource).toContain(
+			"morpho_sdk_execute_failed_fallback_to_native",
+		);
+		expect(serverSource).toContain('mode: "native-fallback"');
+		expect(serverSource).toContain("fallback: {");
+		expect(serverSource).toContain("function executeMonadMorphoDepositNative(");
 		expect(serverSource).toContain("MONAD_DELEGATION_GATE_BLOCKED");
 		expect(serverSource).toContain("delegation_gate_blocked");
-		expect(serverSource).toContain(
-			"function deposit(uint256 assets,address receiver) returns (uint256 shares)",
-		);
 		expect(serverSource).toContain("executionArtifact");
 		expect(serverSource).toContain("executionReconciliation");
 		expect(serverSource).toContain('action: "monad_morpho_earn_execute"');
@@ -78,6 +85,9 @@ describe("monad morpho earn mvp", () => {
 		expect(configExample?.monad?.morpho?.useSdk).toBeTypeOf("boolean");
 		expect(configExample?.monad?.morpho?.sdk?.apiBaseUrl).toBeTypeOf("string");
 		expect(configExample?.monad?.morpho?.sdk?.package).toBeTypeOf("string");
+		expect(
+			configExample?.monad?.morpho?.sdk?.executeFallbackToNative,
+		).toBeTypeOf("boolean");
 		expect(configExample?.monad?.morpho?.sdk?.rewardsSource).toBeTypeOf(
 			"string",
 		);

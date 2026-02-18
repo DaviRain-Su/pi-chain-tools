@@ -90,25 +90,25 @@
 ### A. 执行抽象
 
 #### 文件：`apps/dashboard/server.mjs`
-- [ ] 现有 execute 函数改为路由器：
+- [x] 现有 execute 函数改为路由器：
   - sdk path（首选）
   - native fallback（兜底）
-- [ ] 用统一执行结果模型（txHash/status/error/reconcile）。
+- [x] 用统一执行结果模型（txHash/status/error/reconcile）。
 
 #### 文件：`apps/dashboard/monad-morpho-sdk.mjs`
-- [ ] `buildDepositTx(...)` / `sendDepositTx(...)`。
+- [x] `buildDepositTx(...)` / `sendDepositTx(...)`。
 - [ ] gas/nonce/confirmations 策略配置化。
 
 ### B. 安全与风控
-- [ ] confirm gate 必须保留
-- [ ] delegation gate 必须保留
-- [ ] max amount / cooldown / daily cap 必须保留
-- [ ] SDK path 与 native path 错误码统一
+- [x] confirm gate 必须保留
+- [x] delegation gate 必须保留
+- [x] max amount / cooldown / daily cap 必须保留
+- [x] SDK path 与 native path 错误码统一
 
 ### C. 测试
-- [ ] execute SDK success/failure/retryable 测试
-- [ ] fallback 触发条件测试
-- [ ] artifact/reconcile 一致性测试
+- [x] execute SDK success/failure/retryable 测试
+- [x] fallback 触发条件测试
+- [x] artifact/reconcile 一致性测试
 
 ---
 

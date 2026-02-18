@@ -233,11 +233,13 @@ npm run monad:morpho:replay
   - rewards read：`morpho_sdk_rewards_fetch_failed_fallback_to_native`
   - rewards claim build：`morpho_sdk_rewards_claim_build_failed_fallback_to_native`
 - rewards claim 成功后必须检查：`txHash`、`executionArtifact`、`executionReconciliation.reconcileOk`、以及 actionHistory 是否写入 `monad_morpho_rewards_claim_execute`
+- earn execute 现在为 SDK-first：若发生应急回退，必须检查响应中 `mode=native-fallback`、`warnings` 包含 `morpho_sdk_execute_failed_fallback_to_native`，且 actionHistory 对应项包含 `fallback.used=true` 与 `fallback.reason`
 - 快速核验：
 ```bash
 curl -s 'http://127.0.0.1:4173/api/monad/morpho/earn/markets' | jq '.dataSource,.sdk,.warnings'
 curl -s 'http://127.0.0.1:4173/api/monad/morpho/earn/strategy' | jq '.dataSource,.sdk,.warnings'
 curl -s 'http://127.0.0.1:4173/api/monad/morpho/earn/rewards' | jq '.dataSource,.sdk,.warnings,.tracking'
+curl -s -X POST 'http://127.0.0.1:4173/api/monad/morpho/earn/execute' -H 'content-type: application/json' -d '{"confirm":true,"amountRaw":"1000"}' | jq '.mode,.warnings,.fallback,.executionArtifact,.executionReconciliation'
 ```
 - claim 核验（需 confirm=true）：
 ```bash

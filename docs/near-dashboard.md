@@ -177,7 +177,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - strategy input normalization is enforced in SDK mode (`apyBps/tvlRaw/liquidityRaw/risk.score`) before scorer
   - `GET /api/monad/morpho/earn/rewards` -> SDK-first rewards read when `MONAD_MORPHO_USE_SDK=true` (normalized `campaign/token/claimable` rows); SDK read failure auto-falls back to native env snapshot with warning `morpho_sdk_rewards_fetch_failed_fallback_to_native`
   - `POST /api/monad/morpho/earn/rewards/claim` (`confirm=true`) -> SDK claim-request builder first when SDK mode is on; if builder fails, command-mode fallback remains available with warning `morpho_sdk_rewards_claim_build_failed_fallback_to_native`; response includes `txHash`, `executionArtifact`, `executionReconciliation`, and writes actionHistory + metrics consistently
-  - `POST /api/monad/morpho/earn/execute` (`confirm=true`) -> native RPC wallet deposit path (approve + deposit) with normalized error (`error/retryable/category/message`) and `executionArtifact/executionReconciliation`
+  - `POST /api/monad/morpho/earn/execute` (`confirm=true`) -> SDK-first deposit routing (`apps/dashboard/monad-morpho-sdk.mjs`) with native emergency fallback (guarded by `MONAD_MORPHO_SDK_EXECUTE_FALLBACK_TO_NATIVE=true`), unified execute model (`status/txHash/error/reconcile/artifact/history`), and explicit fallback markers (`mode=native-fallback`, `warnings=["morpho_sdk_execute_failed_fallback_to_native"]`, `fallback.used=true`)
   - `POST /api/monad/morpho/worker/start|stop` + `GET /api/monad/morpho/worker/status` -> dry-run-first auto-rebalance worker control with interval guardrails
   - `npm run monad:morpho:replay` -> deterministic replay/pressure-test pack, writes `apps/dashboard/data/monad-morpho-replay-trend.json`
   - execution history writes to dashboard `actionHistory` with `action=monad_morpho_earn_execute`, including `runId/txHash/reconciliation`; Monad card shows recent execute trend/error summary + one-click incident copy
@@ -298,6 +298,7 @@ Common mapping examples:
 - `MONAD_MORPHO_COOLDOWN_SECONDS` - cooldown guard between Monad execute calls (default: `0`, disabled)
 - `MONAD_MORPHO_DAILY_CAP_RAW` - optional per-day execute raw amount cap (empty = disabled)
 - `MONAD_MORPHO_REWARDS_JSON` - rewards tracking source JSON array for `/api/monad/morpho/earn/rewards` (SDK mode also consumes this scaffold source for normalized rewards rows)
+- `MONAD_MORPHO_SDK_EXECUTE_FALLBACK_TO_NATIVE` - execute emergency fallback toggle (default `true`); when SDK execute fails, auto-switches to native route and records fallback warnings/history
 - `MONAD_MORPHO_REWARDS_CLAIM_ENABLED` - enable rewards claim execute endpoint (default: `false`)
 - `MONAD_MORPHO_REWARDS_CLAIM_COMMAND` - audited claim command template used by SDK claim-request builder (and native fallback)
 - `MONAD_MORPHO_APY_BPS` - APY hint in bps for dashboard display
