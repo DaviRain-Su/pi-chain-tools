@@ -1,0 +1,57 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://pi-chain-tools.local/schemas/debridge-crosschain-execute-artifact.v1.schema.json",
+	"title": "debridge-crosschain-execute-artifact.v1",
+	"type": "object",
+	"additionalProperties": true,
+	"required": ["type", "version", "provider", "status", "occurredAt"],
+	"properties": {
+		"type": {
+			"const": "debridge_crosschain_execute"
+		},
+		"version": {
+			"const": "v1"
+		},
+		"provider": {
+			"const": "debridge-mcp"
+		},
+		"status": {
+			"type": "string",
+			"enum": ["success", "blocked", "error"]
+		},
+		"runId": {
+			"type": "string"
+		},
+		"originChain": {
+			"type": ["string", "null"]
+		},
+		"destinationChain": {
+			"type": ["string", "null"]
+		},
+		"tokenIn": {
+			"type": ["string", "null"]
+		},
+		"tokenOut": {
+			"type": ["string", "null"]
+		},
+		"amount": {
+			"type": ["string", "null"]
+		},
+		"recipient": {
+			"type": ["string", "null"]
+		},
+		"txHash": {
+			"type": ["string", "null"]
+		},
+		"error": {
+			"type": ["string", "null"]
+		},
+		"rawOutput": {
+			"type": ["string", "null"]
+		},
+		"occurredAt": {
+			"type": "string",
+			"format": "date-time"
+		}
+	}
+}

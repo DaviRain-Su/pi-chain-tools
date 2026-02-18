@@ -10,6 +10,7 @@ const REQUIRED_FILES = [
 	"openclaw-btc5m-runtime-state.schema.json",
 	"openclaw-btc5m-retry-policy.schema.json",
 	"bsc-post-action-supply-artifact.v1.schema.json",
+	"debridge-crosschain-execute-artifact.v1.schema.json",
 ];
 
 function createWorkspace(includeFiles: string[] = REQUIRED_FILES) {
@@ -89,8 +90,8 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		const payload = JSON.parse(result.stdout);
 		expect(payload.status).toBe("failed");
 		expect(payload.summary.allExist).toBe(false);
-		expect(payload.summary.missingFiles).toBe(2);
-		expect(payload.errors).toHaveLength(2);
+		expect(payload.summary.missingFiles).toBe(3);
+		expect(payload.errors).toHaveLength(3);
 		expect(payload.errors).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -100,6 +101,10 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 				expect.objectContaining({
 					code: "missing_file",
 					file: "bsc-post-action-supply-artifact.v1.schema.json",
+				}),
+				expect.objectContaining({
+					code: "missing_file",
+					file: "debridge-crosschain-execute-artifact.v1.schema.json",
 				}),
 			]),
 		);
@@ -148,6 +153,9 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		expect(result.stdout + result.stderr).toContain(
 			"invalid schema file: bsc-post-action-supply-artifact.v1.schema.json",
 		);
+		expect(result.stdout + result.stderr).toContain(
+			"invalid schema file: debridge-crosschain-execute-artifact.v1.schema.json",
+		);
 	});
 
 	it("fails --list-strict if a configured file path exists but is directory", () => {
@@ -168,11 +176,19 @@ describe("validate-openclaw-schemas CLI list modes", () => {
 		expect(result.status).toBe(1);
 		const payload = JSON.parse(result.stdout);
 		expect(payload.status).toBe("failed");
-		expect(payload.summary.missingFiles).toBe(1);
-		expect(payload.errors[0]).toMatchObject({
-			code: "missing_file",
-			file: "bsc-post-action-supply-artifact.v1.schema.json",
-		});
+		expect(payload.summary.missingFiles).toBe(2);
+		expect(payload.errors).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					code: "missing_file",
+					file: "bsc-post-action-supply-artifact.v1.schema.json",
+				}),
+				expect.objectContaining({
+					code: "missing_file",
+					file: "debridge-crosschain-execute-artifact.v1.schema.json",
+				}),
+			]),
+		);
 	});
 
 	it("exposes usage with --help", () => {
