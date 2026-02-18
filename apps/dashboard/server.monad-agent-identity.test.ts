@@ -11,10 +11,13 @@ import {
 const serverPath = path.resolve("apps", "dashboard", "server.mjs");
 const serverSource = readFileSync(serverPath, "utf8");
 
-describe("monad agent identity + delegation v1.3", () => {
-	it("exposes identity + delegation routes with confirm gates", () => {
+describe("monad agent identity + delegation v1.4", () => {
+	it("exposes profile/identity/delegation/name routes with confirm gates", () => {
+		expect(serverSource).toContain("/api/monad/agent/profile");
 		expect(serverSource).toContain("/api/monad/agent/identity");
 		expect(serverSource).toContain("/api/monad/agent/identity/register");
+		expect(serverSource).toContain("/api/monad/agent/name/register");
+		expect(serverSource).toContain("/api/monad/agent/name/update");
 		expect(serverSource).toContain("/api/monad/agent/delegation/prepare");
 		expect(serverSource).toContain("/api/monad/agent/delegation/submit");
 		expect(serverSource).toContain("/api/monad/agent/delegation/revoke");
@@ -38,6 +41,13 @@ describe("monad agent identity + delegation v1.3", () => {
 		});
 		expect(one.agentId).toBe(two.agentId);
 		expect(one.agentId.startsWith("monad-agent-")).toBe(true);
+	});
+
+	it("includes delegation gate bridge in worker/execute paths", () => {
+		expect(serverSource).toContain("evaluateMonadDelegationGate");
+		expect(serverSource).toContain("monad_morpho_worker_delegation_gate");
+		expect(serverSource).toContain("MONAD_DELEGATION_GATE_BLOCKED");
+		expect(serverSource).toContain("monad.agent.profile.v1.4");
 	});
 
 	it("prepares + verifies delegation payload", () => {

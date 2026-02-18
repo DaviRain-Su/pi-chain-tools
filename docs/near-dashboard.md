@@ -155,13 +155,17 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `Copy share link` includes `debridgeWindow` + `debridgeAdvancedOpen` query state for reproducible views
   - `Copy share markdown` copies one-line markdown link
   - `Copy markdown + summary` copies markdown link + current reliability headline for incident handoff
-- Monad Agent Identity + Delegation v1.3 scaffold:
-  - `GET /api/monad/agent/identity` -> deterministic `agentId` + metadata + registration/delegation status
+- Monad Agent profile/discovery + delegation/name mapping v1.4 scaffold:
+  - `GET /api/monad/agent/profile` -> self-describing profile (`schema`, deterministic identity, `a2aEndpoint`, links, delegation gate, name mapping, morpho strategy summary)
+  - `GET /api/monad/agent/identity` -> deterministic `agentId` + metadata + registration/delegation/name snapshots
   - `POST /api/monad/agent/identity/register` (`confirm=true`) -> explicit-gate identity registration artifact/history emission (`mode=mock|simulated-chain`)
+  - `POST /api/monad/agent/name/register` (`confirm=true`) -> ENS-style alias scaffold (stateful local registry, artifact/history/blockers/hints/fixPack)
+  - `POST /api/monad/agent/name/update` (`confirm=true`) -> alias repoint/update with explicit blockers/fix pack when invalid
   - `POST /api/monad/agent/delegation/prepare` -> non-custodial EIP-712-style delegation payload (`domain/types/message/digest`)
   - `POST /api/monad/agent/delegation/submit` (`confirm=true`) -> verifier-gated delegation intake (`blockers/hints/fixPack` when invalid)
   - `POST /api/monad/agent/delegation/revoke` (`confirm=true`) -> revocation path by `delegationId`
-  - dashboard adds minimal v1.3 card for identity/delegation state + action-history-backed metrics
+  - delegation policy bridge: worker and execute endpoint check delegation gate before live execution and emit blocked events/reasons (`monad_morpho_worker_delegation_gate`)
+  - dashboard v1.4 card: profile + name mapping + status badges + copy profile JSON + alias register/update controls
   - local persistence: `MONAD_AGENT_STATE_PATH` (`apps/dashboard/data/monad-agent-state.json` by default)
 - Monad Morpho Earn v1.2 (advanced polish):
   - `GET /api/monad/morpho/earn/readiness` -> execute gate aggregation + risk controls (`canExecute/blockers/hints/fixPack/riskControls`)

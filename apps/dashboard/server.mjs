@@ -1036,6 +1036,11 @@ const MONAD_AGENT_STATE = {
 		registerTxHash: null,
 		notes: null,
 	},
+	nameMapping: {
+		primaryAlias: null,
+		aliases: [],
+		history: [],
+	},
 	delegations: [],
 	metrics: {
 		identityGet: 0,
@@ -1046,6 +1051,12 @@ const MONAD_AGENT_STATE = {
 		delegationSubmitSuccess: 0,
 		delegationRevokeAttempt: 0,
 		delegationRevokeSuccess: 0,
+		nameRegisterAttempt: 0,
+		nameRegisterSuccess: 0,
+		nameUpdateAttempt: 0,
+		nameUpdateSuccess: 0,
+		delegationGateChecks: 0,
+		delegationGateBlocked: 0,
 	},
 };
 const DEBRIDGE_EXECUTE_METRICS = {
@@ -1903,7 +1914,10 @@ async function buildSnapshot(accountId) {
 				...MONAD_AGENT_STATE.identity,
 			},
 			delegation: getMonadDelegationSummary(),
+			delegationGate: evaluateMonadDelegationGate(),
+			nameMapping: getMonadNameMappingSummary(),
 			metrics: { ...MONAD_AGENT_STATE.metrics },
+			profile: buildMonadAgentProfile(),
 		},
 	};
 }
@@ -3729,6 +3743,168 @@ function getMonadDelegationSummary() {
 	};
 }
 
+function normalizeMonadAlias(input) {
+	return String(input || "")
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9.-]/g, "")
+		.slice(0, 64);
+}
+
+function validateMonadAlias(input) {
+	const alias = normalizeMonadAlias(input);
+	const blockers = [];
+	if (!alias) blockers.push("alias_missing");
+	if (alias && alias.length < 3) blockers.push("alias_too_short");
+	if (alias && !/^[a-z0-9]/.test(alias)) blockers.push("alias_invalid_start");
+	if (alias && /\.\./.test(alias))
+		blockers.push("alias_invalid_consecutive_dots");
+	if (alias && !/^[a-z0-9][a-z0-9.-]*$/.test(alias))
+		blockers.push("alias_invalid_charset");
+	const exists = MONAD_AGENT_STATE.nameMapping.aliases.find(
+		(row) => String(row.alias || "").toLowerCase() === alias,
+	);
+	if (exists) blockers.push("alias_already_exists");
+	const hints = blockers.map((code) => {
+		switch (code) {
+			case "alias_missing":
+				return "Provide alias like pi-agent.monad";
+			case "alias_too_short":
+				return "Alias length must be >= 3";
+			case "alias_already_exists":
+				return "Use /api/monad/agent/name/update to repoint existing alias";
+			default:
+				return `Fix ${code.replaceAll("_", " ")}`;
+		}
+	});
+	return {
+		ok: blockers.length === 0,
+		alias,
+		blockers,
+		hints,
+		fixPack: {
+			example: {
+				alias: "pi-agent.monad",
+				confirm: true,
+				note: "dashboard-register",
+			},
+			envLines: [
+				`MONAD_EXECUTE_ENABLED=${MONAD_EXECUTE_ENABLED}`,
+				"# For chain publish later, provide registry contract + key",
+			],
+		},
+	};
+}
+
+function getMonadNameMappingSummary() {
+	const aliases = Array.isArray(MONAD_AGENT_STATE?.nameMapping?.aliases)
+		? MONAD_AGENT_STATE.nameMapping.aliases
+		: [];
+	const history = Array.isArray(MONAD_AGENT_STATE?.nameMapping?.history)
+		? MONAD_AGENT_STATE.nameMapping.history
+		: [];
+	return {
+		primaryAlias: MONAD_AGENT_STATE?.nameMapping?.primaryAlias || null,
+		aliases: aliases.slice(0, 20),
+		history: history.slice(0, 30),
+		totalAliases: aliases.length,
+		totalHistory: history.length,
+	};
+}
+
+function evaluateMonadDelegationGate({
+	scope = "monad:morpho:earn:execute",
+} = {}) {
+	MONAD_AGENT_STATE.metrics.delegationGateChecks += 1;
+	const nowSec = Math.floor(Date.now() / 1000);
+	const active = MONAD_AGENT_STATE.delegations.filter((row) => {
+		if (row?.status !== "active") return false;
+		const exp = Number(row?.delegationIntent?.message?.expiresAt || 0);
+		if (Number.isFinite(exp) && exp > 0 && exp <= nowSec) return false;
+		const scopes = Array.isArray(row?.delegationIntent?.scope)
+			? row.delegationIntent.scope.map((x) => String(x))
+			: [];
+		if (!scopes.includes(scope)) return false;
+		return true;
+	});
+	if (active.length > 0) {
+		return {
+			ok: true,
+			status: "active",
+			reason: "delegation_active",
+			delegationId: active[0]?.delegationId || null,
+		};
+	}
+	MONAD_AGENT_STATE.metrics.delegationGateBlocked += 1;
+	return {
+		ok: false,
+		status: "blocked",
+		reason: "missing_active_delegation",
+		blockers: ["missing_active_delegation"],
+		hints: [
+			"Call /api/monad/agent/delegation/prepare then /submit to activate delegation",
+		],
+		fixPack: {
+			next: [
+				"POST /api/monad/agent/delegation/prepare",
+				"POST /api/monad/agent/delegation/submit (confirm=true)",
+			],
+		},
+	};
+}
+
+async function emitMonadDelegationBlockedEvent(payload = {}) {
+	recordMonadMorphoWorkerEvent({
+		status: "blocked",
+		event: "delegation_gate_blocked",
+		...payload,
+	});
+	pushActionHistory({
+		action: "monad_morpho_worker_delegation_gate",
+		status: "blocked",
+		summary: `delegation gate blocked: ${payload?.reason || "unknown"}`,
+		detail: payload,
+	});
+	await saveMonadAgentState();
+}
+
+function buildMonadAgentProfile() {
+	const identity = getMonadAgentIdentity();
+	const delegation = getMonadDelegationSummary();
+	const strategy = {
+		vaults: MONAD_MORPHO_VAULTS,
+		primaryVault: MONAD_MORPHO_VAULTS[0] || null,
+		asset: MONAD_MORPHO_ASSET || null,
+		maxAmountRaw: MONAD_MORPHO_MAX_AMOUNT_RAW,
+		apyBps: MONAD_MORPHO_APY_BPS,
+		riskScore: MONAD_MORPHO_RISK_SCORE,
+		weights: MONAD_MORPHO_STRATEGY_WEIGHTS,
+	};
+	return {
+		schema: "monad.agent.profile.v1.4",
+		chain: "monad",
+		a2aEndpoint: "/api/monad/morpho/earn/execute",
+		identity,
+		delegation: {
+			...delegation,
+			gate: evaluateMonadDelegationGate(),
+		},
+		nameMapping: getMonadNameMappingSummary(),
+		links: {
+			strategy: "/api/monad/morpho/earn/strategy",
+			vaults: MONAD_MORPHO_VAULTS,
+			readiness: "/api/monad/morpho/earn/readiness",
+			identity: "/api/monad/agent/identity",
+			nameRegister: "/api/monad/agent/name/register",
+			nameUpdate: "/api/monad/agent/name/update",
+			delegationPrepare: "/api/monad/agent/delegation/prepare",
+			delegationSubmit: "/api/monad/agent/delegation/submit",
+		},
+		strategy,
+		updatedAt: new Date().toISOString(),
+	};
+}
+
 async function saveMonadAgentState() {
 	try {
 		await mkdir(path.dirname(MONAD_AGENT_STATE_PATH), { recursive: true });
@@ -3756,6 +3932,18 @@ async function loadMonadAgentState() {
 			MONAD_AGENT_STATE.metrics = {
 				...MONAD_AGENT_STATE.metrics,
 				...parsed.metrics,
+			};
+		}
+		if (parsed.nameMapping && typeof parsed.nameMapping === "object") {
+			MONAD_AGENT_STATE.nameMapping = {
+				...MONAD_AGENT_STATE.nameMapping,
+				...parsed.nameMapping,
+				aliases: Array.isArray(parsed?.nameMapping?.aliases)
+					? parsed.nameMapping.aliases.slice(0, 100)
+					: [],
+				history: Array.isArray(parsed?.nameMapping?.history)
+					? parsed.nameMapping.history.slice(0, 200)
+					: [],
 			};
 		}
 		if (Array.isArray(parsed.delegations)) {
@@ -5635,6 +5823,22 @@ function startMonadMorphoWorker(options = {}) {
 	);
 	const tick = async () => {
 		try {
+			const delegationGate = evaluateMonadDelegationGate();
+			if (!MONAD_MORPHO_WORKER.dryRun && !delegationGate.ok) {
+				MONAD_MORPHO_WORKER.lastRunAt = new Date().toISOString();
+				MONAD_MORPHO_WORKER.lastDecision = {
+					action: "blocked",
+					reason: delegationGate.reason,
+					delegationGate,
+				};
+				MONAD_MORPHO_WORKER.lastError = null;
+				await emitMonadDelegationBlockedEvent({
+					reason: delegationGate.reason,
+					blockers: delegationGate.blockers || [],
+					workerMode: "live",
+				});
+				return;
+			}
 			const { markets, strategy } = await collectMonadMorphoMarketsWithStrategy(
 				{
 					amountRaw: MONAD_MORPHO_WORKER.maxAmountRaw,
@@ -8010,6 +8214,29 @@ const server = http.createServer(async (req, res) => {
 			});
 		}
 
+		if (url.pathname === "/api/monad/agent/profile") {
+			MONAD_AGENT_STATE.metrics.identityGet += 1;
+			const profile = buildMonadAgentProfile();
+			try {
+				const { strategy } = await collectMonadMorphoMarketsWithStrategy();
+				profile.strategySummary = {
+					recommendation: strategy?.recommendation || null,
+					allocation: Array.isArray(strategy?.allocation)
+						? strategy.allocation.slice(0, 3)
+						: [],
+				};
+			} catch (error) {
+				profile.strategySummary = {
+					error: error instanceof Error ? error.message : String(error),
+				};
+			}
+			await saveMonadAgentState();
+			return json(res, 200, {
+				ok: true,
+				profile,
+			});
+		}
+
 		if (url.pathname === "/api/monad/agent/identity") {
 			MONAD_AGENT_STATE.metrics.identityGet += 1;
 			const identity = getMonadAgentIdentity();
@@ -8021,6 +8248,8 @@ const server = http.createServer(async (req, res) => {
 					registration: { ...MONAD_AGENT_STATE.identity },
 				},
 				delegation: getMonadDelegationSummary(),
+				delegationGate: evaluateMonadDelegationGate(),
+				nameMapping: getMonadNameMappingSummary(),
 				metrics: { ...MONAD_AGENT_STATE.metrics },
 				updatedAt: new Date().toISOString(),
 			});
@@ -8099,6 +8328,171 @@ const server = http.createServer(async (req, res) => {
 						`MONAD_EXECUTE_PRIVATE_KEY=${MONAD_EXECUTE_PRIVATE_KEY ? "***" : "<set-private-key>"}`,
 					],
 				},
+			});
+		}
+
+		if (
+			url.pathname === "/api/monad/agent/name/register" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			MONAD_AGENT_STATE.metrics.nameRegisterAttempt += 1;
+			const v = validateMonadAlias(payload.alias);
+			if (!v.ok) {
+				return json(res, 200, {
+					ok: true,
+					mode: "blocked",
+					error: "MONAD_AGENT_NAME_REGISTER_BLOCKED",
+					artifact: {
+						type: "monad_agent_name_register_artifact.v1",
+						alias: v.alias,
+						requestedAt: new Date().toISOString(),
+					},
+					history: getMonadNameMappingSummary().history,
+					blockers: v.blockers,
+					hints: v.hints,
+					fixPack: v.fixPack,
+				});
+			}
+			const nowIso = new Date().toISOString();
+			const row = {
+				alias: v.alias,
+				status: "active",
+				createdAt: nowIso,
+				updatedAt: nowIso,
+				note: String(payload.note || "").trim() || null,
+			};
+			MONAD_AGENT_STATE.nameMapping.aliases.unshift(row);
+			if (MONAD_AGENT_STATE.nameMapping.aliases.length > 100) {
+				MONAD_AGENT_STATE.nameMapping.aliases.length = 100;
+			}
+			MONAD_AGENT_STATE.nameMapping.primaryAlias = row.alias;
+			MONAD_AGENT_STATE.nameMapping.history.unshift({
+				action: "register",
+				alias: row.alias,
+				at: nowIso,
+				note: row.note,
+			});
+			if (MONAD_AGENT_STATE.nameMapping.history.length > 200) {
+				MONAD_AGENT_STATE.nameMapping.history.length = 200;
+			}
+			MONAD_AGENT_STATE.metrics.nameRegisterSuccess += 1;
+			await saveMonadAgentState();
+			return json(res, 200, {
+				ok: true,
+				mode: "recorded",
+				artifact: {
+					type: "monad_agent_name_register_artifact.v1",
+					alias: row.alias,
+					status: row.status,
+				},
+				history: getMonadNameMappingSummary().history,
+				nameMapping: getMonadNameMappingSummary(),
+			});
+		}
+
+		if (
+			url.pathname === "/api/monad/agent/name/update" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			MONAD_AGENT_STATE.metrics.nameUpdateAttempt += 1;
+			const alias = normalizeMonadAlias(payload.alias);
+			const nextAlias = normalizeMonadAlias(payload.nextAlias || payload.alias);
+			const target = MONAD_AGENT_STATE.nameMapping.aliases.find(
+				(row) => String(row.alias || "").toLowerCase() === alias,
+			);
+			if (!target || !nextAlias) {
+				return json(res, 200, {
+					ok: true,
+					mode: "blocked",
+					error: "MONAD_AGENT_NAME_UPDATE_BLOCKED",
+					artifact: {
+						type: "monad_agent_name_update_artifact.v1",
+						alias,
+						nextAlias,
+						requestedAt: new Date().toISOString(),
+					},
+					history: getMonadNameMappingSummary().history,
+					blockers: [
+						...(target ? [] : ["alias_not_found"]),
+						...(nextAlias ? [] : ["next_alias_missing"]),
+					],
+					hints: [
+						"Use existing alias as alias",
+						"Provide nextAlias like pi-agent-v2.monad",
+					],
+					fixPack: {
+						example: {
+							alias: "pi-agent.monad",
+							nextAlias: "pi-agent-v2.monad",
+							confirm: true,
+						},
+					},
+				});
+			}
+			if (nextAlias !== alias) {
+				const dup = MONAD_AGENT_STATE.nameMapping.aliases.find(
+					(row) => String(row.alias || "").toLowerCase() === nextAlias,
+				);
+				if (dup) {
+					return json(res, 200, {
+						ok: true,
+						mode: "blocked",
+						error: "MONAD_AGENT_NAME_UPDATE_BLOCKED",
+						artifact: {
+							type: "monad_agent_name_update_artifact.v1",
+							alias,
+							nextAlias,
+						},
+						history: getMonadNameMappingSummary().history,
+						blockers: ["next_alias_already_exists"],
+						hints: ["Choose another nextAlias"],
+						fixPack: {
+							example: { alias, nextAlias: `${nextAlias}-1`, confirm: true },
+						},
+					});
+				}
+			}
+			target.alias = nextAlias;
+			target.updatedAt = new Date().toISOString();
+			target.note = String(payload.note || target.note || "").trim() || null;
+			MONAD_AGENT_STATE.nameMapping.primaryAlias = nextAlias;
+			MONAD_AGENT_STATE.nameMapping.history.unshift({
+				action: "update",
+				alias,
+				nextAlias,
+				at: target.updatedAt,
+				note: target.note,
+			});
+			if (MONAD_AGENT_STATE.nameMapping.history.length > 200) {
+				MONAD_AGENT_STATE.nameMapping.history.length = 200;
+			}
+			MONAD_AGENT_STATE.metrics.nameUpdateSuccess += 1;
+			await saveMonadAgentState();
+			return json(res, 200, {
+				ok: true,
+				mode: "updated",
+				artifact: {
+					type: "monad_agent_name_update_artifact.v1",
+					alias,
+					nextAlias,
+					updatedAt: target.updatedAt,
+				},
+				history: getMonadNameMappingSummary().history,
+				nameMapping: getMonadNameMappingSummary(),
 			});
 		}
 
@@ -8558,6 +8952,22 @@ const server = http.createServer(async (req, res) => {
 					retryable: false,
 					category: "input",
 					message: "Missing confirm=true",
+				});
+			}
+			const delegationGate = evaluateMonadDelegationGate();
+			if (!delegationGate.ok) {
+				await emitMonadDelegationBlockedEvent({
+					reason: delegationGate.reason,
+					blockers: delegationGate.blockers || [],
+					entrypoint: "execute_endpoint",
+				});
+				return json(res, 200, {
+					ok: true,
+					mode: "blocked",
+					error: "MONAD_DELEGATION_GATE_BLOCKED",
+					blockers: delegationGate.blockers || ["missing_active_delegation"],
+					hints: delegationGate.hints || [],
+					fixPack: delegationGate.fixPack || {},
 				});
 			}
 			try {

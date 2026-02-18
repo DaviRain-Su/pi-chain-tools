@@ -34,6 +34,7 @@ Multi-chain toolset library for Pi extensions with a chain-agnostic grouping mod
 
 - **`docs/near-hackathon.md`：NEAR Innovation Sandbox — Autonomous Stablecoin Yield Agent**
 - `docs/monad-ai-hackathon.md`：Monad AI Hackathon 参赛文档（赛道选择、架构优势、展示脚本与评审话术）
+- `docs/monad-agent-identity-v1.4-notes.md`：Monad agent v1.4 productization notes（profile/name/delegation gate）
 
 ## Solana Tool Groups
 

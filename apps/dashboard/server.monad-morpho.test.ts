@@ -30,6 +30,8 @@ describe("monad morpho earn mvp", () => {
 
 	it("contains native rpc deposit execution path + reconciliation", () => {
 		expect(serverSource).toContain("function executeMonadMorphoDeposit(");
+		expect(serverSource).toContain("MONAD_DELEGATION_GATE_BLOCKED");
+		expect(serverSource).toContain("delegation_gate_blocked");
 		expect(serverSource).toContain(
 			"function deposit(uint256 assets,address receiver) returns (uint256 shares)",
 		);

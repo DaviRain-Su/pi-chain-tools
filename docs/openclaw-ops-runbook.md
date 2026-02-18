@@ -264,3 +264,30 @@ Phase-1（本期，已完成）
 Phase-2（下期，最小目标）
 - native slot 协议级用例继续扩充（真实链路回放 + 异常分类覆盖）
 - Dashboard readiness 卡片继续补齐协议级 fix pack 提示
+
+### 5.6 Monad v1.4 quick ops (profile / name / delegation gate)
+
+```bash
+# profile discovery (A2A + identity + strategy summary)
+curl -s http://127.0.0.1:4173/api/monad/agent/profile | jq
+
+# register alias (confirm-gated, local scaffold)
+curl -s -X POST http://127.0.0.1:4173/api/monad/agent/name/register \
+  -H 'content-type: application/json' \
+  -d '{"confirm":true,"alias":"pi-agent.monad","note":"ops-register"}' | jq
+
+# update alias mapping
+curl -s -X POST http://127.0.0.1:4173/api/monad/agent/name/update \
+  -H 'content-type: application/json' \
+  -d '{"confirm":true,"alias":"pi-agent.monad","nextAlias":"pi-agent-v2.monad","note":"ops-update"}' | jq
+
+# delegation gate preflight (identity returns gate summary)
+curl -s http://127.0.0.1:4173/api/monad/agent/identity | jq '.delegationGate'
+
+# if blocked before execute: prepare + submit delegation intent
+curl -s -X POST http://127.0.0.1:4173/api/monad/agent/delegation/prepare \
+  -H 'content-type: application/json' \
+  -d '{"delegatee":"0x0000000000000000000000000000000000000001","scope":["monad:morpho:earn:execute"],"revocable":true}' | jq
+```
+
+> 说明：v1.4 的 name/profile 为安全可复现的本地状态脚手架，默认不做风险链上写入；涉及链上执行的动作仍需 `confirm=true`。

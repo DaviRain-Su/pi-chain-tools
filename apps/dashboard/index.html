@@ -199,16 +199,25 @@
       </div>
 
       <div class="card" style="margin-top:16px">
-        <h3>Monad Agent Identity + Delegation (v1.3)</h3>
-        <div id="monadAgentIdentity" class="muted">identity: -</div>
+        <h3>Monad Agent Profile + Name Mapping (v1.4)</h3>
+        <div id="monadAgentProfile" class="muted">profile: -</div>
+        <div id="monadAgentIdentity" class="muted" style="margin-top:6px">identity: -</div>
         <div id="monadAgentDelegation" class="muted" style="margin-top:6px">delegation: -</div>
+        <div id="monadAgentName" class="muted" style="margin-top:6px">name: -</div>
         <div id="monadAgentMetrics" class="muted" style="margin-top:6px">metrics: -</div>
         <div class="row" style="margin-top:8px">
+          <button id="copyMonadAgentProfile">Copy profile JSON</button>
           <button id="registerMonadAgentIdentity">Register identity (confirm)</button>
           <input id="monadDelegationDelegatee" placeholder="delegatee 0x..." size="24" />
           <button id="prepareMonadDelegation">Prepare delegation</button>
           <button id="submitMonadDelegation">Submit delegation (confirm)</button>
           <button id="revokeMonadDelegation">Revoke latest (confirm)</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <input id="monadAgentAlias" placeholder="alias (e.g. pi-agent.monad)" size="24" />
+          <input id="monadAgentNextAlias" placeholder="next alias for update" size="24" />
+          <button id="registerMonadAgentName">Register alias (confirm)</button>
+          <button id="updateMonadAgentName">Update alias (confirm)</button>
         </div>
       </div>
 
@@ -481,11 +490,18 @@
       const monadMorphoRewardsEl = document.getElementById("monadMorphoRewards");
       const monadMorphoLastEl = document.getElementById("monadMorphoLast");
       const monadMorphoTrendEl = document.getElementById("monadMorphoTrend");
+      const monadAgentProfileEl = document.getElementById("monadAgentProfile");
       const monadAgentIdentityEl = document.getElementById("monadAgentIdentity");
       const monadAgentDelegationEl = document.getElementById("monadAgentDelegation");
+      const monadAgentNameEl = document.getElementById("monadAgentName");
       const monadAgentMetricsEl = document.getElementById("monadAgentMetrics");
+      const copyMonadAgentProfileBtn = document.getElementById("copyMonadAgentProfile");
       const registerMonadAgentIdentityBtn = document.getElementById("registerMonadAgentIdentity");
       const monadDelegationDelegateeEl = document.getElementById("monadDelegationDelegatee");
+      const monadAgentAliasEl = document.getElementById("monadAgentAlias");
+      const monadAgentNextAliasEl = document.getElementById("monadAgentNextAlias");
+      const registerMonadAgentNameBtn = document.getElementById("registerMonadAgentName");
+      const updateMonadAgentNameBtn = document.getElementById("updateMonadAgentName");
       const prepareMonadDelegationBtn = document.getElementById("prepareMonadDelegation");
       const submitMonadDelegationBtn = document.getElementById("submitMonadDelegation");
       const revokeMonadDelegationBtn = document.getElementById("revokeMonadDelegation");
@@ -1260,6 +1276,7 @@
       let lastRebalancePlan = null;
       let lastAcpAsyncJobId = "";
       let lastPreparedDelegationIntent = null;
+      let lastMonadAgentProfile = null;
       const BSC_READINESS_PROTOCOL_KEY = "near_dashboard.bsc.readinessProtocol";
       const DEBRIDGE_WINDOW_KEY = "near_dashboard.debridge.window";
       const DEBRIDGE_ADVANCED_OPEN_KEY = "near_dashboard.debridge.advancedOpen";
@@ -1333,7 +1350,7 @@
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
         const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
-        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes] = await Promise.all([
+        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes] = await Promise.all([
           fetch(`/api/snapshot${query}`),
           fetch(`/api/portfolio/unified${query}`),
           fetch(`/api/bsc/yield/plan${query ? `${query}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
@@ -1350,6 +1367,7 @@
           fetch("/api/monad/morpho/earn/strategy"),
           fetch("/api/monad/morpho/worker/status"),
           fetch("/api/monad/morpho/earn/rewards"),
+          fetch("/api/monad/agent/profile"),
         ]);
         const data = await snapRes.json();
         const unified = await unifiedRes.json().catch(() => ({ ok: false }));
@@ -1367,6 +1385,7 @@
         const monadMorphoStrategy = await monadMorphoStrategyRes.json().catch(() => ({ ok: false, strategy: null }));
         const monadMorphoWorker = await monadMorphoWorkerRes.json().catch(() => ({ ok: false, worker: {} }));
         const monadMorphoRewards = await monadMorphoRewardsRes.json().catch(() => ({ ok: false, rewards: [] }));
+        const monadAgentProfilePayload = await monadAgentProfileRes.json().catch(() => ({ ok: false, profile: null }));
         lastCiSignatures = ciSignatures;
         if (!snapRes.ok) {
           metaEl.textContent = `Error: ${data.error || "Unknown"}`;
@@ -1414,12 +1433,19 @@
         const monadOk = monadRecent.length - monadErr;
         monadMorphoTrendEl.innerHTML = `trend(10): <span class="ok">ok=${monadOk}</span> · <span class="${monadErr > 0 ? "warn" : "muted"}">error=${monadErr}</span> · errRate=${monadRecent.length ? `${((monadErr / monadRecent.length) * 100).toFixed(0)}%` : "-"}`;
         const monadAgent = data?.monadAgent || {};
-        const identity = monadAgent?.identity || {};
-        const delegation = monadAgent?.delegation || {};
+        const profile = monadAgentProfilePayload?.profile || monadAgent?.profile || {};
+        lastMonadAgentProfile = profile;
+        const identity = monadAgent?.identity || profile?.identity || {};
+        const delegation = monadAgent?.delegation || profile?.delegation || {};
+        const delegationGate = monadAgent?.delegationGate || profile?.delegation?.gate || {};
+        const nameMapping = monadAgent?.nameMapping || profile?.nameMapping || {};
         const metrics = monadAgent?.metrics || {};
+        const gateCls = delegationGate?.ok ? "ok" : "warn";
+        monadAgentProfileEl.innerHTML = `profile: schema=${profile?.schema || "-"} · a2a=${profile?.a2aEndpoint || "-"} · strategyTop=${profile?.strategySummary?.recommendation?.vault || profile?.strategy?.primaryVault || "-"} · gate=<span class="${gateCls}">${delegationGate?.ok ? "active" : "blocked"}</span>`;
         monadAgentIdentityEl.innerHTML = `identity: agentId=${identity?.agentId || "-"} · owner=${identity?.metadata?.ownerAccountId || "-"} · operator=${identity?.metadata?.operatorAddress || "-"} · registered=<span class="${identity?.registered ? "ok" : "warn"}">${identity?.registered ? "yes" : "no"}</span> · mode=${identity?.registerMode || "-"}`;
-        monadAgentDelegationEl.innerHTML = `delegation: active=${delegation?.active || 0} · revoked=${delegation?.revoked || 0} · total=${delegation?.total || 0} · recent=${(delegation?.recent || []).slice(0, 2).map((r) => `${r.delegationId}:${r.status}`).join(",") || "-"}`;
-        monadAgentMetricsEl.innerHTML = `metrics: idGet=${metrics.identityGet || 0} · register=${metrics.identityRegisterSuccess || 0}/${metrics.identityRegisterAttempt || 0} · prepare=${metrics.delegationPrepare || 0} · submit=${metrics.delegationSubmitSuccess || 0}/${metrics.delegationSubmitAttempt || 0} · revoke=${metrics.delegationRevokeSuccess || 0}/${metrics.delegationRevokeAttempt || 0}`;
+        monadAgentDelegationEl.innerHTML = `delegation: active=<span class="${(delegation?.active || 0) > 0 ? "ok" : "warn"}">${delegation?.active || 0}</span> · revoked=${delegation?.revoked || 0} · total=${delegation?.total || 0} · gateReason=${delegationGate?.reason || "-"} · recent=${(delegation?.recent || []).slice(0, 2).map((r) => `${r.delegationId}:${r.status}`).join(",") || "-"}`;
+        monadAgentNameEl.innerHTML = `name: primary=<span class="${nameMapping?.primaryAlias ? "ok" : "warn"}">${nameMapping?.primaryAlias || "-"}</span> · aliases=${nameMapping?.totalAliases || (nameMapping?.aliases || []).length || 0} · history=${nameMapping?.totalHistory || (nameMapping?.history || []).length || 0}`;
+        monadAgentMetricsEl.innerHTML = `metrics: idGet=${metrics.identityGet || 0} · register=${metrics.identityRegisterSuccess || 0}/${metrics.identityRegisterAttempt || 0} · prepare=${metrics.delegationPrepare || 0} · submit=${metrics.delegationSubmitSuccess || 0}/${metrics.delegationSubmitAttempt || 0} · revoke=${metrics.delegationRevokeSuccess || 0}/${metrics.delegationRevokeAttempt || 0} · nameReg=${metrics.nameRegisterSuccess || 0}/${metrics.nameRegisterAttempt || 0} · nameUpd=${metrics.nameUpdateSuccess || 0}/${metrics.nameUpdateAttempt || 0} · gateBlocked=${metrics.delegationGateBlocked || 0}/${metrics.delegationGateChecks || 0}`;
         ciSignaturesEl.textContent = computeCiSignaturesSummary(ciSignatures);
         ciAutoActionEl.textContent = getCiAutoActionHint(ciSignatures);
         renderCiSignaturesRows(ciSignatures);
@@ -2483,6 +2509,56 @@
           await load();
         } catch (e) {
           acpAsyncMetaEl.textContent = `Purge failed: ${e.message || e}`;
+        }
+      });
+
+      copyMonadAgentProfileBtn?.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(JSON.stringify(lastMonadAgentProfile || {}, null, 2));
+          cmdMetaEl.textContent = "Monad profile JSON copied";
+        } catch {
+          cmdMetaEl.textContent = "Copy profile JSON failed";
+        }
+      });
+
+      registerMonadAgentNameBtn?.addEventListener("click", async () => {
+        try {
+          const alias = String(monadAgentAliasEl?.value || "").trim();
+          const res = await fetch("/api/monad/agent/name/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm: true, alias, note: "dashboard-register" }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || payload?.ok === false || payload?.mode === "blocked") {
+            cmdMetaEl.textContent = `Alias register blocked: ${payload?.error || (payload?.blockers || []).join(",") || payload?.message || res.status}`;
+            return;
+          }
+          cmdMetaEl.textContent = `Alias registered: ${payload?.artifact?.alias || alias}`;
+          await load();
+        } catch (error) {
+          cmdMetaEl.textContent = `Alias register failed: ${error?.message || error}`;
+        }
+      });
+
+      updateMonadAgentNameBtn?.addEventListener("click", async () => {
+        try {
+          const alias = String(monadAgentAliasEl?.value || "").trim();
+          const nextAlias = String(monadAgentNextAliasEl?.value || "").trim();
+          const res = await fetch("/api/monad/agent/name/update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm: true, alias, nextAlias, note: "dashboard-update" }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || payload?.ok === false || payload?.mode === "blocked") {
+            cmdMetaEl.textContent = `Alias update blocked: ${payload?.error || (payload?.blockers || []).join(",") || payload?.message || res.status}`;
+            return;
+          }
+          cmdMetaEl.textContent = `Alias updated: ${payload?.artifact?.nextAlias || nextAlias}`;
+          await load();
+        } catch (error) {
+          cmdMetaEl.textContent = `Alias update failed: ${error?.message || error}`;
         }
       });
 
