@@ -201,6 +201,9 @@
           <button id="appendQuickFixTimeout">+ timeout</button>
           <button id="appendQuickFixRate">+ rate-limit</button>
           <button id="appendQuickFixNetwork">+ network</button>
+          <button id="copyQuickFixTimeout">copy timeout</button>
+          <button id="copyQuickFixRate">copy rate</button>
+          <button id="copyQuickFixNetwork">copy network</button>
         </div>
         <div id="debridgeReliability" class="muted" style="white-space:pre-wrap">-</div>
       </div>
@@ -422,6 +425,9 @@
       const appendQuickFixTimeoutBtn = document.getElementById("appendQuickFixTimeout");
       const appendQuickFixRateBtn = document.getElementById("appendQuickFixRate");
       const appendQuickFixNetworkBtn = document.getElementById("appendQuickFixNetwork");
+      const copyQuickFixTimeoutBtn = document.getElementById("copyQuickFixTimeout");
+      const copyQuickFixRateBtn = document.getElementById("copyQuickFixRate");
+      const copyQuickFixNetworkBtn = document.getElementById("copyQuickFixNetwork");
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
@@ -2308,6 +2314,30 @@
       appendQuickFixNetworkBtn?.addEventListener("click", () => {
         appendDebridgeQuickFixToConsole("debridge_execute_network_error");
         cmdMetaEl.textContent = "Appended quick fix (network)";
+      });
+      copyQuickFixTimeoutBtn?.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(buildDebridgeQuickFixSnippet("debridge_execute_timeout"));
+          cmdMetaEl.textContent = "Copied quick fix (timeout)";
+        } catch {
+          cmdMetaEl.textContent = "Copy quick fix (timeout) failed";
+        }
+      });
+      copyQuickFixRateBtn?.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(buildDebridgeQuickFixSnippet("debridge_execute_rate_limited"));
+          cmdMetaEl.textContent = "Copied quick fix (rate-limit)";
+        } catch {
+          cmdMetaEl.textContent = "Copy quick fix (rate-limit) failed";
+        }
+      });
+      copyQuickFixNetworkBtn?.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(buildDebridgeQuickFixSnippet("debridge_execute_network_error"));
+          cmdMetaEl.textContent = "Copied quick fix (network)";
+        } catch {
+          cmdMetaEl.textContent = "Copy quick fix (network) failed";
+        }
       });
       acpStatusFilterEl?.addEventListener("change", () => {
         syncAcpFiltersToUrl();
