@@ -1108,11 +1108,16 @@
         strategyDslInputEl.value = JSON.stringify(buildStrategyDslSample(), null, 2);
       }
       if (debridgeWindowEl) {
+        const qp = new URLSearchParams(window.location.search || "");
+        const qsWindow = String(qp.get("debridgeWindow") || "").toLowerCase();
         const savedDebridgeWindow = String(localStorage.getItem(DEBRIDGE_WINDOW_KEY) || "24h").toLowerCase();
         const allowedDebridgeWindows = ["1h", "24h", "7d"];
-        debridgeWindowEl.value = allowedDebridgeWindows.includes(savedDebridgeWindow)
-          ? savedDebridgeWindow
-          : "24h";
+        const selectedWindow = allowedDebridgeWindows.includes(qsWindow)
+          ? qsWindow
+          : allowedDebridgeWindows.includes(savedDebridgeWindow)
+            ? savedDebridgeWindow
+            : "24h";
+        debridgeWindowEl.value = selectedWindow;
       }
       if (debridgeAdvancedToolsEl) {
         const qp = new URLSearchParams(window.location.search || "");
@@ -2270,6 +2275,10 @@
       debridgeWindowEl?.addEventListener("change", () => {
         const nextWindow = String(debridgeWindowEl.value || "24h");
         localStorage.setItem(DEBRIDGE_WINDOW_KEY, nextWindow);
+        const qp = new URLSearchParams(window.location.search || "");
+        qp.set("debridgeWindow", nextWindow);
+        const next = `${window.location.pathname}?${qp.toString()}`.replace(/\?$/, "");
+        window.history.replaceState(null, "", next);
         if (!lastSnapshot) return;
         debridgeReliabilityEl.textContent = computeDebridgeReliability(
           lastSnapshot,
