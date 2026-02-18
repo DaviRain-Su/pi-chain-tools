@@ -807,6 +807,8 @@ Quick references:
 - Monad × Morpho submission template: `docs/hackathon-monad-morpho-submission.md`
 - Monad × Morpho 3-day build plan: `docs/monad-morpho-build-plan.md`
 - Morpho Earn integration checklist (file-level): `docs/monad-morpho-integration-checklist.md`
+- Hackathon final submission checklist: `docs/hackathon-final-submission-checklist.md`
+- Hackathon 5-min pitch script: `docs/hackathon-5min-pitch-script.md`
 
 ### Local NEAR Dashboard (web)
 
