@@ -805,6 +805,7 @@ Quick references:
 - Good Vibes Only submission template (BSC): `docs/hackathon-goodvibes-submission.md`
 - Monad × Morpho submission template: `docs/hackathon-monad-morpho-submission.md`
 - Monad × Morpho 3-day build plan: `docs/monad-morpho-build-plan.md`
+- Morpho Earn integration checklist (file-level): `docs/monad-morpho-integration-checklist.md`
 
 ### Local NEAR Dashboard (web)
 
