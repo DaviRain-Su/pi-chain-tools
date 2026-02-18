@@ -12,7 +12,7 @@ const retryDelayMs = Math.max(
 
 function runCiOnce() {
 	return new Promise((resolve) => {
-		const child = spawn("npm", ["run", "ci"], {
+		const child = spawn("npm", ["run", "ci:resilient"], {
 			stdio: "inherit",
 			env: process.env,
 			shell: process.platform === "win32",
@@ -30,7 +30,7 @@ for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
 	}
 	if (attempt < maxAttempts) {
 		console.log(
-			`[ci-retry] failed with code=${code}, retrying in ${retryDelayMs}ms...`,
+			`[ci-retry] ci:resilient failed with code=${code}, retrying in ${retryDelayMs}ms...`,
 		);
 		await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
 	} else {
