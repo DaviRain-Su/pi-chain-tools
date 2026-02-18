@@ -819,6 +819,7 @@ Quick references:
 - Hackathon final submission checklist: `docs/hackathon-final-submission-checklist.md`
 - Hackathon 5-min pitch script: `docs/hackathon-5min-pitch-script.md`
 - Monad + Morpho SDK integration plan: `docs/monad-morpho-sdk-integration-plan.md`
+- Sol-agent integration plan: `docs/sol-agent-integration-plan.md`
 - Submission evidence artifact guide: `npm run submission:evidence` (writes `docs/submission-evidence.md`)
 - One-click Monad↔BSC demo flow: `npm run demo:monad-bsc` (dry-run default, explicit execute guard)
 
