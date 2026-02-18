@@ -201,6 +201,7 @@
           <button id="appendQuickFixTimeout">+ timeout</button>
           <button id="appendQuickFixRate">+ rate-limit</button>
           <button id="appendQuickFixNetwork">+ network</button>
+          <button id="copyQuickFixDominant">copy by dominant</button>
           <button id="copyQuickFixTimeout">copy timeout</button>
           <button id="copyQuickFixRate">copy rate</button>
           <button id="copyQuickFixNetwork">copy network</button>
@@ -425,6 +426,7 @@
       const appendQuickFixTimeoutBtn = document.getElementById("appendQuickFixTimeout");
       const appendQuickFixRateBtn = document.getElementById("appendQuickFixRate");
       const appendQuickFixNetworkBtn = document.getElementById("appendQuickFixNetwork");
+      const copyQuickFixDominantBtn = document.getElementById("copyQuickFixDominant");
       const copyQuickFixTimeoutBtn = document.getElementById("copyQuickFixTimeout");
       const copyQuickFixRateBtn = document.getElementById("copyQuickFixRate");
       const copyQuickFixNetworkBtn = document.getElementById("copyQuickFixNetwork");
@@ -2314,6 +2316,21 @@
       appendQuickFixNetworkBtn?.addEventListener("click", () => {
         appendDebridgeQuickFixToConsole("debridge_execute_network_error");
         cmdMetaEl.textContent = "Appended quick fix (network)";
+      });
+      copyQuickFixDominantBtn?.addEventListener("click", async () => {
+        if (!lastSnapshot) {
+          cmdMetaEl.textContent = "No snapshot available for dominant quick fix";
+          return;
+        }
+        const windowKey = String(debridgeWindowEl?.value || "24h");
+        const stats = getDebridgeWindowErrorStats(lastSnapshot, windowKey);
+        const code = String(stats.dominantError || lastSnapshot?.debridgeExecuteMetrics?.lastErrorCode || "");
+        try {
+          await navigator.clipboard.writeText(buildDebridgeQuickFixSnippet(code));
+          cmdMetaEl.textContent = `Copied quick fix (${code || "generic"})`;
+        } catch {
+          cmdMetaEl.textContent = "Copy quick fix (dominant) failed";
+        }
       });
       copyQuickFixTimeoutBtn?.addEventListener("click", async () => {
         try {
