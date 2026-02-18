@@ -187,7 +187,18 @@
 
       <div class="card" style="margin-top:16px">
         <h3>CI Failure Signatures</h3>
+        <div class="row" style="margin-bottom:8px">
+          <button id="copyCiFailureClusters">Copy failure clusters</button>
+          <span id="ciSignaturesMeta" class="muted"></span>
+        </div>
         <div id="ciSignatures" class="muted">-</div>
+        <details style="margin-top:8px">
+          <summary>Recent CI signature rows</summary>
+          <table style="margin-top:8px">
+            <thead><tr><th>Time</th><th>Status</th><th>checkFailureKind</th><th>pythonMissing</th><th>biomeIo</th><th>testRetry</th><th>flakeRecovered</th></tr></thead>
+            <tbody id="ciSignaturesRows"></tbody>
+          </table>
+        </details>
       </div>
 
       <div class="card" style="margin-top:16px">
@@ -431,6 +442,9 @@
       const bscMarketHealthEl = document.getElementById("bscMarketHealth");
       const execQualityEl = document.getElementById("execQuality");
       const ciSignaturesEl = document.getElementById("ciSignatures");
+      const copyCiFailureClustersBtn = document.getElementById("copyCiFailureClusters");
+      const ciSignaturesMetaEl = document.getElementById("ciSignaturesMeta");
+      const ciSignaturesRowsEl = document.getElementById("ciSignaturesRows");
       const debridgeReliabilityEl = document.getElementById("debridgeReliability");
       const debridgeWindowEl = document.getElementById("debridgeWindow");
       const copyDebridgeReliabilityBtn = document.getElementById("copyDebridgeReliability");
@@ -769,6 +783,32 @@
         return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText} · ${pnlText} · ${rpcText} · ${rpcDetail} · ${topText} · ${webhookText} · ${debridgeText}`;
       }
 
+      function buildCiFailureClusters(payload) {
+        const rows = Array.isArray(payload?.signatures) ? payload.signatures : [];
+        const kinds = rows
+          .slice(0, 30)
+          .map((r) => String(r?.signatures?.checkFailureKind || "ok"))
+          .filter((k) => k && k !== "ok")
+          .reduce((acc, k) => {
+            acc[k] = (acc[k] || 0) + 1;
+            return acc;
+          }, {});
+        return Object.entries(kinds)
+          .sort((a, b) => Number(b[1]) - Number(a[1]))
+          .map(([k, v]) => `${k}:${v}`)
+          .join(" · ") || "none";
+      }
+
+      function renderCiSignaturesRows(payload) {
+        if (!ciSignaturesRowsEl) return;
+        const rows = Array.isArray(payload?.signatures) ? payload.signatures : [];
+        ciSignaturesRowsEl.innerHTML = rows.slice(0, 20).map((r) => {
+          const sig = r?.signatures || {};
+          const ts = r?.ts ? new Date(r.ts).toLocaleString() : "-";
+          return `<tr><td>${ts}</td><td>${String(r?.status || "-")}</td><td>${String(sig?.checkFailureKind || "-")}</td><td>${Number(sig?.pythonMissingDetections || 0)}</td><td>${Number(sig?.biomeIoDetections || 0)}</td><td>${Number(sig?.testRetryCount || 0)}</td><td>${Number(sig?.testFlakeRecovered || 0)}</td></tr>`;
+        }).join("") || '<tr><td colspan="7" class="muted">No rows</td></tr>';
+      }
+
       function computeCiSignaturesSummary(payload) {
         const rows = Array.isArray(payload?.signatures) ? payload.signatures : [];
         if (rows.length === 0) return "No CI signature records yet.";
@@ -781,19 +821,7 @@
         const recovered = Number(sig?.testFlakeRecovered || 0);
         const status = String(latest?.status || "-");
         const ts = latest?.ts ? new Date(latest.ts).toLocaleString() : "-";
-        const recentKinds = rows
-          .slice(0, 10)
-          .map((r) => String(r?.signatures?.checkFailureKind || "ok"))
-          .filter((x) => x && x !== "ok")
-          .reduce((acc, k) => {
-            acc[k] = (acc[k] || 0) + 1;
-            return acc;
-          }, {});
-        const topKinds = Object.entries(recentKinds)
-          .sort((a, b) => Number(b[1]) - Number(a[1]))
-          .slice(0, 3)
-          .map(([k, v]) => `${k}:${v}`)
-          .join(" · ") || "none";
+        const topKinds = buildCiFailureClusters(payload);
         return `Latest=${status} @ ${ts} · checkFailureKind=${kind} · pythonMissing=${pyMiss} · biomeIo=${biomeIo} · testRetries=${retries} · flakeRecovered=${recovered} · recentTopFailureKinds=${topKinds}`;
       }
 
@@ -1153,6 +1181,7 @@
       }
 
       let lastSnapshot = null;
+      let lastCiSignatures = null;
       let lastRebalancePlan = null;
       let lastAcpAsyncJobId = "";
       const BSC_READINESS_PROTOCOL_KEY = "near_dashboard.bsc.readinessProtocol";
@@ -1252,6 +1281,7 @@
         const acpDead = await acpDeadRes.json().catch(() => ({ ok: false, deadLetters: [] }));
         const acpDismissed = await acpDismissedRes.json().catch(() => ({ ok: false, dismissed: [] }));
         const ciSignatures = await ciSignaturesRes.json().catch(() => ({ ok: false, signatures: [] }));
+        lastCiSignatures = ciSignatures;
         if (!snapRes.ok) {
           metaEl.textContent = `Error: ${data.error || "Unknown"}`;
           return;
@@ -1273,6 +1303,8 @@
         yieldHealthEl.innerHTML = `Portfolio aggregate risk: <span class="${aggregateCls}">${aggregateBand}</span> · avg=${aggregateAvg != null ? aggregateAvg : "-"} · max=${aggregateMax != null ? aggregateMax : "-"}<br/><span class="muted">${yieldHealthText}</span>`;
         execQualityEl.textContent = computeExecutionQuality(data);
         ciSignaturesEl.textContent = computeCiSignaturesSummary(ciSignatures);
+        renderCiSignaturesRows(ciSignatures);
+        ciSignaturesMetaEl.textContent = `rows=${Array.isArray(ciSignatures?.signatures) ? ciSignatures.signatures.length : 0}`;
         debridgeReliabilityEl.textContent = computeDebridgeReliability(
           data,
           String(debridgeWindowEl?.value || "24h"),
@@ -2358,6 +2390,14 @@
         qp.set("debridgeAdvancedOpen", isOpen ? "1" : "0");
         const next = `${window.location.pathname}?${qp.toString()}`.replace(/\?$/, "");
         window.history.replaceState(null, "", next);
+      });
+      copyCiFailureClustersBtn?.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(buildCiFailureClusters(lastCiSignatures));
+          ciSignaturesMetaEl.textContent = "Copied CI failure clusters";
+        } catch {
+          ciSignaturesMetaEl.textContent = "Copy CI failure clusters failed";
+        }
       });
       copyDebridgeReliabilityBtn?.addEventListener("click", async () => {
         const text = String(debridgeReliabilityEl?.textContent || "").trim();
