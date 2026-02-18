@@ -8,6 +8,7 @@ const schemaFiles = [
 	"openclaw-btc5m-retry-policy.schema.json",
 	"bsc-post-action-supply-artifact.v1.schema.json",
 	"debridge-crosschain-execute-artifact.v1.schema.json",
+	"debridge-execution-reconciliation.v1.schema.json",
 ];
 
 const args = new Set(process.argv.slice(2));
@@ -43,7 +44,8 @@ function printUsage() {
 			"  openclaw-btc5m-runtime-state.schema.json\n" +
 			"  openclaw-btc5m-retry-policy.schema.json\n" +
 			"  bsc-post-action-supply-artifact.v1.schema.json\n" +
-			"  debridge-crosschain-execute-artifact.v1.schema.json\n\n" +
+			"  debridge-crosschain-execute-artifact.v1.schema.json\n" +
+			"  debridge-execution-reconciliation.v1.schema.json\n\n" +
 			"npm script helpers:\n" +
 			"  npm run schema:check-files         # list schema file manifest (strict, human-readable)\n" +
 			"  npm run schema:check-files:json    # list schema file manifest (strict, JSON)\n" +

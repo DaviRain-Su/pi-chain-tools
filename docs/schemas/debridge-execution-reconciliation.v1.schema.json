@@ -1,0 +1,48 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://pi-chain-tools.local/schemas/debridge-execution-reconciliation.v1.schema.json",
+	"title": "debridge-execution-reconciliation.v1",
+	"type": "object",
+	"additionalProperties": true,
+	"required": [
+		"type",
+		"version",
+		"ok",
+		"normalizedStatus",
+		"providerConsistent",
+		"txHashPresent",
+		"issues",
+		"checkedAt"
+	],
+	"properties": {
+		"type": {
+			"const": "debridge_execution_reconciliation"
+		},
+		"version": {
+			"const": "v1"
+		},
+		"ok": {
+			"type": "boolean"
+		},
+		"normalizedStatus": {
+			"type": "string",
+			"enum": ["ok", "blocked", "error", "success"]
+		},
+		"providerConsistent": {
+			"type": "boolean"
+		},
+		"txHashPresent": {
+			"type": "boolean"
+		},
+		"issues": {
+			"type": "array",
+			"items": {
+				"type": "string"
+			}
+		},
+		"checkedAt": {
+			"type": "string",
+			"format": "date-time"
+		}
+	}
+}
