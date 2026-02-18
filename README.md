@@ -820,6 +820,8 @@ Quick references:
 - Hackathon 5-min pitch script: `docs/hackathon-5min-pitch-script.md`
 - Monad + Morpho SDK integration plan: `docs/monad-morpho-sdk-integration-plan.md`
 - Sol-agent integration plan: `docs/sol-agent-integration-plan.md`
+- Sol-agent risk boundary (production safety contract): `docs/sol-agent-risk-boundary.md`
+- Sol-agent bridge scaffold (Phase A, read-only): `src/chains/solana/sol-agent-bridge.ts`
 - Submission evidence artifact guide: `npm run submission:evidence` (writes `docs/submission-evidence.md`)
 - One-click Monad↔BSC demo flow: `npm run demo:monad-bsc` (dry-run default, explicit execute guard)
 

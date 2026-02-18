@@ -84,6 +84,20 @@ export { createSolanaRpcTools } from "./chains/solana/tools/rpc.js";
 export { createSolanaWorkflowTools } from "./chains/solana/tools/workflow.js";
 export { createSolanaToolset } from "./chains/solana/toolset.js";
 export { createSolanaWorkflowToolset } from "./chains/solana/workflow-toolset.js";
+export {
+	SOL_AGENT_BRIDGE_ALLOWED_TASK_KINDS,
+	SOL_AGENT_BRIDGE_VERSION,
+	assertSolAgentBridgeTaskKind,
+	hasExecutePathOverride,
+	isSolAgentBridgeTaskKind,
+} from "./chains/solana/sol-agent-bridge.js";
+export type {
+	SolAgentBridgeAdapter,
+	SolAgentBridgeMode,
+	SolAgentBridgeTaskKind,
+	SolAgentProfileDescriptor,
+	SolAgentTaskEnvelope,
+} from "./chains/solana/sol-agent-bridge.js";
 export { createMetaReadTools } from "./chains/meta/tools/read.js";
 export { createMetaToolset } from "./chains/meta/toolset.js";
 
