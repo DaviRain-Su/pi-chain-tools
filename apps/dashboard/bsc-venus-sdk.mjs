@@ -52,7 +52,7 @@ async function tryLoadSdkPackage(packageName) {
 	}
 }
 
-function resolveDefaultBscVToken(symbol) {
+export function resolveDefaultBscVToken(symbol) {
 	const entries = Array.isArray(venusChainVTokens?.[MainnetChainId.BSC_MAINNET])
 		? venusChainVTokens[MainnetChainId.BSC_MAINNET]
 		: [];

@@ -13,6 +13,7 @@ import { JsonRpcProvider } from "@ethersproject/providers";
 import { Wallet } from "@ethersproject/wallet";
 
 import { reconcileBscExecutionArtifact } from "./bsc-reconcile.mjs";
+import { executeVenusSupplySdkFirst } from "./bsc-venus-execute.mjs";
 import {
 	collectVenusSdkMarketView,
 	collectVenusSdkPositionView,
@@ -612,6 +613,36 @@ const BSC_VENUS_SDK_PACKAGE = String(
 const BSC_VENUS_COMPTROLLER = String(
 	envOrCfg("BSC_VENUS_COMPTROLLER", "bsc.venus.comptroller", ""),
 ).trim();
+const BSC_VENUS_EXECUTE_MODE = String(
+	envOrCfg("BSC_VENUS_EXECUTE_MODE", "bsc.venus.execute.mode", "auto"),
+)
+	.trim()
+	.toLowerCase();
+const BSC_VENUS_SDK_EXECUTE_FALLBACK_TO_NATIVE =
+	String(
+		envOrCfg(
+			"BSC_VENUS_SDK_EXECUTE_FALLBACK_TO_NATIVE",
+			"bsc.venus.sdk.executeFallbackToNative",
+			"true",
+		),
+	).toLowerCase() === "true";
+const BSC_VENUS_MAX_AMOUNT_RAW = String(
+	envOrCfg(
+		"BSC_VENUS_MAX_AMOUNT_RAW",
+		"bsc.venus.maxAmountRaw",
+		"20000000000000000000000",
+	),
+).trim();
+const BSC_VENUS_ALLOWED_TOKENS = String(
+	envOrCfg(
+		"BSC_VENUS_ALLOWED_TOKENS",
+		"bsc.venus.allowedTokens",
+		`${BSC_USDC},${BSC_USDT}`,
+	),
+)
+	.split(",")
+	.map((x) => x.trim().toLowerCase())
+	.filter(Boolean);
 const BSC_AAVE_APR_API_URL = String(
 	envOrCfg("BSC_AAVE_APR_API_URL", "bsc.yield.aaveAprApiUrl", ""),
 ).trim();
@@ -2460,6 +2491,32 @@ async function executeBscSwap(params) {
 	);
 }
 
+function validateBscVenusSupplyInput(params) {
+	const token = String(params?.token || "")
+		.trim()
+		.toLowerCase();
+	const amountRaw = String(params?.amountRaw || "0").trim();
+	if (!/^\d+$/.test(amountRaw) || BigInt(amountRaw) <= 0n) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_venus_amount_invalid",
+		);
+	}
+	const maxRaw = /^\d+$/.test(BSC_VENUS_MAX_AMOUNT_RAW)
+		? BigInt(BSC_VENUS_MAX_AMOUNT_RAW)
+		: 0n;
+	if (maxRaw > 0n && BigInt(amountRaw) > maxRaw) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_venus_amount_exceeds_limit",
+		);
+	}
+	if (!token || !BSC_VENUS_ALLOWED_TOKENS.includes(token)) {
+		throw new Error(
+			"BSC_EXECUTE_CONFIG retryable=false message=bsc_venus_token_not_allowed",
+		);
+	}
+	return { token, amountRaw };
+}
+
 function validateBscAaveSupplyInput(params) {
 	const token = String(params?.token || "")
 		.trim()
@@ -3008,7 +3065,57 @@ const BSC_NATIVE_SLOT_IMPLEMENTED = {
 	wombat: Boolean(BSC_WOMBAT_POOL && BSC_WOMBAT_EXECUTE_PRIVATE_KEY),
 };
 
+async function executeBscVenusSupply(params) {
+	const validated = validateBscVenusSupplyInput(params);
+	const preferSdk =
+		BSC_VENUS_USE_SDK &&
+		(BSC_VENUS_EXECUTE_MODE === "auto" || BSC_VENUS_EXECUTE_MODE === "sdk");
+	if (BSC_VENUS_EXECUTE_MODE === "native") {
+		return executeVenusSupplySdkFirst({
+			sdkEnabled: false,
+			fallbackToNative: false,
+			rpcUrl: params?.rpcUrl || BSC_RPC_URL,
+			chainId: params?.chainId || BSC_CHAIN_ID,
+			privateKey: BSC_EXECUTE_PRIVATE_KEY,
+			tokenAddress: validated.token,
+			tokenSymbol:
+				validated.token.toLowerCase() === BSC_USDT.toLowerCase()
+					? "USDT"
+					: "USDC",
+			amountRaw: validated.amountRaw,
+			vTokenAddress:
+				validated.token.toLowerCase() === BSC_USDT.toLowerCase()
+					? BSC_VENUS_VTOKEN_USDT
+					: BSC_VENUS_VTOKEN_USDC,
+			confirmations: BSC_EXECUTE_CONFIRMATIONS,
+			recipient: BSC_EXECUTE_RECIPIENT || null,
+		});
+	}
+	return executeVenusSupplySdkFirst({
+		sdkEnabled: preferSdk,
+		fallbackToNative: BSC_VENUS_SDK_EXECUTE_FALLBACK_TO_NATIVE,
+		rpcUrl: params?.rpcUrl || BSC_RPC_URL,
+		chainId: params?.chainId || BSC_CHAIN_ID,
+		privateKey: BSC_EXECUTE_PRIVATE_KEY,
+		tokenAddress: validated.token,
+		tokenSymbol:
+			validated.token.toLowerCase() === BSC_USDT.toLowerCase()
+				? "USDT"
+				: "USDC",
+		amountRaw: validated.amountRaw,
+		vTokenAddress:
+			validated.token.toLowerCase() === BSC_USDT.toLowerCase()
+				? BSC_VENUS_VTOKEN_USDT
+				: BSC_VENUS_VTOKEN_USDC,
+		confirmations: BSC_EXECUTE_CONFIRMATIONS,
+		recipient: BSC_EXECUTE_RECIPIENT || null,
+		comptroller: BSC_VENUS_COMPTROLLER,
+		sdkPackage: BSC_VENUS_SDK_PACKAGE,
+	});
+}
+
 const BSC_POST_ACTION_SUPPLY_EXECUTORS = {
+	venus: executeBscVenusSupply,
 	aave: executeBscAaveSupply,
 	lista: executeBscListaSupply,
 	wombat: executeBscWombatSupply,
@@ -9982,6 +10089,7 @@ const server = http.createServer(async (req, res) => {
 				let postActionArtifact = null;
 				let postActionReconciliation = null;
 				if (
+					plan.executionProtocol === "venus" ||
 					plan.executionProtocol === "aave" ||
 					plan.executionProtocol === "lista" ||
 					plan.executionProtocol === "wombat"
@@ -10006,13 +10114,16 @@ const server = http.createServer(async (req, res) => {
 						postAction = {
 							ok: false,
 							reason:
-								plan.executionProtocol === "aave"
-									? "aave_supply_amount_unavailable"
-									: plan.executionProtocol === "lista"
-										? "lista_supply_amount_unavailable"
-										: "wombat_supply_amount_unavailable",
+								plan.executionProtocol === "venus"
+									? "venus_supply_amount_unavailable"
+									: plan.executionProtocol === "aave"
+										? "aave_supply_amount_unavailable"
+										: plan.executionProtocol === "lista"
+											? "lista_supply_amount_unavailable"
+											: "wombat_supply_amount_unavailable",
 						};
 					}
+					const isVenus = plan.executionProtocol === "venus";
 					const isAave = plan.executionProtocol === "aave";
 					const isLista = plan.executionProtocol === "lista";
 					postActionArtifact = buildBscPostActionArtifact({
@@ -10024,22 +10135,34 @@ const server = http.createServer(async (req, res) => {
 					postActionReconciliation =
 						reconcileBscExecutionArtifact(postActionArtifact);
 					pushActionHistory({
-						action: isAave
-							? "bsc_aave_supply"
-							: isLista
-								? "bsc_lista_supply"
-								: "bsc_wombat_supply",
+						action: isVenus
+							? "bsc_venus_supply"
+							: isAave
+								? "bsc_aave_supply"
+								: isLista
+									? "bsc_lista_supply"
+									: "bsc_wombat_supply",
 						step: payload.step || "bsc-stable-yield-post-action",
 						accountId: payload.account || null,
 						status: postAction?.ok ? "success" : "error",
 						summary: postAction?.ok
-							? `${isAave ? "aave" : isLista ? "lista" : "wombat"} post-swap supply executed`
-							: `${isAave ? "aave" : isLista ? "lista" : "wombat"} post-swap supply failed: ${postAction?.reason || "unknown"}`,
+							? `${isVenus ? "venus" : isAave ? "aave" : isLista ? "lista" : "wombat"} post-swap supply executed`
+							: `${isVenus ? "venus" : isAave ? "aave" : isLista ? "lista" : "wombat"} post-swap supply failed: ${postAction?.reason || "unknown"}`,
 						txHash: postAction?.txHash || null,
 					});
+					if (postAction?.fallback?.used) {
+						pushActionHistory({
+							action: "bsc_venus_supply_fallback",
+							step: payload.step || "bsc-stable-yield-post-action",
+							accountId: payload.account || null,
+							status: "warning",
+							summary: `venus post-action fell back to native (${postAction?.fallback?.reason || "unknown"})`,
+							txHash: postAction?.txHash || null,
+						});
+					}
 					if (!postAction?.ok) {
 						throw new Error(
-							`${isAave ? "BSC_AAVE_POST_ACTION_FAILED" : isLista ? "BSC_LISTA_POST_ACTION_FAILED" : "BSC_WOMBAT_POST_ACTION_FAILED"} retryable=true message=${postAction?.reason || "unknown"}`,
+							`${isVenus ? "BSC_VENUS_POST_ACTION_FAILED" : isAave ? "BSC_AAVE_POST_ACTION_FAILED" : isLista ? "BSC_LISTA_POST_ACTION_FAILED" : "BSC_WOMBAT_POST_ACTION_FAILED"} retryable=true message=${postAction?.reason || "unknown"}`,
 						);
 					}
 				}

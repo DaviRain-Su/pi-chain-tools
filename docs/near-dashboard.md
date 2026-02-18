@@ -111,6 +111,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - Official Venus client package for this phase: `@venusprotocol/chains` (used to load canonical Venus BSC market metadata + vToken registry in SDK path).
     - SDK response markers: BSC responses now carry `dataSource` / `sdk` / `warnings`; SDK fallback is explicit (`dataSource=native-fallback` + warning tags like `venus_sdk_market_fetch_failed_fallback_to_native` / `venus_sdk_position_fetch_failed_fallback_to_native`).
     - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista/wombat` support native RPC mode and command fallback)
+    - Venus execute path is SDK-first when `BSC_VENUS_USE_SDK=true` + `BSC_VENUS_EXECUTE_MODE=auto|sdk`; if SDK execute prep fails and `BSC_VENUS_SDK_EXECUTE_FALLBACK_TO_NATIVE=true`, response/history explicitly mark fallback (`mode=native-fallback`, `fallback.used=true`, warning `venus_sdk_execute_failed_fallback_to_native`).
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
     - `POST /api/bsc/yield/worker/stop` (`confirm=true`)
     - `GET /api/bsc/yield/worker/status`
@@ -263,7 +264,11 @@ Common mapping examples:
 - `bsc.yield.wombatAprApiUrl` ↔ `BSC_WOMBAT_APR_API_URL`
 - `bsc.venus.useSdk` ↔ `BSC_VENUS_USE_SDK`
 - `bsc.venus.comptroller` ↔ `BSC_VENUS_COMPTROLLER`
+- `bsc.venus.execute.mode` ↔ `BSC_VENUS_EXECUTE_MODE` (`auto|sdk|native`)
+- `bsc.venus.execute.maxAmountRaw` ↔ `BSC_VENUS_MAX_AMOUNT_RAW`
+- `bsc.venus.execute.allowedTokens` ↔ `BSC_VENUS_ALLOWED_TOKENS`
 - `bsc.venus.sdk.package` ↔ `BSC_VENUS_SDK_PACKAGE`
+- `bsc.venus.sdk.executeFallbackToNative` ↔ `BSC_VENUS_SDK_EXECUTE_FALLBACK_TO_NATIVE`
 - `bsc.positions.listaRateApiUrl` ↔ `BSC_LISTA_POSITION_RATE_API_URL`
 - `bsc.positions.wombatRateApiUrl` ↔ `BSC_WOMBAT_POSITION_RATE_API_URL`
 - `bsc.positions.rateCacheTtlMs` ↔ `BSC_POSITION_RATE_CACHE_TTL_MS`

@@ -49,8 +49,14 @@
 		"venus": {
 			"useSdk": false,
 			"comptroller": "",
+			"execute": {
+				"mode": "auto",
+				"maxAmountRaw": "20000000000000000000000",
+				"allowedTokens": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d,0x55d398326f99059ff775485246999027b3197955"
+			},
 			"sdk": {
-				"package": "@venusprotocol/chains"
+				"package": "@venusprotocol/chains",
+				"executeFallbackToNative": true
 			}
 		},
 		"aave": {
