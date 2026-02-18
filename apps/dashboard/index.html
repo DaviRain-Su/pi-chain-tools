@@ -824,12 +824,33 @@
         return actions.slice(0, 3);
       }
 
-      function buildDebridgeFixDraft(snapshot) {
+      function buildDebridgeFixDraft(snapshot, windowKey = "24h") {
         const d = snapshot?.debridgeExecuteMetrics || {};
-        const code = String(d.lastErrorCode || "");
+        const now = Date.now();
+        const windowMs = windowKey === "1h"
+          ? 60 * 60 * 1000
+          : windowKey === "7d"
+            ? 7 * 24 * 60 * 60 * 1000
+            : 24 * 60 * 60 * 1000;
+        const recent = Array.isArray(d.recent) ? d.recent : [];
+        const rows = recent.filter((r) => {
+          const ts = Date.parse(String(r?.timestamp || ""));
+          return Number.isFinite(ts) && now - ts <= windowMs;
+        });
+        const buckets = rows
+          .filter((r) => String(r?.status || "") === "error")
+          .reduce((acc, r) => {
+            const key = String(r?.errorCode || "unknown");
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+          }, {});
+        const topCode = Object.entries(buckets).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+        const code = String(topCode || d.lastErrorCode || "");
         const lines = [
           "# deBridge fix draft",
           "# Apply to shell env or dashboard config",
+          `# window=${windowKey}`,
+          `# dominantError=${code || "-"}`,
           "",
         ];
         if (code === "debridge_execute_timeout") {
@@ -2150,7 +2171,8 @@
           cmdMetaEl.textContent = "No snapshot available for fix draft";
           return;
         }
-        const draft = buildDebridgeFixDraft(lastSnapshot);
+        const windowKey = String(debridgeWindowEl?.value || "24h");
+        const draft = buildDebridgeFixDraft(lastSnapshot, windowKey);
         if (cmdOutEl) cmdOutEl.value = draft;
         cmdMetaEl.textContent = "Filled deBridge fix draft into Action Console";
       });
