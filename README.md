@@ -802,6 +802,7 @@ Quick references:
 - Env template: `.env.near.example`
 - Dashboard doc: `docs/near-dashboard.md`
 - Ops runbook (ACP/Payments/DLQ): `docs/openclaw-ops-runbook.md`
+- Good Vibes Only submission template (BSC): `docs/hackathon-goodvibes-submission.md`
 
 ### Local NEAR Dashboard (web)
 
