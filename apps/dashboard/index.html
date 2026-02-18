@@ -195,6 +195,7 @@
             <option value="7d">7d</option>
           </select>
           <button id="copyDebridgeReliability">Copy summary</button>
+          <button id="copyDebridgeIncident">Copy incident format</button>
         </div>
         <div id="debridgeReliability" class="muted" style="white-space:pre-wrap">-</div>
       </div>
@@ -410,6 +411,7 @@
       const debridgeReliabilityEl = document.getElementById("debridgeReliability");
       const debridgeWindowEl = document.getElementById("debridgeWindow");
       const copyDebridgeReliabilityBtn = document.getElementById("copyDebridgeReliability");
+      const copyDebridgeIncidentBtn = document.getElementById("copyDebridgeIncident");
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
@@ -804,6 +806,61 @@
         const arrow = delta > 0.01 ? "↑" : delta < -0.01 ? "↓" : "→";
 
         return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})\nRecent(20): ${trendLabel}\n${windowKey} TopErrors: ${topErrorsWindow}\nSuccess trend: ${arrow} ${latestRate.toFixed(1)}% vs ${prevRate.toFixed(1)}% (Δ ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}pp)`;
+      }
+
+      function buildDebridgeIncidentSummary(snapshot, windowKey = "24h") {
+        const d = snapshot?.debridgeExecuteMetrics || {};
+        const now = Date.now();
+        const windowMs = windowKey === "1h"
+          ? 60 * 60 * 1000
+          : windowKey === "7d"
+            ? 7 * 24 * 60 * 60 * 1000
+            : 24 * 60 * 60 * 1000;
+        const recent = Array.isArray(d.recent) ? d.recent : [];
+        const rows = recent.filter((r) => {
+          const ts = Date.parse(String(r?.timestamp || ""));
+          return Number.isFinite(ts) && now - ts <= windowMs;
+        });
+        const total = rows.length;
+        const success = rows.filter((r) => String(r?.status || "") === "success").length;
+        const blocked = rows.filter((r) => String(r?.status || "") === "blocked").length;
+        const error = rows.filter((r) => String(r?.status || "") === "error").length;
+        const successRate = total > 0 ? (success / total) * 100 : 0;
+        const errorBuckets = rows
+          .filter((r) => String(r?.status || "") === "error")
+          .reduce((acc, r) => {
+            const key = String(r?.errorCode || "unknown");
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+          }, {});
+        const topErrors = Object.entries(errorBuckets)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([k, v]) => `- ${k}: ${v}`)
+          .join("\n") || "- none";
+        const trend = rows
+          .slice(0, 20)
+          .map((r) => {
+            const s = String(r?.status || "");
+            if (s === "success") return "🟩";
+            if (s === "blocked") return "🟨";
+            if (s === "error") return "🟥";
+            return "⬜";
+          })
+          .join("") || "-";
+        return [
+          `[deBridge Incident Summary]`,
+          `window: ${windowKey}`,
+          `generatedAt: ${new Date().toISOString()}`,
+          `totals: total=${total} success=${success} blocked=${blocked} error=${error}`,
+          `successRate: ${successRate.toFixed(1)}%`,
+          `retryStats: attempts=${Number(d.retryAttempts || 0)} recovered=${Number(d.retryRecovered || 0)}`,
+          `lastError: ${d.lastErrorCode || "-"} (${d.lastErrorCategory || "-"}) at ${d.lastErrorAt || "-"}`,
+          `topErrors:`,
+          topErrors,
+          `recentTrend(20): ${trend}`,
+          `conclusion: ${error > success ? "degraded" : error > 0 ? "warning" : "healthy"}`,
+        ].join("\n");
       }
 
       function toCsv(snapshot) {
@@ -2008,6 +2065,20 @@
           cmdMetaEl.textContent = "Copied deBridge reliability summary";
         } catch {
           cmdMetaEl.textContent = "Copy deBridge reliability summary failed";
+        }
+      });
+      copyDebridgeIncidentBtn?.addEventListener("click", async () => {
+        if (!lastSnapshot) {
+          cmdMetaEl.textContent = "No snapshot available for incident summary";
+          return;
+        }
+        const windowKey = String(debridgeWindowEl?.value || "24h");
+        const report = buildDebridgeIncidentSummary(lastSnapshot, windowKey);
+        try {
+          await navigator.clipboard.writeText(report);
+          cmdMetaEl.textContent = "Copied deBridge incident summary";
+        } catch {
+          cmdMetaEl.textContent = "Copy deBridge incident summary failed";
         }
       });
       acpStatusFilterEl?.addEventListener("change", () => {
