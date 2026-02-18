@@ -14,6 +14,11 @@ import { Wallet } from "@ethersproject/wallet";
 
 import { reconcileBscExecutionArtifact } from "./bsc-reconcile.mjs";
 import {
+	collectVenusSdkMarketView,
+	collectVenusSdkPositionView,
+	createVenusSdkAdapter,
+} from "./bsc-venus-sdk.mjs";
+import {
 	buildDebridgeExecutionArtifact,
 	classifyDebridgeExecuteError,
 	reconcileDebridgeExecutionArtifact,
@@ -592,6 +597,20 @@ const BSC_WOMBAT_APR_API_URL = String(
 ).trim();
 const BSC_VENUS_APR_API_URL = String(
 	envOrCfg("BSC_VENUS_APR_API_URL", "bsc.yield.venusAprApiUrl", ""),
+).trim();
+const BSC_VENUS_USE_SDK =
+	String(
+		envOrCfg("BSC_VENUS_USE_SDK", "bsc.venus.useSdk", "false"),
+	).toLowerCase() === "true";
+const BSC_VENUS_SDK_PACKAGE = String(
+	envOrCfg(
+		"BSC_VENUS_SDK_PACKAGE",
+		"bsc.venus.sdk.package",
+		"@venusprotocol/sdk",
+	),
+).trim();
+const BSC_VENUS_COMPTROLLER = String(
+	envOrCfg("BSC_VENUS_COMPTROLLER", "bsc.venus.comptroller", ""),
 ).trim();
 const BSC_AAVE_APR_API_URL = String(
 	envOrCfg("BSC_AAVE_APR_API_URL", "bsc.yield.aaveAprApiUrl", ""),
@@ -4499,9 +4518,10 @@ async function getBscAaveAprHints() {
 	return getBscProtocolAprHints("aave");
 }
 
-async function getBscLendingMarketCompare() {
+async function getBscLendingMarketCompareNative(options = {}) {
+	const venusOverride = options?.venusOverride || null;
 	const [venus, aave, lista, wombat] = await Promise.all([
-		getBscStableAprHints(),
+		venusOverride ? Promise.resolve(venusOverride) : getBscStableAprHints(),
 		getBscAaveAprHints(),
 		getBscProtocolAprHints("lista"),
 		getBscProtocolAprHints("wombat"),
@@ -4631,6 +4651,82 @@ async function getBscLendingMarketCompare() {
 			},
 		},
 	};
+}
+
+async function getBscLendingMarketCompare(options = {}) {
+	if (!BSC_VENUS_USE_SDK) {
+		const native = await getBscLendingMarketCompareNative(options);
+		return {
+			...native,
+			dataSource: "native",
+			sdk: {
+				venus: {
+					enabled: false,
+					used: false,
+					fallback: false,
+				},
+			},
+			warnings: native?.warnings || [],
+		};
+	}
+	const aprHints = await getBscStableAprHints();
+	try {
+		const adapter = await createVenusSdkAdapter({
+			rpcUrl: BSC_RPC_URL,
+			chainId: BSC_CHAIN_ID,
+			comptroller: BSC_VENUS_COMPTROLLER,
+			sdkPackage: BSC_VENUS_SDK_PACKAGE,
+		});
+		const sdkView = await collectVenusSdkMarketView(adapter, {
+			usdcVToken: BSC_VENUS_VTOKEN_USDC,
+			usdtVToken: BSC_VENUS_VTOKEN_USDT,
+			aprHints,
+			usdcDecimals: BSC_USDC_DECIMALS,
+			usdtDecimals: BSC_USDT_DECIMALS,
+		});
+		const compare = await getBscLendingMarketCompareNative({
+			...options,
+			venusOverride: sdkView.venus,
+		});
+		return {
+			...compare,
+			dataSource: sdkView.mode,
+			sdk: {
+				venus: {
+					enabled: true,
+					used: true,
+					fallback: false,
+					meta: sdkView.sdk,
+				},
+			},
+			warnings: [
+				...new Set([
+					...(compare?.warnings || []),
+					...(sdkView?.warnings || []),
+				]),
+			],
+		};
+	} catch (error) {
+		const native = await getBscLendingMarketCompareNative(options);
+		return {
+			...native,
+			dataSource: "native-fallback",
+			sdk: {
+				venus: {
+					enabled: true,
+					used: false,
+					fallback: true,
+					error: error instanceof Error ? error.message : String(error),
+				},
+			},
+			warnings: [
+				...new Set([
+					...(native?.warnings || []),
+					"venus_sdk_market_fetch_failed_fallback_to_native",
+				]),
+			],
+		};
+	}
 }
 
 async function buildBscDexNetYieldInsight(compare, options = {}) {
@@ -4810,7 +4906,7 @@ async function getBscWalletStableBalances(account) {
 	};
 }
 
-async function getBscProtocolPositions(account) {
+async function getBscProtocolPositionsNative(account) {
 	const owner = String(account || "").trim();
 	if (!owner) {
 		return {
@@ -5008,6 +5104,109 @@ async function getBscProtocolPositions(account) {
 		health,
 		fetchedAt: new Date().toISOString(),
 	};
+}
+
+async function getBscProtocolPositions(account) {
+	const native = await getBscProtocolPositionsNative(account);
+	if (!BSC_VENUS_USE_SDK) {
+		return {
+			...native,
+			dataSource: "native",
+			sdk: {
+				venus: {
+					enabled: false,
+					used: false,
+					fallback: false,
+				},
+			},
+			warnings: native?.warnings || [],
+		};
+	}
+	const owner = String(account || "").trim();
+	if (!owner) {
+		return {
+			...native,
+			dataSource: "native",
+			sdk: {
+				venus: {
+					enabled: true,
+					used: false,
+					fallback: true,
+					reason: "missing_account",
+				},
+			},
+			warnings: [
+				...new Set([
+					...(native?.warnings || []),
+					"venus_sdk_position_missing_account",
+				]),
+			],
+		};
+	}
+	try {
+		const adapter = await createVenusSdkAdapter({
+			rpcUrl: BSC_RPC_URL,
+			chainId: BSC_CHAIN_ID,
+			comptroller: BSC_VENUS_COMPTROLLER,
+			sdkPackage: BSC_VENUS_SDK_PACKAGE,
+		});
+		const sdkView = await collectVenusSdkPositionView(adapter, {
+			accountAddress: owner,
+			usdcVToken: BSC_VENUS_VTOKEN_USDC,
+			usdtVToken: BSC_VENUS_VTOKEN_USDT,
+			usdcDecimals: BSC_USDC_DECIMALS,
+			usdtDecimals: BSC_USDT_DECIMALS,
+		});
+		const next = {
+			...native,
+			venus: sdkView.venus,
+			subtotalsUsdApprox: {
+				...native.subtotalsUsdApprox,
+				venus:
+					Number(sdkView?.venus?.usdc?.normalizedUsdApprox || 0) +
+					Number(sdkView?.venus?.usdt?.normalizedUsdApprox || 0),
+			},
+		};
+		next.totalUsdApprox =
+			Number(next?.subtotalsUsdApprox?.aave || 0) +
+			Number(next?.subtotalsUsdApprox?.venus || 0) +
+			Number(next?.subtotalsUsdApprox?.lista || 0) +
+			Number(next?.subtotalsUsdApprox?.wombat || 0);
+		return {
+			...next,
+			dataSource: sdkView.mode,
+			sdk: {
+				venus: {
+					enabled: true,
+					used: true,
+					fallback: false,
+					meta: sdkView.sdk,
+				},
+			},
+			warnings: [
+				...new Set([...(native?.warnings || []), ...(sdkView?.warnings || [])]),
+			],
+		};
+	} catch (error) {
+		return {
+			...native,
+			dataSource: "native-fallback",
+			sdk: {
+				venus: {
+					enabled: true,
+					used: false,
+					fallback: true,
+					error: error instanceof Error ? error.message : String(error),
+				},
+			},
+			warnings: [
+				...new Set([
+					...(native?.warnings || []),
+					"venus_sdk_position_fetch_failed_fallback_to_native",
+				]),
+			],
+		};
+	}
 }
 
 function buildBscYieldPlan({
@@ -5492,6 +5691,15 @@ async function computeBscYieldPlan(input = {}) {
 		ok: true,
 		chain: "bsc",
 		mode: "stable-yield-plan",
+		dataSource: compare?.dataSource || "native",
+		sdk: compare?.sdk || {
+			venus: {
+				enabled: BSC_VENUS_USE_SDK,
+				used: false,
+				fallback: BSC_VENUS_USE_SDK,
+			},
+		},
+		warnings: [...new Set([...(compare?.warnings || [])])],
 		account,
 		balances,
 		aprHints,

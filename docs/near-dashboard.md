@@ -107,6 +107,8 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - includes stable-yield agent v1 APIs:
     - `GET /api/bsc/yield/plan` (supports `executionProtocol=venus|aave|lista|wombat`; when omitted, defaults to net-yield `recommendedProtocol`; returns `executeReadiness.blockers/recommendedProtocol` and includes `netYieldInsight`)
     - `GET /api/bsc/yield/markets` (returns Venus/Aave/Lista/Wombat read-only compare + best protocol recommendation + `sourceHealth` + `marketHealth(status/source/updatedAt/ageMs)` + `marketRiskTags` + `marketRiskScore(0-100)` + `marketRiskBand(low|medium|high)` + `aggregateRisk{avgScore,maxScore,band}` + `netYieldInsight`; includes Pancake V2 read-only quote signal and `dexQuoteCompare{bestSource,conservativeSource,spreadBps}` in `netYieldInsight.quote`; supports query `amountUsd` and `rebalanceIntervalDays`; `executionReadiness.nativeSlotImplemented` exposes per-protocol native slot status, where Lista and Wombat are `true` only when native RPC config is present (`POOL` + protocol private key)
+    - Venus SDK-first read/plan mode: set `BSC_VENUS_USE_SDK=true` (or `bsc.venus.useSdk=true` in dashboard config) to route Venus market/position reads through `apps/dashboard/bsc-venus-sdk.mjs`.
+    - SDK response markers: BSC responses now carry `dataSource` / `sdk` / `warnings`; SDK fallback is explicit (`dataSource=native-fallback` + warning tags like `venus_sdk_market_fetch_failed_fallback_to_native` / `venus_sdk_position_fetch_failed_fallback_to_native`).
     - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista/wombat` support native RPC mode and command fallback)
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
     - `POST /api/bsc/yield/worker/stop` (`confirm=true`)
@@ -258,6 +260,9 @@ Common mapping examples:
 - `bsc.wombat.allowedTokens` ↔ `BSC_WOMBAT_ALLOWED_TOKENS`
 - `bsc.yield.listaAprApiUrl` ↔ `BSC_LISTA_APR_API_URL`
 - `bsc.yield.wombatAprApiUrl` ↔ `BSC_WOMBAT_APR_API_URL`
+- `bsc.venus.useSdk` ↔ `BSC_VENUS_USE_SDK`
+- `bsc.venus.comptroller` ↔ `BSC_VENUS_COMPTROLLER`
+- `bsc.venus.sdk.package` ↔ `BSC_VENUS_SDK_PACKAGE`
 - `bsc.positions.listaRateApiUrl` ↔ `BSC_LISTA_POSITION_RATE_API_URL`
 - `bsc.positions.wombatRateApiUrl` ↔ `BSC_WOMBAT_POSITION_RATE_API_URL`
 - `bsc.positions.rateCacheTtlMs` ↔ `BSC_POSITION_RATE_CACHE_TTL_MS`

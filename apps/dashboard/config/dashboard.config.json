@@ -46,6 +46,13 @@
 			"listaAprApiUrl": "",
 			"wombatAprApiUrl": ""
 		},
+		"venus": {
+			"useSdk": false,
+			"comptroller": "",
+			"sdk": {
+				"package": "@venusprotocol/sdk"
+			}
+		},
 		"aave": {
 			"enabled": false,
 			"mode": "auto",
