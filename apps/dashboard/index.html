@@ -196,6 +196,7 @@
           </select>
           <button id="copyDebridgeReliability">Copy summary</button>
           <button id="copyDebridgeIncident">Copy incident format</button>
+          <button id="fillDebridgeFixDraft">Fill fix draft</button>
         </div>
         <div id="debridgeReliability" class="muted" style="white-space:pre-wrap">-</div>
       </div>
@@ -412,6 +413,7 @@
       const debridgeWindowEl = document.getElementById("debridgeWindow");
       const copyDebridgeReliabilityBtn = document.getElementById("copyDebridgeReliability");
       const copyDebridgeIncidentBtn = document.getElementById("copyDebridgeIncident");
+      const fillDebridgeFixDraftBtn = document.getElementById("fillDebridgeFixDraft");
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
@@ -820,6 +822,49 @@
         }
         if (actions.length === 0) actions.push("No immediate fix hints; inspect rawOutput + executionArtifact for edge-case failures.");
         return actions.slice(0, 3);
+      }
+
+      function buildDebridgeFixDraft(snapshot) {
+        const d = snapshot?.debridgeExecuteMetrics || {};
+        const code = String(d.lastErrorCode || "");
+        const lines = [
+          "# deBridge fix draft",
+          "# Apply to shell env or dashboard config",
+          "",
+        ];
+        if (code === "debridge_execute_timeout") {
+          lines.push("export DEBRIDGE_MCP_TIMEOUT_MS=180000");
+          lines.push("# optional: reduce route amount / complexity for validation run");
+        } else if (code === "debridge_execute_rate_limited") {
+          lines.push("export DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS=3");
+          lines.push("export DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS=2500");
+          lines.push("# optional: reduce schedule trigger frequency");
+        } else if (code === "debridge_execute_network_error") {
+          lines.push("export DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS=3");
+          lines.push("export DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS=2000");
+          lines.push("# verify MCP host DNS/network stability");
+        } else if (code === "debridge_execute_insufficient_funds") {
+          lines.push("# top up gas + source token balance first");
+          lines.push("# keep retries conservative to avoid waste");
+          lines.push("export DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS=1");
+        } else if (code === "debridge_execute_invalid_request") {
+          lines.push("# validate route params: origin/destination/tokenIn/tokenOut/amount");
+          lines.push("# run /api/crosschain/debridge/plan then /quote before execute");
+          lines.push("export DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS=1");
+        } else if (code === "debridge_execute_unauthorized") {
+          lines.push("# verify execute credentials/permissions for deBridge MCP");
+          lines.push("export DEBRIDGE_MCP_EXECUTE_ENABLED=false");
+          lines.push("# re-enable after credential validation");
+        } else {
+          lines.push("# generic safe defaults");
+          lines.push("export DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS=2");
+          lines.push("export DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS=1500");
+        }
+        lines.push("");
+        lines.push(`# lastErrorCode=${code || "-"}`);
+        lines.push(`# lastErrorCategory=${String(d.lastErrorCategory || "-")}`);
+        lines.push(`# lastErrorAt=${String(d.lastErrorAt || "-")}`);
+        return lines.join("\n");
       }
 
       function buildDebridgeIncidentSummary(snapshot, windowKey = "24h") {
@@ -2099,6 +2144,15 @@
         } catch {
           cmdMetaEl.textContent = "Copy deBridge incident summary failed";
         }
+      });
+      fillDebridgeFixDraftBtn?.addEventListener("click", () => {
+        if (!lastSnapshot) {
+          cmdMetaEl.textContent = "No snapshot available for fix draft";
+          return;
+        }
+        const draft = buildDebridgeFixDraft(lastSnapshot);
+        if (cmdOutEl) cmdOutEl.value = draft;
+        cmdMetaEl.textContent = "Filled deBridge fix draft into Action Console";
       });
       acpStatusFilterEl?.addEventListener("change", () => {
         syncAcpFiltersToUrl();
