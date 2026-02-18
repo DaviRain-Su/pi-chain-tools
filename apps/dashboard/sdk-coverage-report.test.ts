@@ -86,6 +86,8 @@ describe("sdk coverage report consistency", () => {
 		const mustBeGreen = [
 			["Venus", "yield.markets"],
 			["Venus", "positions.read"],
+			["Wombat", "yield.markets"],
+			["Wombat", "positions.read"],
 		] as const;
 		for (const [protocol, action] of mustBeGreen) {
 			const entry = entries.find(

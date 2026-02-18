@@ -57,12 +57,35 @@ describe("bsc lista/wombat sdk-first read adapters", () => {
 			rpcUrl: "http://127.0.0.1:8545",
 			chainId: 56,
 			sdkPackage: "@wombat-exchange/configx",
+			loadSdkPackage: async (packageName) => ({
+				loaded: false,
+				packageName: String(packageName || ""),
+				moduleKeys: [],
+				error: "ERR_MODULE_NOT_FOUND",
+			}),
 		});
 		expect(adapterWithMissingSdk.meta.officialSdkWired).toBe(false);
 		expect(adapterWithMissingSdk.meta.client).toBe("wombat-sdk-scaffold");
 		expect(adapterWithMissingSdk.meta.sdkPackage).toBe(
 			"@wombat-exchange/configx",
 		);
+	});
+
+	it("uses official-package sdk mode when loader resolves successfully", async () => {
+		const adapterWithSdk = await createWombatSdkAdapter({
+			rpcUrl: "http://127.0.0.1:8545",
+			chainId: 56,
+			sdkPackage: "@wombat-exchange/configx",
+			loadSdkPackage: async (packageName) => ({
+				loaded: true,
+				packageName: String(packageName || ""),
+				moduleKeys: ["default"],
+				error: null,
+			}),
+		});
+		expect(adapterWithSdk.meta.officialSdkWired).toBe(true);
+		expect(adapterWithSdk.meta.client).toBe("wombat-configx");
+		expect(adapterWithSdk.meta.warnings).toEqual([]);
 	});
 
 	it("normalizes wombat market + position shape with sdk markers", async () => {

@@ -74,12 +74,15 @@ export async function createWombatSdkAdapter({
 	rpcUrl,
 	chainId,
 	sdkPackage,
+	loadSdkPackage,
 } = {}) {
 	const provider = new JsonRpcProvider(String(rpcUrl || ""), {
 		name: "bsc",
 		chainId: Number(chainId || 56),
 	});
-	const sdk = await tryLoadSdkPackage(sdkPackage);
+	const sdkLoader =
+		typeof loadSdkPackage === "function" ? loadSdkPackage : tryLoadSdkPackage;
+	const sdk = await sdkLoader(sdkPackage);
 	const warnings = [];
 	if (!sdk.loaded) {
 		warnings.push(

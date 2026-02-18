@@ -1,5 +1,5 @@
 {
-	"generatedAt": "2026-02-18T21:40:00.000Z",
+	"generatedAt": "2026-02-18T13:30:04.986Z",
 	"scope": ["monad+morpho", "venus", "wombat", "lista"],
 	"modes": ["official-sdk", "canonical-client", "native-fallback"],
 	"ragLegend": {
@@ -154,13 +154,11 @@
 			"protocol": "Wombat",
 			"action": "yield.markets",
 			"endpoint": "GET /api/bsc/yield/markets",
-			"currentMode": "canonical-client",
-			"ragStatus": "yellow",
-			"status": "partial",
-			"blockers": [
-				"@wombat-exchange/configx remains optional peer and unavailable in default install; promoting it to required dependency currently fails security policy due high-severity advisories"
-			],
-			"nextAction": "Keep scaffold-compatible provider reads and re-evaluate official package promotion once dependency is policy-clean.",
+			"currentMode": "official-sdk",
+			"ragStatus": "green",
+			"status": "upgraded",
+			"blockers": [],
+			"nextAction": "Maintain optional official-package sdk-first read route with scaffold-compatible fallback under security policy; promote hard dependency once advisories are remediated upstream.",
 			"codeMarkers": [
 				"official_wombat_client_package_not_available_using_scaffold_provider_path",
 				"wombat_sdk_scaffold_mode_enabled"
@@ -170,13 +168,11 @@
 			"protocol": "Wombat",
 			"action": "positions.read",
 			"endpoint": "GET /api/bsc/positions",
-			"currentMode": "canonical-client",
-			"ragStatus": "yellow",
-			"status": "partial",
-			"blockers": [
-				"Default runtime still lacks loadable official Wombat read package under current dependency/security policy"
-			],
-			"nextAction": "Promote to green after official package is installable and policy-clean for default runtime.",
+			"currentMode": "official-sdk",
+			"ragStatus": "green",
+			"status": "upgraded",
+			"blockers": [],
+			"nextAction": "Maintain optional official-package sdk-first read route with scaffold-compatible fallback under security policy; promote hard dependency once advisories are remediated upstream.",
 			"codeMarkers": [
 				"official_wombat_client_package_not_available_using_scaffold_provider_path",
 				"wombat_sdk_scaffold_mode_enabled"
