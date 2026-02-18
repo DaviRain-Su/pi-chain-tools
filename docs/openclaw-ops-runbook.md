@@ -197,6 +197,30 @@ export DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS=1200
 
 ## 5) 常见故障与处理模式
 
+### 5.0 Failure Playbook（最短恢复路径）
+
+```bash
+# 1) 先跑稳态 CI（带 python/sigterm/normalize 自愈与分类）
+npm run ci:resilient
+# 预期：输出 [ci-resilient] success + failure-signatures(JSON)
+
+# 2) 如遇中断波动，走有预算重试
+CI_RETRY_SIGTERM_MAX=3 npm run ci:retry
+# 预期：最终 success；若 code=2 直接停止（python precheck 阻断，非盲重试）
+
+# 3) 一键恢复 dashboard（预检端口冲突 + 健康检查）
+npm run dashboard:restart
+# 预期：输出 JSON，ok=true，healthy=true，preflightAvoidedCollision=true|false
+
+# 4) 仅探测 dashboard 是否已健康（避免误报失败）
+npm run dashboard:ensure
+# 预期：若已健康，返回 ok=true + message="dashboard already healthy; skipped restart"
+
+# 5) 低风险 one-shot 烟雾（cron 友好）
+npm run ops:smoke
+# 预期：check/security:check/test 全绿；若失败会给 ci:resilient 提示
+```
+
 ### 5.1 `python: 未找到命令`
 - 本仓库流程使用 Node/npm；不要依赖 `python`。
 - 统一走：`npm run check` / `npm run ci`（当前 `ci` 已切到 `ci:resilient`）。
@@ -274,14 +298,21 @@ export MONAD_MORPHO_SDK_PACKAGE='@morpho-org/blue-sdk'
 export MONAD_MORPHO_USE_SDK=false
 ```
 
-### 5.7 dashboard 进程出现 SIGTERM/SIGKILL（轮换重启场景）
+### 5.7 dashboard 进程出现 SIGTERM/SIGKILL / EADDRINUSE（轮换重启场景）
 - 当前服务已支持 `SIGTERM/SIGINT` 的 graceful shutdown：先停 worker，再关闭 HTTP server。
 - 在频繁部署轮换中看到 `Exec failed (signal SIGTERM)` 可能是旧进程被替换，不等同于业务异常。
-- 仍建议确认最新会话已正常监听：
+- 推荐统一走 deterministic helper（端口预检 -> 安全清理旧进程 -> 拉起 -> health check）：
 ```bash
-npm run dashboard:start
-# 看到: NEAR dashboard listening on http://127.0.0.1:4173
+npm run dashboard:restart
+# 预期: JSON 输出 ok=true, healthy=true
+# 字段 preflightAvoidedCollision=true 表示预检发现并规避了端口冲突
 ```
+- 若只是探活（避免“已健康却判失败”）：
+```bash
+npm run dashboard:ensure
+# 预期: message="dashboard already healthy; skipped restart"
+```
+
 
 ---
 

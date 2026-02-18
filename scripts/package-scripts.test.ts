@@ -95,6 +95,11 @@ describe("package.json script contracts", () => {
 		expect(scripts?.check).toBe(
 			"node scripts/normalize-runtime-metrics.mjs && npm run lint && npm run typecheck && npm run schema:validate",
 		);
+		expect(
+			String(scripts?.check).startsWith(
+				"node scripts/normalize-runtime-metrics.mjs &&",
+			),
+		).toBe(true);
 		expect(scripts?.ci).toContain("npm run check");
 		expect(scripts?.ci).toContain("npm test");
 		expect(typeof scripts?.["ci:resilient"]).toBe("string");
@@ -105,6 +110,13 @@ describe("package.json script contracts", () => {
 			"node scripts/submission-evidence.mjs",
 		);
 		expect(scripts?.["demo:monad-bsc"]).toBe("node scripts/demo-monad-bsc.mjs");
+		expect(scripts?.["ops:smoke"]).toBe("node scripts/ops-smoke.mjs");
+		expect(scripts?.["dashboard:restart"]).toContain(
+			"node scripts/dashboard-restart.mjs --restart",
+		);
+		expect(scripts?.["dashboard:ensure"]).toBe(
+			"node scripts/dashboard-restart.mjs",
+		);
 	});
 
 	it("keeps CI schema validation as single-step command", () => {

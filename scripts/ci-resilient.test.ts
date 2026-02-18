@@ -19,6 +19,9 @@ describe("ci resilient hardening", () => {
 	it("adds SIGTERM retry handling in resilient and retry wrappers", () => {
 		expect(resilientSource).toContain("runWithSigtermRetry");
 		expect(resilientSource).toContain('signal === "SIGTERM"');
+		expect(resilientSource).toContain("aborted by signal sigterm");
+		expect(resilientSource).toContain("normalize-runtime-metrics-interrupted");
+		expect(resilientSource).toContain("retry-hint");
 		expect(retrySource).toContain("CI_RETRY_SIGTERM_MAX");
 		expect(retrySource).toContain("non-retryable precheck failure");
 	});

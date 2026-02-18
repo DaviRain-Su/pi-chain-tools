@@ -124,10 +124,30 @@ function hasPythonMissingSignature(output) {
 	);
 }
 
+function hasNormalizeRuntimeMetricsSignature(output) {
+	const lower = String(output || "").toLowerCase();
+	return (
+		lower.includes("normalize-runtime-metrics") ||
+		lower.includes("scripts/normalize-runtime-metrics.mjs")
+	);
+}
+
 function classifyCheckFailure(output) {
 	const lower = String(output || "").toLowerCase();
-	if (lower.includes("signal=sigterm")) return "sigterm";
+	if (
+		lower.includes("signal=sigterm") ||
+		lower.includes("aborted by signal sigterm")
+	) {
+		if (hasNormalizeRuntimeMetricsSignature(lower)) {
+			return "normalize-runtime-metrics-interrupted";
+		}
+		if (lower.includes("npm run check")) return "check-interrupted";
+		return "sigterm";
+	}
 	if (hasPythonMissingSignature(lower)) return "python-missing";
+	if (hasNormalizeRuntimeMetricsSignature(lower)) {
+		return "normalize-runtime-metrics";
+	}
 	if (lower.includes("npm run lint") || lower.includes("biome check")) {
 		if (lower.includes("internalerror/io")) return "lint-biome-io";
 		return "lint";
@@ -144,18 +164,45 @@ function classifyCheckFailure(output) {
 	return "check-unknown";
 }
 
-function printSignatureSummary(signatures) {
+function retryHintForSignatures(signatures) {
+	if (signatures.pythonPrecheckBlocked > 0) {
+		return "Install python3 (or provide python alias), then rerun: npm run ci:resilient";
+	}
+	if (signatures.checkFailureKind === "normalize-runtime-metrics-interrupted") {
+		return "normalize-runtime-metrics was interrupted (SIGTERM). Retry once: npm run ci:resilient. If persistent, check host restarts and avoid overlapping CI runs.";
+	}
+	if (signatures.checkFailureKind === "normalize-runtime-metrics") {
+		return "normalize-runtime-metrics failed. Validate JSON file exists and is writable: apps/dashboard/data/rebalance-metrics.json";
+	}
+	if (
+		signatures.checkFailureKind === "sigterm" ||
+		signatures.checkFailureKind === "check-interrupted" ||
+		signatures.sigtermDetections > 0
+	) {
+		return "Detected SIGTERM interruption. Retry with bounded backoff: CI_RETRY_SIGTERM_MAX=3 npm run ci:retry";
+	}
+	if (signatures.checkFailureKind === "python-missing") {
+		return "Python missing signature detected. Use npm run ci:resilient (auto python3 shim) and confirm python3 is on PATH.";
+	}
+	return "Retry with npm run ci:retry and inspect apps/dashboard/data/ci-signatures.jsonl for recurring signatures.";
+}
+
+function printSignatureSummary(signatures, retryHint = "") {
 	console.log(
 		`[ci-resilient] failure-signatures ${JSON.stringify(signatures)}`,
 	);
+	if (retryHint) {
+		console.log(`[ci-resilient] retry-hint ${retryHint}`);
+	}
 }
 
-function appendSignatureSummary(signatures, status) {
+function appendSignatureSummary(signatures, status, retryHint = "") {
 	try {
 		const payload = {
 			ts: new Date().toISOString(),
 			status,
 			signatures,
+			retryHint,
 		};
 		mkdirSync(path.dirname(CI_SIGNATURES_JSONL_PATH), { recursive: true });
 		appendFileSync(
@@ -172,8 +219,9 @@ function appendSignatureSummary(signatures, status) {
 
 function failWithSummary(code, message, signatures) {
 	console.error(message);
-	printSignatureSummary(signatures);
-	appendSignatureSummary(signatures, "failed");
+	const retryHint = retryHintForSignatures(signatures);
+	printSignatureSummary(signatures, retryHint);
+	appendSignatureSummary(signatures, "failed", retryHint);
 	process.exit(code);
 }
 
@@ -223,13 +271,21 @@ async function main() {
 		);
 	}
 
-	await runWithSigtermRetry(
+	const normalizeStep = await runWithSigtermRetry(
 		"node",
 		["scripts/normalize-runtime-metrics.mjs"],
 		"normalize-runtime-metrics",
 		runtime.env,
 		signatures,
 	);
+	if (normalizeStep.code !== 0) {
+		signatures.checkFailureKind = classifyCheckFailure(normalizeStep.output);
+		failWithSummary(
+			normalizeStep.code,
+			`[ci-resilient] normalize-runtime-metrics failed (${signatures.checkFailureKind})`,
+			signatures,
+		);
+	}
 	await applyBiomeHotfix(runtime.env, signatures, "proactive");
 
 	console.log("[ci-resilient] step 1/3: npm run check");
@@ -322,8 +378,9 @@ async function main() {
 	}
 
 	console.log("[ci-resilient] success");
-	printSignatureSummary(signatures);
-	appendSignatureSummary(signatures, "success");
+	const retryHint = "none";
+	printSignatureSummary(signatures, retryHint);
+	appendSignatureSummary(signatures, "success", retryHint);
 }
 
 await main();

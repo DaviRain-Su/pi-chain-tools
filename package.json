@@ -42,10 +42,13 @@
 		"ci": "npm run check && npm run security:check && npm test",
 		"ci:retry": "node scripts/ci-retry.mjs",
 		"ci:resilient": "node scripts/ci-resilient.mjs",
+		"ops:smoke": "node scripts/ops-smoke.mjs",
 		"monad:morpho:replay": "node scripts/monad-morpho-replay-pack.mjs",
 		"submission:evidence": "node scripts/submission-evidence.mjs",
 		"demo:monad-bsc": "node scripts/demo-monad-bsc.mjs",
-		"dashboard:start": "node apps/dashboard/server.mjs"
+		"dashboard:start": "node apps/dashboard/server.mjs",
+		"dashboard:restart": "node scripts/dashboard-restart.mjs --restart",
+		"dashboard:ensure": "node scripts/dashboard-restart.mjs"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",

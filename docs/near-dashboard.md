@@ -159,6 +159,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - Includes `Copy failure clusters` action and recent-row table (time/status/failure kind/python/biome/test-retry)
   - Includes `Auto action` hint derived from latest `checkFailureKind` for faster ops response
   - Stabilization rules: `check` now runs `scripts/normalize-runtime-metrics.mjs` before lint to avoid runtime JSON churn; CI prechecks python/python3 and fails fast with non-retryable code when both are missing; SIGTERM interruptions are retried with bounded budget in both `ci:resilient` and `ci:retry`.
+  - Dashboard restart helper: use `npm run dashboard:restart` (preflight port check + safe kill + relaunch + `/api/health` check); use `npm run dashboard:ensure` for no-op health verification to avoid false failure when already healthy.
 - deBridge Reliability card sharing ops:
   - `Copy share link` includes `debridgeWindow` + `debridgeAdvancedOpen` query state for reproducible views
   - `Copy share markdown` copies one-line markdown link
