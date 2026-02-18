@@ -755,7 +755,39 @@
           })
           .join("");
         const trendLabel = trend || "-";
-        return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})\nRecent(20): ${trendLabel}`;
+
+        const now = Date.now();
+        const recent24h = recent.filter((r) => {
+          const ts = Date.parse(String(r?.timestamp || ""));
+          return Number.isFinite(ts) && now - ts <= 24 * 60 * 60 * 1000;
+        });
+        const errors24h = recent24h
+          .filter((r) => String(r?.status || "") === "error")
+          .reduce((acc, r) => {
+            const key = String(r?.errorCode || "unknown");
+            acc[key] = (acc[key] || 0) + 1;
+            return acc;
+          }, {});
+        const topErrors24h = Object.entries(errors24h)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([k, v]) => `${k}:${v}`)
+          .join(" · ") || "-";
+
+        const compareWindow = recent.slice(0, 20);
+        const half = Math.max(1, Math.floor(compareWindow.length / 2));
+        const latestHalf = compareWindow.slice(0, half);
+        const prevHalf = compareWindow.slice(half, half * 2);
+        const latestRate = latestHalf.length
+          ? (latestHalf.filter((r) => String(r?.status || "") === "success").length / latestHalf.length) * 100
+          : 0;
+        const prevRate = prevHalf.length
+          ? (prevHalf.filter((r) => String(r?.status || "") === "success").length / prevHalf.length) * 100
+          : 0;
+        const delta = latestRate - prevRate;
+        const arrow = delta > 0.01 ? "↑" : delta < -0.01 ? "↓" : "→";
+
+        return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})\nRecent(20): ${trendLabel}\n24h TopErrors: ${topErrors24h}\nSuccess trend: ${arrow} ${latestRate.toFixed(1)}% vs ${prevRate.toFixed(1)}% (Δ ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}pp)`;
       }
 
       function toCsv(snapshot) {
