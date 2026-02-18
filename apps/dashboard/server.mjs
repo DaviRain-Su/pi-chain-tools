@@ -25,6 +25,7 @@ import {
 	createDelegationIntentPayload,
 	verifyDelegationIntentPayload,
 } from "./monad-agent.mjs";
+import { collectMonadMorphoSdkSnapshot } from "./monad-morpho-sdk.mjs";
 import {
 	buildStrategyDslFromLegacy,
 	validateStrategyDslV1,
@@ -341,6 +342,16 @@ const MONAD_MORPHO_REWARDS_CLAIM_COMMAND = String(
 		"monad.morpho.rewardsClaim.command",
 		"",
 	),
+).trim();
+const MONAD_MORPHO_USE_SDK =
+	String(
+		envOrCfg("MONAD_MORPHO_USE_SDK", "monad.morpho.useSdk", "false"),
+	).toLowerCase() === "true";
+const MONAD_MORPHO_SDK_API_BASE_URL = String(
+	envOrCfg("MONAD_MORPHO_SDK_API_BASE_URL", "monad.morpho.sdk.apiBaseUrl", ""),
+).trim();
+const MONAD_MORPHO_SDK_PACKAGE = String(
+	envOrCfg("MONAD_MORPHO_SDK_PACKAGE", "monad.morpho.sdk.package", ""),
 ).trim();
 const MONAD_MORPHO_APY_BPS = Number.parseInt(
 	String(envOrCfg("MONAD_MORPHO_APY_BPS", "monad.morpho.apyBps", "0")),
@@ -5789,6 +5800,78 @@ async function collectMonadMorphoMarketsWithStrategy({
 	return { markets, strategy };
 }
 
+async function collectMonadMorphoMarketsWithSdkFallback({
+	accountAddress = "",
+	amountRaw = null,
+} = {}) {
+	if (!MONAD_MORPHO_USE_SDK) {
+		const native = await collectMonadMorphoMarketsWithStrategy({
+			accountAddress,
+			amountRaw,
+		});
+		return {
+			...native,
+			mode: "native",
+			warnings: [],
+			sdk: {
+				enabled: false,
+				used: false,
+				fallback: false,
+			},
+		};
+	}
+	try {
+		const sdkSnapshot = await collectMonadMorphoSdkSnapshot(
+			{
+				rpcUrl: MONAD_RPC_URL,
+				chainId: MONAD_CHAIN_ID,
+				vaults: MONAD_MORPHO_VAULTS,
+				asset: MONAD_MORPHO_ASSET,
+				assetDecimals: MONAD_MORPHO_ASSET_DECIMALS,
+				apyBps: MONAD_MORPHO_APY_BPS,
+				riskScore: MONAD_MORPHO_RISK_SCORE,
+				liquidityCapRaw: MONAD_MORPHO_LIQUIDITY_CAP_RAW,
+				sdkApiBaseUrl: MONAD_MORPHO_SDK_API_BASE_URL,
+				sdkPackage: MONAD_MORPHO_SDK_PACKAGE,
+			},
+			{ accountAddress },
+		);
+		const strategy = computeMonadMorphoStrategy(
+			sdkSnapshot.strategyMarkets,
+			amountRaw,
+		);
+		return {
+			markets: sdkSnapshot.markets,
+			strategy,
+			mode: sdkSnapshot.mode,
+			warnings: sdkSnapshot.warnings || [],
+			sdk: {
+				enabled: true,
+				used: true,
+				fallback: false,
+				meta: sdkSnapshot.meta,
+				stats: sdkSnapshot.stats,
+			},
+		};
+	} catch (error) {
+		const native = await collectMonadMorphoMarketsWithStrategy({
+			accountAddress,
+			amountRaw,
+		});
+		return {
+			...native,
+			mode: "native-fallback",
+			warnings: ["morpho_sdk_fetch_failed_fallback_to_native"],
+			sdk: {
+				enabled: true,
+				used: false,
+				fallback: true,
+				error: error instanceof Error ? error.message : String(error),
+			},
+		};
+	}
+}
+
 function recordMonadMorphoWorkerEvent(entry) {
 	MONAD_MORPHO_WORKER.recent.unshift({
 		timestamp: new Date().toISOString(),
@@ -8648,6 +8731,9 @@ const server = http.createServer(async (req, res) => {
 					maxAmountRaw: MONAD_MORPHO_MAX_AMOUNT_RAW,
 					cooldownSeconds: MONAD_MORPHO_COOLDOWN_SECONDS,
 					dailyCapRaw: MONAD_MORPHO_DAILY_CAP_RAW || null,
+					useSdk: MONAD_MORPHO_USE_SDK,
+					sdkApiBaseUrl: MONAD_MORPHO_SDK_API_BASE_URL || null,
+					sdkPackage: MONAD_MORPHO_SDK_PACKAGE || null,
 				},
 				executeState: {
 					lastExecuteAt: MONAD_MORPHO_EXECUTE_STATE.lastExecuteAt,
@@ -8698,18 +8784,19 @@ const server = http.createServer(async (req, res) => {
 			).trim();
 			const amountRawQ = String(url.searchParams.get("amountRaw") || "").trim();
 			const amountRaw = /^\d+$/.test(amountRawQ) ? amountRawQ : null;
-			const { markets, strategy } = await collectMonadMorphoMarketsWithStrategy(
-				{
-					accountAddress,
-					amountRaw,
-				},
-			);
+			const strategyView = await collectMonadMorphoMarketsWithSdkFallback({
+				accountAddress,
+				amountRaw,
+			});
 			return json(res, 200, {
 				ok: true,
 				chain: "monad",
 				protocol: "morpho-earn",
-				strategy,
-				markets,
+				strategy: strategyView.strategy,
+				markets: strategyView.markets,
+				warnings: strategyView.warnings,
+				sdk: strategyView.sdk,
+				dataSource: strategyView.mode,
 				updatedAt: new Date().toISOString(),
 			});
 		}
@@ -8745,18 +8832,19 @@ const server = http.createServer(async (req, res) => {
 			}
 			const amountRawQ = String(url.searchParams.get("amountRaw") || "").trim();
 			const amountRaw = /^\d+$/.test(amountRawQ) ? amountRawQ : null;
-			const { markets, strategy } = await collectMonadMorphoMarketsWithStrategy(
-				{
-					accountAddress,
-					amountRaw,
-				},
-			);
+			const marketView = await collectMonadMorphoMarketsWithSdkFallback({
+				accountAddress,
+				amountRaw,
+			});
 			return json(res, 200, {
 				ok: true,
 				chain: "monad",
 				protocol: "morpho-earn",
-				markets,
-				strategy,
+				markets: marketView.markets,
+				strategy: marketView.strategy,
+				warnings: marketView.warnings,
+				sdk: marketView.sdk,
+				dataSource: marketView.mode,
 				readiness,
 				updatedAt: new Date().toISOString(),
 			});

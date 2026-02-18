@@ -40,11 +40,25 @@ describe("monad morpho earn mvp", () => {
 		expect(serverSource).toContain('action: "monad_morpho_earn_execute"');
 	});
 
+	it("contains sdk markets/strategy branch with fallback warnings", () => {
+		expect(serverSource).toContain("MONAD_MORPHO_USE_SDK");
+		expect(serverSource).toContain("collectMonadMorphoMarketsWithSdkFallback");
+		expect(serverSource).toContain("collectMonadMorphoSdkSnapshot");
+		expect(serverSource).toContain(
+			"morpho_sdk_fetch_failed_fallback_to_native",
+		);
+		expect(serverSource).toContain("dataSource: marketView.mode");
+		expect(serverSource).toContain("dataSource: strategyView.mode");
+	});
+
 	it("documents monad config in dashboard config example", () => {
 		expect(configExample?.monad?.rpcUrl).toBeTypeOf("string");
 		expect(configExample?.monad?.execute?.enabled).toBeTypeOf("boolean");
 		expect(configExample?.monad?.morpho?.vault).toBeTypeOf("string");
 		expect(configExample?.monad?.morpho?.asset).toBeTypeOf("string");
+		expect(configExample?.monad?.morpho?.useSdk).toBeTypeOf("boolean");
+		expect(configExample?.monad?.morpho?.sdk?.apiBaseUrl).toBeTypeOf("string");
+		expect(configExample?.monad?.morpho?.sdk?.package).toBeTypeOf("string");
 		expect(configExample?.monad?.morpho?.maxAmountRaw).toBeTypeOf("string");
 		expect(configExample?.monad?.morpho?.cooldownSeconds).toBeTypeOf("number");
 		expect(configExample?.monad?.morpho?.dailyCapRaw).toBeTypeOf("string");

@@ -224,7 +224,30 @@ curl -s -X POST http://127.0.0.1:4173/api/monad/morpho/worker/stop -H 'content-t
 npm run monad:morpho:replay
 ```
 
-### 5.6 dashboard 进程出现 SIGTERM/SIGKILL（轮换重启场景）
+### 5.6 Monad Morpho SDK 模式异常排查（Phase-1）
+- markets/strategy 支持双轨：
+  - `MONAD_MORPHO_USE_SDK=true`：走 SDK adapter（当前为 provider-backed scaffold）
+  - `MONAD_MORPHO_USE_SDK=false`：走原生 native read 路径
+- 当 SDK 分支异常时，接口会自动回退到 native，并返回：
+  - `warnings` 包含 `morpho_sdk_fetch_failed_fallback_to_native`
+  - `sdk.fallback=true`，`sdk.error` 带错误摘要
+- 快速核验：
+```bash
+curl -s 'http://127.0.0.1:4173/api/monad/morpho/earn/markets' | jq '.dataSource,.sdk,.warnings'
+curl -s 'http://127.0.0.1:4173/api/monad/morpho/earn/strategy' | jq '.dataSource,.sdk,.warnings'
+```
+- 建议配置：
+```bash
+export MONAD_MORPHO_USE_SDK=true
+export MONAD_MORPHO_SDK_API_BASE_URL=''
+export MONAD_MORPHO_SDK_PACKAGE=''
+```
+- 如果线上波动，先切回：
+```bash
+export MONAD_MORPHO_USE_SDK=false
+```
+
+### 5.7 dashboard 进程出现 SIGTERM/SIGKILL（轮换重启场景）
 - 当前服务已支持 `SIGTERM/SIGINT` 的 graceful shutdown：先停 worker，再关闭 HTTP server。
 - 在频繁部署轮换中看到 `Exec failed (signal SIGTERM)` 可能是旧进程被替换，不等同于业务异常。
 - 仍建议确认最新会话已正常监听：

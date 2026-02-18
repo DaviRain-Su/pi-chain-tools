@@ -107,6 +107,11 @@
 			"vaults": "",
 			"asset": "",
 			"assetDecimals": 18,
+			"useSdk": false,
+			"sdk": {
+				"apiBaseUrl": "",
+				"package": ""
+			},
 			"maxAmountRaw": "1000000000000000000000",
 			"cooldownSeconds": 0,
 			"dailyCapRaw": "",

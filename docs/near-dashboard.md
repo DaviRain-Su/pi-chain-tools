@@ -171,7 +171,10 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `GET /api/monad/morpho/earn/readiness` -> execute gate aggregation + risk controls (`canExecute/blockers/hints/fixPack/riskControls`)
   - `POST /api/monad/morpho/earn/plan` -> pre-execute plan/readiness evaluation for amount (`readiness.blockers/hints/fixPack`)
   - `GET /api/monad/morpho/earn/markets` -> vault discovery snapshot (`vault/asset/APY/TVL/risk` + optional user shares) + strategy score/allocation summary
+    - SDK path switch: `MONAD_MORPHO_USE_SDK=true` routes through `apps/dashboard/monad-morpho-sdk.mjs`
+    - response includes `dataSource`, `sdk`, `warnings`; SDK read failure auto-falls back to native path with explicit warning
   - `GET /api/monad/morpho/earn/strategy` -> explainable scorer across vaults (`apy/liquidity/risk` factors + allocation recommendation)
+    - strategy input normalization is enforced in SDK mode (`apyBps/tvlRaw/liquidityRaw/risk.score`) before scorer
   - `GET /api/monad/morpho/earn/rewards` -> read-only rewards tracking snapshot (env-fed discovery/tracking)
   - `POST /api/monad/morpho/earn/rewards/claim` (`confirm=true`) -> minimal claim execute endpoint with safe config gate; returns blocked path + fixPack when onchain claim wiring is unavailable
   - `POST /api/monad/morpho/earn/execute` (`confirm=true`) -> native RPC wallet deposit path (approve + deposit) with normalized error (`error/retryable/category/message`) and `executionArtifact/executionReconciliation`
@@ -288,6 +291,9 @@ Common mapping examples:
 - `MONAD_MORPHO_VAULTS` - optional comma-separated vault discovery list (falls back to `MONAD_MORPHO_VAULT`)
 - `MONAD_MORPHO_ASSET` - underlying ERC20 asset address
 - `MONAD_MORPHO_ASSET_DECIMALS` - asset decimals for display/amount conversion (default: `18`)
+- `MONAD_MORPHO_USE_SDK` - enable Morpho SDK adapter branch for markets/strategy (`true|false`, default: `false`)
+- `MONAD_MORPHO_SDK_API_BASE_URL` - optional SDK/provider API base URL hint for adapter scaffold
+- `MONAD_MORPHO_SDK_PACKAGE` - optional expected official SDK package name hint for telemetry/readiness
 - `MONAD_MORPHO_MAX_AMOUNT_RAW` - risk cap for execute amount
 - `MONAD_MORPHO_COOLDOWN_SECONDS` - cooldown guard between Monad execute calls (default: `0`, disabled)
 - `MONAD_MORPHO_DAILY_CAP_RAW` - optional per-day execute raw amount cap (empty = disabled)
