@@ -116,7 +116,7 @@
 			"currentMode": "canonical-client",
 			"status": "partial",
 			"blockers": [
-				"Execution relies on canonical ethers native/command bridge with fallback controls"
+				"SDK-first adapter now drives canonical ethers signer/provider execution with explicit remainingNonSdkPath + native/command fallback markers, but no official Wombat execute SDK is published"
 			]
 		}
 	]

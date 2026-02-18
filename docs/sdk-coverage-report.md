@@ -23,9 +23,9 @@ Mode definitions:
 | Lista | yield.execute | `POST /api/bsc/yield/execute` | canonical-client | partial | sdk-first adapter now routes into canonical ethers signer/provider client with explicit `remainingNonSdkPath` + fallback markers; blocked on maintained official Lista execute SDK |
 | Wombat | yield.markets | `GET /api/bsc/yield/markets` | canonical-client | partial | `@wombat-exchange/configx` is metadata-oriented, not full execute SDK |
 | Wombat | positions.read | `GET /api/bsc/positions` | canonical-client | partial | no full official npm SDK for read/execute parity |
-| Wombat | yield.execute | `POST /api/bsc/yield/execute` | canonical-client | partial | execution kept on ethers-native/command bridge |
+| Wombat | yield.execute | `POST /api/bsc/yield/execute` | canonical-client | partial | sdk-first adapter now routes into canonical ethers signer/provider execution with explicit `remainingNonSdkPath` + native/command fallback markers; blocked on official Wombat execute SDK |
 
 ## Notes
 
 - Safety behavior remains default-safe: all sdk/canonical paths keep explicit fallback behavior and warning markers.
-- Non-replaceable paths are now annotated in code (`apps/dashboard/bsc-venus-sdk.mjs`, `apps/dashboard/bsc-lista-sdk.mjs`, `apps/dashboard/bsc-wombat-sdk.mjs`, `apps/dashboard/monad-morpho-sdk.mjs`) and reflected in this report.
+- Non-replaceable paths are now annotated in code (`apps/dashboard/bsc-venus-sdk.mjs`, `apps/dashboard/bsc-lista-sdk.mjs`, `apps/dashboard/bsc-wombat-sdk.mjs`, `apps/dashboard/bsc-wombat-execute.mjs`, `apps/dashboard/monad-morpho-sdk.mjs`) and reflected in this report.

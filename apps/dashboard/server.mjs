@@ -25,6 +25,7 @@ import {
 	collectVenusSdkPositionView,
 	createVenusSdkAdapter,
 } from "./bsc-venus-sdk.mjs";
+import { executeWombatSupplySdkFirst } from "./bsc-wombat-execute.mjs";
 import {
 	collectWombatSdkMarketView,
 	collectWombatSdkPositionView,
@@ -2984,10 +2985,12 @@ async function executeBscWombatSupplyViaNativeSlot(params) {
 		: "0";
 	const deadline =
 		Math.floor(Date.now() / 1000) + Math.max(30, BSC_WOMBAT_DEADLINE_SECONDS);
-	const provider = new JsonRpcProvider(params.rpcUrl || BSC_RPC_URL, {
-		name: "bsc",
-		chainId: Number(params.chainId || BSC_CHAIN_ID),
-	});
+	const provider =
+		params?.providerOverride ||
+		new JsonRpcProvider(params.rpcUrl || BSC_RPC_URL, {
+			name: "bsc",
+			chainId: Number(params.chainId || BSC_CHAIN_ID),
+		});
 	const wallet = new Wallet(BSC_WOMBAT_EXECUTE_PRIVATE_KEY, provider);
 	const erc20Iface = new Interface([
 		"function allowance(address owner,address spender) view returns (uint256)",
@@ -3101,6 +3104,21 @@ function withListaNonSdkMarkers(result, { marker, reason }) {
 	};
 }
 
+function withWombatNonSdkMarkers(result, { marker, reason }) {
+	return {
+		...result,
+		warnings: [
+			...(Array.isArray(result?.warnings) ? result.warnings : []),
+			...(marker ? [marker] : []),
+		],
+		remainingNonSdkPath: {
+			active: true,
+			marker: marker || "wombat_execute_non_sdk_path_active",
+			reason: reason || "official_wombat_execute_sdk_not_available",
+		},
+	};
+}
+
 async function executeBscListaSupplyViaSdk(params) {
 	if (!BSC_LISTA_NATIVE_EXECUTE_ENABLED) {
 		throw new Error(
@@ -3128,30 +3146,29 @@ async function executeBscListaSupplyViaSdk(params) {
 }
 
 async function executeBscWombatSupplyViaSdk(params) {
-	const adapter = await createWombatSdkAdapter({
-		rpcUrl: params?.rpcUrl || BSC_RPC_URL,
-		chainId: params?.chainId || BSC_CHAIN_ID,
-		sdkPackage: BSC_WOMBAT_SDK_PACKAGE,
-	});
 	if (!BSC_WOMBAT_NATIVE_EXECUTE_ENABLED) {
 		throw new Error(
 			"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_native_execute_not_enabled",
 		);
 	}
-	const native = await executeBscWombatSupplyViaNativeSlot(params);
-	return {
-		...native,
-		mode: "sdk",
-		provider: "wombat-sdk-native-rpc",
-		sdk: {
-			enabled: true,
-			used: true,
-			fallback: false,
-			meta: adapter?.meta || null,
+	return executeWombatSupplySdkFirst({
+		sdkEnabled: true,
+		fallbackToNative: false,
+		rpcUrl: params?.rpcUrl || BSC_RPC_URL,
+		chainId: params?.chainId || BSC_CHAIN_ID,
+		sdkPackage: BSC_WOMBAT_SDK_PACKAGE,
+		executeCanonical: async (context) => {
+			const native = await executeBscWombatSupplyViaNativeSlot({
+				...params,
+				providerOverride: context?.providerOverride,
+			});
+			return {
+				...native,
+				provider: "wombat-sdk-canonical-ethers",
+			};
 		},
-		warnings: [],
-		fallback: { used: false, from: null, to: null, reason: null },
-	};
+		createAdapter: createWombatSdkAdapter,
+	});
 }
 
 async function executeBscListaSupply(params) {
@@ -3256,15 +3273,27 @@ async function executeBscWombatSupply(params) {
 				"BSC_EXECUTE_CONFIG retryable=false message=bsc_wombat_native_execute_not_enabled",
 			);
 		}
-		return withBscExecuteFallbackMetadata(
-			await executeBscWombatSupplyViaNativeSlot(params),
-			{ used: false },
+		return withWombatNonSdkMarkers(
+			withBscExecuteFallbackMetadata(
+				await executeBscWombatSupplyViaNativeSlot(params),
+				{ used: false },
+			),
+			{
+				marker: "wombat_execute_non_sdk_native_mode_active",
+				reason: "execute_mode_native",
+			},
 		);
 	}
 	if (BSC_WOMBAT_EXECUTE_MODE === "command") {
-		return withBscExecuteFallbackMetadata(
-			await executeBscWombatSupplyViaCommand(params),
-			{ used: false },
+		return withWombatNonSdkMarkers(
+			withBscExecuteFallbackMetadata(
+				await executeBscWombatSupplyViaCommand(params),
+				{ used: false },
+			),
+			{
+				marker: "wombat_execute_non_sdk_command_mode_active",
+				reason: "execute_mode_command",
+			},
 		);
 	}
 	const preferSdk =
@@ -3278,33 +3307,57 @@ async function executeBscWombatSupply(params) {
 			const reason = error instanceof Error ? error.message : String(error);
 			if (BSC_WOMBAT_NATIVE_EXECUTE_ENABLED) {
 				try {
-					return withBscExecuteFallbackMetadata(
-						await executeBscWombatSupplyViaNativeSlot(params),
-						{ used: true, from: "wombat_sdk", to: "native", reason },
+					return withWombatNonSdkMarkers(
+						withBscExecuteFallbackMetadata(
+							await executeBscWombatSupplyViaNativeSlot(params),
+							{ used: true, from: "wombat_sdk", to: "native", reason },
+						),
+						{
+							marker: "wombat_execute_non_sdk_native_fallback_path",
+							reason,
+						},
 					);
 				} catch (nativeError) {
 					if (!isNativeSlotNotImplementedError(nativeError)) throw nativeError;
 				}
 			}
-			return withBscExecuteFallbackMetadata(
-				await executeBscWombatSupplyViaCommand(params),
-				{ used: true, from: "wombat_sdk", to: "command", reason },
+			return withWombatNonSdkMarkers(
+				withBscExecuteFallbackMetadata(
+					await executeBscWombatSupplyViaCommand(params),
+					{ used: true, from: "wombat_sdk", to: "command", reason },
+				),
+				{
+					marker: "wombat_execute_non_sdk_command_fallback_path",
+					reason,
+				},
 			);
 		}
 	}
 	if (BSC_WOMBAT_NATIVE_EXECUTE_ENABLED) {
 		try {
-			return withBscExecuteFallbackMetadata(
-				await executeBscWombatSupplyViaNativeSlot(params),
-				{ used: false },
+			return withWombatNonSdkMarkers(
+				withBscExecuteFallbackMetadata(
+					await executeBscWombatSupplyViaNativeSlot(params),
+					{ used: false },
+				),
+				{
+					marker: "wombat_execute_non_sdk_native_auto_mode",
+					reason: "sdk_disabled_or_not_preferred",
+				},
 			);
 		} catch (error) {
 			if (!isNativeSlotNotImplementedError(error)) throw error;
 		}
 	}
-	return withBscExecuteFallbackMetadata(
-		await executeBscWombatSupplyViaCommand(params),
-		{ used: false },
+	return withWombatNonSdkMarkers(
+		withBscExecuteFallbackMetadata(
+			await executeBscWombatSupplyViaCommand(params),
+			{ used: false },
+		),
+		{
+			marker: "wombat_execute_non_sdk_command_auto_mode",
+			reason: "native_path_unavailable",
+		},
 	);
 }
 
