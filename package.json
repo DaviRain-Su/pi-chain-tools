@@ -42,6 +42,7 @@
 		"ci": "npm run check && npm run security:check && npm test",
 		"ci:retry": "node scripts/ci-retry.mjs",
 		"ci:resilient": "node scripts/ci-resilient.mjs",
+		"monad:morpho:replay": "node scripts/monad-morpho-replay-pack.mjs",
 		"dashboard:start": "node apps/dashboard/server.mjs"
 	},
 	"dependencies": {

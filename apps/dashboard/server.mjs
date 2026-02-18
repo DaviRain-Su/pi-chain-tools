@@ -354,6 +354,57 @@ const MONAD_MORPHO_CONFIRMATIONS = Math.max(
 		10,
 	) || 1,
 );
+const MONAD_MORPHO_STRATEGY_WEIGHTS = {
+	apy: Math.max(
+		0,
+		Number.parseFloat(
+			String(
+				envOrCfg(
+					"MONAD_MORPHO_WEIGHT_APY",
+					"monad.morpho.strategyWeights.apy",
+					"0.5",
+				),
+			),
+		) || 0.5,
+	),
+	liquidity: Math.max(
+		0,
+		Number.parseFloat(
+			String(
+				envOrCfg(
+					"MONAD_MORPHO_WEIGHT_LIQUIDITY",
+					"monad.morpho.strategyWeights.liquidity",
+					"0.3",
+				),
+			),
+		) || 0.3,
+	),
+	risk: Math.max(
+		0,
+		Number.parseFloat(
+			String(
+				envOrCfg(
+					"MONAD_MORPHO_WEIGHT_RISK",
+					"monad.morpho.strategyWeights.risk",
+					"0.2",
+				),
+			),
+		) || 0.2,
+	),
+};
+const MONAD_MORPHO_WORKER_MIN_INTERVAL_MS = Math.max(
+	30_000,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"MONAD_MORPHO_WORKER_MIN_INTERVAL_MS",
+				"monad.morpho.worker.minIntervalMs",
+				"30000",
+			),
+		),
+		10,
+	) || 30_000,
+);
 const BSC_RPC_URL = String(
 	envOrCfg("BSC_RPC_URL", "bsc.rpcUrl", "https://bsc-dataseed.binance.org"),
 );
@@ -952,6 +1003,17 @@ const MONAD_MORPHO_EXECUTE_STATE = {
 	lastExecuteAt: null,
 	dailyWindowDay: "",
 	dailyExecutedRaw: 0n,
+};
+const MONAD_MORPHO_WORKER = {
+	running: false,
+	dryRun: true,
+	intervalMs: 5 * 60 * 1000,
+	maxAmountRaw: MONAD_MORPHO_MAX_AMOUNT_RAW,
+	lastRunAt: null,
+	lastDecision: null,
+	lastError: null,
+	recent: [],
+	timer: null,
 };
 const DEBRIDGE_EXECUTE_METRICS = {
 	total: 0,
@@ -1788,6 +1850,10 @@ async function buildSnapshot(accountId) {
 		monadMorphoExecuteMetrics: {
 			...MONAD_MORPHO_EXECUTE_METRICS,
 			recent: MONAD_MORPHO_EXECUTE_METRICS.recent,
+		},
+		monadMorphoWorker: {
+			...MONAD_MORPHO_WORKER,
+			timer: MONAD_MORPHO_WORKER.timer ? "active" : null,
 		},
 	};
 }
@@ -5269,6 +5335,237 @@ function buildMonadMorphoRewardsSnapshot() {
 	};
 }
 
+function clampUnitInterval(value) {
+	const n = Number(value);
+	if (!Number.isFinite(n)) return 0;
+	if (n < 0) return 0;
+	if (n > 1) return 1;
+	return n;
+}
+
+function computeMonadMorphoStrategy(markets = [], amountRaw = null) {
+	const valid = (Array.isArray(markets) ? markets : []).filter(
+		(row) => row && !row.error,
+	);
+	if (valid.length === 0) {
+		return {
+			rankings: [],
+			recommendation: null,
+			allocation: [],
+			explain: [],
+		};
+	}
+	const apyValues = valid.map((row) => Number(row.apyBps || 0));
+	const riskValues = valid.map((row) => Number(row?.risk?.score || 50));
+	const tvlValues = valid.map((row) => {
+		try {
+			return BigInt(String(row.tvlRaw || "0"));
+		} catch {
+			return 0n;
+		}
+	});
+	const minApy = Math.min(...apyValues);
+	const maxApy = Math.max(...apyValues);
+	const minRisk = Math.min(...riskValues);
+	const maxRisk = Math.max(...riskValues);
+	const maxTvl = tvlValues.reduce((acc, row) => (row > acc ? row : acc), 0n);
+	const weightSum =
+		MONAD_MORPHO_STRATEGY_WEIGHTS.apy +
+			MONAD_MORPHO_STRATEGY_WEIGHTS.liquidity +
+			MONAD_MORPHO_STRATEGY_WEIGHTS.risk || 1;
+	const ranked = valid
+		.map((row) => {
+			const apy = Number(row.apyBps || 0);
+			const riskScore = Number(row?.risk?.score || 50);
+			const tvlRaw = (() => {
+				try {
+					return BigInt(String(row.tvlRaw || "0"));
+				} catch {
+					return 0n;
+				}
+			})();
+			const apyNormalized =
+				maxApy === minApy
+					? 0.5
+					: clampUnitInterval((apy - minApy) / (maxApy - minApy));
+			const liquidityNormalized =
+				maxTvl === 0n ? 0 : Number((tvlRaw * 10_000n) / maxTvl) / 10_000;
+			const riskNormalized =
+				maxRisk === minRisk
+					? 0.5
+					: clampUnitInterval(1 - (riskScore - minRisk) / (maxRisk - minRisk));
+			const score =
+				(apyNormalized * MONAD_MORPHO_STRATEGY_WEIGHTS.apy +
+					liquidityNormalized * MONAD_MORPHO_STRATEGY_WEIGHTS.liquidity +
+					riskNormalized * MONAD_MORPHO_STRATEGY_WEIGHTS.risk) /
+				weightSum;
+			return {
+				...row,
+				strategy: {
+					score: Number(score.toFixed(4)),
+					factors: {
+						apyNormalized: Number(apyNormalized.toFixed(4)),
+						liquidityNormalized: Number(liquidityNormalized.toFixed(4)),
+						riskNormalized: Number(riskNormalized.toFixed(4)),
+					},
+					explain: [
+						`apy=${apy}bps`,
+						`liquidityRaw=${String(row.tvlRaw || "0")}`,
+						`riskScore=${riskScore}`,
+					],
+				},
+			};
+		})
+		.sort(
+			(a, b) =>
+				Number(b?.strategy?.score || 0) - Number(a?.strategy?.score || 0),
+		)
+		.map((row, index) => ({
+			...row,
+			strategy: {
+				...row.strategy,
+				rank: index + 1,
+			},
+		}));
+	const totalScore = ranked.reduce(
+		(acc, row) => acc + Number(row?.strategy?.score || 0),
+		0,
+	);
+	const allocation = ranked.map((row) => {
+		const score = Number(row?.strategy?.score || 0);
+		const bps = totalScore > 0 ? Math.round((score / totalScore) * 10_000) : 0;
+		return {
+			vault: row.vault,
+			score,
+			allocationBps: bps,
+			recommendedAmountRaw:
+				amountRaw && totalScore > 0
+					? ((BigInt(String(amountRaw)) * BigInt(bps)) / 10_000n).toString()
+					: null,
+		};
+	});
+	return {
+		rankings: ranked,
+		recommendation: ranked[0]
+			? {
+					vault: ranked[0].vault,
+					score: ranked[0].strategy.score,
+				}
+			: null,
+		allocation,
+		explain: [
+			`weights: apy=${MONAD_MORPHO_STRATEGY_WEIGHTS.apy}, liquidity=${MONAD_MORPHO_STRATEGY_WEIGHTS.liquidity}, risk=${MONAD_MORPHO_STRATEGY_WEIGHTS.risk}`,
+		],
+	};
+}
+
+async function collectMonadMorphoMarketsWithStrategy({
+	accountAddress = "",
+	amountRaw = null,
+} = {}) {
+	const markets = await Promise.all(
+		MONAD_MORPHO_VAULTS.map(async (vault) => {
+			try {
+				return await readMonadMorphoVaultMarket(vault, accountAddress);
+			} catch (error) {
+				return {
+					vault,
+					error: error instanceof Error ? error.message : String(error),
+				};
+			}
+		}),
+	);
+	const strategy = computeMonadMorphoStrategy(markets, amountRaw);
+	return { markets, strategy };
+}
+
+function recordMonadMorphoWorkerEvent(entry) {
+	MONAD_MORPHO_WORKER.recent.unshift({
+		timestamp: new Date().toISOString(),
+		...entry,
+	});
+	if (MONAD_MORPHO_WORKER.recent.length > 30) {
+		MONAD_MORPHO_WORKER.recent.length = 30;
+	}
+}
+
+function stopMonadMorphoWorker() {
+	if (MONAD_MORPHO_WORKER.timer) {
+		clearInterval(MONAD_MORPHO_WORKER.timer);
+		MONAD_MORPHO_WORKER.timer = null;
+	}
+	MONAD_MORPHO_WORKER.running = false;
+}
+
+function startMonadMorphoWorker(options = {}) {
+	stopMonadMorphoWorker();
+	MONAD_MORPHO_WORKER.running = true;
+	MONAD_MORPHO_WORKER.dryRun = options.dryRun !== false;
+	MONAD_MORPHO_WORKER.intervalMs = Math.max(
+		MONAD_MORPHO_WORKER_MIN_INTERVAL_MS,
+		Number.parseInt(
+			String(options.intervalMs || MONAD_MORPHO_WORKER.intervalMs),
+			10,
+		) || MONAD_MORPHO_WORKER.intervalMs,
+	);
+	MONAD_MORPHO_WORKER.maxAmountRaw = String(
+		options.maxAmountRaw || MONAD_MORPHO_MAX_AMOUNT_RAW,
+	);
+	const tick = async () => {
+		try {
+			const { markets, strategy } = await collectMonadMorphoMarketsWithStrategy(
+				{
+					amountRaw: MONAD_MORPHO_WORKER.maxAmountRaw,
+				},
+			);
+			const currentVault = markets.find((row) => {
+				try {
+					return !row.error && BigInt(String(row.userSharesRaw || "0")) > 0n;
+				} catch {
+					return false;
+				}
+			})?.vault;
+			const targetVault = strategy?.recommendation?.vault || null;
+			const action =
+				currentVault && targetVault && currentVault !== targetVault
+					? "rebalance"
+					: "hold";
+			MONAD_MORPHO_WORKER.lastRunAt = new Date().toISOString();
+			MONAD_MORPHO_WORKER.lastDecision = {
+				action,
+				currentVault: currentVault || null,
+				targetVault,
+				dryRun: MONAD_MORPHO_WORKER.dryRun,
+			};
+			MONAD_MORPHO_WORKER.lastError = null;
+			recordMonadMorphoWorkerEvent({
+				status: "ok",
+				decision: MONAD_MORPHO_WORKER.lastDecision,
+			});
+			pushActionHistory({
+				action: "monad_morpho_worker_tick",
+				status: "success",
+				summary: `worker ${action} dryRun=${MONAD_MORPHO_WORKER.dryRun}`,
+				meta: {
+					targetVault,
+					currentVault: currentVault || null,
+				},
+			});
+		} catch (error) {
+			MONAD_MORPHO_WORKER.lastError =
+				error instanceof Error ? error.message : String(error);
+			recordMonadMorphoWorkerEvent({
+				status: "error",
+				error: MONAD_MORPHO_WORKER.lastError,
+			});
+		}
+	};
+	void tick();
+	MONAD_MORPHO_WORKER.timer = setInterval(() => {
+		void tick();
+	}, MONAD_MORPHO_WORKER.intervalMs);
+}
+
 async function readMonadMorphoVaultMarket(vaultAddress, accountAddress = "") {
 	const provider = new JsonRpcProvider(MONAD_RPC_URL, {
 		name: "monad",
@@ -7649,6 +7946,30 @@ const server = http.createServer(async (req, res) => {
 			});
 		}
 
+		if (url.pathname === "/api/monad/morpho/earn/strategy") {
+			const accountAddress = String(
+				url.searchParams.get("account") ||
+					url.searchParams.get("accountAddress") ||
+					"",
+			).trim();
+			const amountRawQ = String(url.searchParams.get("amountRaw") || "").trim();
+			const amountRaw = /^\d+$/.test(amountRawQ) ? amountRawQ : null;
+			const { markets, strategy } = await collectMonadMorphoMarketsWithStrategy(
+				{
+					accountAddress,
+					amountRaw,
+				},
+			);
+			return json(res, 200, {
+				ok: true,
+				chain: "monad",
+				protocol: "morpho-earn",
+				strategy,
+				markets,
+				updatedAt: new Date().toISOString(),
+			});
+		}
+
 		if (url.pathname === "/api/monad/morpho/earn/rewards") {
 			const snapshot = buildMonadMorphoRewardsSnapshot();
 			return json(res, 200, {
@@ -7678,23 +7999,20 @@ const server = http.createServer(async (req, res) => {
 					readiness,
 				});
 			}
-			const markets = await Promise.all(
-				MONAD_MORPHO_VAULTS.map(async (vault) => {
-					try {
-						return await readMonadMorphoVaultMarket(vault, accountAddress);
-					} catch (error) {
-						return {
-							vault,
-							error: error instanceof Error ? error.message : String(error),
-						};
-					}
-				}),
+			const amountRawQ = String(url.searchParams.get("amountRaw") || "").trim();
+			const amountRaw = /^\d+$/.test(amountRawQ) ? amountRawQ : null;
+			const { markets, strategy } = await collectMonadMorphoMarketsWithStrategy(
+				{
+					accountAddress,
+					amountRaw,
+				},
 			);
 			return json(res, 200, {
 				ok: true,
 				chain: "monad",
 				protocol: "morpho-earn",
 				markets,
+				strategy,
 				readiness,
 				updatedAt: new Date().toISOString(),
 			});
@@ -7748,36 +8066,130 @@ const server = http.createServer(async (req, res) => {
 					},
 				});
 			}
+			const requestedVault = String(
+				payload.vault || MONAD_MORPHO_VAULTS[0] || "",
+			).trim();
+			if (!isHexAddress(requestedVault)) {
+				return json(res, 400, {
+					ok: false,
+					error: "MONAD_MORPHO_REWARDS_CLAIM_INVALID_VAULT",
+					retryable: false,
+					category: "input",
+					message: "vault must be a valid 0x address",
+				});
+			}
 			const command = MONAD_MORPHO_REWARDS_CLAIM_COMMAND.replaceAll(
 				"{account}",
 				String(payload.account || ""),
-			).replaceAll(
-				"{vault}",
-				String(payload.vault || MONAD_MORPHO_VAULTS[0] || ""),
-			);
-			const out = await runCommand(command, { timeoutMs: 120000 });
+			).replaceAll("{vault}", requestedVault);
+			const before = buildMonadMorphoRewardsSnapshot();
+			let stdout = "";
+			let ok = true;
+			let errorMessage = null;
+			try {
+				stdout = await runCommand("bash", ["-lc", command], {
+					timeoutMs: 120000,
+				});
+			} catch (error) {
+				ok = false;
+				errorMessage = error instanceof Error ? error.message : String(error);
+			}
+			const after = buildMonadMorphoRewardsSnapshot();
+			const reconciliation = {
+				beforeTotalClaimableRaw: before.tracking.totalClaimableRaw,
+				afterTotalClaimableRaw: after.tracking.totalClaimableRaw,
+				changed:
+					before.tracking.totalClaimableRaw !==
+					after.tracking.totalClaimableRaw,
+			};
 			pushActionHistory({
 				action: "monad_morpho_rewards_claim_execute",
-				status: out.ok ? "success" : "error",
-				summary: out.ok
-					? "monad morpho rewards claim"
-					: out.stderr || out.stdout,
-				detail: out,
+				status: ok ? "success" : "error",
+				summary: ok ? "monad morpho rewards claim" : errorMessage,
+				detail: {
+					vault: requestedVault,
+					reconciliation,
+					commandPreview: command.slice(0, 180),
+				},
 			});
-			return json(res, out.ok ? 200 : 500, {
-				ok: out.ok,
+			return json(res, ok ? 200 : 500, {
+				ok,
 				chain: "monad",
 				protocol: "morpho-earn",
 				action: "rewards-claim",
-				stdout: out.stdout,
-				stderr: out.stderr,
-				code: out.code,
-				error: out.ok ? null : "MONAD_MORPHO_REWARDS_CLAIM_FAILED",
+				vault: requestedVault,
+				stdout,
+				error: ok ? null : "MONAD_MORPHO_REWARDS_CLAIM_FAILED",
 				retryable: false,
-				category: out.ok ? null : "runtime",
-				message: out.ok
-					? "ok"
-					: out.stderr || out.stdout || "claim command failed",
+				category: ok ? null : "runtime",
+				message: ok ? "ok" : errorMessage,
+				reconciliation,
+				telemetry: {
+					at: new Date().toISOString(),
+					commandPreview: command.slice(0, 140),
+				},
+			});
+		}
+
+		if (url.pathname === "/api/monad/morpho/worker/status") {
+			return json(res, 200, {
+				ok: true,
+				worker: {
+					...MONAD_MORPHO_WORKER,
+					timer: MONAD_MORPHO_WORKER.timer ? "active" : null,
+				},
+			});
+		}
+
+		if (
+			url.pathname === "/api/monad/morpho/worker/start" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			startMonadMorphoWorker(payload);
+			pushActionHistory({
+				action: "monad_morpho_worker_control",
+				status: "success",
+				summary: `worker started dryRun=${MONAD_MORPHO_WORKER.dryRun} intervalMs=${MONAD_MORPHO_WORKER.intervalMs}`,
+			});
+			return json(res, 200, {
+				ok: true,
+				worker: {
+					...MONAD_MORPHO_WORKER,
+					timer: MONAD_MORPHO_WORKER.timer ? "active" : null,
+				},
+			});
+		}
+
+		if (
+			url.pathname === "/api/monad/morpho/worker/stop" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			stopMonadMorphoWorker();
+			pushActionHistory({
+				action: "monad_morpho_worker_control",
+				status: "success",
+				summary: "worker stopped",
+			});
+			return json(res, 200, {
+				ok: true,
+				worker: {
+					...MONAD_MORPHO_WORKER,
+					timer: null,
+				},
 			});
 		}
 

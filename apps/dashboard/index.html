@@ -181,15 +181,19 @@
       </div>
 
       <div class="card" style="margin-top:16px">
-        <h3>Monad Morpho Earn (v1.1)</h3>
+        <h3>Monad Morpho Earn (v1.2)</h3>
         <div id="monadMorphoReadiness" class="muted">readiness: -</div>
         <div id="monadMorphoMarkets" class="muted" style="margin-top:6px">markets: -</div>
+        <div id="monadMorphoStrategy" class="muted" style="margin-top:6px">strategy: -</div>
+        <div id="monadMorphoWorker" class="muted" style="margin-top:6px">worker: -</div>
         <div id="monadMorphoRewards" class="muted" style="margin-top:6px">rewards: -</div>
         <div id="monadMorphoLast" class="muted" style="margin-top:6px">last execute: -</div>
         <div id="monadMorphoTrend" class="muted" style="margin-top:6px">trend: -</div>
         <div class="row" style="margin-top:8px">
           <input id="monadMorphoAmountRaw" placeholder="amountRaw" size="24" />
           <button id="execMonadMorphoDeposit">Execute deposit (confirm)</button>
+          <button id="startMonadMorphoWorker">Start worker (dry-run)</button>
+          <button id="stopMonadMorphoWorker">Stop worker</button>
           <button id="copyMonadMorphoIncident">Copy Monad incident</button>
         </div>
       </div>
@@ -458,11 +462,15 @@
       const execQualityEl = document.getElementById("execQuality");
       const monadMorphoReadinessEl = document.getElementById("monadMorphoReadiness");
       const monadMorphoMarketsEl = document.getElementById("monadMorphoMarkets");
+      const monadMorphoStrategyEl = document.getElementById("monadMorphoStrategy");
+      const monadMorphoWorkerEl = document.getElementById("monadMorphoWorker");
       const monadMorphoRewardsEl = document.getElementById("monadMorphoRewards");
       const monadMorphoLastEl = document.getElementById("monadMorphoLast");
       const monadMorphoTrendEl = document.getElementById("monadMorphoTrend");
       const monadMorphoAmountRawEl = document.getElementById("monadMorphoAmountRaw");
       const execMonadMorphoDepositBtn = document.getElementById("execMonadMorphoDeposit");
+      const startMonadMorphoWorkerBtn = document.getElementById("startMonadMorphoWorker");
+      const stopMonadMorphoWorkerBtn = document.getElementById("stopMonadMorphoWorker");
       const copyMonadMorphoIncidentBtn = document.getElementById("copyMonadMorphoIncident");
       const ciSignaturesEl = document.getElementById("ciSignatures");
       const copyCiFailureClustersBtn = document.getElementById("copyCiFailureClusters");
@@ -1302,7 +1310,7 @@
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
         const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
-        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoRewardsRes] = await Promise.all([
+        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes] = await Promise.all([
           fetch(`/api/snapshot${query}`),
           fetch(`/api/portfolio/unified${query}`),
           fetch(`/api/bsc/yield/plan${query ? `${query}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
@@ -1316,6 +1324,8 @@
           fetch("/api/ops/ci-signatures?limit=30"),
           fetch("/api/monad/morpho/earn/readiness"),
           fetch("/api/monad/morpho/earn/markets"),
+          fetch("/api/monad/morpho/earn/strategy"),
+          fetch("/api/monad/morpho/worker/status"),
           fetch("/api/monad/morpho/earn/rewards"),
         ]);
         const data = await snapRes.json();
@@ -1331,6 +1341,8 @@
         const ciSignatures = await ciSignaturesRes.json().catch(() => ({ ok: false, signatures: [] }));
         const monadMorphoReadiness = await monadMorphoReadinessRes.json().catch(() => ({ ok: false }));
         const monadMorphoMarkets = await monadMorphoMarketsRes.json().catch(() => ({ ok: false, markets: [] }));
+        const monadMorphoStrategy = await monadMorphoStrategyRes.json().catch(() => ({ ok: false, strategy: null }));
+        const monadMorphoWorker = await monadMorphoWorkerRes.json().catch(() => ({ ok: false, worker: {} }));
         const monadMorphoRewards = await monadMorphoRewardsRes.json().catch(() => ({ ok: false, rewards: [] }));
         lastCiSignatures = ciSignatures;
         if (!snapRes.ok) {
@@ -1360,6 +1372,11 @@
         monadMorphoMarketsEl.innerHTML = monadMarkets.length
           ? monadMarkets.slice(0, 3).map((m) => `${m.vault || "-"}: APY ${m.apy || "-"}, TVL ${m.tvl || "-"}, risk ${m?.risk?.band || "-"}`).join("<br/>")
           : "markets: -";
+        const monadRank = monadMorphoStrategy?.strategy?.rankings || [];
+        monadMorphoStrategyEl.innerHTML = monadRank.length
+          ? `strategy: top=${monadMorphoStrategy?.strategy?.recommendation?.vault || "-"} · alloc=${(monadMorphoStrategy?.strategy?.allocation || []).slice(0, 2).map((a) => `${String(a.vault || "-").slice(0, 8)}:${a.allocationBps || 0}bps`).join(", ")}`
+          : "strategy: -";
+        monadMorphoWorkerEl.innerHTML = `worker: ${(monadMorphoWorker?.worker?.running ? "running" : "stopped")} · dryRun=${monadMorphoWorker?.worker?.dryRun !== false} · intervalMs=${monadMorphoWorker?.worker?.intervalMs || "-"} · last=${monadMorphoWorker?.worker?.lastRunAt || "-"}`;
         const monadRewards = Array.isArray(monadMorphoRewards?.rewards) ? monadMorphoRewards.rewards : [];
         monadMorphoRewardsEl.innerHTML = monadRewards.length
           ? `rewards: count=${monadRewards.length} · totalRaw=${monadMorphoRewards?.tracking?.totalClaimableRaw || "0"} · top=${monadRewards.slice(0, 2).map((r) => `${r.rewardToken || "token"}:${r.claimableRaw || "0"}`).join(", ")}`
@@ -2462,6 +2479,43 @@
           await load();
         } catch (error) {
           cmdMetaEl.textContent = `Monad execute failed: ${error?.message || error}`;
+        }
+      });
+      startMonadMorphoWorkerBtn?.addEventListener("click", async () => {
+        try {
+          const amountRaw = String(monadMorphoAmountRawEl?.value || "").trim();
+          const res = await fetch("/api/monad/morpho/worker/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm: true, dryRun: true, amountRaw: amountRaw || undefined }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || payload?.ok === false) {
+            cmdMetaEl.textContent = `Worker start failed: ${payload?.error || payload?.message || res.status}`;
+            return;
+          }
+          cmdMetaEl.textContent = "Monad worker started (dry-run)";
+          await load();
+        } catch (error) {
+          cmdMetaEl.textContent = `Worker start failed: ${error?.message || error}`;
+        }
+      });
+      stopMonadMorphoWorkerBtn?.addEventListener("click", async () => {
+        try {
+          const res = await fetch("/api/monad/morpho/worker/stop", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm: true }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || payload?.ok === false) {
+            cmdMetaEl.textContent = `Worker stop failed: ${payload?.error || payload?.message || res.status}`;
+            return;
+          }
+          cmdMetaEl.textContent = "Monad worker stopped";
+          await load();
+        } catch (error) {
+          cmdMetaEl.textContent = `Worker stop failed: ${error?.message || error}`;
         }
       });
       copyMonadMorphoIncidentBtn?.addEventListener("click", async () => {

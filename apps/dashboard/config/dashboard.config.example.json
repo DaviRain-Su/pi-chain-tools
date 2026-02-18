@@ -118,7 +118,15 @@
 			"apyBps": 0,
 			"riskScore": 45,
 			"liquidityCapRaw": "",
-			"confirmations": 1
+			"confirmations": 1,
+			"strategyWeights": {
+				"apy": 0.5,
+				"liquidity": 0.3,
+				"risk": 0.2
+			},
+			"worker": {
+				"minIntervalMs": 30000
+			}
 		}
 	},
 	"crosschain": {

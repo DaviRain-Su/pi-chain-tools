@@ -155,13 +155,16 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `Copy share link` includes `debridgeWindow` + `debridgeAdvancedOpen` query state for reproducible views
   - `Copy share markdown` copies one-line markdown link
   - `Copy markdown + summary` copies markdown link + current reliability headline for incident handoff
-- Monad Morpho Earn v1.1 (hackathon polish):
+- Monad Morpho Earn v1.2 (advanced polish):
   - `GET /api/monad/morpho/earn/readiness` -> execute gate aggregation + risk controls (`canExecute/blockers/hints/fixPack/riskControls`)
   - `POST /api/monad/morpho/earn/plan` -> pre-execute plan/readiness evaluation for amount (`readiness.blockers/hints/fixPack`)
-  - `GET /api/monad/morpho/earn/markets` -> vault discovery snapshot (`vault/asset/APY/TVL/risk` + optional user shares)
+  - `GET /api/monad/morpho/earn/markets` -> vault discovery snapshot (`vault/asset/APY/TVL/risk` + optional user shares) + strategy score/allocation summary
+  - `GET /api/monad/morpho/earn/strategy` -> explainable scorer across vaults (`apy/liquidity/risk` factors + allocation recommendation)
   - `GET /api/monad/morpho/earn/rewards` -> read-only rewards tracking snapshot (env-fed discovery/tracking)
   - `POST /api/monad/morpho/earn/rewards/claim` (`confirm=true`) -> minimal claim execute endpoint with safe config gate; returns blocked path + fixPack when onchain claim wiring is unavailable
   - `POST /api/monad/morpho/earn/execute` (`confirm=true`) -> native RPC wallet deposit path (approve + deposit) with normalized error (`error/retryable/category/message`) and `executionArtifact/executionReconciliation`
+  - `POST /api/monad/morpho/worker/start|stop` + `GET /api/monad/morpho/worker/status` -> dry-run-first auto-rebalance worker control with interval guardrails
+  - `npm run monad:morpho:replay` -> deterministic replay/pressure-test pack, writes `apps/dashboard/data/monad-morpho-replay-trend.json`
   - execution history writes to dashboard `actionHistory` with `action=monad_morpho_earn_execute`, including `runId/txHash/reconciliation`; Monad card shows recent execute trend/error summary + one-click incident copy
 - deBridge MCP readiness (cross-chain integration hook):
   - `GET /api/crosschain/debridge/readiness` (returns `enabled/commandConfigured/executeEnabled/executeCommandConfigured/executeRetry/canExecute/blockers/hints`)

@@ -18,9 +18,13 @@ describe("monad morpho earn mvp", () => {
 		expect(serverSource).toContain("/api/monad/morpho/earn/readiness");
 		expect(serverSource).toContain("/api/monad/morpho/earn/plan");
 		expect(serverSource).toContain("/api/monad/morpho/earn/markets");
+		expect(serverSource).toContain("/api/monad/morpho/earn/strategy");
 		expect(serverSource).toContain("/api/monad/morpho/earn/rewards");
 		expect(serverSource).toContain("/api/monad/morpho/earn/rewards/claim");
 		expect(serverSource).toContain("/api/monad/morpho/earn/execute");
+		expect(serverSource).toContain("/api/monad/morpho/worker/start");
+		expect(serverSource).toContain("/api/monad/morpho/worker/stop");
+		expect(serverSource).toContain("/api/monad/morpho/worker/status");
 		expect(serverSource).toContain("Missing confirm=true");
 	});
 
@@ -48,6 +52,12 @@ describe("monad morpho earn mvp", () => {
 		);
 		expect(configExample?.monad?.morpho?.rewardsClaim?.command).toBeTypeOf(
 			"string",
+		);
+		expect(configExample?.monad?.morpho?.strategyWeights?.apy).toBeTypeOf(
+			"number",
+		);
+		expect(configExample?.monad?.morpho?.worker?.minIntervalMs).toBeTypeOf(
+			"number",
 		);
 	});
 });
