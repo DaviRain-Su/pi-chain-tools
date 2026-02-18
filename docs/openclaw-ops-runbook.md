@@ -134,6 +134,10 @@ curl -s -X POST 'http://127.0.0.1:4173/api/crosschain/debridge/execute' \
 
 执行结果会写入 dashboard actionHistory（`action=debridge_execute`，`status=ok|blocked|error`），并返回 `executionArtifact/executionReconciliation`，便于后续审计与回放。
 
+运行时会对 artifact/reconciliation 做结构校验；若不合法将返回：
+- `debridge_execution_artifact_invalid`
+- `debridge_execution_reconciliation_invalid`
+
 建议最小配置：
 ```bash
 export DEBRIDGE_MCP_ENABLED=true

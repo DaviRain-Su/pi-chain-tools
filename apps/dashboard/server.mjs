@@ -2533,6 +2533,37 @@ function reconcileDebridgeExecutionArtifact(artifact) {
 	};
 }
 
+function validateDebridgeExecutionArtifactV1(artifact) {
+	if (!artifact || typeof artifact !== "object") return false;
+	if (artifact.type !== "debridge_crosschain_execute") return false;
+	if (artifact.version !== "v1") return false;
+	if (artifact.provider !== "debridge-mcp") return false;
+	if (!["success", "blocked", "error"].includes(String(artifact.status || "")))
+		return false;
+	if (
+		!artifact.occurredAt ||
+		Number.isNaN(Date.parse(String(artifact.occurredAt)))
+	)
+		return false;
+	return true;
+}
+
+function validateDebridgeExecutionReconciliationV1(reconciliation) {
+	if (!reconciliation || typeof reconciliation !== "object") return false;
+	if (reconciliation.type !== "debridge_execution_reconciliation") return false;
+	if (reconciliation.version !== "v1") return false;
+	if (typeof reconciliation.ok !== "boolean") return false;
+	if (typeof reconciliation.providerConsistent !== "boolean") return false;
+	if (typeof reconciliation.txHashPresent !== "boolean") return false;
+	if (!Array.isArray(reconciliation.issues)) return false;
+	if (
+		!reconciliation.checkedAt ||
+		Number.isNaN(Date.parse(String(reconciliation.checkedAt)))
+	)
+		return false;
+	return true;
+}
+
 function buildAcpExecutionPlan(payload) {
 	const requirements = payload?.requirements || {};
 	const targetChain = String(
@@ -6535,6 +6566,20 @@ const server = http.createServer(async (req, res) => {
 				});
 				const executionReconciliation =
 					reconcileDebridgeExecutionArtifact(executionArtifact);
+				if (!validateDebridgeExecutionArtifactV1(executionArtifact)) {
+					return json(res, 500, {
+						ok: false,
+						error: "debridge_execution_artifact_invalid",
+					});
+				}
+				if (
+					!validateDebridgeExecutionReconciliationV1(executionReconciliation)
+				) {
+					return json(res, 500, {
+						ok: false,
+						error: "debridge_execution_reconciliation_invalid",
+					});
+				}
 				pushActionHistory({
 					action: "debridge_execute",
 					status: "blocked",
@@ -6588,6 +6633,20 @@ const server = http.createServer(async (req, res) => {
 				});
 				const executionReconciliation =
 					reconcileDebridgeExecutionArtifact(executionArtifact);
+				if (!validateDebridgeExecutionArtifactV1(executionArtifact)) {
+					return json(res, 500, {
+						ok: false,
+						error: "debridge_execution_artifact_invalid",
+					});
+				}
+				if (
+					!validateDebridgeExecutionReconciliationV1(executionReconciliation)
+				) {
+					return json(res, 500, {
+						ok: false,
+						error: "debridge_execution_reconciliation_invalid",
+					});
+				}
 				pushActionHistory({
 					action: "debridge_execute",
 					status: "ok",
@@ -6622,6 +6681,20 @@ const server = http.createServer(async (req, res) => {
 				});
 				const executionReconciliation =
 					reconcileDebridgeExecutionArtifact(executionArtifact);
+				if (!validateDebridgeExecutionArtifactV1(executionArtifact)) {
+					return json(res, 500, {
+						ok: false,
+						error: "debridge_execution_artifact_invalid",
+					});
+				}
+				if (
+					!validateDebridgeExecutionReconciliationV1(executionReconciliation)
+				) {
+					return json(res, 500, {
+						ok: false,
+						error: "debridge_execution_reconciliation_invalid",
+					});
+				}
 				pushActionHistory({
 					action: "debridge_execute",
 					status: "error",
