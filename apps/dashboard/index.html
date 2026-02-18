@@ -194,6 +194,7 @@
             <option value="24h" selected>24h</option>
             <option value="7d">7d</option>
           </select>
+          <button id="copyDebridgeReliability">Copy summary</button>
         </div>
         <div id="debridgeReliability" class="muted" style="white-space:pre-wrap">-</div>
       </div>
@@ -408,6 +409,7 @@
       const execQualityEl = document.getElementById("execQuality");
       const debridgeReliabilityEl = document.getElementById("debridgeReliability");
       const debridgeWindowEl = document.getElementById("debridgeWindow");
+      const copyDebridgeReliabilityBtn = document.getElementById("copyDebridgeReliability");
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
@@ -1994,6 +1996,19 @@
           lastSnapshot,
           nextWindow,
         );
+      });
+      copyDebridgeReliabilityBtn?.addEventListener("click", async () => {
+        const text = String(debridgeReliabilityEl?.textContent || "").trim();
+        if (!text || text === "-") {
+          cmdMetaEl.textContent = "No deBridge reliability summary to copy";
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(text);
+          cmdMetaEl.textContent = "Copied deBridge reliability summary";
+        } catch {
+          cmdMetaEl.textContent = "Copy deBridge reliability summary failed";
+        }
       });
       acpStatusFilterEl?.addEventListener("change", () => {
         syncAcpFiltersToUrl();
