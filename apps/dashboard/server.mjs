@@ -296,6 +296,40 @@ const MONAD_MORPHO_MAX_AMOUNT_RAW = String(
 		"1000000000000000000000",
 	),
 ).trim();
+const MONAD_MORPHO_COOLDOWN_SECONDS = Math.max(
+	0,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"MONAD_MORPHO_COOLDOWN_SECONDS",
+				"monad.morpho.cooldownSeconds",
+				"0",
+			),
+		),
+		10,
+	) || 0,
+);
+const MONAD_MORPHO_DAILY_CAP_RAW = String(
+	envOrCfg("MONAD_MORPHO_DAILY_CAP_RAW", "monad.morpho.dailyCapRaw", ""),
+).trim();
+const MONAD_MORPHO_REWARDS_JSON = String(
+	envOrCfg("MONAD_MORPHO_REWARDS_JSON", "monad.morpho.rewardsJson", "[]"),
+).trim();
+const MONAD_MORPHO_REWARDS_CLAIM_ENABLED =
+	String(
+		envOrCfg(
+			"MONAD_MORPHO_REWARDS_CLAIM_ENABLED",
+			"monad.morpho.rewardsClaim.enabled",
+			"false",
+		),
+	).toLowerCase() === "true";
+const MONAD_MORPHO_REWARDS_CLAIM_COMMAND = String(
+	envOrCfg(
+		"MONAD_MORPHO_REWARDS_CLAIM_COMMAND",
+		"monad.morpho.rewardsClaim.command",
+		"",
+	),
+).trim();
 const MONAD_MORPHO_APY_BPS = Number.parseInt(
 	String(envOrCfg("MONAD_MORPHO_APY_BPS", "monad.morpho.apyBps", "0")),
 	10,
@@ -911,7 +945,13 @@ const MONAD_MORPHO_EXECUTE_METRICS = {
 	error: 0,
 	recent: [],
 	lastErrorCode: null,
+	lastErrorCategory: null,
 	lastErrorAt: null,
+};
+const MONAD_MORPHO_EXECUTE_STATE = {
+	lastExecuteAt: null,
+	dailyWindowDay: "",
+	dailyExecutedRaw: 0n,
 };
 const DEBRIDGE_EXECUTE_METRICS = {
 	total: 0,
@@ -993,7 +1033,15 @@ async function saveMetricsToDisk() {
 					rpcMetrics: RPC_METRICS,
 					paymentWebhookMetrics: PAYMENT_WEBHOOK_METRICS,
 					debridgeExecuteMetrics: DEBRIDGE_EXECUTE_METRICS,
-					monadMorphoExecuteMetrics: MONAD_MORPHO_EXECUTE_METRICS,
+					monadMorphoExecuteMetrics: {
+						...MONAD_MORPHO_EXECUTE_METRICS,
+						executeState: {
+							lastExecuteAt: MONAD_MORPHO_EXECUTE_STATE.lastExecuteAt,
+							dailyWindowDay: MONAD_MORPHO_EXECUTE_STATE.dailyWindowDay,
+							dailyExecutedRaw:
+								MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw.toString(),
+						},
+					},
 					acpJobHistory: ACP_JOB_HISTORY,
 					acpAsyncJobs: ACP_ASYNC_JOBS,
 				},
@@ -1063,11 +1111,28 @@ async function loadMetricsFromDisk() {
 			MONAD_MORPHO_EXECUTE_METRICS.error = Number(monadMorpho.error || 0);
 			MONAD_MORPHO_EXECUTE_METRICS.lastErrorCode =
 				monadMorpho.lastErrorCode || null;
+			MONAD_MORPHO_EXECUTE_METRICS.lastErrorCategory =
+				monadMorpho.lastErrorCategory || null;
 			MONAD_MORPHO_EXECUTE_METRICS.lastErrorAt =
 				monadMorpho.lastErrorAt || null;
 			MONAD_MORPHO_EXECUTE_METRICS.recent = Array.isArray(monadMorpho.recent)
 				? monadMorpho.recent.slice(0, 50)
 				: [];
+			const executeState = monadMorpho.executeState;
+			if (executeState && typeof executeState === "object") {
+				MONAD_MORPHO_EXECUTE_STATE.lastExecuteAt =
+					executeState.lastExecuteAt || null;
+				MONAD_MORPHO_EXECUTE_STATE.dailyWindowDay = String(
+					executeState.dailyWindowDay || "",
+				);
+				try {
+					MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw = BigInt(
+						String(executeState.dailyExecutedRaw || "0"),
+					);
+				} catch {
+					MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw = 0n;
+				}
+			}
 		}
 
 		const acpHistory = parsed.acpJobHistory;
@@ -5029,7 +5094,9 @@ function classifyMonadMorphoExecuteError(error) {
 		lower.includes("vault") ||
 		lower.includes("asset") ||
 		lower.includes("private key") ||
-		lower.includes("execute_disabled")
+		lower.includes("execute_disabled") ||
+		lower.includes("cooldown") ||
+		lower.includes("daily_cap")
 	) {
 		return {
 			code: "MONAD_MORPHO_CONFIG",
@@ -5063,7 +5130,59 @@ function classifyMonadMorphoExecuteError(error) {
 	};
 }
 
-function buildMonadMorphoReadiness() {
+function evaluateMonadMorphoRiskControls(amountRaw = null) {
+	const blockers = [];
+	const hints = [];
+	const nowMs = Date.now();
+	const guard = {
+		maxAmountRaw: MONAD_MORPHO_MAX_AMOUNT_RAW,
+		cooldownSeconds: MONAD_MORPHO_COOLDOWN_SECONDS,
+		dailyCapRaw: MONAD_MORPHO_DAILY_CAP_RAW || null,
+	};
+	if (amountRaw != null) {
+		const amount = BigInt(String(amountRaw));
+		if (amount > BigInt(MONAD_MORPHO_MAX_AMOUNT_RAW || "0")) {
+			blockers.push("amount_exceeds_max_amount_raw");
+			hints.push(`Reduce amountRaw <= ${MONAD_MORPHO_MAX_AMOUNT_RAW}`);
+		}
+		if (MONAD_MORPHO_DAILY_CAP_RAW) {
+			const day = currentDayKey();
+			const usedToday =
+				MONAD_MORPHO_EXECUTE_STATE.dailyWindowDay === day
+					? MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw
+					: 0n;
+			if (usedToday + amount > BigInt(MONAD_MORPHO_DAILY_CAP_RAW)) {
+				blockers.push("daily_cap_exceeded");
+				hints.push(
+					`Lower amount or wait next day (daily cap ${MONAD_MORPHO_DAILY_CAP_RAW})`,
+				);
+			}
+		}
+	}
+	if (
+		MONAD_MORPHO_COOLDOWN_SECONDS > 0 &&
+		MONAD_MORPHO_EXECUTE_STATE.lastExecuteAt
+	) {
+		const lastMs = Date.parse(MONAD_MORPHO_EXECUTE_STATE.lastExecuteAt);
+		if (Number.isFinite(lastMs)) {
+			const remaining =
+				MONAD_MORPHO_COOLDOWN_SECONDS * 1000 - Math.max(0, nowMs - lastMs);
+			if (remaining > 0) {
+				blockers.push("cooldown_active");
+				hints.push(
+					`Wait ${Math.ceil(remaining / 1000)}s until next execute window`,
+				);
+			}
+		}
+	}
+	return {
+		guard,
+		blockers,
+		hints,
+	};
+}
+
+function buildMonadMorphoReadiness({ amountRaw = null } = {}) {
 	const blockers = [];
 	const hints = [];
 	if (MONAD_MORPHO_VAULTS.length === 0)
@@ -5084,12 +5203,16 @@ function buildMonadMorphoReadiness() {
 		hints.push("Set MONAD_EXECUTE_PRIVATE_KEY for native RPC signer");
 	if (blockers.includes("missing_monad_rpc_url"))
 		hints.push("Set MONAD_RPC_URL");
+	const riskControls = evaluateMonadMorphoRiskControls(amountRaw);
+	const allBlockers = [...blockers, ...riskControls.blockers];
+	const allHints = [...hints, ...riskControls.hints];
 	return {
 		chain: "monad",
 		protocol: "morpho-earn",
-		canExecute: blockers.length === 0,
-		blockers,
-		hints,
+		canExecute: allBlockers.length === 0,
+		blockers: allBlockers,
+		hints: allHints,
+		riskControls,
 		fixPack: {
 			envLines: [
 				`MONAD_RPC_URL=${MONAD_RPC_URL || "https://rpc.monad.xyz"}`,
@@ -5098,8 +5221,51 @@ function buildMonadMorphoReadiness() {
 				`MONAD_MORPHO_VAULT=${MONAD_MORPHO_VAULT || "<set>"}`,
 				`MONAD_MORPHO_ASSET=${MONAD_MORPHO_ASSET || "<set>"}`,
 				`MONAD_MORPHO_MAX_AMOUNT_RAW=${MONAD_MORPHO_MAX_AMOUNT_RAW}`,
+				`MONAD_MORPHO_COOLDOWN_SECONDS=${MONAD_MORPHO_COOLDOWN_SECONDS}`,
+				`MONAD_MORPHO_DAILY_CAP_RAW=${MONAD_MORPHO_DAILY_CAP_RAW || "<optional>"}`,
 			],
 		},
+	};
+}
+
+function parseMonadMorphoRewardsSource() {
+	try {
+		const parsed = JSON.parse(MONAD_MORPHO_REWARDS_JSON || "[]");
+		if (!Array.isArray(parsed)) return [];
+		return parsed
+			.map((row, index) => ({
+				index,
+				rewardToken: String(row?.rewardToken || row?.token || "").trim(),
+				vault: String(row?.vault || "").trim(),
+				claimableRaw: String(row?.claimableRaw || row?.amountRaw || "0").trim(),
+				claimable: String(row?.claimable || "").trim() || null,
+				source: String(row?.source || "env").trim(),
+			}))
+			.filter((row) => row.rewardToken || row.vault);
+	} catch {
+		return [];
+	}
+}
+
+function buildMonadMorphoRewardsSnapshot() {
+	const rewards = parseMonadMorphoRewardsSource();
+	const totalClaimableRaw = rewards.reduce((acc, row) => {
+		try {
+			return acc + BigInt(String(row.claimableRaw || "0"));
+		} catch {
+			return acc;
+		}
+	}, 0n);
+	return {
+		chain: "monad",
+		protocol: "morpho-earn",
+		tracking: {
+			source: "MONAD_MORPHO_REWARDS_JSON",
+			count: rewards.length,
+			totalClaimableRaw: totalClaimableRaw.toString(),
+		},
+		rewards,
+		updatedAt: new Date().toISOString(),
 	};
 }
 
@@ -5242,12 +5408,6 @@ function reconcileMonadMorphoExecutionArtifact({ before, after, artifact }) {
 }
 
 async function executeMonadMorphoDeposit(payload = {}) {
-	const readiness = buildMonadMorphoReadiness();
-	if (readiness.canExecute !== true) {
-		throw new Error(
-			`MONAD_MORPHO_CONFIG retryable=false message=${readiness.blockers[0] || "execute_not_ready"}`,
-		);
-	}
 	const runId = String(payload.runId || `monad-morpho-${Date.now()}`);
 	const amountRaw = payload.amountRaw
 		? parsePositiveRaw(payload.amountRaw, "amountRaw")
@@ -5255,9 +5415,10 @@ async function executeMonadMorphoDeposit(payload = {}) {
 				payload.amount || "0",
 				MONAD_MORPHO_ASSET_DECIMALS,
 			);
-	if (BigInt(amountRaw) > BigInt(MONAD_MORPHO_MAX_AMOUNT_RAW || "0")) {
+	const readiness = buildMonadMorphoReadiness({ amountRaw });
+	if (readiness.canExecute !== true) {
 		throw new Error(
-			"MONAD_MORPHO_CONFIG retryable=false message=amount_exceeds_max_amount_raw",
+			`MONAD_MORPHO_CONFIG retryable=false message=${readiness.blockers[0] || "execute_not_ready"}`,
 		);
 	}
 	const vault = MONAD_MORPHO_VAULTS[0];
@@ -5339,14 +5500,25 @@ async function executeMonadMorphoDeposit(payload = {}) {
 	});
 	MONAD_MORPHO_EXECUTE_METRICS.total += 1;
 	MONAD_MORPHO_EXECUTE_METRICS.success += 1;
+	MONAD_MORPHO_EXECUTE_METRICS.lastErrorCode = null;
+	MONAD_MORPHO_EXECUTE_METRICS.lastErrorCategory = null;
 	MONAD_MORPHO_EXECUTE_METRICS.recent.unshift({
 		timestamp: new Date().toISOString(),
 		status: "success",
 		txHash: depositTx.hash,
 		runId,
+		action: "deposit",
+		amountRaw,
 	});
 	if (MONAD_MORPHO_EXECUTE_METRICS.recent.length > 30)
 		MONAD_MORPHO_EXECUTE_METRICS.recent.length = 30;
+	MONAD_MORPHO_EXECUTE_STATE.lastExecuteAt = new Date().toISOString();
+	const day = currentDayKey();
+	if (MONAD_MORPHO_EXECUTE_STATE.dailyWindowDay !== day) {
+		MONAD_MORPHO_EXECUTE_STATE.dailyWindowDay = day;
+		MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw = 0n;
+	}
+	MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw += BigInt(amountRaw);
 	pushActionHistory({
 		action: "monad_morpho_earn_execute",
 		status: "success",
@@ -7420,7 +7592,10 @@ const server = http.createServer(async (req, res) => {
 		}
 
 		if (url.pathname === "/api/monad/morpho/earn/readiness") {
-			const readiness = buildMonadMorphoReadiness();
+			const amountRawQ = String(url.searchParams.get("amountRaw") || "").trim();
+			const readiness = buildMonadMorphoReadiness({
+				amountRaw: /^\d+$/.test(amountRawQ) ? amountRawQ : null,
+			});
 			return json(res, 200, {
 				ok: true,
 				...readiness,
@@ -7430,6 +7605,59 @@ const server = http.createServer(async (req, res) => {
 					asset: MONAD_MORPHO_ASSET || null,
 					vaults: MONAD_MORPHO_VAULTS,
 					maxAmountRaw: MONAD_MORPHO_MAX_AMOUNT_RAW,
+					cooldownSeconds: MONAD_MORPHO_COOLDOWN_SECONDS,
+					dailyCapRaw: MONAD_MORPHO_DAILY_CAP_RAW || null,
+				},
+				executeState: {
+					lastExecuteAt: MONAD_MORPHO_EXECUTE_STATE.lastExecuteAt,
+					dailyWindowDay:
+						MONAD_MORPHO_EXECUTE_STATE.dailyWindowDay || currentDayKey(),
+					dailyExecutedRaw:
+						MONAD_MORPHO_EXECUTE_STATE.dailyExecutedRaw.toString(),
+				},
+			});
+		}
+
+		if (
+			url.pathname === "/api/monad/morpho/earn/plan" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			const amountRaw = payload.amountRaw
+				? parsePositiveRaw(payload.amountRaw, "amountRaw")
+				: payload.amount
+					? toRawAmountFromDecimal(payload.amount, MONAD_MORPHO_ASSET_DECIMALS)
+					: null;
+			const readiness = buildMonadMorphoReadiness({ amountRaw });
+			return json(res, 200, {
+				ok: true,
+				chain: "monad",
+				protocol: "morpho-earn",
+				intent: "deposit",
+				readiness,
+				request: {
+					amountRaw,
+					amount: payload.amount || null,
+				},
+				next: readiness.canExecute
+					? "/api/monad/morpho/earn/execute (POST confirm=true)"
+					: "Fix blockers then retry /plan",
+				updatedAt: new Date().toISOString(),
+			});
+		}
+
+		if (url.pathname === "/api/monad/morpho/earn/rewards") {
+			const snapshot = buildMonadMorphoRewardsSnapshot();
+			return json(res, 200, {
+				ok: true,
+				...snapshot,
+				claim: {
+					enabled: MONAD_MORPHO_REWARDS_CLAIM_ENABLED,
+					commandConfigured: Boolean(MONAD_MORPHO_REWARDS_CLAIM_COMMAND),
+					endpoint: "/api/monad/morpho/earn/rewards/claim",
 				},
 			});
 		}
@@ -7473,6 +7701,87 @@ const server = http.createServer(async (req, res) => {
 		}
 
 		if (
+			url.pathname === "/api/monad/morpho/earn/rewards/claim" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, {
+					ok: false,
+					error: "MONAD_MORPHO_CONFIRM_REQUIRED",
+					retryable: false,
+					category: "input",
+					message: "Missing confirm=true",
+				});
+			}
+			if (
+				!MONAD_MORPHO_REWARDS_CLAIM_ENABLED ||
+				!MONAD_MORPHO_REWARDS_CLAIM_COMMAND
+			) {
+				return json(res, 400, {
+					ok: false,
+					mode: "blocked",
+					error: "MONAD_MORPHO_REWARDS_CLAIM_BLOCKED",
+					retryable: false,
+					category: "config",
+					message: "Rewards claim execute not wired safely",
+					blockers: [
+						!MONAD_MORPHO_REWARDS_CLAIM_ENABLED
+							? "monad_morpho_rewards_claim_disabled"
+							: null,
+						!MONAD_MORPHO_REWARDS_CLAIM_COMMAND
+							? "missing_monad_morpho_rewards_claim_command"
+							: null,
+					].filter(Boolean),
+					hints: [
+						"Set MONAD_MORPHO_REWARDS_CLAIM_ENABLED=true only after verifying command safety",
+						"Set MONAD_MORPHO_REWARDS_CLAIM_COMMAND to audited claim command template",
+					],
+					fixPack: {
+						envLines: [
+							`MONAD_MORPHO_REWARDS_CLAIM_ENABLED=${MONAD_MORPHO_REWARDS_CLAIM_ENABLED}`,
+							`MONAD_MORPHO_REWARDS_CLAIM_COMMAND=${MONAD_MORPHO_REWARDS_CLAIM_COMMAND || "<set-claim-command>"}`,
+						],
+					},
+				});
+			}
+			const command = MONAD_MORPHO_REWARDS_CLAIM_COMMAND.replaceAll(
+				"{account}",
+				String(payload.account || ""),
+			).replaceAll(
+				"{vault}",
+				String(payload.vault || MONAD_MORPHO_VAULTS[0] || ""),
+			);
+			const out = await runCommand(command, { timeoutMs: 120000 });
+			pushActionHistory({
+				action: "monad_morpho_rewards_claim_execute",
+				status: out.ok ? "success" : "error",
+				summary: out.ok
+					? "monad morpho rewards claim"
+					: out.stderr || out.stdout,
+				detail: out,
+			});
+			return json(res, out.ok ? 200 : 500, {
+				ok: out.ok,
+				chain: "monad",
+				protocol: "morpho-earn",
+				action: "rewards-claim",
+				stdout: out.stdout,
+				stderr: out.stderr,
+				code: out.code,
+				error: out.ok ? null : "MONAD_MORPHO_REWARDS_CLAIM_FAILED",
+				retryable: false,
+				category: out.ok ? null : "runtime",
+				message: out.ok
+					? "ok"
+					: out.stderr || out.stdout || "claim command failed",
+			});
+		}
+
+		if (
 			url.pathname === "/api/monad/morpho/earn/execute" &&
 			req.method === "POST"
 		) {
@@ -7497,6 +7806,7 @@ const server = http.createServer(async (req, res) => {
 				MONAD_MORPHO_EXECUTE_METRICS.total += 1;
 				MONAD_MORPHO_EXECUTE_METRICS.error += 1;
 				MONAD_MORPHO_EXECUTE_METRICS.lastErrorCode = normalized.code;
+				MONAD_MORPHO_EXECUTE_METRICS.lastErrorCategory = normalized.category;
 				MONAD_MORPHO_EXECUTE_METRICS.lastErrorAt = new Date().toISOString();
 				MONAD_MORPHO_EXECUTE_METRICS.recent.unshift({
 					timestamp: new Date().toISOString(),

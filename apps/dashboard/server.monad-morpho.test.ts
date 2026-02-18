@@ -14,9 +14,12 @@ const configPath = path.resolve(
 const configExample = JSON.parse(readFileSync(configPath, "utf8"));
 
 describe("monad morpho earn mvp", () => {
-	it("exposes readiness + markets + execute routes", () => {
+	it("exposes readiness + plan + markets + rewards + execute routes", () => {
 		expect(serverSource).toContain("/api/monad/morpho/earn/readiness");
+		expect(serverSource).toContain("/api/monad/morpho/earn/plan");
 		expect(serverSource).toContain("/api/monad/morpho/earn/markets");
+		expect(serverSource).toContain("/api/monad/morpho/earn/rewards");
+		expect(serverSource).toContain("/api/monad/morpho/earn/rewards/claim");
 		expect(serverSource).toContain("/api/monad/morpho/earn/execute");
 		expect(serverSource).toContain("Missing confirm=true");
 	});
@@ -36,5 +39,15 @@ describe("monad morpho earn mvp", () => {
 		expect(configExample?.monad?.execute?.enabled).toBeTypeOf("boolean");
 		expect(configExample?.monad?.morpho?.vault).toBeTypeOf("string");
 		expect(configExample?.monad?.morpho?.asset).toBeTypeOf("string");
+		expect(configExample?.monad?.morpho?.maxAmountRaw).toBeTypeOf("string");
+		expect(configExample?.monad?.morpho?.cooldownSeconds).toBeTypeOf("number");
+		expect(configExample?.monad?.morpho?.dailyCapRaw).toBeTypeOf("string");
+		expect(configExample?.monad?.morpho?.rewardsJson).toBeTypeOf("string");
+		expect(configExample?.monad?.morpho?.rewardsClaim?.enabled).toBeTypeOf(
+			"boolean",
+		);
+		expect(configExample?.monad?.morpho?.rewardsClaim?.command).toBeTypeOf(
+			"string",
+		);
 	});
 });

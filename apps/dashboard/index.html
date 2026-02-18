@@ -181,13 +181,16 @@
       </div>
 
       <div class="card" style="margin-top:16px">
-        <h3>Monad Morpho Earn (MVP)</h3>
+        <h3>Monad Morpho Earn (v1.1)</h3>
         <div id="monadMorphoReadiness" class="muted">readiness: -</div>
         <div id="monadMorphoMarkets" class="muted" style="margin-top:6px">markets: -</div>
+        <div id="monadMorphoRewards" class="muted" style="margin-top:6px">rewards: -</div>
         <div id="monadMorphoLast" class="muted" style="margin-top:6px">last execute: -</div>
+        <div id="monadMorphoTrend" class="muted" style="margin-top:6px">trend: -</div>
         <div class="row" style="margin-top:8px">
           <input id="monadMorphoAmountRaw" placeholder="amountRaw" size="24" />
           <button id="execMonadMorphoDeposit">Execute deposit (confirm)</button>
+          <button id="copyMonadMorphoIncident">Copy Monad incident</button>
         </div>
       </div>
 
@@ -455,9 +458,12 @@
       const execQualityEl = document.getElementById("execQuality");
       const monadMorphoReadinessEl = document.getElementById("monadMorphoReadiness");
       const monadMorphoMarketsEl = document.getElementById("monadMorphoMarkets");
+      const monadMorphoRewardsEl = document.getElementById("monadMorphoRewards");
       const monadMorphoLastEl = document.getElementById("monadMorphoLast");
+      const monadMorphoTrendEl = document.getElementById("monadMorphoTrend");
       const monadMorphoAmountRawEl = document.getElementById("monadMorphoAmountRaw");
       const execMonadMorphoDepositBtn = document.getElementById("execMonadMorphoDeposit");
+      const copyMonadMorphoIncidentBtn = document.getElementById("copyMonadMorphoIncident");
       const ciSignaturesEl = document.getElementById("ciSignatures");
       const copyCiFailureClustersBtn = document.getElementById("copyCiFailureClusters");
       const ciSignaturesMetaEl = document.getElementById("ciSignaturesMeta");
@@ -1296,7 +1302,7 @@
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
         const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
-        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes] = await Promise.all([
+        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoRewardsRes] = await Promise.all([
           fetch(`/api/snapshot${query}`),
           fetch(`/api/portfolio/unified${query}`),
           fetch(`/api/bsc/yield/plan${query ? `${query}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
@@ -1310,6 +1316,7 @@
           fetch("/api/ops/ci-signatures?limit=30"),
           fetch("/api/monad/morpho/earn/readiness"),
           fetch("/api/monad/morpho/earn/markets"),
+          fetch("/api/monad/morpho/earn/rewards"),
         ]);
         const data = await snapRes.json();
         const unified = await unifiedRes.json().catch(() => ({ ok: false }));
@@ -1324,6 +1331,7 @@
         const ciSignatures = await ciSignaturesRes.json().catch(() => ({ ok: false, signatures: [] }));
         const monadMorphoReadiness = await monadMorphoReadinessRes.json().catch(() => ({ ok: false }));
         const monadMorphoMarkets = await monadMorphoMarketsRes.json().catch(() => ({ ok: false, markets: [] }));
+        const monadMorphoRewards = await monadMorphoRewardsRes.json().catch(() => ({ ok: false, rewards: [] }));
         lastCiSignatures = ciSignatures;
         if (!snapRes.ok) {
           metaEl.textContent = `Error: ${data.error || "Unknown"}`;
@@ -1352,10 +1360,19 @@
         monadMorphoMarketsEl.innerHTML = monadMarkets.length
           ? monadMarkets.slice(0, 3).map((m) => `${m.vault || "-"}: APY ${m.apy || "-"}, TVL ${m.tvl || "-"}, risk ${m?.risk?.band || "-"}`).join("<br/>")
           : "markets: -";
-        const monadLast = (data.actionHistory || []).find((row) => String(row?.action || "") === "monad_morpho_earn_execute");
+        const monadRewards = Array.isArray(monadMorphoRewards?.rewards) ? monadMorphoRewards.rewards : [];
+        monadMorphoRewardsEl.innerHTML = monadRewards.length
+          ? `rewards: count=${monadRewards.length} · totalRaw=${monadMorphoRewards?.tracking?.totalClaimableRaw || "0"} · top=${monadRewards.slice(0, 2).map((r) => `${r.rewardToken || "token"}:${r.claimableRaw || "0"}`).join(", ")}`
+          : "rewards: -";
+        const monadActions = (data.actionHistory || []).filter((row) => String(row?.action || "") === "monad_morpho_earn_execute");
+        const monadLast = monadActions[0];
         monadMorphoLastEl.innerHTML = monadLast
           ? `last execute: <span class="${monadLast.status === "success" ? "ok" : "warn"}">${monadLast.status}</span> · runId=${monadLast.runId || "-"} · tx=${monadLast.txHash || "-"}`
           : "last execute: -";
+        const monadRecent = monadActions.slice(0, 10);
+        const monadErr = monadRecent.filter((row) => String(row?.status || "") !== "success").length;
+        const monadOk = monadRecent.length - monadErr;
+        monadMorphoTrendEl.innerHTML = `trend(10): <span class="ok">ok=${monadOk}</span> · <span class="${monadErr > 0 ? "warn" : "muted"}">error=${monadErr}</span> · errRate=${monadRecent.length ? `${((monadErr / monadRecent.length) * 100).toFixed(0)}%` : "-"}`;
         ciSignaturesEl.textContent = computeCiSignaturesSummary(ciSignatures);
         ciAutoActionEl.textContent = getCiAutoActionHint(ciSignatures);
         renderCiSignaturesRows(ciSignatures);
@@ -2445,6 +2462,29 @@
           await load();
         } catch (error) {
           cmdMetaEl.textContent = `Monad execute failed: ${error?.message || error}`;
+        }
+      });
+      copyMonadMorphoIncidentBtn?.addEventListener("click", async () => {
+        const monadRows = (lastSnapshot?.actionHistory || []).filter((row) => String(row?.action || "") === "monad_morpho_earn_execute").slice(0, 10);
+        if (!monadRows.length) {
+          cmdMetaEl.textContent = "No Monad Morpho incidents to copy";
+          return;
+        }
+        const errs = monadRows.filter((row) => String(row?.status || "") !== "success");
+        const latest = monadRows[0] || {};
+        const report = [
+          "# Monad Morpho Incident",
+          `window=latest-10 total=${monadRows.length} error=${errs.length} ok=${monadRows.length - errs.length}`,
+          `latestStatus=${latest.status || "-"} runId=${latest.runId || "-"} tx=${latest.txHash || "-"}`,
+          `latestSummary=${latest.summary || latest.error?.message || "-"}`,
+          "## Recent",
+          ...monadRows.slice(0, 5).map((row) => `- ${row.timestamp || row.ts || "-"} | ${row.status || "-"} | runId=${row.runId || "-"} | tx=${row.txHash || "-"} | ${(row.summary || row.error?.message || "-").toString().slice(0, 140)}`),
+        ].join("\n");
+        try {
+          await navigator.clipboard.writeText(report);
+          cmdMetaEl.textContent = "Copied Monad Morpho incident summary";
+        } catch {
+          cmdMetaEl.textContent = "Copy Monad Morpho incident summary failed";
         }
       });
       bscExecutionProtocolEl?.addEventListener("change", () => {

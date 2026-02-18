@@ -108,6 +108,13 @@
 			"asset": "",
 			"assetDecimals": 18,
 			"maxAmountRaw": "1000000000000000000000",
+			"cooldownSeconds": 0,
+			"dailyCapRaw": "",
+			"rewardsJson": "[]",
+			"rewardsClaim": {
+				"enabled": false,
+				"command": ""
+			},
 			"apyBps": 0,
 			"riskScore": 45,
 			"liquidityCapRaw": "",

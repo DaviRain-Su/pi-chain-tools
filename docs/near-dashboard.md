@@ -155,11 +155,14 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `Copy share link` includes `debridgeWindow` + `debridgeAdvancedOpen` query state for reproducible views
   - `Copy share markdown` copies one-line markdown link
   - `Copy markdown + summary` copies markdown link + current reliability headline for incident handoff
-- Monad Morpho Earn MVP (v1, reward claim out of scope):
-  - `GET /api/monad/morpho/earn/readiness` -> execute gate aggregation (`canExecute/blockers/hints/fixPack`)
+- Monad Morpho Earn v1.1 (hackathon polish):
+  - `GET /api/monad/morpho/earn/readiness` -> execute gate aggregation + risk controls (`canExecute/blockers/hints/fixPack/riskControls`)
+  - `POST /api/monad/morpho/earn/plan` -> pre-execute plan/readiness evaluation for amount (`readiness.blockers/hints/fixPack`)
   - `GET /api/monad/morpho/earn/markets` -> vault discovery snapshot (`vault/asset/APY/TVL/risk` + optional user shares)
-  - `POST /api/monad/morpho/earn/execute` (`confirm=true`) -> native RPC wallet deposit path (approve + deposit) with normalized error (`error/retryable/category`) and `executionArtifact/executionReconciliation`
-  - execution history writes to dashboard `actionHistory` with `action=monad_morpho_earn_execute`, including `runId/txHash/reconciliation`
+  - `GET /api/monad/morpho/earn/rewards` -> read-only rewards tracking snapshot (env-fed discovery/tracking)
+  - `POST /api/monad/morpho/earn/rewards/claim` (`confirm=true`) -> minimal claim execute endpoint with safe config gate; returns blocked path + fixPack when onchain claim wiring is unavailable
+  - `POST /api/monad/morpho/earn/execute` (`confirm=true`) -> native RPC wallet deposit path (approve + deposit) with normalized error (`error/retryable/category/message`) and `executionArtifact/executionReconciliation`
+  - execution history writes to dashboard `actionHistory` with `action=monad_morpho_earn_execute`, including `runId/txHash/reconciliation`; Monad card shows recent execute trend/error summary + one-click incident copy
 - deBridge MCP readiness (cross-chain integration hook):
   - `GET /api/crosschain/debridge/readiness` (returns `enabled/commandConfigured/executeEnabled/executeCommandConfigured/executeRetry/canExecute/blockers/hints`)
   - `GET /api/ops/debridge-execute-metrics?limit=30` (returns deBridge execute reliability telemetry: totals/retryRecovered/recent)
@@ -271,6 +274,11 @@ Common mapping examples:
 - `MONAD_MORPHO_ASSET` - underlying ERC20 asset address
 - `MONAD_MORPHO_ASSET_DECIMALS` - asset decimals for display/amount conversion (default: `18`)
 - `MONAD_MORPHO_MAX_AMOUNT_RAW` - risk cap for execute amount
+- `MONAD_MORPHO_COOLDOWN_SECONDS` - cooldown guard between Monad execute calls (default: `0`, disabled)
+- `MONAD_MORPHO_DAILY_CAP_RAW` - optional per-day execute raw amount cap (empty = disabled)
+- `MONAD_MORPHO_REWARDS_JSON` - rewards tracking source JSON array for `/api/monad/morpho/earn/rewards`
+- `MONAD_MORPHO_REWARDS_CLAIM_ENABLED` - enable minimal rewards claim execute endpoint (default: `false`)
+- `MONAD_MORPHO_REWARDS_CLAIM_COMMAND` - audited claim command template used by claim execute endpoint
 - `MONAD_MORPHO_APY_BPS` - APY hint in bps for dashboard display
 - `MONAD_MORPHO_RISK_SCORE` - risk score hint (0-100) for dashboard display banding
 - `MONAD_MORPHO_LIQUIDITY_CAP_RAW` - optional liquidity cap hint for display

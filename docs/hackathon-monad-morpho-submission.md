@@ -22,9 +22,9 @@ We built a practical autonomous yield workflow tailored for Morpho on Monad:
 
 - **Read**: fetch market opportunities and portfolio state.
 - **Plan**: generate target allocation with risk/policy limits.
-- **Execute**: run confirmed onchain actions (deposit/rebalance path).
+- **Execute**: run confirmed onchain actions (deposit/rebalance path) with execute guards.
 - **Reconcile**: produce execution artifact + reconciliation summary.
-- **Operate**: monitor reliability, failures, and incident-ready summaries in dashboard.
+- **Operate**: monitor reliability, rewards tracking, failures, and incident-ready summaries in dashboard.
 
 Key design principles:
 - reproducibility first,
@@ -96,10 +96,18 @@ Set env/config (example placeholders):
 
 ```bash
 export MONAD_RPC_URL=https://...
-export MONAD_CHAIN_ID=...
+export MONAD_CHAIN_ID=143
 export MONAD_EXECUTE_ENABLED=true
 export MONAD_EXECUTE_PRIVATE_KEY=0x...
-export MORPHO_MARKET_ID=...
+export MONAD_MORPHO_VAULT=0x...
+export MONAD_MORPHO_ASSET=0x...
+export MONAD_MORPHO_MAX_AMOUNT_RAW=1000000000000000000000
+export MONAD_MORPHO_COOLDOWN_SECONDS=30
+export MONAD_MORPHO_DAILY_CAP_RAW=5000000000000000000000
+export MONAD_MORPHO_REWARDS_JSON='[{"vault":"0x...","rewardToken":"0x...","claimableRaw":"0"}]'
+# optional claim execution wiring (safe default disabled)
+export MONAD_MORPHO_REWARDS_CLAIM_ENABLED=false
+export MONAD_MORPHO_REWARDS_CLAIM_COMMAND=''
 ```
 
 Run verification:
