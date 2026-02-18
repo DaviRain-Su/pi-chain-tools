@@ -301,7 +301,7 @@ Phase-1（本期，已完成）
 - Venus SDK 分支带显式标记：`dataSource` / `sdk` / `warnings`；失败回退原生路径时标记 `dataSource=native-fallback`
 - Venus SDK 故障排查：检查 `BSC_VENUS_VTOKEN_USDC/BSC_VENUS_VTOKEN_USDT`、`BSC_VENUS_COMPTROLLER`、`BSC_VENUS_SDK_PACKAGE`（默认 `@venusprotocol/chains`），并观察 warning `venus_sdk_market_fetch_failed_fallback_to_native` / `venus_sdk_position_fetch_failed_fallback_to_native`
 - 包选择说明：`@venusprotocol/sdk` 目前无可用 npm 发布，Phase-1 改用 Venus 官方 `@venusprotocol/chains` 作为 canonical client package（链/市场/vToken 元数据），读链路继续由 provider ABI 调用承接。
-- Wombat SDK Phase-1：默认使用官方 `@wombat-exchange/configx` 提供资产配置与规范化入口；若 SDK 读失败，响应会显式标记 `dataSource=native-fallback` 并附带 `wombat_sdk_*_fallback_to_native` warning。
+- Wombat SDK Phase-1：默认尝试官方 `@wombat-exchange/configx`（按 optional peer 方式动态加载）；若包不存在或 SDK 读失败，自动回退 `sdk-scaffold/native-fallback`，响应显式标记 `dataSource` 并附带 `wombat_sdk_*_fallback_to_native` warning。
 - Lista SDK Phase-1：官方 SDK 包当前未在 npm 发布，暂以 canonical client `ethers` + Lista/Wombat 统一 ABI 读路径承接，响应携带 `official_lista_sdk_not_available_using_canonical_ethers_client_path`，并在失败时输出 `lista_sdk_*_fallback_to_native` warning。
 - Lista/Wombat execute 已补齐 SDK-first 路由（`mode=auto|sdk`）：优先 SDK 路径，失败后按 `*_SDK_FALLBACK_TO_NATIVE` 回退 native/command，并在返回与 actionHistory 中写入明确 fallback 标记（如 `bsc_lista_supply_fallback` / `bsc_wombat_supply_fallback`）。
 - BSC post-action execute 返回模型统一：`status/txHash/error/artifact/reconcile/history/metrics` 在 sdk/native/command 分支下结构一致，便于审计与告警聚类。
@@ -309,6 +309,19 @@ Phase-1（本期，已完成）
 Phase-2（下期，最小目标）
 - native slot 协议级用例继续扩充（真实链路回放 + 异常分类覆盖）
 - Dashboard readiness 卡片继续补齐协议级 fix pack 提示
+
+### 6.1 Security exception policy（npm audit / security:check）
+
+- 默认策略：优先升级直接依赖；其次通过兼容的 overrides/resolutions 拉升传递依赖；仅在无安全可行替代时进入 allowlist。
+- allowlist 录入规范（`scripts/security-audit-policy.json`）：
+  - 必须最小化范围（仅具体包名，不用通配）；
+  - 必须写明 `reason`（风险、为何不可立即升级、影响面）；
+  - 必须在 runbook 留存跟踪项（责任人 + 到期日 + 退出条件）。
+- 2026-02-18 remediation（BSC SDK 集成后）：
+  - 移除 `@wombat-exchange/configx` 的生产硬依赖，改为 `peerDependencies + optional`；
+  - 保留运行时动态加载与 scaffold fallback，避免将 `viem`/`ws` 高危链路强制装入生产依赖树；
+  - 退出条件：当官方 Wombat SDK 发布修复后，评估恢复为 direct dependency（需先通过 `npm run security:check`）。
+- 当前残余高危均为既有 Solana 生态传递依赖（已在 policy 中显式列出）；目标窗口：`2026-03-31` 前完成上游版本评估并收敛 allowlist。
 
 ### 5.6 Monad v1.4 quick ops (profile / name / delegation gate)
 

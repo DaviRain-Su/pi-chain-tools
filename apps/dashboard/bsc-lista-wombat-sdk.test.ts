@@ -7,6 +7,7 @@ import {
 import {
 	collectWombatSdkMarketView,
 	collectWombatSdkPositionView,
+	createWombatSdkAdapter,
 } from "./bsc-wombat-sdk.mjs";
 
 describe("bsc lista/wombat sdk-first read adapters", () => {
@@ -49,6 +50,19 @@ describe("bsc lista/wombat sdk-first read adapters", () => {
 		expect(position.lista.usdc.dataSource).toBe("sdk-scaffold");
 		expect(position.lista.usdc.balanceRaw).toBeTypeOf("string");
 		expect(position.warnings).toContain("lista_usdc_token_missing_config");
+	});
+
+	it("falls back to scaffold when official wombat sdk package is unavailable", async () => {
+		const adapterWithMissingSdk = await createWombatSdkAdapter({
+			rpcUrl: "http://127.0.0.1:8545",
+			chainId: 56,
+			sdkPackage: "@wombat-exchange/configx",
+		});
+		expect(adapterWithMissingSdk.meta.officialSdkWired).toBe(false);
+		expect(adapterWithMissingSdk.meta.client).toBe("wombat-sdk-scaffold");
+		expect(adapterWithMissingSdk.meta.sdkPackage).toBe(
+			"@wombat-exchange/configx",
+		);
 	});
 
 	it("normalizes wombat market + position shape with sdk markers", async () => {

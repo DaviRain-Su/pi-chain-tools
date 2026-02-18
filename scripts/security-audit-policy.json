@@ -2,6 +2,11 @@
 	"name": "pi-chain-tools-security-audit-allowlist",
 	"version": "1.0.0",
 	"threshold": "high",
+	"exceptionPolicy": {
+		"defaultExpiryDate": "2026-03-31",
+		"trackingNote": "docs/openclaw-ops-runbook.md#61-security-exception-policynpm-audit--securitycheck",
+		"owner": "ops-runtime"
+	},
 	"ignore": {
 		"@kamino-finance/farms-sdk": {
 			"maxSeverity": "high",

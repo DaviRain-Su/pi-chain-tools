@@ -63,7 +63,6 @@
 		"@solana/spl-token": "^0.4.11",
 		"@solana/web3.js": "^1.98.4",
 		"@venusprotocol/chains": "^0.22.0",
-		"@wombat-exchange/configx": "^1.0.11",
 		"bs58": "^6.0.0",
 		"near-api-js": "^7.1.0",
 		"stable-layer-sdk": "^2.0.0"
@@ -71,7 +70,8 @@
 	"peerDependencies": {
 		"@kamino-finance/klend-sdk": "^7.3.18",
 		"@meteora-ag/dlmm": "^1.9.3",
-		"@raydium-io/raydium-sdk-v2": "^0.2.32-alpha"
+		"@raydium-io/raydium-sdk-v2": "^0.2.32-alpha",
+		"@wombat-exchange/configx": "^1.0.11"
 	},
 	"peerDependenciesMeta": {
 		"@kamino-finance/klend-sdk": {
@@ -81,6 +81,9 @@
 			"optional": true
 		},
 		"@meteora-ag/dlmm": {
+			"optional": true
+		},
+		"@wombat-exchange/configx": {
 			"optional": true
 		}
 	},
