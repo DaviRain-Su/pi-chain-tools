@@ -19,6 +19,15 @@ Multi-chain toolset library for Pi extensions with a chain-agnostic grouping mod
   - Async job lifecycle and deterministic execution expectations
   - Marketplace monetization and fee-split baseline
 
+## SDK Replacement Completion Summary (Item 5)
+
+Final consolidation status across **Morpho / Venus / Lista / Wombat** is tracked in:
+- `docs/sdk-coverage-report.md` (human-readable matrix)
+- `docs/sdk-coverage-report.json` (machine-readable source of truth)
+
+Current split: **🟩 3 / 🟨 10 / 🟥 0**.
+All non-green actions include explicit blocker, next action, and code marker alignment.
+
 ## Structure
 
 - `src/core`: common toolset abstractions and registration helpers

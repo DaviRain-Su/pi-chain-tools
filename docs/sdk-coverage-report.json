@@ -1,40 +1,65 @@
 {
-	"generatedAt": "2026-02-18T20:55:00.000Z",
+	"generatedAt": "2026-02-18T21:25:00.000Z",
 	"scope": ["monad+morpho", "venus", "wombat", "lista"],
 	"modes": ["official-sdk", "canonical-client", "native-fallback"],
+	"ragLegend": {
+		"green": "official-sdk (or official package + sdk-first as far as public APIs allow)",
+		"yellow": "canonical-client with explicit blocker",
+		"red": "native-fallback only"
+	},
 	"entries": [
 		{
 			"protocol": "Monad+Morpho",
 			"action": "earn.markets",
 			"endpoint": "GET /api/monad/morpho/earn/markets",
 			"currentMode": "official-sdk",
+			"ragStatus": "green",
 			"status": "upgraded",
-			"blockers": []
+			"blockers": [],
+			"nextAction": "Maintain current route; monitor @morpho-org/blue-sdk public API changes for execute support parity.",
+			"codeMarkers": [
+				"official_morpho_sdk_not_available_using_canonical_ethers_client_path"
+			]
 		},
 		{
 			"protocol": "Monad+Morpho",
 			"action": "earn.strategy",
 			"endpoint": "GET /api/monad/morpho/earn/strategy",
 			"currentMode": "official-sdk",
+			"ragStatus": "green",
 			"status": "upgraded",
-			"blockers": []
+			"blockers": [],
+			"nextAction": "Maintain current route; keep strategy normalizer aligned with Morpho SDK release notes.",
+			"codeMarkers": [
+				"official_morpho_sdk_not_available_using_canonical_ethers_client_path"
+			]
 		},
 		{
 			"protocol": "Monad+Morpho",
 			"action": "earn.rewards",
 			"endpoint": "GET /api/monad/morpho/earn/rewards",
 			"currentMode": "official-sdk",
+			"ragStatus": "green",
 			"status": "upgraded",
-			"blockers": []
+			"blockers": [],
+			"nextAction": "Maintain scaffold-compat warning behavior until official rewards claim SDK flow is published.",
+			"codeMarkers": ["sdk_scaffold_mode_enabled"]
 		},
 		{
 			"protocol": "Monad+Morpho",
 			"action": "earn.execute.deposit",
 			"endpoint": "POST /api/monad/morpho/earn/execute",
 			"currentMode": "canonical-client",
+			"ragStatus": "yellow",
 			"status": "partial",
 			"blockers": [
 				"SDK-first execute now consumes @morpho-org/blue-sdk for vault conversion math/projection + metadata, but @morpho-org/blue-sdk still does not expose a public tx signer/executor pipeline for vault deposit; ethers signer remains canonical execute client with explicit remainingNonSdkPath/fallback markers"
+			],
+			"nextAction": "Track Morpho Blue SDK for public execute signer pipeline; switch tx submit path from canonical ethers signer once available.",
+			"codeMarkers": [
+				"morpho_execute_canonical_ethers_path_no_official_sdk_executor",
+				"morpho_execute_non_sdk_native_fallback_path",
+				"morpho_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor"
 			]
 		},
 		{
@@ -42,9 +67,15 @@
 			"action": "yield.markets",
 			"endpoint": "GET /api/bsc/yield/markets",
 			"currentMode": "canonical-client",
+			"ragStatus": "yellow",
 			"status": "partial",
 			"blockers": [
 				"Official @venusprotocol/sdk package is not published on npm; using @venusprotocol/chains + provider ABI reads"
+			],
+			"nextAction": "Replace scaffold/provider read path with official @venusprotocol/sdk once publicly published and stable.",
+			"codeMarkers": [
+				"official_venus_client_package_not_available_using_scaffold_provider_path",
+				"venus_sdk_scaffold_mode_enabled"
 			]
 		},
 		{
@@ -52,17 +83,30 @@
 			"action": "positions.read",
 			"endpoint": "GET /api/bsc/positions",
 			"currentMode": "canonical-client",
+			"ragStatus": "yellow",
 			"status": "partial",
-			"blockers": ["Official @venusprotocol/sdk package unavailable on npm"]
+			"blockers": ["Official @venusprotocol/sdk package unavailable on npm"],
+			"nextAction": "Adopt official Venus SDK account-position APIs once package is published; remove scaffold mode warning path.",
+			"codeMarkers": [
+				"official_venus_client_package_not_available_using_scaffold_provider_path",
+				"venus_sdk_scaffold_mode_enabled"
+			]
 		},
 		{
 			"protocol": "Venus",
 			"action": "yield.execute",
 			"endpoint": "POST /api/bsc/yield/execute",
 			"currentMode": "canonical-client",
+			"ragStatus": "yellow",
 			"status": "partial",
 			"blockers": [
 				"SDK-first market/vToken resolution uses official @venusprotocol/chains, but transaction submission still relies on canonical ethers signer because no public official Venus execute SDK is published"
+			],
+			"nextAction": "Migrate execute path when official Venus tx executor SDK becomes available; then retire explicit non-sdk execute marker.",
+			"codeMarkers": [
+				"venus_execute_canonical_ethers_path_no_official_sdk_executor",
+				"venus_execute_non_sdk_native_fallback_path",
+				"venus_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor"
 			]
 		},
 		{
@@ -70,25 +114,42 @@
 			"action": "yield.markets",
 			"endpoint": "GET /api/bsc/yield/markets",
 			"currentMode": "canonical-client",
+			"ragStatus": "yellow",
 			"status": "blocked",
-			"blockers": ["No maintained official Lista npm SDK currently available"]
+			"blockers": ["No maintained official Lista npm SDK currently available"],
+			"nextAction": "Re-check official Lista SDK candidates (@lista-dao/*) each release cycle; replace canonical ethers reads once maintained package appears.",
+			"codeMarkers": [
+				"official_lista_sdk_not_available_using_canonical_ethers_client_path"
+			]
 		},
 		{
 			"protocol": "Lista",
 			"action": "positions.read",
 			"endpoint": "GET /api/bsc/positions",
 			"currentMode": "canonical-client",
+			"ragStatus": "yellow",
 			"status": "blocked",
-			"blockers": ["No maintained official Lista npm SDK currently available"]
+			"blockers": ["No maintained official Lista npm SDK currently available"],
+			"nextAction": "Adopt official Lista position/account SDK APIs when available and remove canonical-only status.",
+			"codeMarkers": [
+				"official_lista_sdk_not_available_using_canonical_ethers_client_path"
+			]
 		},
 		{
 			"protocol": "Lista",
 			"action": "yield.execute",
 			"endpoint": "POST /api/bsc/yield/execute",
 			"currentMode": "canonical-client",
+			"ragStatus": "yellow",
 			"status": "partial",
 			"blockers": [
 				"SDK-first adapter now drives canonical ethers signer/provider execution with explicit remainingNonSdkPath + fallback markers, but no maintained official Lista execute SDK is published"
+			],
+			"nextAction": "Switch execute adapter to official Lista tx SDK once maintained package is published.",
+			"codeMarkers": [
+				"lista_execute_canonical_ethers_path_no_official_sdk_executor",
+				"lista_sdk_execute_failed_fallback_to_native",
+				"lista_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor"
 			]
 		},
 		{
@@ -96,9 +157,15 @@
 			"action": "yield.markets",
 			"endpoint": "GET /api/bsc/yield/markets",
 			"currentMode": "canonical-client",
+			"ragStatus": "yellow",
 			"status": "partial",
 			"blockers": [
 				"@wombat-exchange/configx provides configuration metadata only; market reads still use provider calls"
+			],
+			"nextAction": "Adopt full official Wombat read SDK when published; keep configx metadata integration as optional complement.",
+			"codeMarkers": [
+				"official_wombat_client_package_not_available_using_scaffold_provider_path",
+				"wombat_sdk_scaffold_mode_enabled"
 			]
 		},
 		{
@@ -106,17 +173,30 @@
 			"action": "positions.read",
 			"endpoint": "GET /api/bsc/positions",
 			"currentMode": "canonical-client",
+			"ragStatus": "yellow",
 			"status": "partial",
-			"blockers": ["No full official npm SDK for read/execute parity"]
+			"blockers": ["No full official npm SDK for read/execute parity"],
+			"nextAction": "Migrate wallet/position reads once official Wombat SDK exposes stable position APIs.",
+			"codeMarkers": [
+				"official_wombat_client_package_not_available_using_scaffold_provider_path",
+				"wombat_sdk_scaffold_mode_enabled"
+			]
 		},
 		{
 			"protocol": "Wombat",
 			"action": "yield.execute",
 			"endpoint": "POST /api/bsc/yield/execute",
 			"currentMode": "canonical-client",
+			"ragStatus": "yellow",
 			"status": "partial",
 			"blockers": [
 				"SDK-first adapter now drives canonical ethers signer/provider execution with explicit remainingNonSdkPath + native/command fallback markers, but no official Wombat execute SDK is published"
+			],
+			"nextAction": "Replace canonical execute path when official Wombat tx executor SDK is published and production-ready.",
+			"codeMarkers": [
+				"wombat_execute_canonical_ethers_path_no_official_sdk_executor",
+				"wombat_sdk_execute_failed_fallback_to_native",
+				"wombat_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor"
 			]
 		}
 	]
