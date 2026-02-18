@@ -250,6 +250,76 @@ const BSC_CHAIN_ID = Number.parseInt(
 	String(envOrCfg("BSC_CHAIN_ID", "bsc.chainId", "56")),
 	10,
 );
+const MONAD_RPC_URL = String(
+	envOrCfg("MONAD_RPC_URL", "monad.rpcUrl", "https://rpc.monad.xyz"),
+).trim();
+const MONAD_CHAIN_ID = Number.parseInt(
+	String(envOrCfg("MONAD_CHAIN_ID", "monad.chainId", "143")),
+	10,
+);
+const MONAD_EXECUTE_ENABLED =
+	String(
+		envOrCfg("MONAD_EXECUTE_ENABLED", "monad.execute.enabled", "false"),
+	).toLowerCase() === "true";
+const MONAD_EXECUTE_PRIVATE_KEY = String(
+	envOrCfg("MONAD_EXECUTE_PRIVATE_KEY", "monad.execute.privateKey", ""),
+).trim();
+const MONAD_MORPHO_VAULT = String(
+	envOrCfg("MONAD_MORPHO_VAULT", "monad.morpho.vault", ""),
+).trim();
+const MONAD_MORPHO_VAULTS = String(
+	envOrCfg("MONAD_MORPHO_VAULTS", "monad.morpho.vaults", MONAD_MORPHO_VAULT),
+)
+	.split(",")
+	.map((x) => x.trim())
+	.filter(Boolean);
+const MONAD_MORPHO_ASSET = String(
+	envOrCfg("MONAD_MORPHO_ASSET", "monad.morpho.asset", ""),
+).trim();
+const MONAD_MORPHO_ASSET_DECIMALS = Math.max(
+	0,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"MONAD_MORPHO_ASSET_DECIMALS",
+				"monad.morpho.assetDecimals",
+				"18",
+			),
+		),
+		10,
+	) || 18,
+);
+const MONAD_MORPHO_MAX_AMOUNT_RAW = String(
+	envOrCfg(
+		"MONAD_MORPHO_MAX_AMOUNT_RAW",
+		"monad.morpho.maxAmountRaw",
+		"1000000000000000000000",
+	),
+).trim();
+const MONAD_MORPHO_APY_BPS = Number.parseInt(
+	String(envOrCfg("MONAD_MORPHO_APY_BPS", "monad.morpho.apyBps", "0")),
+	10,
+);
+const MONAD_MORPHO_RISK_SCORE = Number.parseInt(
+	String(envOrCfg("MONAD_MORPHO_RISK_SCORE", "monad.morpho.riskScore", "45")),
+	10,
+);
+const MONAD_MORPHO_LIQUIDITY_CAP_RAW = String(
+	envOrCfg(
+		"MONAD_MORPHO_LIQUIDITY_CAP_RAW",
+		"monad.morpho.liquidityCapRaw",
+		"",
+	),
+).trim();
+const MONAD_MORPHO_CONFIRMATIONS = Math.max(
+	1,
+	Number.parseInt(
+		String(
+			envOrCfg("MONAD_MORPHO_CONFIRMATIONS", "monad.morpho.confirmations", "1"),
+		),
+		10,
+	) || 1,
+);
 const BSC_RPC_URL = String(
 	envOrCfg("BSC_RPC_URL", "bsc.rpcUrl", "https://bsc-dataseed.binance.org"),
 );
@@ -835,6 +905,14 @@ const PAYMENT_WEBHOOK_METRICS = {
 	lastProvider: null,
 	lastError: null,
 };
+const MONAD_MORPHO_EXECUTE_METRICS = {
+	total: 0,
+	success: 0,
+	error: 0,
+	recent: [],
+	lastErrorCode: null,
+	lastErrorAt: null,
+};
 const DEBRIDGE_EXECUTE_METRICS = {
 	total: 0,
 	success: 0,
@@ -915,6 +993,7 @@ async function saveMetricsToDisk() {
 					rpcMetrics: RPC_METRICS,
 					paymentWebhookMetrics: PAYMENT_WEBHOOK_METRICS,
 					debridgeExecuteMetrics: DEBRIDGE_EXECUTE_METRICS,
+					monadMorphoExecuteMetrics: MONAD_MORPHO_EXECUTE_METRICS,
 					acpJobHistory: ACP_JOB_HISTORY,
 					acpAsyncJobs: ACP_ASYNC_JOBS,
 				},
@@ -974,6 +1053,20 @@ async function loadMetricsFromDisk() {
 			DEBRIDGE_EXECUTE_METRICS.lastErrorAt = debridge.lastErrorAt || null;
 			DEBRIDGE_EXECUTE_METRICS.recent = Array.isArray(debridge.recent)
 				? debridge.recent.slice(0, 50)
+				: [];
+		}
+
+		const monadMorpho = parsed.monadMorphoExecuteMetrics;
+		if (monadMorpho && typeof monadMorpho === "object") {
+			MONAD_MORPHO_EXECUTE_METRICS.total = Number(monadMorpho.total || 0);
+			MONAD_MORPHO_EXECUTE_METRICS.success = Number(monadMorpho.success || 0);
+			MONAD_MORPHO_EXECUTE_METRICS.error = Number(monadMorpho.error || 0);
+			MONAD_MORPHO_EXECUTE_METRICS.lastErrorCode =
+				monadMorpho.lastErrorCode || null;
+			MONAD_MORPHO_EXECUTE_METRICS.lastErrorAt =
+				monadMorpho.lastErrorAt || null;
+			MONAD_MORPHO_EXECUTE_METRICS.recent = Array.isArray(monadMorpho.recent)
+				? monadMorpho.recent.slice(0, 50)
 				: [];
 		}
 
@@ -1626,6 +1719,10 @@ async function buildSnapshot(accountId) {
 		debridgeExecuteMetrics: {
 			...DEBRIDGE_EXECUTE_METRICS,
 			recent: DEBRIDGE_EXECUTE_METRICS.recent,
+		},
+		monadMorphoExecuteMetrics: {
+			...MONAD_MORPHO_EXECUTE_METRICS,
+			recent: MONAD_MORPHO_EXECUTE_METRICS.recent,
 		},
 	};
 }
@@ -4899,6 +4996,384 @@ async function computeBscYieldPlan(input = {}) {
 	};
 }
 
+function isHexAddress(value) {
+	return /^0x[a-fA-F0-9]{40}$/.test(String(value || "").trim());
+}
+
+function toRawAmountFromDecimal(value, decimals = 18) {
+	const text = String(value || "").trim();
+	if (!/^\d+(\.\d+)?$/.test(text)) {
+		throw new Error("amount must be a decimal string");
+	}
+	const [whole, fraction = ""] = text.split(".");
+	const padded = (fraction + "0".repeat(decimals)).slice(0, decimals);
+	const raw = `${whole}${padded}`.replace(/^0+/, "") || "0";
+	if (!/^\d+$/.test(raw) || BigInt(raw) <= 0n) {
+		throw new Error("amount must be positive");
+	}
+	return raw;
+}
+
+function classifyMonadMorphoExecuteError(error) {
+	const msg = String(error?.message || error || "");
+	const lower = msg.toLowerCase();
+	if (lower.includes("missing confirm=true")) {
+		return {
+			code: "MONAD_MORPHO_CONFIRM_REQUIRED",
+			retryable: false,
+			category: "input",
+		};
+	}
+	if (
+		lower.includes("amount") ||
+		lower.includes("vault") ||
+		lower.includes("asset") ||
+		lower.includes("private key") ||
+		lower.includes("execute_disabled")
+	) {
+		return {
+			code: "MONAD_MORPHO_CONFIG",
+			retryable: false,
+			category: "config",
+		};
+	}
+	if (
+		lower.includes("timeout") ||
+		lower.includes("nonce") ||
+		lower.includes("underpriced") ||
+		lower.includes("temporarily")
+	) {
+		return {
+			code: "MONAD_MORPHO_EXECUTE_FAILED",
+			retryable: true,
+			category: "runtime",
+		};
+	}
+	if (lower.includes("insufficient")) {
+		return {
+			code: "MONAD_MORPHO_EXECUTE_FAILED",
+			retryable: false,
+			category: "funds",
+		};
+	}
+	return {
+		code: "MONAD_MORPHO_EXECUTE_FAILED",
+		retryable: true,
+		category: "runtime",
+	};
+}
+
+function buildMonadMorphoReadiness() {
+	const blockers = [];
+	const hints = [];
+	if (MONAD_MORPHO_VAULTS.length === 0)
+		blockers.push("missing_monad_morpho_vault");
+	if (!isHexAddress(MONAD_MORPHO_ASSET))
+		blockers.push("missing_monad_morpho_asset");
+	if (!MONAD_EXECUTE_ENABLED) blockers.push("monad_execute_disabled");
+	if (!MONAD_EXECUTE_PRIVATE_KEY)
+		blockers.push("missing_monad_execute_private_key");
+	if (!MONAD_RPC_URL) blockers.push("missing_monad_rpc_url");
+	if (blockers.includes("missing_monad_morpho_vault"))
+		hints.push("Set MONAD_MORPHO_VAULT or MONAD_MORPHO_VAULTS");
+	if (blockers.includes("missing_monad_morpho_asset"))
+		hints.push("Set MONAD_MORPHO_ASSET (ERC20 token address)");
+	if (blockers.includes("monad_execute_disabled"))
+		hints.push("Set MONAD_EXECUTE_ENABLED=true");
+	if (blockers.includes("missing_monad_execute_private_key"))
+		hints.push("Set MONAD_EXECUTE_PRIVATE_KEY for native RPC signer");
+	if (blockers.includes("missing_monad_rpc_url"))
+		hints.push("Set MONAD_RPC_URL");
+	return {
+		chain: "monad",
+		protocol: "morpho-earn",
+		canExecute: blockers.length === 0,
+		blockers,
+		hints,
+		fixPack: {
+			envLines: [
+				`MONAD_RPC_URL=${MONAD_RPC_URL || "https://rpc.monad.xyz"}`,
+				`MONAD_CHAIN_ID=${MONAD_CHAIN_ID}`,
+				`MONAD_EXECUTE_ENABLED=${MONAD_EXECUTE_ENABLED}`,
+				`MONAD_MORPHO_VAULT=${MONAD_MORPHO_VAULT || "<set>"}`,
+				`MONAD_MORPHO_ASSET=${MONAD_MORPHO_ASSET || "<set>"}`,
+				`MONAD_MORPHO_MAX_AMOUNT_RAW=${MONAD_MORPHO_MAX_AMOUNT_RAW}`,
+			],
+		},
+	};
+}
+
+async function readMonadMorphoVaultMarket(vaultAddress, accountAddress = "") {
+	const provider = new JsonRpcProvider(MONAD_RPC_URL, {
+		name: "monad",
+		chainId: MONAD_CHAIN_ID,
+	});
+	const vaultIface = new Interface([
+		"function totalAssets() view returns (uint256)",
+		"function totalSupply() view returns (uint256)",
+		"function asset() view returns (address)",
+		"function balanceOf(address owner) view returns (uint256)",
+	]);
+	const callRead = async (data) => {
+		const raw = await provider.call({ to: vaultAddress, data });
+		return raw;
+	};
+	const [totalAssetsRawData, totalSupplyRawData, assetData, userSharesData] =
+		await Promise.all([
+			callRead(vaultIface.encodeFunctionData("totalAssets", [])),
+			callRead(vaultIface.encodeFunctionData("totalSupply", [])),
+			callRead(vaultIface.encodeFunctionData("asset", [])),
+			accountAddress
+				? callRead(vaultIface.encodeFunctionData("balanceOf", [accountAddress]))
+				: Promise.resolve(null),
+		]);
+	const totalAssetsRaw =
+		vaultIface
+			.decodeFunctionResult("totalAssets", totalAssetsRawData)?.[0]
+			?.toString() || "0";
+	const totalSupplyRaw =
+		vaultIface
+			.decodeFunctionResult("totalSupply", totalSupplyRawData)?.[0]
+			?.toString() || "0";
+	const assetAddress =
+		vaultIface.decodeFunctionResult("asset", assetData)?.[0] ||
+		MONAD_MORPHO_ASSET;
+	const userSharesRaw = userSharesData
+		? vaultIface
+				.decodeFunctionResult("balanceOf", userSharesData)?.[0]
+				?.toString() || "0"
+		: "0";
+	const apyBps = Number.isFinite(MONAD_MORPHO_APY_BPS)
+		? Number(MONAD_MORPHO_APY_BPS)
+		: 0;
+	const riskScore = Number.isFinite(MONAD_MORPHO_RISK_SCORE)
+		? Number(MONAD_MORPHO_RISK_SCORE)
+		: 45;
+	const riskBand =
+		riskScore >= 70 ? "high" : riskScore >= 40 ? "medium" : "low";
+	return {
+		vault: vaultAddress,
+		asset: assetAddress,
+		tvlRaw: totalAssetsRaw,
+		tvl: formatUnits(totalAssetsRaw, MONAD_MORPHO_ASSET_DECIMALS),
+		totalSupplyRaw,
+		userSharesRaw,
+		userShares: formatUnits(userSharesRaw, MONAD_MORPHO_ASSET_DECIMALS),
+		apyBps,
+		apy: `${(apyBps / 100).toFixed(2)}%`,
+		risk: {
+			score: riskScore,
+			band: riskBand,
+		},
+		liquidityCapRaw: MONAD_MORPHO_LIQUIDITY_CAP_RAW || null,
+	};
+}
+
+function buildMonadMorphoExecutionArtifact({
+	status,
+	txHash = null,
+	vault,
+	asset,
+	amountRaw,
+	account,
+	runId,
+	error = null,
+}) {
+	return {
+		type: "monad_morpho_earn_execute",
+		version: "1.0.0",
+		protocol: "morpho-earn",
+		chain: "monad",
+		status,
+		runId: runId || null,
+		txHash,
+		vault,
+		asset,
+		amountRaw,
+		account,
+		timestamp: new Date().toISOString(),
+		error,
+	};
+}
+
+function reconcileMonadMorphoExecutionArtifact({ before, after, artifact }) {
+	const beforeAsset = BigInt(before?.assetRaw || "0");
+	const afterAsset = BigInt(after?.assetRaw || "0");
+	const beforeShares = BigInt(before?.sharesRaw || "0");
+	const afterShares = BigInt(after?.sharesRaw || "0");
+	const amount = BigInt(artifact?.amountRaw || "0");
+	const assetDelta = beforeAsset - afterAsset;
+	const shareDelta = afterShares - beforeShares;
+	const reconcileOk =
+		artifact?.status === "success"
+			? Boolean(artifact?.txHash) &&
+				assetDelta >= 0n &&
+				shareDelta >= 0n &&
+				assetDelta <= amount
+			: true;
+	const mismatchReason = reconcileOk
+		? null
+		: !artifact?.txHash
+			? "tx_hash_missing"
+			: shareDelta <= 0n
+				? "share_not_increased"
+				: assetDelta > amount
+					? "asset_delta_exceeds_amount"
+					: "unknown_mismatch";
+	return {
+		protocol: "morpho-earn",
+		chain: "monad",
+		reconcileOk,
+		mismatchReason,
+		txHash: artifact?.txHash || null,
+		before: {
+			assetRaw: String(beforeAsset),
+			sharesRaw: String(beforeShares),
+		},
+		after: {
+			assetRaw: String(afterAsset),
+			sharesRaw: String(afterShares),
+		},
+		delta: {
+			assetRaw: String(assetDelta),
+			sharesRaw: String(shareDelta),
+		},
+	};
+}
+
+async function executeMonadMorphoDeposit(payload = {}) {
+	const readiness = buildMonadMorphoReadiness();
+	if (readiness.canExecute !== true) {
+		throw new Error(
+			`MONAD_MORPHO_CONFIG retryable=false message=${readiness.blockers[0] || "execute_not_ready"}`,
+		);
+	}
+	const runId = String(payload.runId || `monad-morpho-${Date.now()}`);
+	const amountRaw = payload.amountRaw
+		? parsePositiveRaw(payload.amountRaw, "amountRaw")
+		: toRawAmountFromDecimal(
+				payload.amount || "0",
+				MONAD_MORPHO_ASSET_DECIMALS,
+			);
+	if (BigInt(amountRaw) > BigInt(MONAD_MORPHO_MAX_AMOUNT_RAW || "0")) {
+		throw new Error(
+			"MONAD_MORPHO_CONFIG retryable=false message=amount_exceeds_max_amount_raw",
+		);
+	}
+	const vault = MONAD_MORPHO_VAULTS[0];
+	const provider = new JsonRpcProvider(MONAD_RPC_URL, {
+		name: "monad",
+		chainId: MONAD_CHAIN_ID,
+	});
+	const wallet = new Wallet(MONAD_EXECUTE_PRIVATE_KEY, provider);
+	const account = wallet.address;
+	const erc20Iface = new Interface([
+		"function allowance(address owner,address spender) view returns (uint256)",
+		"function approve(address spender,uint256 value) returns (bool)",
+		"function balanceOf(address owner) view returns (uint256)",
+	]);
+	const vaultIface = new Interface([
+		"function deposit(uint256 assets,address receiver) returns (uint256 shares)",
+		"function balanceOf(address owner) view returns (uint256)",
+	]);
+	const readBalance = async () => {
+		const [assetRawData, sharesRawData] = await Promise.all([
+			provider.call({
+				to: MONAD_MORPHO_ASSET,
+				data: erc20Iface.encodeFunctionData("balanceOf", [account]),
+			}),
+			provider.call({
+				to: vault,
+				data: vaultIface.encodeFunctionData("balanceOf", [account]),
+			}),
+		]);
+		return {
+			assetRaw:
+				erc20Iface
+					.decodeFunctionResult("balanceOf", assetRawData)?.[0]
+					?.toString() || "0",
+			sharesRaw:
+				vaultIface
+					.decodeFunctionResult("balanceOf", sharesRawData)?.[0]
+					?.toString() || "0",
+		};
+	};
+	const before = await readBalance();
+	const allowanceRawData = await provider.call({
+		to: MONAD_MORPHO_ASSET,
+		data: erc20Iface.encodeFunctionData("allowance", [account, vault]),
+	});
+	const allowance = BigInt(
+		erc20Iface
+			.decodeFunctionResult("allowance", allowanceRawData)?.[0]
+			?.toString() || "0",
+	);
+	const approveTxs = [];
+	if (allowance < BigInt(amountRaw)) {
+		const approveTx = await wallet.sendTransaction({
+			to: MONAD_MORPHO_ASSET,
+			data: erc20Iface.encodeFunctionData("approve", [vault, MaxUint256]),
+		});
+		await approveTx.wait(MONAD_MORPHO_CONFIRMATIONS);
+		approveTxs.push(approveTx.hash);
+	}
+	const depositTx = await wallet.sendTransaction({
+		to: vault,
+		data: vaultIface.encodeFunctionData("deposit", [amountRaw, account]),
+	});
+	const receipt = await depositTx.wait(MONAD_MORPHO_CONFIRMATIONS);
+	const after = await readBalance();
+	const executionArtifact = buildMonadMorphoExecutionArtifact({
+		status: "success",
+		txHash: depositTx.hash,
+		vault,
+		asset: MONAD_MORPHO_ASSET,
+		amountRaw,
+		account,
+		runId,
+	});
+	const executionReconciliation = reconcileMonadMorphoExecutionArtifact({
+		before,
+		after,
+		artifact: executionArtifact,
+	});
+	MONAD_MORPHO_EXECUTE_METRICS.total += 1;
+	MONAD_MORPHO_EXECUTE_METRICS.success += 1;
+	MONAD_MORPHO_EXECUTE_METRICS.recent.unshift({
+		timestamp: new Date().toISOString(),
+		status: "success",
+		txHash: depositTx.hash,
+		runId,
+	});
+	if (MONAD_MORPHO_EXECUTE_METRICS.recent.length > 30)
+		MONAD_MORPHO_EXECUTE_METRICS.recent.length = 30;
+	pushActionHistory({
+		action: "monad_morpho_earn_execute",
+		status: "success",
+		step: payload.step || "deposit",
+		runId,
+		txHash: depositTx.hash,
+		summary: `monad morpho deposit ${amountRaw}`,
+		executionArtifact,
+		executionReconciliation,
+	});
+	return {
+		ok: true,
+		chain: "monad",
+		protocol: "morpho-earn",
+		runId,
+		txHash: depositTx.hash,
+		receipt: {
+			transactionHash: receipt?.transactionHash || depositTx.hash,
+			blockNumber: receipt?.blockNumber || null,
+			confirmations: MONAD_MORPHO_CONFIRMATIONS,
+			approveTxHashes: approveTxs,
+		},
+		executionArtifact,
+		executionReconciliation,
+	};
+}
+
 function parsePositiveRaw(value, fieldName) {
 	const text = String(value || "").trim();
 	if (!/^\d+$/.test(text) || BigInt(text) <= 0n) {
@@ -6942,6 +7417,110 @@ const server = http.createServer(async (req, res) => {
 				executionArtifact,
 				executionReconciliation,
 			});
+		}
+
+		if (url.pathname === "/api/monad/morpho/earn/readiness") {
+			const readiness = buildMonadMorphoReadiness();
+			return json(res, 200, {
+				ok: true,
+				...readiness,
+				config: {
+					rpcUrl: MONAD_RPC_URL,
+					chainId: MONAD_CHAIN_ID,
+					asset: MONAD_MORPHO_ASSET || null,
+					vaults: MONAD_MORPHO_VAULTS,
+					maxAmountRaw: MONAD_MORPHO_MAX_AMOUNT_RAW,
+				},
+			});
+		}
+
+		if (url.pathname === "/api/monad/morpho/earn/markets") {
+			const accountAddress = String(
+				url.searchParams.get("account") ||
+					url.searchParams.get("accountAddress") ||
+					"",
+			).trim();
+			const readiness = buildMonadMorphoReadiness();
+			if (MONAD_MORPHO_VAULTS.length === 0) {
+				return json(res, 200, {
+					ok: true,
+					chain: "monad",
+					protocol: "morpho-earn",
+					markets: [],
+					readiness,
+				});
+			}
+			const markets = await Promise.all(
+				MONAD_MORPHO_VAULTS.map(async (vault) => {
+					try {
+						return await readMonadMorphoVaultMarket(vault, accountAddress);
+					} catch (error) {
+						return {
+							vault,
+							error: error instanceof Error ? error.message : String(error),
+						};
+					}
+				}),
+			);
+			return json(res, 200, {
+				ok: true,
+				chain: "monad",
+				protocol: "morpho-earn",
+				markets,
+				readiness,
+				updatedAt: new Date().toISOString(),
+			});
+		}
+
+		if (
+			url.pathname === "/api/monad/morpho/earn/execute" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, {
+					ok: false,
+					error: "MONAD_MORPHO_CONFIRM_REQUIRED",
+					retryable: false,
+					category: "input",
+					message: "Missing confirm=true",
+				});
+			}
+			try {
+				const result = await executeMonadMorphoDeposit(payload);
+				return json(res, 200, result);
+			} catch (error) {
+				const normalized = classifyMonadMorphoExecuteError(error);
+				MONAD_MORPHO_EXECUTE_METRICS.total += 1;
+				MONAD_MORPHO_EXECUTE_METRICS.error += 1;
+				MONAD_MORPHO_EXECUTE_METRICS.lastErrorCode = normalized.code;
+				MONAD_MORPHO_EXECUTE_METRICS.lastErrorAt = new Date().toISOString();
+				MONAD_MORPHO_EXECUTE_METRICS.recent.unshift({
+					timestamp: new Date().toISOString(),
+					status: "error",
+					errorCode: normalized.code,
+					retryable: normalized.retryable,
+					message: error instanceof Error ? error.message : String(error),
+				});
+				if (MONAD_MORPHO_EXECUTE_METRICS.recent.length > 30)
+					MONAD_MORPHO_EXECUTE_METRICS.recent.length = 30;
+				pushActionHistory({
+					action: "monad_morpho_earn_execute",
+					status: "error",
+					summary: error instanceof Error ? error.message : String(error),
+					error: normalized,
+				});
+				return json(res, 500, {
+					ok: false,
+					error: normalized.code,
+					retryable: normalized.retryable,
+					category: normalized.category,
+					message: error instanceof Error ? error.message : String(error),
+				});
+			}
 		}
 
 		if (url.pathname === "/api/bsc/yield/plan") {

@@ -155,6 +155,11 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `Copy share link` includes `debridgeWindow` + `debridgeAdvancedOpen` query state for reproducible views
   - `Copy share markdown` copies one-line markdown link
   - `Copy markdown + summary` copies markdown link + current reliability headline for incident handoff
+- Monad Morpho Earn MVP (v1, reward claim out of scope):
+  - `GET /api/monad/morpho/earn/readiness` -> execute gate aggregation (`canExecute/blockers/hints/fixPack`)
+  - `GET /api/monad/morpho/earn/markets` -> vault discovery snapshot (`vault/asset/APY/TVL/risk` + optional user shares)
+  - `POST /api/monad/morpho/earn/execute` (`confirm=true`) -> native RPC wallet deposit path (approve + deposit) with normalized error (`error/retryable/category`) and `executionArtifact/executionReconciliation`
+  - execution history writes to dashboard `actionHistory` with `action=monad_morpho_earn_execute`, including `runId/txHash/reconciliation`
 - deBridge MCP readiness (cross-chain integration hook):
   - `GET /api/crosschain/debridge/readiness` (returns `enabled/commandConfigured/executeEnabled/executeCommandConfigured/executeRetry/canExecute/blockers/hints`)
   - `GET /api/ops/debridge-execute-metrics?limit=30` (returns deBridge execute reliability telemetry: totals/retryRecovered/recent)
@@ -257,6 +262,19 @@ Common mapping examples:
 - `NEAR_DASHBOARD_METRICS_PATH` - metrics persistence path (default: `apps/dashboard/data/rebalance-metrics.json`)
 - `NEAR_DASHBOARD_POLICY_PATH` - policy persistence path (default: `apps/dashboard/data/portfolio-policy.json`)
 - `NEAR_DASHBOARD_MARKETPLACE_PATH` - strategy marketplace persistence path (default: `apps/dashboard/data/strategy-marketplace.json`)
+- `MONAD_RPC_URL` - Monad RPC endpoint for Morpho read/execute (default: `https://rpc.monad.xyz`)
+- `MONAD_CHAIN_ID` - Monad chain id (default: `143`)
+- `MONAD_EXECUTE_ENABLED` - enable Monad Morpho execute path (`true|false`, default: `false`)
+- `MONAD_EXECUTE_PRIVATE_KEY` - native signer private key for Monad execute
+- `MONAD_MORPHO_VAULT` - primary Morpho Earn vault address
+- `MONAD_MORPHO_VAULTS` - optional comma-separated vault discovery list (falls back to `MONAD_MORPHO_VAULT`)
+- `MONAD_MORPHO_ASSET` - underlying ERC20 asset address
+- `MONAD_MORPHO_ASSET_DECIMALS` - asset decimals for display/amount conversion (default: `18`)
+- `MONAD_MORPHO_MAX_AMOUNT_RAW` - risk cap for execute amount
+- `MONAD_MORPHO_APY_BPS` - APY hint in bps for dashboard display
+- `MONAD_MORPHO_RISK_SCORE` - risk score hint (0-100) for dashboard display banding
+- `MONAD_MORPHO_LIQUIDITY_CAP_RAW` - optional liquidity cap hint for display
+- `MONAD_MORPHO_CONFIRMATIONS` - confirmation count for execute receipt wait (default: `1`)
 - `BSC_EXECUTE_ENABLED` - enable BSC execute adapter path (`true|false`, default: `false`)
 - `BSC_EXECUTE_MODE` - `auto|native|command` (default: `auto`)
 - `BSC_EXECUTE_PRIVATE_KEY` - private key for native BSC executor signer (used by `native`/`auto` mode)

@@ -29,6 +29,7 @@ Ship a hackathon-ready Monad stable yield agent using Morpho with:
 
 ## Deliverables
 - Execute endpoint for at least one real action path (deposit/rebalance).
+- Scope guard: rewards claim remains out-of-scope for v1 (track for v1.1 only).
 - Confirm/risk gate (explicit confirm + amount bounds).
 - Execution artifact + reconciliation output.
 - Failure classification (`retryable` + category).

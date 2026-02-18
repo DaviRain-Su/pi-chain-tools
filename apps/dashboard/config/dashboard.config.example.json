@@ -95,6 +95,25 @@
 			"rateCacheTtlMs": 60000
 		}
 	},
+	"monad": {
+		"rpcUrl": "https://rpc.monad.xyz",
+		"chainId": 143,
+		"execute": {
+			"enabled": false,
+			"privateKey": ""
+		},
+		"morpho": {
+			"vault": "",
+			"vaults": "",
+			"asset": "",
+			"assetDecimals": 18,
+			"maxAmountRaw": "1000000000000000000000",
+			"apyBps": 0,
+			"riskScore": 45,
+			"liquidityCapRaw": "",
+			"confirmations": 1
+		}
+	},
 	"crosschain": {
 		"debridge": {
 			"enabled": false,
