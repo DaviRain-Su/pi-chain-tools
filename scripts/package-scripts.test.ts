@@ -101,6 +101,10 @@ describe("package.json script contracts", () => {
 		expect(String(scripts?.["ci:resilient"])).toContain(
 			"node scripts/ci-resilient.mjs",
 		);
+		expect(scripts?.["submission:evidence"]).toBe(
+			"node scripts/submission-evidence.mjs",
+		);
+		expect(scripts?.["demo:monad-bsc"]).toBe("node scripts/demo-monad-bsc.mjs");
 	});
 
 	it("keeps CI schema validation as single-step command", () => {

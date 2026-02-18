@@ -43,6 +43,8 @@
 		"ci:retry": "node scripts/ci-retry.mjs",
 		"ci:resilient": "node scripts/ci-resilient.mjs",
 		"monad:morpho:replay": "node scripts/monad-morpho-replay-pack.mjs",
+		"submission:evidence": "node scripts/submission-evidence.mjs",
+		"demo:monad-bsc": "node scripts/demo-monad-bsc.mjs",
 		"dashboard:start": "node apps/dashboard/server.mjs"
 	},
 	"dependencies": {

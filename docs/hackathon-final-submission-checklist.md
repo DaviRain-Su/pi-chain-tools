@@ -57,6 +57,9 @@
 - [ ] commit hash 与线上仓库一致
 - [ ] demo 视频可播放（无权限问题）
 - [ ] 文案无“将来时”描述（尽量写已完成）
+- [ ] 已运行 `npm run submission:evidence` 并核对 `docs/submission-evidence.md`
+- [ ] 已运行 `npm run demo:monad-bsc`（默认 dry-run）并保存输出摘要
+- [ ] 如需展示真实执行，使用显式确认参数运行 demo execute（并保留 tx proof）
 
 ---
 

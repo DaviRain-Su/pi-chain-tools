@@ -810,6 +810,8 @@ Quick references:
 - Hackathon final submission checklist: `docs/hackathon-final-submission-checklist.md`
 - Hackathon 5-min pitch script: `docs/hackathon-5min-pitch-script.md`
 - Monad + Morpho SDK integration plan: `docs/monad-morpho-sdk-integration-plan.md`
+- Submission evidence artifact guide: `npm run submission:evidence` (writes `docs/submission-evidence.md`)
+- One-click Monad↔BSC demo flow: `npm run demo:monad-bsc` (dry-run default, explicit execute guard)
 
 ### Local NEAR Dashboard (web)
 
@@ -825,6 +827,34 @@ npm run dashboard:start
 Open in browser:
 
 - `http://127.0.0.1:4173`
+
+### Submission Evidence Automation
+
+Generate a submission-ready markdown artifact (deterministic, non-destructive):
+
+```bash
+npm run submission:evidence
+```
+
+Output:
+
+- `docs/submission-evidence.md`
+
+The artifact includes latest commit metadata, best-effort quality snapshot (`check/test/security:check`), dashboard/session references, and tx-proof template placeholders.
+
+### One-click Demo (Monad + BSC)
+
+Safe default (dry-run):
+
+```bash
+npm run demo:monad-bsc
+```
+
+Live execute is blocked unless explicit guard text is provided:
+
+```bash
+npm run demo:monad-bsc -- --execute --confirm-execute I_UNDERSTAND_THIS_WILL_EXECUTE_ONCHAIN
+```
 
 Optional env overrides:
 

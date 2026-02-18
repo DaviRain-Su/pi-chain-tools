@@ -221,6 +221,29 @@ Open:
 
 - `http://127.0.0.1:4173`
 
+## Submission / Demo helper commands
+
+- Generate submission evidence markdown:
+
+```bash
+npm run submission:evidence
+```
+
+  - Output: `docs/submission-evidence.md`
+  - Includes: latest commit hash/date, best-effort check/test/security snapshot, dashboard/session references, tx-proof template
+
+- Run one-click Monad↔BSC demo (safe dry-run default):
+
+```bash
+npm run demo:monad-bsc
+```
+
+- Enable live execute only with explicit confirmation text:
+
+```bash
+npm run demo:monad-bsc -- --execute --confirm-execute I_UNDERSTAND_THIS_WILL_EXECUTE_ONCHAIN
+```
+
 ## Unified dashboard config (recommended)
 
 The dashboard now supports a single JSON config file for non-sensitive settings:

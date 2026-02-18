@@ -9,6 +9,19 @@ cd /home/davirain/clawd/pi-chain-tools
 npm run dashboard:start
 ```
 
+辅助命令（提交流程常用）：
+
+```bash
+# 生成提交证据文档（docs/submission-evidence.md）
+npm run submission:evidence
+
+# 一键 Demo（默认 dry-run；不会自动上链执行）
+npm run demo:monad-bsc
+
+# 仅在明确确认时启用 live execute
+npm run demo:monad-bsc -- --execute --confirm-execute I_UNDERSTAND_THIS_WILL_EXECUTE_ONCHAIN
+```
+
 默认地址：
 - `http://127.0.0.1:4173`
 
