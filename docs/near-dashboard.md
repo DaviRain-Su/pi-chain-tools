@@ -110,6 +110,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
     - Venus SDK-first read/plan mode: set `BSC_VENUS_USE_SDK=true` (or `bsc.venus.useSdk=true` in dashboard config) to route Venus market/position reads through `apps/dashboard/bsc-venus-sdk.mjs`.
     - Official Venus client package for this phase: `@venusprotocol/chains` (used to load canonical Venus BSC market metadata + vToken registry in SDK path).
     - SDK response markers: BSC responses now carry `dataSource` / `sdk` / `warnings`; SDK fallback is explicit (`dataSource=native-fallback` + warning tags like `venus_sdk_market_fetch_failed_fallback_to_native` / `venus_sdk_position_fetch_failed_fallback_to_native`).
+    - Lista/Wombat read/plan now support SDK-first branches (`BSC_LISTA_USE_SDK` / `BSC_WOMBAT_USE_SDK`) with explicit fallback warnings (`lista_sdk_market_fetch_failed_fallback_to_native`, `lista_sdk_position_fetch_failed_fallback_to_native`, `wombat_sdk_market_fetch_failed_fallback_to_native`, `wombat_sdk_position_fetch_failed_fallback_to_native`).
     - `POST /api/bsc/yield/execute` (`confirm=true`, supports `executionProtocol=venus|aave|lista|wombat`; `aave` requires enable flag; `lista/wombat` support native RPC mode and command fallback)
     - Venus execute path is SDK-first when `BSC_VENUS_USE_SDK=true` + `BSC_VENUS_EXECUTE_MODE=auto|sdk`; if SDK execute prep fails and `BSC_VENUS_SDK_EXECUTE_FALLBACK_TO_NATIVE=true`, response/history explicitly mark fallback (`mode=native-fallback`, `fallback.used=true`, warning `venus_sdk_execute_failed_fallback_to_native`).
     - `POST /api/bsc/yield/worker/start` (`confirm=true`, `dryRun` default true)
@@ -238,6 +239,9 @@ Common mapping examples:
 - `bsc.yield.minAprDeltaBps` ↔ `BSC_YIELD_MIN_APR_DELTA_BPS`
 - `bsc.aave.enabled` ↔ `BSC_AAVE_EXECUTE_ENABLED`
 - `bsc.lista.enabled` ↔ `BSC_LISTA_EXECUTE_ENABLED`
+- `bsc.lista.useSdk` ↔ `BSC_LISTA_USE_SDK`
+- `bsc.lista.sdk.package` ↔ `BSC_LISTA_SDK_PACKAGE` (Phase-1 canonical client default: `ethers`; official Lista SDK package currently unavailable on npm)
+- `bsc.lista.sdk.fallbackToNative` ↔ `BSC_LISTA_SDK_FALLBACK_TO_NATIVE`
 - `bsc.lista.mode` ↔ `BSC_LISTA_EXECUTE_MODE`
 - `bsc.lista.nativeEnabled` ↔ `BSC_LISTA_NATIVE_EXECUTE_ENABLED`
 - `bsc.lista.pool` ↔ `BSC_LISTA_POOL`
@@ -249,6 +253,9 @@ Common mapping examples:
 - `bsc.lista.maxAmountRaw` ↔ `BSC_LISTA_MAX_AMOUNT_RAW`
 - `bsc.lista.allowedTokens` ↔ `BSC_LISTA_ALLOWED_TOKENS`
 - `bsc.wombat.enabled` ↔ `BSC_WOMBAT_EXECUTE_ENABLED`
+- `bsc.wombat.useSdk` ↔ `BSC_WOMBAT_USE_SDK`
+- `bsc.wombat.sdk.package` ↔ `BSC_WOMBAT_SDK_PACKAGE` (Phase-1 default: `@wombat-exchange/configx`)
+- `bsc.wombat.sdk.fallbackToNative` ↔ `BSC_WOMBAT_SDK_FALLBACK_TO_NATIVE`
 - `bsc.wombat.mode` ↔ `BSC_WOMBAT_EXECUTE_MODE`
 - `bsc.wombat.nativeEnabled` ↔ `BSC_WOMBAT_NATIVE_EXECUTE_ENABLED`
 - `bsc.wombat.pool` ↔ `BSC_WOMBAT_POOL`
