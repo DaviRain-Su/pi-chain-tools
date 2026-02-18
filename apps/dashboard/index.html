@@ -198,7 +198,7 @@
           <button id="copyDebridgeIncident">Copy incident format</button>
           <button id="fillDebridgeFixDraft">Fill fix draft</button>
         </div>
-        <details>
+        <details id="debridgeAdvancedTools">
           <summary class="muted">deBridge advanced quick-fix tools</summary>
           <div class="row" style="margin-top:8px">
             <button id="appendDebridgeQuickFix">Append quick fix</button>
@@ -435,6 +435,7 @@
       const copyQuickFixTimeoutBtn = document.getElementById("copyQuickFixTimeout");
       const copyQuickFixRateBtn = document.getElementById("copyQuickFixRate");
       const copyQuickFixNetworkBtn = document.getElementById("copyQuickFixNetwork");
+      const debridgeAdvancedToolsEl = document.getElementById("debridgeAdvancedTools");
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
@@ -1093,6 +1094,7 @@
       let lastAcpAsyncJobId = "";
       const BSC_READINESS_PROTOCOL_KEY = "near_dashboard.bsc.readinessProtocol";
       const DEBRIDGE_WINDOW_KEY = "near_dashboard.debridge.window";
+      const DEBRIDGE_ADVANCED_OPEN_KEY = "near_dashboard.debridge.advancedOpen";
       let targetConfig = loadTargets();
       targetUsdtEl.value = targetConfig.usdt;
       targetUsdceEl.value = targetConfig.usdce;
@@ -1111,6 +1113,10 @@
         debridgeWindowEl.value = allowedDebridgeWindows.includes(savedDebridgeWindow)
           ? savedDebridgeWindow
           : "24h";
+      }
+      if (debridgeAdvancedToolsEl) {
+        const savedOpen = String(localStorage.getItem(DEBRIDGE_ADVANCED_OPEN_KEY) || "false").toLowerCase() === "true";
+        debridgeAdvancedToolsEl.open = savedOpen;
       }
 
       function buildStrategyDslSample() {
@@ -2260,6 +2266,12 @@
         debridgeReliabilityEl.textContent = computeDebridgeReliability(
           lastSnapshot,
           nextWindow,
+        );
+      });
+      debridgeAdvancedToolsEl?.addEventListener("toggle", () => {
+        localStorage.setItem(
+          DEBRIDGE_ADVANCED_OPEN_KEY,
+          debridgeAdvancedToolsEl.open ? "true" : "false",
         );
       });
       copyDebridgeReliabilityBtn?.addEventListener("click", async () => {
