@@ -198,6 +198,7 @@
           <button id="copyDebridgeIncident">Copy incident format</button>
           <button id="copyDebridgeShareLink">Copy share link</button>
           <button id="copyDebridgeShareMarkdown">Copy share markdown</button>
+          <button id="copyDebridgeShareMarkdownSummary">Copy markdown + summary</button>
           <button id="fillDebridgeFixDraft">Fill fix draft</button>
         </div>
         <details id="debridgeAdvancedTools">
@@ -430,6 +431,7 @@
       const copyDebridgeIncidentBtn = document.getElementById("copyDebridgeIncident");
       const copyDebridgeShareLinkBtn = document.getElementById("copyDebridgeShareLink");
       const copyDebridgeShareMarkdownBtn = document.getElementById("copyDebridgeShareMarkdown");
+      const copyDebridgeShareMarkdownSummaryBtn = document.getElementById("copyDebridgeShareMarkdownSummary");
       const fillDebridgeFixDraftBtn = document.getElementById("fillDebridgeFixDraft");
       const appendDebridgeQuickFixBtn = document.getElementById("appendDebridgeQuickFix");
       const appendQuickFixTimeoutBtn = document.getElementById("appendQuickFixTimeout");
@@ -962,6 +964,14 @@
         const windowKey = String(debridgeWindowEl?.value || "24h");
         const title = `deBridge diagnostics (${windowKey})`;
         return `[${title}](${buildDebridgeShareLink()})`;
+      }
+
+      function buildDebridgeShareMarkdownSummary() {
+        const summary = String(debridgeReliabilityEl?.textContent || "").trim();
+        const compactSummary = summary && summary !== "-"
+          ? summary.split("\n")[0]
+          : "No deBridge reliability summary available";
+        return `${buildDebridgeShareMarkdown()}\n\n${compactSummary}`;
       }
 
       function buildDebridgeFixDraft(snapshot, windowKey = "24h") {
@@ -2353,6 +2363,14 @@
           cmdMetaEl.textContent = "Copied deBridge share markdown";
         } catch {
           cmdMetaEl.textContent = "Copy deBridge share markdown failed";
+        }
+      });
+      copyDebridgeShareMarkdownSummaryBtn?.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(buildDebridgeShareMarkdownSummary());
+          cmdMetaEl.textContent = "Copied deBridge markdown + summary";
+        } catch {
+          cmdMetaEl.textContent = "Copy deBridge markdown + summary failed";
         }
       });
       fillDebridgeFixDraftBtn?.addEventListener("click", () => {

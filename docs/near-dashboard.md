@@ -148,6 +148,10 @@ This is a lightweight local dashboard for quick visibility into your account sta
 - CI resilient failure-signature telemetry:
   - `scripts/ci-resilient.mjs` appends JSONL records to `apps/dashboard/data/ci-signatures.jsonl` (override via `CI_SIGNATURES_JSONL_PATH`)
   - read-only API: `GET /api/ops/ci-signatures?limit=50` (returns newest-first rows)
+- deBridge Reliability card sharing ops:
+  - `Copy share link` includes `debridgeWindow` + `debridgeAdvancedOpen` query state for reproducible views
+  - `Copy share markdown` copies one-line markdown link
+  - `Copy markdown + summary` copies markdown link + current reliability headline for incident handoff
 - deBridge MCP readiness (cross-chain integration hook):
   - `GET /api/crosschain/debridge/readiness` (returns `enabled/commandConfigured/executeEnabled/executeCommandConfigured/executeRetry/canExecute/blockers/hints`)
   - `GET /api/ops/debridge-execute-metrics?limit=30` (returns deBridge execute reliability telemetry: totals/retryRecovered/recent)

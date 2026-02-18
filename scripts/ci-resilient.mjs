@@ -104,6 +104,25 @@ function hasPythonMissingSignature(output) {
 	);
 }
 
+function classifyCheckFailure(output) {
+	const lower = String(output || "").toLowerCase();
+	if (hasPythonMissingSignature(lower)) return "python-missing";
+	if (lower.includes("npm run lint") || lower.includes("biome check")) {
+		if (lower.includes("internalerror/io")) return "lint-biome-io";
+		return "lint";
+	}
+	if (lower.includes("npm run typecheck") || lower.includes("tsc --noemit")) {
+		return "typecheck";
+	}
+	if (
+		lower.includes("schema_validation_failed") ||
+		lower.includes("npm run schema:validate")
+	) {
+		return "schema-validate";
+	}
+	return "check-unknown";
+}
+
 function printSignatureSummary(signatures) {
 	console.log(
 		`[ci-resilient] failure-signatures ${JSON.stringify(signatures)}`,
@@ -162,6 +181,7 @@ async function main() {
 		biomeHotfixRuns: 0,
 		testRetryCount: 0,
 		testFlakeRecovered: 0,
+		checkFailureKind: "",
 	};
 
 	const runtime = ensurePythonAliasEnv(process.env);
@@ -197,7 +217,12 @@ async function main() {
 		}
 	}
 	if (check.code !== 0) {
-		failWithSummary(check.code, "[ci-resilient] check failed", signatures);
+		signatures.checkFailureKind = classifyCheckFailure(check.output);
+		failWithSummary(
+			check.code,
+			`[ci-resilient] check failed (${signatures.checkFailureKind})`,
+			signatures,
+		);
 	}
 
 	console.log("[ci-resilient] step 2/3: npm run security:check");
