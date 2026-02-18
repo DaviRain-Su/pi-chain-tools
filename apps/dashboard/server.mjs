@@ -14,6 +14,12 @@ import { Wallet } from "@ethersproject/wallet";
 
 import { reconcileBscExecutionArtifact } from "./bsc-reconcile.mjs";
 import {
+	buildDebridgeExecutionArtifact,
+	reconcileDebridgeExecutionArtifact,
+	validateDebridgeExecutionArtifactV1,
+	validateDebridgeExecutionReconciliationV1,
+} from "./debridge-reconcile.mjs";
+import {
 	buildStrategyDslFromLegacy,
 	validateStrategyDslV1,
 	validateStrategySemanticV1,
@@ -2481,87 +2487,6 @@ function buildBscPostActionArtifact({
 		retryable: Boolean(postAction && postAction.ok !== true),
 		occurredAt: new Date().toISOString(),
 	};
-}
-
-function buildDebridgeExecutionArtifact({
-	payload,
-	output,
-	txHash,
-	status,
-	error,
-}) {
-	return {
-		type: "debridge_crosschain_execute",
-		version: "v1",
-		provider: "debridge-mcp",
-		status,
-		runId: String(payload?.runId || ""),
-		originChain: String(payload?.originChain || "").trim() || null,
-		destinationChain: String(payload?.destinationChain || "").trim() || null,
-		tokenIn: String(payload?.tokenIn || "").trim() || null,
-		tokenOut: String(payload?.tokenOut || "").trim() || null,
-		amount: String(payload?.amount || "").trim() || null,
-		recipient: String(payload?.recipient || "").trim() || null,
-		txHash: txHash || null,
-		error: error || null,
-		rawOutput: output || null,
-		occurredAt: new Date().toISOString(),
-	};
-}
-
-function reconcileDebridgeExecutionArtifact(artifact) {
-	const providerConsistent = artifact?.provider === "debridge-mcp";
-	const txHashPresent = /^0x[a-fA-F0-9]{64}$/.test(
-		String(artifact?.txHash || ""),
-	);
-	const normalizedStatus =
-		artifact?.status === "success" ? "ok" : artifact?.status;
-	return {
-		type: "debridge_execution_reconciliation",
-		version: "v1",
-		ok: normalizedStatus === "ok",
-		normalizedStatus,
-		providerConsistent,
-		txHashPresent,
-		issues: [
-			...(providerConsistent ? [] : ["provider_mismatch"]),
-			...(normalizedStatus === "ok" && !txHashPresent
-				? ["tx_hash_missing"]
-				: []),
-		],
-		checkedAt: new Date().toISOString(),
-	};
-}
-
-function validateDebridgeExecutionArtifactV1(artifact) {
-	if (!artifact || typeof artifact !== "object") return false;
-	if (artifact.type !== "debridge_crosschain_execute") return false;
-	if (artifact.version !== "v1") return false;
-	if (artifact.provider !== "debridge-mcp") return false;
-	if (!["success", "blocked", "error"].includes(String(artifact.status || "")))
-		return false;
-	if (
-		!artifact.occurredAt ||
-		Number.isNaN(Date.parse(String(artifact.occurredAt)))
-	)
-		return false;
-	return true;
-}
-
-function validateDebridgeExecutionReconciliationV1(reconciliation) {
-	if (!reconciliation || typeof reconciliation !== "object") return false;
-	if (reconciliation.type !== "debridge_execution_reconciliation") return false;
-	if (reconciliation.version !== "v1") return false;
-	if (typeof reconciliation.ok !== "boolean") return false;
-	if (typeof reconciliation.providerConsistent !== "boolean") return false;
-	if (typeof reconciliation.txHashPresent !== "boolean") return false;
-	if (!Array.isArray(reconciliation.issues)) return false;
-	if (
-		!reconciliation.checkedAt ||
-		Number.isNaN(Date.parse(String(reconciliation.checkedAt)))
-	)
-		return false;
-	return true;
 }
 
 function buildAcpExecutionPlan(payload) {
