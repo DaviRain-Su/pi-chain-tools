@@ -187,6 +187,14 @@
 
       <div class="card" style="margin-top:16px">
         <h3>deBridge Execute Reliability</h3>
+        <div class="row" style="margin-bottom:8px">
+          <label class="muted" for="debridgeWindow">window</label>
+          <select id="debridgeWindow">
+            <option value="1h">1h</option>
+            <option value="24h" selected>24h</option>
+            <option value="7d">7d</option>
+          </select>
+        </div>
         <div id="debridgeReliability" class="muted" style="white-space:pre-wrap">-</div>
       </div>
 
@@ -399,6 +407,7 @@
       const bscMarketHealthEl = document.getElementById("bscMarketHealth");
       const execQualityEl = document.getElementById("execQuality");
       const debridgeReliabilityEl = document.getElementById("debridgeReliability");
+      const debridgeWindowEl = document.getElementById("debridgeWindow");
       const acpOpsEl = document.getElementById("acpOps");
       const acpJobsEl = document.getElementById("acpJobs");
       const acpStatusFilterEl = document.getElementById("acpStatusFilter");
@@ -720,7 +729,7 @@
         return `Runs: ${total} · Success: ${success} · Failed: ${failed} · Rollback: ${rollback} · Reconcile warns: ${reconcileWarn} · Success rate: ${successRate.toFixed(1)}% · ${latestText} · ${pnlText} · ${rpcText} · ${rpcDetail} · ${topText} · ${webhookText} · ${debridgeText}`;
       }
 
-      function computeDebridgeReliability(snapshot) {
+      function computeDebridgeReliability(snapshot, windowKey = "24h") {
         const d = snapshot?.debridgeExecuteMetrics || {};
         const total = Number(d.total || 0);
         if (total <= 0) return "No deBridge execute telemetry yet.";
@@ -757,18 +766,23 @@
         const trendLabel = trend || "-";
 
         const now = Date.now();
-        const recent24h = recent.filter((r) => {
+        const windowMs = windowKey === "1h"
+          ? 60 * 60 * 1000
+          : windowKey === "7d"
+            ? 7 * 24 * 60 * 60 * 1000
+            : 24 * 60 * 60 * 1000;
+        const recentWindow = recent.filter((r) => {
           const ts = Date.parse(String(r?.timestamp || ""));
-          return Number.isFinite(ts) && now - ts <= 24 * 60 * 60 * 1000;
+          return Number.isFinite(ts) && now - ts <= windowMs;
         });
-        const errors24h = recent24h
+        const errorsWindow = recentWindow
           .filter((r) => String(r?.status || "") === "error")
           .reduce((acc, r) => {
             const key = String(r?.errorCode || "unknown");
             acc[key] = (acc[key] || 0) + 1;
             return acc;
           }, {});
-        const topErrors24h = Object.entries(errors24h)
+        const topErrorsWindow = Object.entries(errorsWindow)
           .sort((a, b) => b[1] - a[1])
           .slice(0, 3)
           .map(([k, v]) => `${k}:${v}`)
@@ -787,7 +801,7 @@
         const delta = latestRate - prevRate;
         const arrow = delta > 0.01 ? "↑" : delta < -0.01 ? "↓" : "→";
 
-        return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})\nRecent(20): ${trendLabel}\n24h TopErrors: ${topErrors24h}\nSuccess trend: ${arrow} ${latestRate.toFixed(1)}% vs ${prevRate.toFixed(1)}% (Δ ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}pp)`;
+        return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})\nRecent(20): ${trendLabel}\n${windowKey} TopErrors: ${topErrorsWindow}\nSuccess trend: ${arrow} ${latestRate.toFixed(1)}% vs ${prevRate.toFixed(1)}% (Δ ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}pp)`;
       }
 
       function toCsv(snapshot) {
@@ -899,7 +913,10 @@
         const aggregateMax = Number.isFinite(Number(aggregateRisk?.maxScore)) ? Number(aggregateRisk.maxScore) : null;
         yieldHealthEl.innerHTML = `Portfolio aggregate risk: <span class="${aggregateCls}">${aggregateBand}</span> · avg=${aggregateAvg != null ? aggregateAvg : "-"} · max=${aggregateMax != null ? aggregateMax : "-"}<br/><span class="muted">${yieldHealthText}</span>`;
         execQualityEl.textContent = computeExecutionQuality(data);
-        debridgeReliabilityEl.textContent = computeDebridgeReliability(data);
+        debridgeReliabilityEl.textContent = computeDebridgeReliability(
+          data,
+          String(debridgeWindowEl?.value || "24h"),
+        );
         const bscLayer = (unified?.portfolio?.executionLayers || []).find((x) => String(x?.chain || "").toLowerCase() === "bsc");
         const protocolPos = bscLayer?.positions?.protocols || {};
         const normalizationHealth = bscLayer?.positions?.normalizationHealth || {};
@@ -1960,6 +1977,13 @@
         const selected = String(bscExecutionProtocolEl.value || "aave").toLowerCase();
         localStorage.setItem(BSC_READINESS_PROTOCOL_KEY, selected);
         load().catch(() => {});
+      });
+      debridgeWindowEl?.addEventListener("change", () => {
+        if (!lastSnapshot) return;
+        debridgeReliabilityEl.textContent = computeDebridgeReliability(
+          lastSnapshot,
+          String(debridgeWindowEl.value || "24h"),
+        );
       });
       acpStatusFilterEl?.addEventListener("change", () => {
         syncAcpFiltersToUrl();
