@@ -296,7 +296,8 @@ Phase-1（本期，已完成）
 - CI resilient 自愈 + signature telemetry（JSONL + `/api/ops/ci-signatures`）
 - Venus SDK-first（read/plan）开关：`BSC_VENUS_USE_SDK=true`（或 `bsc.venus.useSdk=true`）
 - Venus SDK 分支带显式标记：`dataSource` / `sdk` / `warnings`；失败回退原生路径时标记 `dataSource=native-fallback`
-- Venus SDK 故障排查：检查 `BSC_VENUS_VTOKEN_USDC/BSC_VENUS_VTOKEN_USDT`、`BSC_VENUS_COMPTROLLER`、`BSC_VENUS_SDK_PACKAGE`（默认 `@venusprotocol/sdk`），并观察 warning `venus_sdk_market_fetch_failed_fallback_to_native` / `venus_sdk_position_fetch_failed_fallback_to_native`
+- Venus SDK 故障排查：检查 `BSC_VENUS_VTOKEN_USDC/BSC_VENUS_VTOKEN_USDT`、`BSC_VENUS_COMPTROLLER`、`BSC_VENUS_SDK_PACKAGE`（默认 `@venusprotocol/chains`），并观察 warning `venus_sdk_market_fetch_failed_fallback_to_native` / `venus_sdk_position_fetch_failed_fallback_to_native`
+- 包选择说明：`@venusprotocol/sdk` 目前无可用 npm 发布，Phase-1 改用 Venus 官方 `@venusprotocol/chains` 作为 canonical client package（链/市场/vToken 元数据），读链路继续由 provider ABI 调用承接。
 
 Phase-2（下期，最小目标）
 - native slot 协议级用例继续扩充（真实链路回放 + 异常分类覆盖）

@@ -50,7 +50,7 @@
 			"useSdk": false,
 			"comptroller": "",
 			"sdk": {
-				"package": "@venusprotocol/sdk"
+				"package": "@venusprotocol/chains"
 			}
 		},
 		"aave": {

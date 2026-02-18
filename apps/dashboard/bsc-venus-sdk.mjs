@@ -1,5 +1,9 @@
 import { Interface } from "@ethersproject/abi";
 import { JsonRpcProvider } from "@ethersproject/providers";
+import {
+	MainnetChainId,
+	vTokens as venusChainVTokens,
+} from "@venusprotocol/chains";
 
 function safeBigInt(value, fallback = 0n) {
 	try {
@@ -21,9 +25,11 @@ function formatUnits(raw, decimals) {
 	return `${whole}.${fractionText}`.replace(/\.0+$/, "").replace(/\.$/, "");
 }
 
+const DEFAULT_VENUS_SDK_PACKAGE = "@venusprotocol/chains";
+
 function normalizeSdkPackageName(input) {
 	const text = String(input || "").trim();
-	return text || "@venusprotocol/sdk";
+	return text || DEFAULT_VENUS_SDK_PACKAGE;
 }
 
 async function tryLoadSdkPackage(packageName) {
@@ -46,6 +52,25 @@ async function tryLoadSdkPackage(packageName) {
 	}
 }
 
+function resolveDefaultBscVToken(symbol) {
+	const entries = Array.isArray(venusChainVTokens?.[MainnetChainId.BSC_MAINNET])
+		? venusChainVTokens[MainnetChainId.BSC_MAINNET]
+		: [];
+	const upper = String(symbol || "")
+		.trim()
+		.toUpperCase();
+	if (!upper) return null;
+	return (
+		entries.find((entry) => {
+			const vTokenSymbol = String(entry?.symbol || "").toUpperCase();
+			const underlyingSymbol = String(
+				entry?.underlyingToken?.symbol || "",
+			).toUpperCase();
+			return vTokenSymbol === `V${upper}` || underlyingSymbol === upper;
+		}) || null
+	);
+}
+
 export async function createVenusSdkAdapter({
 	rpcUrl,
 	chainId,
@@ -60,7 +85,7 @@ export async function createVenusSdkAdapter({
 	const warnings = [];
 	if (!sdk.loaded) {
 		warnings.push(
-			"official_venus_sdk_not_available_using_scaffold_provider_path",
+			"official_venus_client_package_not_available_using_scaffold_provider_path",
 		);
 	}
 	return {
@@ -191,12 +216,24 @@ export async function collectVenusSdkMarketView(
 	const warnings = [];
 	const provider = adapter?.provider;
 	if (!provider) throw new Error("venus_sdk_adapter_provider_missing");
+	const defaultUsdcVToken = resolveDefaultBscVToken("USDC");
+	const defaultUsdtVToken = resolveDefaultBscVToken("USDT");
+	const resolvedUsdcVToken =
+		String(usdcVToken || "").trim() || defaultUsdcVToken?.address || "";
+	const resolvedUsdtVToken =
+		String(usdtVToken || "").trim() || defaultUsdtVToken?.address || "";
+	if (!String(usdcVToken || "").trim() && resolvedUsdcVToken) {
+		warnings.push("venus_usdc_vtoken_defaulted_from_official_registry");
+	}
+	if (!String(usdtVToken || "").trim() && resolvedUsdtVToken) {
+		warnings.push("venus_usdt_vtoken_defaulted_from_official_registry");
+	}
 	const [usdcToken, usdtToken] = await Promise.all([
-		usdcVToken
-			? readVenusTokenSnapshot(provider, usdcVToken)
+		resolvedUsdcVToken
+			? readVenusTokenSnapshot(provider, resolvedUsdcVToken)
 			: Promise.resolve(null),
-		usdtVToken
-			? readVenusTokenSnapshot(provider, usdtVToken)
+		resolvedUsdtVToken
+			? readVenusTokenSnapshot(provider, resolvedUsdtVToken)
 			: Promise.resolve(null),
 	]);
 	if (!usdcToken) warnings.push("venus_usdc_vtoken_missing_config");
@@ -320,12 +357,32 @@ export async function collectVenusSdkPositionView(
 	if (!accountAddress) {
 		warnings.push("venus_account_missing_sdk_position_best_effort");
 	}
+	const defaultUsdcVToken = resolveDefaultBscVToken("USDC");
+	const defaultUsdtVToken = resolveDefaultBscVToken("USDT");
+	const resolvedUsdcVToken =
+		String(usdcVToken || "").trim() || defaultUsdcVToken?.address || "";
+	const resolvedUsdtVToken =
+		String(usdtVToken || "").trim() || defaultUsdtVToken?.address || "";
+	if (!String(usdcVToken || "").trim() && resolvedUsdcVToken) {
+		warnings.push("venus_usdc_vtoken_defaulted_from_official_registry");
+	}
+	if (!String(usdtVToken || "").trim() && resolvedUsdtVToken) {
+		warnings.push("venus_usdt_vtoken_defaulted_from_official_registry");
+	}
 	const [usdc, usdt] = await Promise.all([
-		usdcVToken
-			? readVenusTokenSnapshot(adapter.provider, usdcVToken, accountAddress)
+		resolvedUsdcVToken
+			? readVenusTokenSnapshot(
+					adapter.provider,
+					resolvedUsdcVToken,
+					accountAddress,
+				)
 			: Promise.resolve(null),
-		usdtVToken
-			? readVenusTokenSnapshot(adapter.provider, usdtVToken, accountAddress)
+		resolvedUsdtVToken
+			? readVenusTokenSnapshot(
+					adapter.provider,
+					resolvedUsdtVToken,
+					accountAddress,
+				)
 			: Promise.resolve(null),
 	]);
 	if (!usdc) warnings.push("venus_usdc_vtoken_missing_config");

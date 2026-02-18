@@ -606,7 +606,7 @@ const BSC_VENUS_SDK_PACKAGE = String(
 	envOrCfg(
 		"BSC_VENUS_SDK_PACKAGE",
 		"bsc.venus.sdk.package",
-		"@venusprotocol/sdk",
+		"@venusprotocol/chains",
 	),
 ).trim();
 const BSC_VENUS_COMPTROLLER = String(

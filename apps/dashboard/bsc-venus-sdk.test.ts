@@ -16,7 +16,7 @@ describe("bsc venus sdk scaffold adapter", () => {
 			config: { comptroller: "" },
 			meta: {
 				officialSdkWired: false,
-				sdkPackage: "@venusprotocol/sdk",
+				sdkPackage: "@venusprotocol/chains",
 			},
 		};
 		const view = await collectVenusSdkMarketView(adapter, {
@@ -34,7 +34,10 @@ describe("bsc venus sdk scaffold adapter", () => {
 		expect(view.venus.usdtSupplyAprBps).toBe(101);
 		expect(view.venus.dataSource).toBe("sdk-scaffold");
 		expect(Array.isArray(view.venus.warnings)).toBe(true);
-		expect(view.venus.marketStats.usdc).toBeNull();
+		expect(view.venus.marketStats.usdc?.vToken).toBeTypeOf("string");
+		expect(view.warnings).toContain(
+			"venus_usdc_vtoken_defaulted_from_official_registry",
+		);
 	});
 
 	it("normalizes position view with fallback-friendly token rows", async () => {
@@ -47,7 +50,7 @@ describe("bsc venus sdk scaffold adapter", () => {
 			config: { comptroller: "" },
 			meta: {
 				officialSdkWired: false,
-				sdkPackage: "@venusprotocol/sdk",
+				sdkPackage: "@venusprotocol/chains",
 			},
 		};
 		const view = await collectVenusSdkPositionView(adapter, {
@@ -56,9 +59,15 @@ describe("bsc venus sdk scaffold adapter", () => {
 			usdtVToken: "",
 		});
 		expect(view.mode).toBe("sdk-scaffold");
-		expect(view.venus.usdc.missingConfig).toBe(true);
-		expect(view.venus.usdt.missingConfig).toBe(true);
+		expect(view.venus.usdc.token).toBeTypeOf("string");
+		expect(view.venus.usdt.token).toBeTypeOf("string");
 		expect(view.venus.usdc.dataSource).toBe("sdk-scaffold");
 		expect(Array.isArray(view.warnings)).toBe(true);
+		expect(view.warnings).toContain(
+			"venus_usdc_vtoken_defaulted_from_official_registry",
+		);
+		expect(view.warnings).toContain(
+			"venus_usdt_vtoken_defaulted_from_official_registry",
+		);
 	});
 });
