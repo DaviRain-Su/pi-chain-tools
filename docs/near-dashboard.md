@@ -150,6 +150,7 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - read-only API: `GET /api/ops/ci-signatures?limit=50` (returns newest-first rows)
   - Dashboard `CI Failure Signatures` card summarizes latest run status and top recent `checkFailureKind` clusters
   - Includes `Copy failure clusters` action and recent-row table (time/status/failure kind/python/biome/test-retry)
+  - Includes `Auto action` hint derived from latest `checkFailureKind` for faster ops response
 - deBridge Reliability card sharing ops:
   - `Copy share link` includes `debridgeWindow` + `debridgeAdvancedOpen` query state for reproducible views
   - `Copy share markdown` copies one-line markdown link

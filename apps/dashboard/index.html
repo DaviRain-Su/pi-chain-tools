@@ -192,6 +192,7 @@
           <span id="ciSignaturesMeta" class="muted"></span>
         </div>
         <div id="ciSignatures" class="muted">-</div>
+        <div id="ciAutoAction" class="muted" style="margin-top:6px">Auto action: -</div>
         <details style="margin-top:8px">
           <summary>Recent CI signature rows</summary>
           <table style="margin-top:8px">
@@ -445,6 +446,7 @@
       const copyCiFailureClustersBtn = document.getElementById("copyCiFailureClusters");
       const ciSignaturesMetaEl = document.getElementById("ciSignaturesMeta");
       const ciSignaturesRowsEl = document.getElementById("ciSignaturesRows");
+      const ciAutoActionEl = document.getElementById("ciAutoAction");
       const debridgeReliabilityEl = document.getElementById("debridgeReliability");
       const debridgeWindowEl = document.getElementById("debridgeWindow");
       const copyDebridgeReliabilityBtn = document.getElementById("copyDebridgeReliability");
@@ -807,6 +809,27 @@
           const ts = r?.ts ? new Date(r.ts).toLocaleString() : "-";
           return `<tr><td>${ts}</td><td>${String(r?.status || "-")}</td><td>${String(sig?.checkFailureKind || "-")}</td><td>${Number(sig?.pythonMissingDetections || 0)}</td><td>${Number(sig?.biomeIoDetections || 0)}</td><td>${Number(sig?.testRetryCount || 0)}</td><td>${Number(sig?.testFlakeRecovered || 0)}</td></tr>`;
         }).join("") || '<tr><td colspan="7" class="muted">No rows</td></tr>';
+      }
+
+      function getCiAutoActionHint(payload) {
+        const rows = Array.isArray(payload?.signatures) ? payload.signatures : [];
+        const latestKind = String(rows?.[0]?.signatures?.checkFailureKind || "");
+        if (latestKind === "python-missing") {
+          return "Auto action: run npm run ci:resilient (python shim path) and verify host has python3";
+        }
+        if (latestKind === "lint-biome-io") {
+          return "Auto action: run npx biome check --write apps/dashboard/data/rebalance-metrics.json then npm run check";
+        }
+        if (latestKind === "typecheck") {
+          return "Auto action: run npm run typecheck and fix TS errors before retry";
+        }
+        if (latestKind === "schema-validate") {
+          return "Auto action: run npm run schema:validate and align schema manifest/tests";
+        }
+        if (latestKind === "lint") {
+          return "Auto action: run npm run lint and apply biome fixes";
+        }
+        return "Auto action: run npm run ci:retry (resilient retries enabled)";
       }
 
       function computeCiSignaturesSummary(payload) {
@@ -1303,6 +1326,7 @@
         yieldHealthEl.innerHTML = `Portfolio aggregate risk: <span class="${aggregateCls}">${aggregateBand}</span> · avg=${aggregateAvg != null ? aggregateAvg : "-"} · max=${aggregateMax != null ? aggregateMax : "-"}<br/><span class="muted">${yieldHealthText}</span>`;
         execQualityEl.textContent = computeExecutionQuality(data);
         ciSignaturesEl.textContent = computeCiSignaturesSummary(ciSignatures);
+        ciAutoActionEl.textContent = getCiAutoActionHint(ciSignatures);
         renderCiSignaturesRows(ciSignatures);
         ciSignaturesMetaEl.textContent = `rows=${Array.isArray(ciSignatures?.signatures) ? ciSignatures.signatures.length : 0}`;
         debridgeReliabilityEl.textContent = computeDebridgeReliability(
