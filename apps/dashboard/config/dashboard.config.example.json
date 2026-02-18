@@ -129,6 +129,9 @@
 			}
 		}
 	},
+	"paths": {
+		"monadAgentState": "apps/dashboard/data/monad-agent-state.json"
+	},
 	"crosschain": {
 		"debridge": {
 			"enabled": false,

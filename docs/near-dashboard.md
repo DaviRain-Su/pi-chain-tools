@@ -155,6 +155,14 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `Copy share link` includes `debridgeWindow` + `debridgeAdvancedOpen` query state for reproducible views
   - `Copy share markdown` copies one-line markdown link
   - `Copy markdown + summary` copies markdown link + current reliability headline for incident handoff
+- Monad Agent Identity + Delegation v1.3 scaffold:
+  - `GET /api/monad/agent/identity` -> deterministic `agentId` + metadata + registration/delegation status
+  - `POST /api/monad/agent/identity/register` (`confirm=true`) -> explicit-gate identity registration artifact/history emission (`mode=mock|simulated-chain`)
+  - `POST /api/monad/agent/delegation/prepare` -> non-custodial EIP-712-style delegation payload (`domain/types/message/digest`)
+  - `POST /api/monad/agent/delegation/submit` (`confirm=true`) -> verifier-gated delegation intake (`blockers/hints/fixPack` when invalid)
+  - `POST /api/monad/agent/delegation/revoke` (`confirm=true`) -> revocation path by `delegationId`
+  - dashboard adds minimal v1.3 card for identity/delegation state + action-history-backed metrics
+  - local persistence: `MONAD_AGENT_STATE_PATH` (`apps/dashboard/data/monad-agent-state.json` by default)
 - Monad Morpho Earn v1.2 (advanced polish):
   - `GET /api/monad/morpho/earn/readiness` -> execute gate aggregation + risk controls (`canExecute/blockers/hints/fixPack/riskControls`)
   - `POST /api/monad/morpho/earn/plan` -> pre-execute plan/readiness evaluation for amount (`readiness.blockers/hints/fixPack`)

@@ -21,6 +21,11 @@ import {
 	validateDebridgeExecutionReconciliationV1,
 } from "./debridge-reconcile.mjs";
 import {
+	buildAgentIdentity,
+	createDelegationIntentPayload,
+	verifyDelegationIntentPayload,
+} from "./monad-agent.mjs";
+import {
 	buildStrategyDslFromLegacy,
 	validateStrategyDslV1,
 	validateStrategySemanticV1,
@@ -111,6 +116,13 @@ const POLICY_PATH = String(
 		"NEAR_DASHBOARD_POLICY_PATH",
 		"paths.policy",
 		path.join(__dirname, "data", "portfolio-policy.json"),
+	),
+);
+const MONAD_AGENT_STATE_PATH = String(
+	envOrCfg(
+		"MONAD_AGENT_STATE_PATH",
+		"paths.monadAgentState",
+		path.join(__dirname, "data", "monad-agent-state.json"),
 	),
 );
 const MARKETPLACE_PATH = String(
@@ -1015,6 +1027,27 @@ const MONAD_MORPHO_WORKER = {
 	recent: [],
 	timer: null,
 };
+const MONAD_AGENT_STATE = {
+	identity: {
+		registered: false,
+		registeredAt: null,
+		registerMode: "mock",
+		registerArtifactId: null,
+		registerTxHash: null,
+		notes: null,
+	},
+	delegations: [],
+	metrics: {
+		identityGet: 0,
+		identityRegisterAttempt: 0,
+		identityRegisterSuccess: 0,
+		delegationPrepare: 0,
+		delegationSubmitAttempt: 0,
+		delegationSubmitSuccess: 0,
+		delegationRevokeAttempt: 0,
+		delegationRevokeSuccess: 0,
+	},
+};
 const DEBRIDGE_EXECUTE_METRICS = {
 	total: 0,
 	success: 0,
@@ -1106,6 +1139,7 @@ async function saveMetricsToDisk() {
 					},
 					acpJobHistory: ACP_JOB_HISTORY,
 					acpAsyncJobs: ACP_ASYNC_JOBS,
+					monadAgentMetrics: MONAD_AGENT_STATE.metrics,
 				},
 				null,
 				2,
@@ -1223,6 +1257,14 @@ async function loadMetricsFromDisk() {
 					lastErrorAt: row?.lastErrorAt || null,
 				});
 			}
+		}
+
+		const monadAgentMetrics = parsed.monadAgentMetrics;
+		if (monadAgentMetrics && typeof monadAgentMetrics === "object") {
+			MONAD_AGENT_STATE.metrics = {
+				...MONAD_AGENT_STATE.metrics,
+				...monadAgentMetrics,
+			};
 		}
 
 		const rpc = parsed.rpcMetrics;
@@ -1854,6 +1896,14 @@ async function buildSnapshot(accountId) {
 		monadMorphoWorker: {
 			...MONAD_MORPHO_WORKER,
 			timer: MONAD_MORPHO_WORKER.timer ? "active" : null,
+		},
+		monadAgent: {
+			identity: {
+				...getMonadAgentIdentity(),
+				...MONAD_AGENT_STATE.identity,
+			},
+			delegation: getMonadDelegationSummary(),
+			metrics: { ...MONAD_AGENT_STATE.metrics },
 		},
 	};
 }
@@ -3642,6 +3692,78 @@ function pushAcpJobHistory(entry) {
 		ACP_JOB_HISTORY.length = 50;
 	}
 	void saveMetricsToDisk();
+}
+
+function getMonadAgentIdentity() {
+	const operatorAddress = MONAD_EXECUTE_PRIVATE_KEY
+		? new Wallet(MONAD_EXECUTE_PRIVATE_KEY).address
+		: "";
+	return buildAgentIdentity({
+		namespace: "pi-chain-tools:monad-agent:v1",
+		accountId: ACCOUNT_ID,
+		operatorAddress,
+		rpcUrl: MONAD_RPC_URL,
+		chainId: MONAD_CHAIN_ID,
+		vault: MONAD_MORPHO_VAULTS[0] || "",
+		capabilities: [
+			"monad:morpho:earn:plan",
+			"monad:morpho:earn:execute",
+			"monad:agent:delegation",
+		],
+		version: "v1.3",
+	});
+}
+
+function getMonadDelegationSummary() {
+	const active = MONAD_AGENT_STATE.delegations.filter(
+		(row) => row.status === "active",
+	);
+	const revoked = MONAD_AGENT_STATE.delegations.filter(
+		(row) => row.status === "revoked",
+	);
+	return {
+		total: MONAD_AGENT_STATE.delegations.length,
+		active: active.length,
+		revoked: revoked.length,
+		recent: MONAD_AGENT_STATE.delegations.slice(0, 10),
+	};
+}
+
+async function saveMonadAgentState() {
+	try {
+		await mkdir(path.dirname(MONAD_AGENT_STATE_PATH), { recursive: true });
+		await writeFile(
+			MONAD_AGENT_STATE_PATH,
+			JSON.stringify(MONAD_AGENT_STATE, null, 2),
+		);
+	} catch {
+		// best-effort persistence
+	}
+}
+
+async function loadMonadAgentState() {
+	try {
+		const raw = await readFile(MONAD_AGENT_STATE_PATH, "utf8");
+		const parsed = JSON.parse(raw);
+		if (!parsed || typeof parsed !== "object") return;
+		if (parsed.identity && typeof parsed.identity === "object") {
+			MONAD_AGENT_STATE.identity = {
+				...MONAD_AGENT_STATE.identity,
+				...parsed.identity,
+			};
+		}
+		if (parsed.metrics && typeof parsed.metrics === "object") {
+			MONAD_AGENT_STATE.metrics = {
+				...MONAD_AGENT_STATE.metrics,
+				...parsed.metrics,
+			};
+		}
+		if (Array.isArray(parsed.delegations)) {
+			MONAD_AGENT_STATE.delegations = parsed.delegations.slice(0, 100);
+		}
+	} catch {
+		// ignore missing/corrupt state file
+	}
 }
 
 function recordDebridgeExecuteMetric({
@@ -7888,6 +8010,234 @@ const server = http.createServer(async (req, res) => {
 			});
 		}
 
+		if (url.pathname === "/api/monad/agent/identity") {
+			MONAD_AGENT_STATE.metrics.identityGet += 1;
+			const identity = getMonadAgentIdentity();
+			return json(res, 200, {
+				ok: true,
+				chain: "monad",
+				identity: {
+					...identity,
+					registration: { ...MONAD_AGENT_STATE.identity },
+				},
+				delegation: getMonadDelegationSummary(),
+				metrics: { ...MONAD_AGENT_STATE.metrics },
+				updatedAt: new Date().toISOString(),
+			});
+		}
+
+		if (
+			url.pathname === "/api/monad/agent/identity/register" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			MONAD_AGENT_STATE.metrics.identityRegisterAttempt += 1;
+			const identity = getMonadAgentIdentity();
+			const canWriteChain =
+				MONAD_EXECUTE_ENABLED && Boolean(MONAD_EXECUTE_PRIVATE_KEY);
+			const mode = canWriteChain ? "simulated-chain" : "mock";
+			const nowIso = new Date().toISOString();
+			const artifactId = `monad-agent-register-${Date.now()}`;
+			const artifact = {
+				artifactId,
+				type: "monad_agent_identity_register_artifact.v1",
+				mode,
+				identity,
+				payload: {
+					confirm: true,
+					note: String(payload.note || "").trim() || null,
+				},
+				telemetry: {
+					createdAt: nowIso,
+					chainActionAvailable: canWriteChain,
+				},
+			};
+			MONAD_AGENT_STATE.identity = {
+				...MONAD_AGENT_STATE.identity,
+				registered: true,
+				registeredAt: nowIso,
+				registerMode: mode,
+				registerArtifactId: artifactId,
+				registerTxHash: null,
+				notes: artifact.payload.note,
+			};
+			MONAD_AGENT_STATE.metrics.identityRegisterSuccess += 1;
+			pushActionHistory({
+				action: "monad_agent_identity_register",
+				status: "success",
+				summary: `monad agent identity registered (${mode})`,
+				detail: { agentId: identity.agentId, artifactId, mode },
+				artifact,
+			});
+			await saveMonadAgentState();
+			return json(res, 200, {
+				ok: true,
+				chain: "monad",
+				mode,
+				identity,
+				artifact,
+				historyRef: ACTION_HISTORY[0] || null,
+				blockers: canWriteChain
+					? []
+					: ["chain_registration_unavailable_mock_mode"],
+				hints: canWriteChain
+					? [
+							"Chain write path available; integrate contract call in next batch",
+						]
+					: [
+							"Enable MONAD_EXECUTE_ENABLED + MONAD_EXECUTE_PRIVATE_KEY for future onchain registration",
+						],
+				fixPack: {
+					envLines: [
+						`MONAD_EXECUTE_ENABLED=${MONAD_EXECUTE_ENABLED}`,
+						`MONAD_EXECUTE_PRIVATE_KEY=${MONAD_EXECUTE_PRIVATE_KEY ? "***" : "<set-private-key>"}`,
+					],
+				},
+			});
+		}
+
+		if (
+			url.pathname === "/api/monad/agent/delegation/prepare" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			MONAD_AGENT_STATE.metrics.delegationPrepare += 1;
+			const identity = getMonadAgentIdentity();
+			const delegationPayload = createDelegationIntentPayload({
+				agentId: identity.agentId,
+				delegatee: payload.delegatee,
+				scope: payload.scope,
+				nonce: payload.nonce,
+				now: payload.now,
+				expiresAt: payload.expiresAt,
+				revocable: payload.revocable,
+				chainId: MONAD_CHAIN_ID,
+				verifyingContract: payload.verifyingContract,
+			});
+			await saveMonadAgentState();
+			return json(res, 200, {
+				ok: true,
+				chain: "monad",
+				identity,
+				delegationIntent: delegationPayload,
+				next: "Sign delegationIntent.digest then call /api/monad/agent/delegation/submit with confirm=true",
+			});
+		}
+
+		if (
+			url.pathname === "/api/monad/agent/delegation/submit" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			MONAD_AGENT_STATE.metrics.delegationSubmitAttempt += 1;
+			const verification = verifyDelegationIntentPayload({
+				payload: payload.delegationIntent,
+				now: payload.now,
+			});
+			const delegationId = `dlg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+			if (!verification.ok) {
+				return json(res, 200, {
+					ok: true,
+					mode: "blocked",
+					error: "MONAD_DELEGATION_SUBMIT_BLOCKED",
+					blockers: verification.blockers,
+					hints: verification.hints,
+					fixPack: {
+						hints: [
+							"Call /api/monad/agent/delegation/prepare again and sign returned digest",
+							"Submit same payload with delegationIntent.proof.signature",
+						],
+					},
+				});
+			}
+			const nowIso = new Date().toISOString();
+			const row = {
+				delegationId,
+				status: "active",
+				createdAt: nowIso,
+				revokedAt: null,
+				delegationIntent: payload.delegationIntent,
+				notes: String(payload.note || "").trim() || null,
+			};
+			MONAD_AGENT_STATE.delegations.unshift(row);
+			if (MONAD_AGENT_STATE.delegations.length > 100)
+				MONAD_AGENT_STATE.delegations.length = 100;
+			MONAD_AGENT_STATE.metrics.delegationSubmitSuccess += 1;
+			pushActionHistory({
+				action: "monad_agent_delegation_submit",
+				status: "success",
+				summary: `delegation active ${delegationId}`,
+				detail: {
+					delegationId,
+					agentId: payload?.delegationIntent?.message?.agentId || null,
+					delegatee: payload?.delegationIntent?.message?.delegatee || null,
+				},
+			});
+			await saveMonadAgentState();
+			return json(res, 200, {
+				ok: true,
+				mode: "recorded",
+				delegation: row,
+				verification,
+			});
+		}
+
+		if (
+			url.pathname === "/api/monad/agent/delegation/revoke" &&
+			req.method === "POST"
+		) {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			MONAD_AGENT_STATE.metrics.delegationRevokeAttempt += 1;
+			const delegationId = String(payload.delegationId || "").trim();
+			const target = MONAD_AGENT_STATE.delegations.find(
+				(row) => row.delegationId === delegationId,
+			);
+			if (!target) {
+				return json(res, 404, {
+					ok: false,
+					error: "MONAD_DELEGATION_NOT_FOUND",
+					message: "delegationId not found",
+				});
+			}
+			target.status = "revoked";
+			target.revokedAt = new Date().toISOString();
+			target.revokeReason = String(payload.reason || "manual");
+			MONAD_AGENT_STATE.metrics.delegationRevokeSuccess += 1;
+			pushActionHistory({
+				action: "monad_agent_delegation_revoke",
+				status: "success",
+				summary: `delegation revoked ${delegationId}`,
+				detail: { delegationId, reason: target.revokeReason },
+			});
+			await saveMonadAgentState();
+			return json(res, 200, {
+				ok: true,
+				mode: "revoked",
+				delegation: target,
+			});
+		}
+
 		if (url.pathname === "/api/monad/morpho/earn/readiness") {
 			const amountRawQ = String(url.searchParams.get("amountRaw") || "").trim();
 			const readiness = buildMonadMorphoReadiness({
@@ -8584,6 +8934,7 @@ Promise.all([
 	loadMetricsFromDisk(),
 	loadPolicyFromDisk(),
 	loadMarketplaceFromDisk(),
+	loadMonadAgentState(),
 ]).finally(() => {
 	void processAcpAsyncQueue();
 	setupDismissedPurgeScheduler();

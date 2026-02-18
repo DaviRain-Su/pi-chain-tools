@@ -199,6 +199,20 @@
       </div>
 
       <div class="card" style="margin-top:16px">
+        <h3>Monad Agent Identity + Delegation (v1.3)</h3>
+        <div id="monadAgentIdentity" class="muted">identity: -</div>
+        <div id="monadAgentDelegation" class="muted" style="margin-top:6px">delegation: -</div>
+        <div id="monadAgentMetrics" class="muted" style="margin-top:6px">metrics: -</div>
+        <div class="row" style="margin-top:8px">
+          <button id="registerMonadAgentIdentity">Register identity (confirm)</button>
+          <input id="monadDelegationDelegatee" placeholder="delegatee 0x..." size="24" />
+          <button id="prepareMonadDelegation">Prepare delegation</button>
+          <button id="submitMonadDelegation">Submit delegation (confirm)</button>
+          <button id="revokeMonadDelegation">Revoke latest (confirm)</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
         <h3>Execution Quality</h3>
         <div id="execQuality" class="muted">-</div>
       </div>
@@ -467,6 +481,14 @@
       const monadMorphoRewardsEl = document.getElementById("monadMorphoRewards");
       const monadMorphoLastEl = document.getElementById("monadMorphoLast");
       const monadMorphoTrendEl = document.getElementById("monadMorphoTrend");
+      const monadAgentIdentityEl = document.getElementById("monadAgentIdentity");
+      const monadAgentDelegationEl = document.getElementById("monadAgentDelegation");
+      const monadAgentMetricsEl = document.getElementById("monadAgentMetrics");
+      const registerMonadAgentIdentityBtn = document.getElementById("registerMonadAgentIdentity");
+      const monadDelegationDelegateeEl = document.getElementById("monadDelegationDelegatee");
+      const prepareMonadDelegationBtn = document.getElementById("prepareMonadDelegation");
+      const submitMonadDelegationBtn = document.getElementById("submitMonadDelegation");
+      const revokeMonadDelegationBtn = document.getElementById("revokeMonadDelegation");
       const monadMorphoAmountRawEl = document.getElementById("monadMorphoAmountRaw");
       const execMonadMorphoDepositBtn = document.getElementById("execMonadMorphoDeposit");
       const startMonadMorphoWorkerBtn = document.getElementById("startMonadMorphoWorker");
@@ -1237,6 +1259,7 @@
       let lastCiSignatures = null;
       let lastRebalancePlan = null;
       let lastAcpAsyncJobId = "";
+      let lastPreparedDelegationIntent = null;
       const BSC_READINESS_PROTOCOL_KEY = "near_dashboard.bsc.readinessProtocol";
       const DEBRIDGE_WINDOW_KEY = "near_dashboard.debridge.window";
       const DEBRIDGE_ADVANCED_OPEN_KEY = "near_dashboard.debridge.advancedOpen";
@@ -1390,6 +1413,13 @@
         const monadErr = monadRecent.filter((row) => String(row?.status || "") !== "success").length;
         const monadOk = monadRecent.length - monadErr;
         monadMorphoTrendEl.innerHTML = `trend(10): <span class="ok">ok=${monadOk}</span> · <span class="${monadErr > 0 ? "warn" : "muted"}">error=${monadErr}</span> · errRate=${monadRecent.length ? `${((monadErr / monadRecent.length) * 100).toFixed(0)}%` : "-"}`;
+        const monadAgent = data?.monadAgent || {};
+        const identity = monadAgent?.identity || {};
+        const delegation = monadAgent?.delegation || {};
+        const metrics = monadAgent?.metrics || {};
+        monadAgentIdentityEl.innerHTML = `identity: agentId=${identity?.agentId || "-"} · owner=${identity?.metadata?.ownerAccountId || "-"} · operator=${identity?.metadata?.operatorAddress || "-"} · registered=<span class="${identity?.registered ? "ok" : "warn"}">${identity?.registered ? "yes" : "no"}</span> · mode=${identity?.registerMode || "-"}`;
+        monadAgentDelegationEl.innerHTML = `delegation: active=${delegation?.active || 0} · revoked=${delegation?.revoked || 0} · total=${delegation?.total || 0} · recent=${(delegation?.recent || []).slice(0, 2).map((r) => `${r.delegationId}:${r.status}`).join(",") || "-"}`;
+        monadAgentMetricsEl.innerHTML = `metrics: idGet=${metrics.identityGet || 0} · register=${metrics.identityRegisterSuccess || 0}/${metrics.identityRegisterAttempt || 0} · prepare=${metrics.delegationPrepare || 0} · submit=${metrics.delegationSubmitSuccess || 0}/${metrics.delegationSubmitAttempt || 0} · revoke=${metrics.delegationRevokeSuccess || 0}/${metrics.delegationRevokeAttempt || 0}`;
         ciSignaturesEl.textContent = computeCiSignaturesSummary(ciSignatures);
         ciAutoActionEl.textContent = getCiAutoActionHint(ciSignatures);
         renderCiSignaturesRows(ciSignatures);
@@ -2453,6 +2483,105 @@
           await load();
         } catch (e) {
           acpAsyncMetaEl.textContent = `Purge failed: ${e.message || e}`;
+        }
+      });
+
+      registerMonadAgentIdentityBtn?.addEventListener("click", async () => {
+        try {
+          const res = await fetch("/api/monad/agent/identity/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm: true, note: "dashboard-register" }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || payload?.ok === false) {
+            cmdMetaEl.textContent = `Identity register failed: ${payload?.error || payload?.message || res.status}`;
+            return;
+          }
+          cmdMetaEl.textContent = `Identity registered (${payload?.mode || "mock"})`; 
+          await load();
+        } catch (error) {
+          cmdMetaEl.textContent = `Identity register failed: ${error?.message || error}`;
+        }
+      });
+
+      prepareMonadDelegationBtn?.addEventListener("click", async () => {
+        try {
+          const delegatee = String(monadDelegationDelegateeEl?.value || "").trim();
+          if (!delegatee) {
+            cmdMetaEl.textContent = "Input delegatee first";
+            return;
+          }
+          const res = await fetch("/api/monad/agent/delegation/prepare", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ delegatee, scope: ["monad:morpho:earn:execute"], revocable: true }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || payload?.ok === false) {
+            cmdMetaEl.textContent = `Delegation prepare failed: ${payload?.error || payload?.message || res.status}`;
+            return;
+          }
+          lastPreparedDelegationIntent = payload?.delegationIntent || null;
+          cmdMetaEl.textContent = `Delegation prepared digest=${payload?.delegationIntent?.digest || "-"}`;
+        } catch (error) {
+          cmdMetaEl.textContent = `Delegation prepare failed: ${error?.message || error}`;
+        }
+      });
+
+      submitMonadDelegationBtn?.addEventListener("click", async () => {
+        try {
+          if (!lastPreparedDelegationIntent) {
+            cmdMetaEl.textContent = "Prepare delegation first";
+            return;
+          }
+          const delegatee = String(monadDelegationDelegateeEl?.value || "").trim();
+          const intent = {
+            ...lastPreparedDelegationIntent,
+            proof: {
+              ...(lastPreparedDelegationIntent.proof || {}),
+              signer: delegatee || lastPreparedDelegationIntent?.proof?.signer || null,
+              signature: `demo-sig-${Date.now()}`,
+            },
+          };
+          const res = await fetch("/api/monad/agent/delegation/submit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm: true, delegationIntent: intent, note: "dashboard-submit" }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || payload?.ok === false || payload?.mode === "blocked") {
+            cmdMetaEl.textContent = `Delegation submit failed: ${payload?.error || (payload?.blockers || []).join(",") || payload?.message || res.status}`;
+            return;
+          }
+          cmdMetaEl.textContent = `Delegation active: ${payload?.delegation?.delegationId || "-"}`;
+          await load();
+        } catch (error) {
+          cmdMetaEl.textContent = `Delegation submit failed: ${error?.message || error}`;
+        }
+      });
+
+      revokeMonadDelegationBtn?.addEventListener("click", async () => {
+        try {
+          const latest = (lastSnapshot?.monadAgent?.delegation?.recent || [])[0];
+          if (!latest?.delegationId) {
+            cmdMetaEl.textContent = "No delegation to revoke";
+            return;
+          }
+          const res = await fetch("/api/monad/agent/delegation/revoke", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirm: true, delegationId: latest.delegationId, reason: "dashboard-revoke" }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || payload?.ok === false) {
+            cmdMetaEl.textContent = `Delegation revoke failed: ${payload?.error || payload?.message || res.status}`;
+            return;
+          }
+          cmdMetaEl.textContent = `Delegation revoked: ${payload?.delegation?.delegationId || "-"}`;
+          await load();
+        } catch (error) {
+          cmdMetaEl.textContent = `Delegation revoke failed: ${error?.message || error}`;
         }
       });
 
