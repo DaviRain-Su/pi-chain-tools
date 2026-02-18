@@ -816,6 +816,11 @@
           : dominantRatioNum >= 30
             ? "watch"
             : "normal";
+        const priorityBadge = priority === "focused-fix"
+          ? "🚨 focused-fix"
+          : priority === "watch"
+            ? "⚠️ watch"
+            : "✅ normal";
 
         const compareWindow = recent.slice(0, 20);
         const half = Math.max(1, Math.floor(compareWindow.length / 2));
@@ -830,7 +835,7 @@
         const delta = latestRate - prevRate;
         const arrow = delta > 0.01 ? "↑" : delta < -0.01 ? "↓" : "→";
 
-        return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})\nRecent(20): ${trendLabel}\n${windowKey} TopErrors: ${topErrorsWindow}\n${windowKey} DominantError: ${dominantErrorLabel} (${dominantRatio}% of window errors) · priority=${priority}\nSuccess trend: ${arrow} ${latestRate.toFixed(1)}% vs ${prevRate.toFixed(1)}% (Δ ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}pp)`;
+        return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})\nRecent(20): ${trendLabel}\n${windowKey} TopErrors: ${topErrorsWindow}\n${windowKey} DominantError: ${dominantErrorLabel} (${dominantRatio}% of window errors) · priority=${priorityBadge}\nSuccess trend: ${arrow} ${latestRate.toFixed(1)}% vs ${prevRate.toFixed(1)}% (Δ ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}pp)`;
       }
 
       function debridgeSuggestedActionsFromTopErrors(errors) {
@@ -933,6 +938,11 @@
           : dominantRatioNum >= 30
             ? "watch"
             : "normal";
+        const priorityBadge = priority === "focused-fix"
+          ? "🚨 focused-fix"
+          : priority === "watch"
+            ? "⚠️ watch"
+            : "✅ normal";
         const topErrors = topErrorEntries
           .map(([k, v]) => `- ${k}: ${v}`)
           .join("\n") || "- none";
@@ -960,7 +970,7 @@
           `topErrors:`,
           topErrors,
           `dominantError: ${dominantEntry?.[0] || "-"} (${dominantRatio}% of window errors)`,
-          `priority: ${priority}`,
+          `priority: ${priorityBadge}`,
           `recentTrend(20): ${trend}`,
           `conclusion: ${error > success ? "degraded" : error > 0 ? "warning" : "healthy"}`,
           `nextActions:\n${suggestedActions}`,
