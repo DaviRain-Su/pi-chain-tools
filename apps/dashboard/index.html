@@ -763,6 +763,18 @@
         };
       }
 
+      function debridgeImmediateActionHint(priority, dominantError) {
+        if (priority !== "focused-fix") return "";
+        const code = String(dominantError || "");
+        if (code === "debridge_execute_timeout") return "🚨 Immediate action: increase timeout and reduce route complexity for next run.";
+        if (code === "debridge_execute_rate_limited") return "🚨 Immediate action: throttle trigger frequency and increase retry backoff.";
+        if (code === "debridge_execute_network_error") return "🚨 Immediate action: verify MCP host network/DNS health before next execute.";
+        if (code === "debridge_execute_insufficient_funds") return "🚨 Immediate action: top up gas/token balance before re-execution.";
+        if (code === "debridge_execute_invalid_request") return "🚨 Immediate action: re-run plan/quote and validate execute params.";
+        if (code === "debridge_execute_unauthorized") return "🚨 Immediate action: disable execute and rotate/repair credentials.";
+        return "🚨 Immediate action: inspect raw output + artifact and pause aggressive retries.";
+      }
+
       function computeDebridgeReliability(snapshot, windowKey = "24h") {
         const d = snapshot?.debridgeExecuteMetrics || {};
         const total = Number(d.total || 0);
@@ -821,6 +833,7 @@
           : priority === "watch"
             ? "⚠️ watch"
             : "✅ normal";
+        const immediateAction = debridgeImmediateActionHint(priority, dominantErrorLabel);
 
         const compareWindow = recent.slice(0, 20);
         const half = Math.max(1, Math.floor(compareWindow.length / 2));
@@ -835,7 +848,7 @@
         const delta = latestRate - prevRate;
         const arrow = delta > 0.01 ? "↑" : delta < -0.01 ? "↓" : "→";
 
-        return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})\nRecent(20): ${trendLabel}\n${windowKey} TopErrors: ${topErrorsWindow}\n${windowKey} DominantError: ${dominantErrorLabel} (${dominantRatio}% of window errors) · priority=${priorityBadge}\nSuccess trend: ${arrow} ${latestRate.toFixed(1)}% vs ${prevRate.toFixed(1)}% (Δ ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}pp)`;
+        return `Total=${total} · Success=${success} · Blocked=${blocked} · Error=${error} · SuccessRate=${successRate.toFixed(1)}% · RetryAttempts=${retries} · RetryRecovered=${recovered} · RecoveryRate=${recoveryRate.toFixed(1)}% · TopErrors=${topErrors} · LastErr=${d.lastErrorCode || "-"}(${d.lastErrorCategory || "-"})\nRecent(20): ${trendLabel}\n${windowKey} TopErrors: ${topErrorsWindow}\n${windowKey} DominantError: ${dominantErrorLabel} (${dominantRatio}% of window errors) · priority=${priorityBadge}\n${immediateAction ? `${immediateAction}\n` : ""}Success trend: ${arrow} ${latestRate.toFixed(1)}% vs ${prevRate.toFixed(1)}% (Δ ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}pp)`;
       }
 
       function debridgeSuggestedActionsFromTopErrors(errors) {
@@ -943,6 +956,7 @@
           : priority === "watch"
             ? "⚠️ watch"
             : "✅ normal";
+        const immediateAction = debridgeImmediateActionHint(priority, dominantEntry?.[0] || "");
         const topErrors = topErrorEntries
           .map(([k, v]) => `- ${k}: ${v}`)
           .join("\n") || "- none";
@@ -971,6 +985,7 @@
           topErrors,
           `dominantError: ${dominantEntry?.[0] || "-"} (${dominantRatio}% of window errors)`,
           `priority: ${priorityBadge}`,
+          `immediateAction: ${immediateAction || "-"}`,
           `recentTrend(20): ${trend}`,
           `conclusion: ${error > success ? "degraded" : error > 0 ? "warning" : "healthy"}`,
           `nextActions:\n${suggestedActions}`,
