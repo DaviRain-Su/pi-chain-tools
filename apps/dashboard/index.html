@@ -1355,15 +1355,18 @@
       async function load() {
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
+        const bscAccountQuery = /^0x[a-fA-F0-9]{40}$/.test(accountId)
+          ? `?account=${encodeURIComponent(accountId)}`
+          : "";
         const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
         const safeFetch = (input) => fetch(input).catch(() => null);
         const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes] = await Promise.all([
           safeFetch(`/api/snapshot${query}`),
           safeFetch(`/api/portfolio/unified${query}`),
-          safeFetch(`/api/bsc/yield/plan${query ? `${query}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
-          safeFetch(`/api/bsc/yield/markets${query || ""}`),
+          safeFetch(`/api/bsc/yield/plan${bscAccountQuery ? `${bscAccountQuery}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
+          safeFetch(`/api/bsc/yield/markets${bscAccountQuery || ""}`),
           safeFetch("/api/acp/status"),
-          safeFetch("/api/acp/jobs/summary"),
+          null,
           safeFetch("/api/acp/jobs"),
           safeFetch("/api/payments"),
           safeFetch("/api/acp/jobs/dead-letter"),
