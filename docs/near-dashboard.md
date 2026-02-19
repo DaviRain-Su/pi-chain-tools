@@ -209,6 +209,10 @@ This is a lightweight local dashboard for quick visibility into your account sta
   - `NEAR_REBAL_DAILY_MAX` (default `6`)
 - CSV export for latest snapshot
 - Best-effort USD estimates from NEAR Intents token feed
+- PI-MCP safe-only card + APIs:
+  - `GET /api/pi-mcp/discover` (optional `?phase=read|plan`) returns discover list and dashboard counters (`discoveredTaskCount/recentRuns/executeRejectionCount`)
+  - `POST /api/pi-mcp/run` accepts PI-MCP envelope for `read|plan` only
+  - execute/mutate envelopes are hard-blocked with stable code `PI_MCP_EXECUTE_BLOCKED` (no dashboard execute bypass)
 
 ## Start
 

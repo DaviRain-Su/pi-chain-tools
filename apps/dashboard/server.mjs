@@ -1226,6 +1226,195 @@ const BSC_YIELD_WORKER = {
 	lastError: null,
 	timer: null,
 };
+const PI_MCP_EXECUTE_BLOCKED = "PI_MCP_EXECUTE_BLOCKED";
+const PI_MCP_ENVELOPE_INVALID = "PI_MCP_ENVELOPE_INVALID";
+const PI_MCP_TASK_NOT_FOUND = "PI_MCP_TASK_NOT_FOUND";
+const PI_MCP_TASKS = [
+	{
+		taskId: "solana.read.native-balance",
+		phase: "read",
+		label: "Solana native balance",
+		description: "Read native SOL balance for a wallet",
+		toolName: "solana_getBalance",
+	},
+	{
+		taskId: "solana.read.spl-token-balances",
+		phase: "read",
+		label: "Solana SPL token balances",
+		description: "Read SPL token balances for a wallet",
+		toolName: "solana_getSplTokenBalances",
+	},
+	{
+		taskId: "solana.plan.transfer",
+		phase: "plan",
+		label: "Plan transfer transaction",
+		description: "Compose transfer plan payload without execution",
+		toolName: "solana_composeTransfer",
+	},
+	{
+		taskId: "solana.plan.swap",
+		phase: "plan",
+		label: "Plan swap route",
+		description: "Compose swap route and limits without execution",
+		toolName: "solana_composeSwap",
+	},
+];
+const PI_MCP_STATE = {
+	recentRuns: [],
+	executeRejectionCount: 0,
+	recentRunLimit: 10,
+};
+
+function isObjectRecord(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validatePiMcpEnvelope(input) {
+	if (!isObjectRecord(input)) {
+		return { ok: false, errors: ["envelope must be an object"] };
+	}
+	const errors = [];
+	const id = typeof input.id === "string" ? input.id.trim() : "";
+	const intent = typeof input.intent === "string" ? input.intent.trim() : "";
+	const phase =
+		input.phase === "read" ||
+		input.phase === "plan" ||
+		input.phase === "execute"
+			? input.phase
+			: null;
+	const payload = isObjectRecord(input.payload) ? input.payload : null;
+	if (!id) errors.push("id must be a non-empty string");
+	if (!intent) errors.push("intent must be a non-empty string");
+	if (!phase) errors.push("phase must be one of: read | plan | execute");
+	if (!payload) errors.push("payload must be an object");
+	if (input.meta !== undefined && !isObjectRecord(input.meta)) {
+		errors.push("meta must be an object when provided");
+	}
+	if (errors.length > 0 || !id || !intent || !phase || !payload) {
+		return { ok: false, errors };
+	}
+	return {
+		ok: true,
+		errors: [],
+		envelope: {
+			id,
+			intent,
+			phase,
+			payload,
+			meta: isObjectRecord(input.meta) ? input.meta : undefined,
+		},
+	};
+}
+
+function pushPiMcpRun(row) {
+	PI_MCP_STATE.recentRuns.unshift(row);
+	if (PI_MCP_STATE.recentRuns.length > PI_MCP_STATE.recentRunLimit) {
+		PI_MCP_STATE.recentRuns.length = PI_MCP_STATE.recentRunLimit;
+	}
+}
+
+function buildPiMcpDashboardSummary() {
+	return {
+		discoveredTaskCount: PI_MCP_TASKS.length,
+		recentRuns: [...PI_MCP_STATE.recentRuns],
+		executeRejectionCount: PI_MCP_STATE.executeRejectionCount,
+	};
+}
+
+function discoverPiMcpTasks(phase) {
+	const normalizedPhase =
+		phase === "read" || phase === "plan" ? phase : undefined;
+	const tasks = normalizedPhase
+		? PI_MCP_TASKS.filter((row) => row.phase === normalizedPhase)
+		: [...PI_MCP_TASKS];
+	return {
+		phase: normalizedPhase,
+		taskCount: tasks.length,
+		tasks,
+		...buildPiMcpDashboardSummary(),
+	};
+}
+
+function runPiMcpSafe(input) {
+	const validated = validatePiMcpEnvelope(input);
+	if (!validated.ok || !validated.envelope) {
+		const out = {
+			status: "rejected",
+			message: PI_MCP_ENVELOPE_INVALID,
+			details: { errors: validated.errors || [] },
+		};
+		pushPiMcpRun({
+			id: "invalid",
+			phase: "invalid",
+			intent: "invalid",
+			status: out.status,
+			message: out.message,
+			at: new Date().toISOString(),
+		});
+		return out;
+	}
+	const { envelope } = validated;
+	if (envelope.phase === "execute") {
+		PI_MCP_STATE.executeRejectionCount += 1;
+		const out = {
+			status: "rejected",
+			message: PI_MCP_EXECUTE_BLOCKED,
+			details: {
+				reason:
+					"Execute/mutate is hard-blocked on dashboard PI-MCP boundary; use explicit PI execute flows with confirm/risk/policy guards.",
+			},
+		};
+		pushPiMcpRun({
+			id: envelope.id,
+			phase: envelope.phase,
+			intent: envelope.intent,
+			status: out.status,
+			message: out.message,
+			at: new Date().toISOString(),
+		});
+		return out;
+	}
+	const task = PI_MCP_TASKS.find(
+		(row) => row.taskId === envelope.intent && row.phase === envelope.phase,
+	);
+	if (!task) {
+		const out = {
+			status: "rejected",
+			message: PI_MCP_TASK_NOT_FOUND,
+			details: { phase: envelope.phase, intent: envelope.intent },
+		};
+		pushPiMcpRun({
+			id: envelope.id,
+			phase: envelope.phase,
+			intent: envelope.intent,
+			status: out.status,
+			message: out.message,
+			at: new Date().toISOString(),
+		});
+		return out;
+	}
+	const out = {
+		status: "accepted",
+		message: "PI_MCP_RUN_OK",
+		details: {
+			taskId: task.taskId,
+			phase: task.phase,
+			toolName: task.toolName,
+			safetyMode: "safe-only-read-plan",
+			note: "Accepted as non-execute request. No mutate path exposed here.",
+		},
+	};
+	pushPiMcpRun({
+		id: envelope.id,
+		phase: envelope.phase,
+		intent: envelope.intent,
+		status: out.status,
+		message: out.message,
+		at: new Date().toISOString(),
+	});
+	return out;
+}
+
 const BSC_APR_CACHE = {
 	venus: { ts: 0, value: null },
 	aave: { ts: 0, value: null },
@@ -8380,6 +8569,33 @@ const server = http.createServer(async (req, res) => {
 				ok: true,
 				rpcCandidates: RPC_ENDPOINTS,
 				accountId: ACCOUNT_ID,
+			});
+		}
+
+		if (url.pathname === "/api/pi-mcp/discover" && req.method === "GET") {
+			const phaseQuery = String(url.searchParams.get("phase") || "").trim();
+			const phase =
+				phaseQuery === "read" || phaseQuery === "plan" ? phaseQuery : undefined;
+			return json(res, 200, {
+				ok: true,
+				provider: "pi-mcp",
+				safetyMode: "safe-only-read-plan",
+				data: discoverPiMcpTasks(phase),
+			});
+		}
+
+		if (url.pathname === "/api/pi-mcp/run" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			const result = runPiMcpSafe(payload);
+			return json(res, 200, {
+				ok: true,
+				provider: "pi-mcp",
+				safetyMode: "safe-only-read-plan",
+				result,
+				dashboard: buildPiMcpDashboardSummary(),
 			});
 		}
 

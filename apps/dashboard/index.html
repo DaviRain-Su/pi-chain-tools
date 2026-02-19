@@ -161,6 +161,7 @@
         <div class="card"><h3>NEAR Wallet</h3><div id="near">-</div></div>
         <div class="card"><h3>Burrow Registration</h3><div id="burrowReg">-</div></div>
         <div class="card"><h3>Yield Worker</h3><div id="worker">-</div></div>
+        <div class="card"><h3>PI-MCP (Safe-only)</h3><div id="piMcpCard" class="muted">-</div></div>
       </div>
 
       <div class="card" style="margin-top:16px">
@@ -479,6 +480,7 @@
       const nearEl = document.getElementById("near");
       const burrowRegEl = document.getElementById("burrowReg");
       const workerEl = document.getElementById("worker");
+      const piMcpCardEl = document.getElementById("piMcpCard");
       const yieldHealthEl = document.getElementById("yieldHealth");
       const bscProtocolHealthEl = document.getElementById("bscProtocolHealth");
       const bscYieldReadinessEl = document.getElementById("bscYieldReadiness");
@@ -1354,7 +1356,7 @@
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
         const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
-        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes] = await Promise.all([
+        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes] = await Promise.all([
           fetch(`/api/snapshot${query}`),
           fetch(`/api/portfolio/unified${query}`),
           fetch(`/api/bsc/yield/plan${query ? `${query}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
@@ -1372,6 +1374,7 @@
           fetch("/api/monad/morpho/worker/status"),
           fetch("/api/monad/morpho/earn/rewards"),
           fetch("/api/monad/agent/profile"),
+          fetch("/api/pi-mcp/discover"),
         ]);
         const data = await snapRes.json();
         const unified = await unifiedRes.json().catch(() => ({ ok: false }));
@@ -1390,6 +1393,7 @@
         const monadMorphoWorker = await monadMorphoWorkerRes.json().catch(() => ({ ok: false, worker: {} }));
         const monadMorphoRewards = await monadMorphoRewardsRes.json().catch(() => ({ ok: false, rewards: [] }));
         const monadAgentProfilePayload = await monadAgentProfileRes.json().catch(() => ({ ok: false, profile: null }));
+        const piMcpDiscover = await piMcpDiscoverRes.json().catch(() => ({ ok: false, data: {} }));
         lastCiSignatures = ciSignatures;
         if (!snapRes.ok) {
           metaEl.textContent = `Error: ${data.error || "Unknown"}`;
@@ -1402,6 +1406,13 @@
         nearEl.innerHTML = `${data.near.available} NEAR <span class="muted">(~$${data.near.usd.toFixed(2)})</span><br/><span class="muted">locked: ${data.near.locked}</span>`;
 
         burrowRegEl.innerHTML = data.burrow.registered ? `<span class="ok">Registered</span>` : `<span class="warn">Not registered</span>`;
+        const piMcpData = piMcpDiscover?.data || {};
+        const piMcpRecent = Array.isArray(piMcpData?.recentRuns) ? piMcpData.recentRuns : [];
+        const piMcpExecuteRejects = Number(piMcpData?.executeRejectionCount || 0);
+        const piMcpCount = Number(piMcpData?.discoveredTaskCount || piMcpData?.taskCount || 0);
+        if (piMcpCardEl) {
+          piMcpCardEl.innerHTML = `discoveredTaskCount: <span class="ok">${piMcpCount}</span><br/>recentRuns: ${piMcpRecent.length}<br/>executeRejectionCount: <span class="${piMcpExecuteRejects > 0 ? "warn" : "ok"}">${piMcpExecuteRejects}</span>`;
+        }
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
         const yieldHealthText = computeYieldHealth(data);
         const aggregateRisk = bscYieldMarkets?.aggregateRisk || {};

@@ -147,6 +147,25 @@ curl -s -X POST 'http://127.0.0.1:4173/api/crosschain/debridge/execute' \
 
 执行结果会写入 dashboard actionHistory（`action=debridge_execute`，`status=ok|blocked|error`），并返回 `executionArtifact/executionReconciliation`，便于后续审计与回放。
 
+## PI-MCP safe-only dashboard endpoints
+
+- Discover (read/plan only task list + card counters):
+
+```bash
+curl -s 'http://127.0.0.1:4173/api/pi-mcp/discover?phase=read'
+```
+
+- Run (safe envelope; `phase=read|plan` only):
+
+```bash
+curl -s -X POST 'http://127.0.0.1:4173/api/pi-mcp/run' \
+  -H 'content-type: application/json' \
+  -d '{"id":"demo-1","phase":"plan","intent":"solana.plan.swap","payload":{"wallet":"demo"}}'
+```
+
+- Execute/mutate is hard-blocked at this boundary (`PI_MCP_EXECUTE_BLOCKED`) and does **not** bypass existing execute/risk/confirm policies.
+
+
 运行时会对 artifact/reconciliation 做结构校验；若不合法将返回：
 - `debridge_execution_artifact_invalid`
 - `debridge_execution_reconciliation_invalid`
