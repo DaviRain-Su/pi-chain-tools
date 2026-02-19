@@ -1244,6 +1244,8 @@ const ACP_JOB_STATE = {
 };
 const ACP_ASYNC_JOBS = [];
 let ACP_ASYNC_WORKER_ACTIVE = false;
+let LAST_GOOD_SNAPSHOT = null;
+let LAST_GOOD_UNIFIED = null;
 const BSC_YIELD_WORKER = {
 	running: false,
 	dryRun: true,
@@ -8926,8 +8928,37 @@ const server = http.createServer(async (req, res) => {
 
 		if (url.pathname === "/api/snapshot") {
 			const accountId = url.searchParams.get("accountId") || ACCOUNT_ID;
-			const snapshot = await buildSnapshot(accountId);
-			return json(res, 200, snapshot);
+			try {
+				const snapshot = await buildSnapshot(accountId);
+				LAST_GOOD_SNAPSHOT = snapshot;
+				return json(res, 200, snapshot);
+			} catch (error) {
+				if (LAST_GOOD_SNAPSHOT) {
+					return json(res, 200, {
+						...LAST_GOOD_SNAPSHOT,
+						stale: true,
+						staleReason: error instanceof Error ? error.message : String(error),
+						updatedAt: new Date().toISOString(),
+					});
+				}
+				return json(res, 200, {
+					accountId,
+					stale: true,
+					error: error instanceof Error ? error.message : String(error),
+					near: { available: "0", locked: "0", usd: 0 },
+					tokens: [],
+					burrow: {
+						registered: false,
+						collateral: [],
+						supplied: [],
+						borrowed: [],
+					},
+					strategy: { recommendation: "snapshot temporarily unavailable" },
+					worker: null,
+					recentTxs: [],
+					actionHistory: ACTION_HISTORY,
+				});
+			}
 		}
 
 		if (url.pathname === "/api/acp/status") {
@@ -8955,11 +8986,36 @@ const server = http.createServer(async (req, res) => {
 
 		if (url.pathname === "/api/portfolio/unified") {
 			const accountId = url.searchParams.get("accountId") || ACCOUNT_ID;
-			const portfolio = await buildUnifiedPortfolio(accountId);
-			return json(res, 200, {
-				ok: true,
-				portfolio,
-			});
+			try {
+				const portfolio = await buildUnifiedPortfolio(accountId);
+				LAST_GOOD_UNIFIED = portfolio;
+				return json(res, 200, {
+					ok: true,
+					portfolio,
+				});
+			} catch (error) {
+				if (LAST_GOOD_UNIFIED) {
+					return json(res, 200, {
+						ok: true,
+						stale: true,
+						error: error instanceof Error ? error.message : String(error),
+						portfolio: LAST_GOOD_UNIFIED,
+					});
+				}
+				return json(res, 200, {
+					ok: false,
+					stale: true,
+					error: error instanceof Error ? error.message : String(error),
+					portfolio: {
+						updatedAt: new Date().toISOString(),
+						executionLayers: [],
+						identityLayer: {
+							ok: false,
+							error: "unified portfolio temporarily unavailable",
+						},
+					},
+				});
+			}
 		}
 
 		if (url.pathname === "/api/policy") {
