@@ -2579,6 +2579,7 @@ async function executeBscSwapViaNativeRpc(params) {
 	]);
 	const routerIface = new Interface([
 		"function swapExactTokensForTokens(uint256 amountIn,uint256 amountOutMin,address[] path,address to,uint256 deadline) returns (uint256[] amounts)",
+		"function swapExactETHForTokens(uint256 amountOutMin,address[] path,address to,uint256 deadline) payable returns (uint256[] amounts)",
 	]);
 	const readTokenBalance = async (token, owner) => {
 		const data = erc20Iface.encodeFunctionData("balanceOf", [owner]);
@@ -2589,59 +2590,69 @@ async function executeBscSwapViaNativeRpc(params) {
 		const fee = await provider.getFeeData();
 		const bump = BigInt(100 + BSC_EXECUTE_GAS_BUMP_PERCENT);
 		const out = {};
-		if (fee?.gasPrice) {
-			const gp = (BigInt(fee.gasPrice.toString()) * bump) / 100n;
-			out.gasPrice = gp.toString();
-		}
 		if (fee?.maxFeePerGas && fee?.maxPriorityFeePerGas) {
 			const mf = (BigInt(fee.maxFeePerGas.toString()) * bump) / 100n;
 			const mp = (BigInt(fee.maxPriorityFeePerGas.toString()) * bump) / 100n;
 			out.maxFeePerGas = mf.toString();
 			out.maxPriorityFeePerGas = mp.toString();
+			return out;
+		}
+		if (fee?.gasPrice) {
+			const gp = (BigInt(fee.gasPrice.toString()) * bump) / 100n;
+			out.gasPrice = gp.toString();
 		}
 		return out;
 	};
 	try {
-		const [tokenInBefore, tokenOutBefore] = await Promise.all([
-			readTokenBalance(params.tokenIn, wallet.address),
-			readTokenBalance(params.tokenOut, recipient),
-		]);
-		const allowanceCallData = erc20Iface.encodeFunctionData("allowance", [
-			wallet.address,
-			params.router,
-		]);
-		const allowanceRaw = await provider.call({
-			to: params.tokenIn,
-			data: allowanceCallData,
-		});
-		const allowance = erc20Iface.decodeFunctionResult(
-			"allowance",
-			allowanceRaw,
-		)[0];
-		if (allowance.lt(params.amountInRaw)) {
-			const approveData = erc20Iface.encodeFunctionData("approve", [
+		const isNativeBnbIn =
+			String(params.tokenInSymbol || "").toUpperCase() === "BNB" ||
+			String(params.tokenIn || "").toLowerCase() === BSC_WBNB.toLowerCase();
+		const tokenInBefore = isNativeBnbIn
+			? await provider.getBalance(wallet.address)
+			: await readTokenBalance(params.tokenIn, wallet.address);
+		const tokenOutBefore = await readTokenBalance(params.tokenOut, recipient);
+		if (!isNativeBnbIn) {
+			const allowanceCallData = erc20Iface.encodeFunctionData("allowance", [
+				wallet.address,
 				params.router,
-				MaxUint256,
 			]);
-			const approveTx = await wallet.sendTransaction({
+			const allowanceRaw = await provider.call({
 				to: params.tokenIn,
-				data: approveData,
-				value: 0,
-				...(await bumpGas()),
+				data: allowanceCallData,
 			});
-			await approveTx.wait(BSC_EXECUTE_CONFIRMATIONS);
+			const allowance = erc20Iface.decodeFunctionResult(
+				"allowance",
+				allowanceRaw,
+			)[0];
+			if (allowance.lt(params.amountInRaw)) {
+				const approveData = erc20Iface.encodeFunctionData("approve", [
+					params.router,
+					MaxUint256,
+				]);
+				const approveTx = await wallet.sendTransaction({
+					to: params.tokenIn,
+					data: approveData,
+					value: 0,
+					...(await bumpGas()),
+				});
+				await approveTx.wait(BSC_EXECUTE_CONFIRMATIONS);
+			}
 		}
 		const deadline = Math.floor(Date.now() / 1000) + 20 * 60;
-		const swapData = routerIface.encodeFunctionData(
-			"swapExactTokensForTokens",
-			[
-				String(params.amountInRaw),
-				String(params.minAmountOutRaw),
-				[params.tokenIn, params.tokenOut],
-				recipient,
-				deadline,
-			],
-		);
+		const swapData = isNativeBnbIn
+			? routerIface.encodeFunctionData("swapExactETHForTokens", [
+					String(params.minAmountOutRaw),
+					[params.tokenIn, params.tokenOut],
+					recipient,
+					deadline,
+				])
+			: routerIface.encodeFunctionData("swapExactTokensForTokens", [
+					String(params.amountInRaw),
+					String(params.minAmountOutRaw),
+					[params.tokenIn, params.tokenOut],
+					recipient,
+					deadline,
+				]);
 		let tx;
 		let lastErr = null;
 		for (let attempt = 0; attempt <= BSC_EXECUTE_NONCE_RETRY; attempt += 1) {
@@ -2649,7 +2660,7 @@ async function executeBscSwapViaNativeRpc(params) {
 				tx = await wallet.sendTransaction({
 					to: params.router,
 					data: swapData,
-					value: 0,
+					value: isNativeBnbIn ? String(params.amountInRaw) : 0,
 					...(await bumpGas()),
 					nonce: await provider.getTransactionCount(wallet.address, "pending"),
 				});
@@ -2667,12 +2678,14 @@ async function executeBscSwapViaNativeRpc(params) {
 		}
 		if (!tx) throw lastErr || new Error("bsc swap tx not created");
 		const receipt = await tx.wait(BSC_EXECUTE_CONFIRMATIONS);
-		const [tokenInAfter, tokenOutAfter] = await Promise.all([
-			readTokenBalance(params.tokenIn, wallet.address),
-			readTokenBalance(params.tokenOut, recipient),
-		]);
+		const tokenInAfter = isNativeBnbIn
+			? await provider.getBalance(wallet.address)
+			: await readTokenBalance(params.tokenIn, wallet.address);
+		const tokenOutAfter = await readTokenBalance(params.tokenOut, recipient);
 		const tokenOutDelta = tokenOutAfter.sub(tokenOutBefore);
-		const tokenInDelta = tokenInBefore.sub(tokenInAfter);
+		const tokenInDelta = tokenInBefore.gt(tokenInAfter)
+			? tokenInBefore.sub(tokenInAfter)
+			: 0;
 		const reconcileOk = tokenOutDelta.gte(String(params.minAmountOutRaw));
 		return {
 			ok: true,
@@ -8217,6 +8230,8 @@ async function executeAction(payload) {
 					minAmountOutRaw,
 					tokenIn: tokenInMeta.address,
 					tokenOut: tokenOutMeta.address,
+					tokenInSymbol: tokenInMeta.symbol,
+					tokenOutSymbol: tokenOutMeta.symbol,
 					router: BSC_ROUTER_V2,
 					rpcUrl: BSC_RPC_URL,
 					chainId: BSC_CHAIN_ID,
