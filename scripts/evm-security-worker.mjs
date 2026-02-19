@@ -6,6 +6,7 @@ import {
 	parseArgs,
 	runSecurityScan,
 } from "./evm-security-core.mjs";
+import { dispatchSecurityAlerts } from "./evm-security-notify.mjs";
 
 function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -20,6 +21,20 @@ async function main() {
 		try {
 			const result = await runSecurityScan(parsed);
 			console.log(formatTerminalSummary(result));
+			try {
+				const notifyResult = await dispatchSecurityAlerts({
+					report: result.report,
+					statePath: parsed.statePath,
+				});
+				console.log(
+					`[evm-security-watch] notify provider=${notifyResult.provider} critical=${notifyResult.sent.critical} warn=${notifyResult.sent.warn} info=${notifyResult.sent.info} errors=${notifyResult.sent.errors.length}`,
+				);
+			} catch (notifyError) {
+				console.error(
+					"[evm-security-watch] notify failed (non-fatal)",
+					notifyError?.message || notifyError,
+				);
+			}
 		} catch (error) {
 			console.error(
 				"[evm-security-watch] cycle failed (continuing)",

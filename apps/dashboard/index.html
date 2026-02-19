@@ -219,6 +219,7 @@
         <div class="card"><h3>Burrow Registration</h3><div id="burrowReg">-</div></div>
         <div class="card"><h3>Yield Worker</h3><div id="worker">-</div></div>
         <div class="card"><h3>PI-MCP (Safe-only)</h3><div id="piMcpCard" class="muted">-</div></div>
+        <div class="card"><h3>Security Watch</h3><div id="securityWatchCard" class="muted">-</div></div>
       </div>
 
       <div class="grid" style="margin-top:12px">
@@ -552,6 +553,7 @@
       const burrowRegEl = document.getElementById("burrowReg");
       const workerEl = document.getElementById("worker");
       const piMcpCardEl = document.getElementById("piMcpCard");
+      const securityWatchCardEl = document.getElementById("securityWatchCard");
       const yieldHealthEl = document.getElementById("yieldHealth");
       const bscProtocolHealthEl = document.getElementById("bscProtocolHealth");
       const bscYieldReadinessEl = document.getElementById("bscYieldReadiness");
@@ -1455,7 +1457,7 @@
           : "";
         const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
         const safeFetch = (input) => fetch(input).catch(() => null);
-        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes] = await Promise.all([
+        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes, securityWatchStatusRes] = await Promise.all([
           safeFetch(`/api/snapshot${query}`),
           safeFetch(`/api/portfolio/unified${query}`),
           safeFetch(`/api/bsc/yield/plan${bscAccountQuery ? `${bscAccountQuery}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
@@ -1474,6 +1476,7 @@
           safeFetch("/api/monad/morpho/earn/rewards"),
           safeFetch("/api/monad/agent/profile"),
           safeFetch("/api/pi-mcp/discover"),
+          safeFetch("/api/security/watch/status"),
         ]);
         const data = snapRes ? await snapRes.json().catch(() => ({ error: "snapshot_parse_failed" })) : { error: "snapshot_unreachable" };
         const unified = unifiedRes ? await unifiedRes.json().catch(() => ({ ok: false })) : { ok: false };
@@ -1493,6 +1496,7 @@
         const monadMorphoRewards = monadMorphoRewardsRes ? await monadMorphoRewardsRes.json().catch(() => ({ ok: false, rewards: [] })) : { ok: false, rewards: [] };
         const monadAgentProfilePayload = monadAgentProfileRes ? await monadAgentProfileRes.json().catch(() => ({ ok: false, profile: null })) : { ok: false, profile: null };
         const piMcpDiscover = piMcpDiscoverRes ? await piMcpDiscoverRes.json().catch(() => ({ ok: false, data: {} })) : { ok: false, data: {} };
+        const securityWatchStatus = securityWatchStatusRes ? await securityWatchStatusRes.json().catch(() => ({ ok: false, status: null })) : { ok: false, status: null };
         lastCiSignatures = ciSignatures;
 
         const warnings = [];
@@ -1500,6 +1504,7 @@
         if (unified?.stale) warnings.push(`unified stale: ${unified?.error || "partial fallback"}`);
         if (bscYieldPlan?.ok === false && bscYieldPlan?.error) warnings.push(`bsc plan: ${bscYieldPlan.error}`);
         if (acpStatus?.ok === false && acpStatus?.error) warnings.push(`acp: ${acpStatus.error}`);
+        if (securityWatchStatus?.ok === false) warnings.push("security watch status unavailable");
         if (statusBannerEl) {
           if (warnings.length) {
             statusBannerEl.style.display = "block";
@@ -1540,6 +1545,20 @@
         const piMcpCount = Number(piMcpData?.discoveredTaskCount || piMcpData?.taskCount || 0);
         if (piMcpCardEl) {
           piMcpCardEl.innerHTML = `discoveredTaskCount: <span class="ok">${piMcpCount}</span><br/>recentRuns: ${piMcpRecent.length}<br/>executeRejectionCount: <span class="${piMcpExecuteRejects > 0 ? "warn" : "ok"}">${piMcpExecuteRejects}</span>`;
+        }
+        const securityStatus = securityWatchStatus?.status || {};
+        const secSummary = securityStatus?.summary || { critical: 0, warn: 0, info: 0, total: 0 };
+        const secHealth = String(securityStatus?.health || "missing");
+        const secHealthCls = secHealth === "ok" ? "ok" : secHealth === "warn" || secHealth === "critical" || secHealth === "stale" ? "warn" : "muted";
+        const secFindings = Array.isArray(securityStatus?.topFindings) ? securityStatus.topFindings : [];
+        const secTop = secFindings.length
+          ? secFindings.map((row) => {
+              const link = row?.evidenceLink ? ` <a href="${row.evidenceLink}" target="_blank" rel="noreferrer">link</a>` : "";
+              return `• [${row?.severity || "info"}] ${row?.contractLabel || "contract"}: ${row?.kind || "finding"}${link}`;
+            }).join("<br/>")
+          : "No findings yet";
+        if (securityWatchCardEl) {
+          securityWatchCardEl.innerHTML = `status: <span class="${secHealthCls}">${secHealth}</span><br/>counts: critical=${secSummary.critical || 0} warn=${secSummary.warn || 0} info=${secSummary.info || 0}<br/>last scan: ${securityStatus?.scannedAt ? new Date(securityStatus.scannedAt).toLocaleString() : "-"}<br/>top findings:<br/><span class="muted">${secTop}</span>`;
         }
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
         const yieldHealthText = computeYieldHealth(data);

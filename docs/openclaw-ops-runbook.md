@@ -513,6 +513,9 @@ npm run security:watch
 
 # 自定义间隔（秒）
 node scripts/evm-security-worker.mjs --interval 120
+
+# 仅测试通知链路（不依赖真实告警，可回放 latest report）
+npm run security:watch:notify:test
 ```
 
 支持的检测（best-effort）：
@@ -525,7 +528,17 @@ node scripts/evm-security-worker.mjs --interval 120
 配置说明：
 - `chains[].rpcUrlEnv` 必须映射到环境变量（例如 `ETHEREUM_RPC_URL`）。
 - 若某链 RPC 环境变量缺失，本轮会记录 `missing_rpc_env`（warn）并跳过该链，不会导致 worker 崩溃。
-- `notify` 当前用于报告分级过滤（`severityMin`），便于后续接入系统通知。
+- 通知支持 provider 抽象：`telegram` / `noop`（默认）。
+- 环境变量：
+  - `EVM_SECURITY_NOTIFY_PROVIDER=telegram|noop`
+  - `TELEGRAM_BOT_TOKEN=<bot token>`
+  - `TELEGRAM_CHAT_ID=<chat id>`
+  - 可选：`EVM_SECURITY_NOTIFY_INFO=true`（默认关闭 info 级别推送）
+- 推送策略：
+  - `critical`：逐条即时推送（按 fingerprint + cooldown 去重，状态持久化在 `security-state.json`）
+  - `warn`：每轮扫描聚合为一条 summary
+  - `info`：可选（默认 off）
+- 推送失败不会中断 scan/watch 循环（日志记录为 non-fatal）。
 
 运维建议：
 - 先复制模板为实际配置：

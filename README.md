@@ -11,12 +11,27 @@ Read-only drift monitor for watched EVM contracts (code hash / proxy impl / owne
 ```bash
 cp apps/dashboard/config/security-watchlist.example.json apps/dashboard/config/security-watchlist.json
 # set envs referenced by chains[].rpcUrlEnv, e.g. ETHEREUM_RPC_URL / BSC_RPC_URL
+
+# notifier provider (safe default is noop)
+export EVM_SECURITY_NOTIFY_PROVIDER=telegram
+export TELEGRAM_BOT_TOKEN=123456:abc...
+export TELEGRAM_CHAT_ID=-1001234567890
+# optional: include info level alerts (default false)
+# export EVM_SECURITY_NOTIFY_INFO=true
+
 npm run security:scan:once
 npm run security:watch
+# dry test notifier payload dispatch (uses latest report or built-in sample)
+npm run security:watch:notify:test
 ```
 
 Reports are written to:
 `apps/dashboard/data/security-reports/YYYY-MM-DD/latest.json`
+
+Dashboard security watch APIs/UI:
+- `GET /api/security/watch/status`
+- `GET /api/security/watch/latest`
+- Open `http://127.0.0.1:4173/` and check **Security Watch** card.
 
 ## 🏆 BSC Hackathon Focus (Good Vibes Only)
 

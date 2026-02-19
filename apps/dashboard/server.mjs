@@ -62,6 +62,12 @@ const __dirname = path.dirname(__filename);
 const DASHBOARD_CONFIG_PATH =
 	process.env.NEAR_DASHBOARD_CONFIG_PATH ||
 	path.join(__dirname, "config", "dashboard.config.json");
+const SECURITY_WATCH_STATE_PATH =
+	process.env.EVM_SECURITY_WATCH_STATE ||
+	path.join(__dirname, "data", "security-state.json");
+const SECURITY_WATCH_REPORTS_ROOT =
+	process.env.EVM_SECURITY_WATCH_REPORTS_ROOT ||
+	path.join(__dirname, "data", "security-reports");
 
 function deepGet(obj, dottedPath, fallback = undefined) {
 	const parts = String(dottedPath || "")
@@ -1788,6 +1794,84 @@ async function loadMarketplaceFromDisk() {
 	} catch {
 		// ignore missing/corrupt marketplace file
 	}
+}
+
+async function readSecurityWatchLatestReport() {
+	try {
+		const dayDirs = await readdir(SECURITY_WATCH_REPORTS_ROOT);
+		const sorted = [...dayDirs].sort((a, b) => b.localeCompare(a));
+		for (const day of sorted) {
+			const latestPath = path.join(
+				SECURITY_WATCH_REPORTS_ROOT,
+				day,
+				"latest.json",
+			);
+			try {
+				const content = await readFile(latestPath, "utf8");
+				const report = JSON.parse(content);
+				return { report, reportPath: latestPath };
+			} catch {
+				// try next
+			}
+		}
+	} catch {
+		// no reports yet
+	}
+	return { report: null, reportPath: null };
+}
+
+async function readSecurityWatchStatus() {
+	let state = null;
+	try {
+		const stateRaw = await readFile(SECURITY_WATCH_STATE_PATH, "utf8");
+		state = JSON.parse(stateRaw);
+	} catch {
+		state = null;
+	}
+	const latest = await readSecurityWatchLatestReport();
+	const summary = latest?.report?.summary || {
+		critical: 0,
+		warn: 0,
+		info: 0,
+		total: 0,
+	};
+	const findings = Array.isArray(latest?.report?.findings)
+		? latest.report.findings
+		: [];
+	const topFindings = findings.slice(0, 5).map((item) => ({
+		severity: item?.severity || "info",
+		kind: item?.kind || "unknown",
+		message: item?.message || "",
+		contractLabel:
+			item?.contract?.label || item?.contract?.address || "contract",
+		evidenceLink: item?.evidence?.txLink || item?.evidence?.addressLink || null,
+		detectedAt: item?.detectedAt || null,
+	}));
+	const scannedAt = latest?.report?.scannedAt || null;
+	const stateUpdatedAt = state?.updatedAt || null;
+	const staleMs = scannedAt
+		? Date.now() - Date.parse(scannedAt)
+		: Number.POSITIVE_INFINITY;
+	const health = !latest?.report
+		? "missing"
+		: staleMs > 30 * 60 * 1000
+			? "stale"
+			: summary.critical > 0
+				? "critical"
+				: summary.warn > 0
+					? "warn"
+					: "ok";
+	return {
+		health,
+		statePath: SECURITY_WATCH_STATE_PATH,
+		reportsRoot: SECURITY_WATCH_REPORTS_ROOT,
+		stateUpdatedAt,
+		scannedAt,
+		summary,
+		topFindings,
+		reportPath: latest.reportPath,
+		hasReport: Boolean(latest.report),
+	};
 }
 
 const TOKENS = [
@@ -8896,6 +8980,27 @@ const server = http.createServer(async (req, res) => {
 				ok: true,
 				rpcCandidates: RPC_ENDPOINTS,
 				accountId: ACCOUNT_ID,
+			});
+		}
+
+		if (url.pathname === "/api/security/watch/status" && req.method === "GET") {
+			const status = await readSecurityWatchStatus();
+			return json(res, 200, { ok: true, status });
+		}
+
+		if (url.pathname === "/api/security/watch/latest" && req.method === "GET") {
+			const latest = await readSecurityWatchLatestReport();
+			if (!latest.report) {
+				return json(res, 200, {
+					ok: false,
+					error: "security_watch_report_missing",
+					report: null,
+				});
+			}
+			return json(res, 200, {
+				ok: true,
+				reportPath: latest.reportPath,
+				report: latest.report,
 			});
 		}
 

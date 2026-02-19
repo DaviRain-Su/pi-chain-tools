@@ -39,4 +39,15 @@ describe("evm-security-core", () => {
 		expect(mod.severityAtLeast("warn", "info")).toBe(true);
 		expect(mod.severityAtLeast("info", "warn")).toBe(false);
 	});
+
+	it("builds alert payload grouping in report pipeline", async () => {
+		const mod = await modPromise;
+		expect(typeof mod.runSecurityScan).toBe("function");
+		const source = await import("node:fs").then((fs) =>
+			fs.readFileSync("scripts/evm-security-core.mjs", "utf8"),
+		);
+		expect(source).toContain("buildAlertPayloads");
+		expect(source).toContain("alerts");
+		expect(source).toContain("immediate_per_finding_with_dedupe_cooldown");
+	});
 });

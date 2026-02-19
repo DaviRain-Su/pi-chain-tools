@@ -543,6 +543,28 @@ function buildSummary(findings) {
 	return summary;
 }
 
+function buildAlertPayloads(findings) {
+	const grouped = {
+		critical: findings.filter((item) => item.severity === "critical"),
+		warn: findings.filter((item) => item.severity === "warn"),
+		info: findings.filter((item) => item.severity === "info"),
+	};
+	return {
+		critical: {
+			policy: "immediate_per_finding_with_dedupe_cooldown",
+			findings: grouped.critical,
+		},
+		warn: {
+			policy: "batched_per_scan",
+			findings: grouped.warn,
+		},
+		info: {
+			policy: "optional_off_by_default",
+			findings: grouped.info,
+		},
+	};
+}
+
 async function runSecurityScan(options = {}) {
 	const parsed = {
 		...parseArgs([]),
@@ -550,9 +572,16 @@ async function runSecurityScan(options = {}) {
 	};
 	const loaded = loadWatchlist(parsed.configPath);
 	const { config } = loaded;
-	const state = readJsonFileSafe(parsed.statePath, { contracts: {} });
+	const state = readJsonFileSafe(parsed.statePath, {
+		contracts: {},
+		notify: {},
+	});
 	const nextState = {
 		contracts: { ...(state.contracts ?? {}) },
+		notify:
+			state.notify && typeof state.notify === "object"
+				? { ...state.notify }
+				: {},
 		updatedAt: nowIso(),
 	};
 	const findings = [];
@@ -602,6 +631,7 @@ async function runSecurityScan(options = {}) {
 	const today = new Date().toISOString().slice(0, 10);
 	const reportDir = path.join(parsed.reportsRoot, today);
 	ensureDir(reportDir);
+	const alerts = buildAlertPayloads(findings);
 	const report = {
 		schema: "evm.security.watch.report.v1",
 		scannedAt: nowIso(),
@@ -609,6 +639,7 @@ async function runSecurityScan(options = {}) {
 		usedFallbackConfig: loaded.usedFallback,
 		notify: config.notify,
 		summary,
+		alerts,
 		findings,
 	};
 	const latestPath = path.join(reportDir, "latest.json");
@@ -620,6 +651,7 @@ async function runSecurityScan(options = {}) {
 		notifyFindings: findings.filter((item) =>
 			severityAtLeast(item.severity, config.notify.severityMin),
 		),
+		alertPayloads: alerts,
 	};
 }
 
