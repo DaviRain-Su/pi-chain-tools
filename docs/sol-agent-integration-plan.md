@@ -154,11 +154,14 @@ These stay disabled in production; if needed, allow only in isolated research mo
 
 ---
 
-## 8) Immediate next action
+## 8) Implementation progress
 
-Implement **Phase A scaffold** only:
-1. add `sol-agent-bridge.ts` interface + tests
-2. add risk-boundary doc
-3. no execute-path changes
+- ✅ Phase A scaffold completed (bridge contract + risk boundary doc)
+- ✅ Phase B registry mapping completed:
+  - added `src/chains/solana/registry/*` mapping existing Solana read/plan handlers to bridge descriptors
+  - bridge discovery now resolves descriptors back to existing handlers (no signature/validation drift)
+  - safety boundary unchanged: execute override is still blocked in bridge path
+  - added compatibility and no-behavior-drift tests for mapping/dispatch
+- ⏳ Phase C remains optional and safe-mode only
 
-This gives us a safe integration foothold without architectural risk.
+This preserves existing guarded execution while improving Solana discovery ergonomics.

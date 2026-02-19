@@ -5,13 +5,14 @@ import {
 	type SolAgentBridgeAdapter,
 	type SolAgentTaskEnvelope,
 	assertSolAgentBridgeTaskKind,
+	createSolanaBridgeAdapter,
 	hasExecutePathOverride,
 	isSolAgentBridgeTaskKind,
 } from "./sol-agent-bridge.js";
 
 describe("sol-agent bridge phase A contract", () => {
-	it("exposes a readonly phase version marker", () => {
-		expect(SOL_AGENT_BRIDGE_VERSION).toContain("phase-a");
+	it("exposes phase-b registry mapping version marker", () => {
+		expect(SOL_AGENT_BRIDGE_VERSION).toContain("phase-b");
 	});
 
 	it("only allows read/profile/task_discovery task kinds", () => {
@@ -94,5 +95,38 @@ describe("sol-agent bridge phase A contract", () => {
 		expect(profile.mode).toBe("safe");
 		expect(tasks[0]?.kind).toBe("task_discovery");
 		expect("execute" in adapter).toBe(false);
+	});
+
+	it("registry-backed adapter discovery maps to real handlers", async () => {
+		const adapter = createSolanaBridgeAdapter();
+		const tasks = await adapter.listTasks();
+		expect(tasks.length).toBeGreaterThan(0);
+		expect(
+			tasks.some(
+				(task) =>
+					task.metadata?.toolName === "solana_getPortfolio" &&
+					task.kind === "read",
+			),
+		).toBe(true);
+		expect(
+			tasks.some(
+				(task) =>
+					task.metadata?.toolName === "solana_buildSolTransferTransaction" &&
+					task.kind === "task_discovery",
+			),
+		).toBe(true);
+	});
+
+	it("blocks execute-path override in registry-backed adapter", async () => {
+		const adapter = createSolanaBridgeAdapter();
+		await expect(
+			adapter.read({
+				taskId: "read:solana_getBalance",
+				kind: "read",
+				chain: "solana",
+				title: "Read balance",
+				metadata: { executionPath: "override" },
+			}),
+		).rejects.toThrow("execute path overrides are not allowed");
 	});
 });

@@ -821,7 +821,7 @@ Quick references:
 - Monad + Morpho SDK integration plan: `docs/monad-morpho-sdk-integration-plan.md`
 - Sol-agent integration plan: `docs/sol-agent-integration-plan.md`
 - Sol-agent risk boundary (production safety contract): `docs/sol-agent-risk-boundary.md`
-- Sol-agent bridge scaffold (Phase A, read-only): `src/chains/solana/sol-agent-bridge.ts`
+- Sol-agent bridge + registry mapping (Phase B, safe): `src/chains/solana/sol-agent-bridge.ts`, `src/chains/solana/registry/*`
 - Submission evidence artifact guide: `npm run submission:evidence` (writes `docs/submission-evidence.md`)
 - One-click Monad↔BSC demo flow: `npm run demo:monad-bsc` (dry-run default, explicit execute guard)
 

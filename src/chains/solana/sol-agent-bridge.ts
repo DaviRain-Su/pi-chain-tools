@@ -1,7 +1,13 @@
-export const SOL_AGENT_BRIDGE_VERSION = "phase-a-readonly-v1" as const;
+import {
+	type SolanaBridgeOperationDescriptor,
+	createSolanaBridgeRegistryDescriptors,
+	findSolanaBridgeDescriptorByTaskId,
+} from "./registry/index.js";
+
+export const SOL_AGENT_BRIDGE_VERSION = "phase-b-registry-mapping-v1" as const;
 
 /**
- * Phase A safety contract:
+ * Safety contract:
  * - read/profile/task-discovery only
  * - no execute/mutate dispatch from this bridge
  * - mutating paths must continue through existing guarded runtime/tool pipeline
@@ -29,8 +35,7 @@ export interface SolAgentProfileDescriptor {
 
 /**
  * Read-only task envelope for discovery/planning layers.
- * TODO(phase-b): map these envelopes to registry descriptors that still route
- * execution through existing compose/execute handlers with confirm+policy gates.
+ * Phase B routes discovered task ids back to existing handlers.
  */
 export interface SolAgentTaskEnvelope {
 	taskId: string;
@@ -45,7 +50,6 @@ export interface SolAgentTaskEnvelope {
 
 /**
  * Adapter boundary for sol-agent inspired discovery/profile surfaces.
- * Implementations must remain read-only in Phase A.
  */
 export interface SolAgentBridgeAdapter {
 	getProfile(): Promise<SolAgentProfileDescriptor> | SolAgentProfileDescriptor;
@@ -90,4 +94,71 @@ export function hasExecutePathOverride(
 	}
 	const requestedPath = envelope.metadata?.executionPath;
 	return typeof requestedPath === "string" && requestedPath === "override";
+}
+
+export function mapSolanaBridgeDescriptorToTaskEnvelope(
+	descriptor: SolanaBridgeOperationDescriptor,
+	context?: Record<string, unknown>,
+): SolAgentTaskEnvelope {
+	return {
+		taskId: descriptor.id,
+		kind: descriptor.operationKind === "read" ? "read" : "task_discovery",
+		chain: "solana",
+		title: descriptor.label,
+		intent: descriptor.description,
+		inputs: context,
+		tags: descriptor.tags,
+		metadata: {
+			toolName: descriptor.toolName,
+			group: descriptor.group,
+			operationKind: descriptor.operationKind,
+		},
+	};
+}
+
+export function createSolanaBridgeAdapter(args?: {
+	profile?: Partial<SolAgentProfileDescriptor>;
+	toolCallId?: string;
+}): SolAgentBridgeAdapter {
+	const descriptors = createSolanaBridgeRegistryDescriptors();
+	const toolCallId = args?.toolCallId ?? "sol-agent-bridge";
+	return {
+		getProfile: () => ({
+			id: args?.profile?.id ?? "sol-agent-bridge",
+			label: args?.profile?.label ?? "Sol Agent Bridge",
+			description:
+				args?.profile?.description ??
+				"Registry-backed Solana task discovery mapped to existing handlers.",
+			version: SOL_AGENT_BRIDGE_VERSION,
+			capabilities: ["profile", "task_discovery", "read"],
+			mode: args?.profile?.mode ?? "safe",
+			metadata: {
+				descriptorCount: descriptors.length,
+				...(args?.profile?.metadata ?? {}),
+			},
+		}),
+		listTasks: (context) =>
+			descriptors.map((descriptor) =>
+				mapSolanaBridgeDescriptorToTaskEnvelope(descriptor, context),
+			),
+		read: async (envelope) => {
+			if (hasExecutePathOverride(envelope)) {
+				throw new Error(
+					"execute path overrides are not allowed in sol-agent bridge",
+				);
+			}
+			const descriptor = findSolanaBridgeDescriptorByTaskId(
+				descriptors,
+				envelope.taskId,
+			);
+			if (!descriptor) {
+				throw new Error(`sol-agent bridge task not found: ${envelope.taskId}`);
+			}
+			const result = await descriptor.tool.execute(
+				toolCallId,
+				(envelope.inputs ?? {}) as never,
+			);
+			return result;
+		},
+	};
 }

@@ -85,11 +85,22 @@ export { createSolanaWorkflowTools } from "./chains/solana/tools/workflow.js";
 export { createSolanaToolset } from "./chains/solana/toolset.js";
 export { createSolanaWorkflowToolset } from "./chains/solana/workflow-toolset.js";
 export {
+	createSolanaBridgeRegistryDescriptors,
+	createSolanaBridgeRegistryDescriptorsFromTools,
+	findSolanaBridgeDescriptorByTaskId,
+} from "./chains/solana/registry/index.js";
+export type {
+	SolanaBridgeOperationDescriptor,
+	SolanaBridgeOperationKind,
+} from "./chains/solana/registry/index.js";
+export {
 	SOL_AGENT_BRIDGE_ALLOWED_TASK_KINDS,
 	SOL_AGENT_BRIDGE_VERSION,
 	assertSolAgentBridgeTaskKind,
+	createSolanaBridgeAdapter,
 	hasExecutePathOverride,
 	isSolAgentBridgeTaskKind,
+	mapSolanaBridgeDescriptorToTaskEnvelope,
 } from "./chains/solana/sol-agent-bridge.js";
 export type {
 	SolAgentBridgeAdapter,
