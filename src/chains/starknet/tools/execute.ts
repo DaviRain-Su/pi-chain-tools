@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { Type } from "@sinclair/typebox";
 import { defineTool } from "../../../core/types.js";
 import {
@@ -5,6 +6,25 @@ import {
 	parseStarknetNetwork,
 	starknetNetworkSchema,
 } from "../runtime.js";
+
+function runCommand(command: string, args: string[]) {
+	return new Promise<string>((resolve, reject) => {
+		execFile(command, args, { timeout: 120000 }, (error, stdout, stderr) => {
+			if (error) {
+				reject(
+					new Error(String(stderr || error.message || "command failed").trim()),
+				);
+				return;
+			}
+			resolve(String(stdout || "").trim());
+		});
+	});
+}
+
+function extractTxHash(text: string): string | null {
+	const m = String(text || "").match(/0x[a-fA-F0-9]{64}/);
+	return m ? m[0] : null;
+}
 
 export function createStarknetExecuteTools() {
 	return [
@@ -20,6 +40,7 @@ export function createStarknetExecuteTools() {
 				amountUsd: Type.Optional(Type.Number({ minimum: 0 })),
 				maxAmountUsd: Type.Optional(Type.Number({ minimum: 1 })),
 				dryRun: Type.Optional(Type.Boolean()),
+				runId: Type.Optional(Type.String({ minLength: 3 })),
 			}),
 			execute: async (_id, params) => {
 				const network = parseStarknetNetwork(params.network);
@@ -101,36 +122,78 @@ export function createStarknetExecuteTools() {
 					};
 				}
 
-				// Phase-2 execute scaffold: explicit boundary proof without signer broadcast.
+				const runId = String(params.runId || `starknet-${Date.now()}`);
+				const cmdTemplate = String(
+					process.env.STARKNET_EXECUTE_COMMAND || "",
+				).trim();
+				if (!cmdTemplate) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({
+									ok: true,
+									mode: "execute-ready",
+									network,
+									intent: params.intent,
+									boundaryProof: {
+										confirmPassed: true,
+										policyPassed: true,
+										reconcilePassed: true,
+										note: "set STARKNET_EXECUTE_COMMAND to enable command-mode execute",
+									},
+								}),
+							},
+						],
+						details: {
+							ok: true,
+							mode: "execute-ready",
+							network,
+							intent: params.intent,
+							boundaryProof: {
+								confirmPassed: true,
+								policyPassed: true,
+								reconcilePassed: true,
+								note: "set STARKNET_EXECUTE_COMMAND to enable command-mode execute",
+							},
+						},
+					};
+				}
+
+				const cmd = cmdTemplate
+					.split("{intent}")
+					.join(params.intent)
+					.split("{network}")
+					.join(network)
+					.split("{amountUsd}")
+					.join(String(amountUsd))
+					.split("{runId}")
+					.join(runId);
+				const output = await runCommand("bash", ["-lc", cmd]);
+				const txHash = extractTxHash(output);
 				return {
 					content: [
 						{
 							type: "text",
 							text: JSON.stringify({
 								ok: true,
-								mode: "execute-ready",
+								mode: "execute",
 								network,
 								intent: params.intent,
-								boundaryProof: {
-									confirmPassed: true,
-									policyPassed: true,
-									reconcilePassed: true,
-									note: "starknet signer/broadcast adapter not wired yet",
-								},
+								txHash,
+								runId,
 							}),
 						},
 					],
 					details: {
 						ok: true,
-						mode: "execute-ready",
+						mode: "execute",
 						network,
 						intent: params.intent,
-						boundaryProof: {
-							confirmPassed: true,
-							policyPassed: true,
-							reconcilePassed: true,
-							note: "starknet signer/broadcast adapter not wired yet",
-						},
+						txHash,
+						runId,
+						commandMode: true,
+						output,
 					},
 				};
 			},
