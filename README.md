@@ -4,6 +4,26 @@ Gradience is a multi-chain AI agent runtime — 44 NEAR tools, 30+ EVM tools, fu
 
 **Featured: [Autonomous Stablecoin Yield Agent on NEAR](docs/near-hackathon.md)** — an AI agent that continuously monitors Burrow lending markets and autonomously rebalances stablecoin positions to maximize yield. Starts with one command, keeps working after you close the tab.
 
+## 🏆 BSC Hackathon Focus (Good Vibes Only)
+
+> This repo is currently submission-focused for the BSC hackathon track.
+
+### What is highlighted for judges
+- **Live BSC execution (not only simulation)**: direct swap endpoint `POST /api/bsc/swap` with `confirm=true` gate.
+- **Real on-chain proofs captured**: recent successful tx examples:
+  - `0x03dab3f59e2d377ddfaa177e9bdbf5c7605670e5c219f6e94a8e0583c95c611a` (BNB -> USDT)
+  - `0xe189d380f67e560412485c213f15541512864674e8184cc040728417b4ddbff8` (USDC -> USDT)
+  - `0x45b46f361cf4ac0bc2659271c97f8e6b5cb3cef7733295bf528a97dc5891dddd` (BNB -> USDT)
+- **BSC yield worker in live mode**: periodic plan/execute with guardrails (`confirm/policy/reconcile`).
+- **Submission artifact workflow ready**:
+  - `npm run execute:proof:bsc`
+  - `npm run submission:evidence`
+
+### Submission docs (BSC)
+- Primary submission: `docs/hackathon-goodvibes-submission.md`
+- Final checklist: `docs/hackathon-final-submission-checklist.md`
+- Evidence output: `docs/submission-evidence.md`
+
 Multi-chain toolset library for Pi extensions with a chain-agnostic grouping model:
 
 - `read`
