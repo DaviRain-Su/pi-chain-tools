@@ -3,6 +3,7 @@ import { defineTool } from "../../../core/types.js";
 import {
 	STARKNET_TOOL_PREFIX,
 	callStarknetRpc,
+	getStarknetBtcRouteQuote,
 	parseStarknetNetwork,
 	starknetNetworkSchema,
 } from "../runtime.js";
@@ -68,6 +69,41 @@ export function createStarknetReadTools() {
 						},
 					],
 					details: { ok: true, network, address: params.address, nonce },
+				};
+			},
+		}),
+		defineTool({
+			name: `${STARKNET_TOOL_PREFIX}_getBtcRouteQuote`,
+			label: "Starknet BTC Route Quote",
+			description:
+				"Discover BTC→Starknet route quote. Uses provider API when configured, otherwise deterministic fallback quote.",
+			parameters: Type.Object({
+				network: Type.Optional(starknetNetworkSchema),
+				sourceAsset: Type.Optional(Type.String({ minLength: 2 })),
+				targetAsset: Type.Optional(Type.String({ minLength: 2 })),
+				amount: Type.Union([
+					Type.String({ minLength: 1 }),
+					Type.Number({ minimum: 0 }),
+				]),
+				sourceChain: Type.Optional(Type.String({ minLength: 2 })),
+			}),
+			execute: async (_id, params) => {
+				const network = parseStarknetNetwork(params.network);
+				const quote = await getStarknetBtcRouteQuote({
+					network,
+					sourceAsset: params.sourceAsset,
+					targetAsset: params.targetAsset,
+					amount: params.amount,
+					sourceChain: params.sourceChain,
+				});
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify({ ok: true, network, quote }),
+						},
+					],
+					details: { ok: true, network, quote },
 				};
 			},
 		}),

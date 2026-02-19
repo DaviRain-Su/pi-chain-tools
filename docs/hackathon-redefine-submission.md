@@ -54,11 +54,17 @@ In short, PI Chain Tools turns Starknet privacy/BTC narratives into a practical,
 6. **Close (20s)**: why this is Starknet-ready and production-oriented.
 
 ## Implementation Scope (Phase-1 for this hackathon)
-- [ ] Add Starknet runtime module with read/plan baseline tools
-- [ ] Add BTC-oriented strategy template under Starknet track
-- [ ] Add execute guards (`confirm=true`, risk + slippage + amount bounds)
+- [x] Add Starknet runtime module with read/plan baseline tools
+- [x] Add BTC-oriented strategy template under Starknet track
+- [x] Add execute guards (`confirm=true`, risk + slippage + amount bounds)
 - [ ] Add reconcile + proof schema for Starknet execution artifacts
 - [ ] Add `docs/hackathon-redefine-demo.md` walkthrough
+
+### BTC Adapter Status (Concrete)
+- [x] `starknet_getBtcRouteQuote` read tool implemented (provider-backed when `STARKNET_BTC_QUOTE_API_URL` is configured)
+- [x] `starknet_planBtcBridgeAction` compose tool implemented (quote + fee/min-out guardrail plan)
+- [x] `starknet_executeIntentGuarded` supports `actionType=btc_bridge_swap` with route/min-out placeholders and policy gates
+- Caveat: live provider quality/coverage depends on configured quote endpoint and credentials; fallback quote is deterministic for safe development only.
 
 ## Required Submission Checklist
 - [ ] Working demo/prototype on Starknet testnet/mainnet

@@ -62,6 +62,27 @@ export function createStarknetExecuteTools() {
 				"Policy-gated Starknet execute scaffold. Requires explicit confirm=true and enforces risk caps.",
 			parameters: Type.Object({
 				intent: Type.String({ minLength: 3 }),
+				actionType: Type.Optional(
+					Type.Union([
+						Type.Literal("generic"),
+						Type.Literal("btc_bridge_swap"),
+					]),
+				),
+				routeId: Type.Optional(Type.String({ minLength: 2 })),
+				amount: Type.Optional(
+					Type.Union([
+						Type.String({ minLength: 1 }),
+						Type.Number({ minimum: 0 }),
+					]),
+				),
+				minAmountOut: Type.Optional(
+					Type.Union([
+						Type.String({ minLength: 1 }),
+						Type.Number({ minimum: 0 }),
+					]),
+				),
+				feeBps: Type.Optional(Type.Number({ minimum: 0 })),
+				maxFeeBps: Type.Optional(Type.Number({ minimum: 0 })),
 				network: Type.Optional(starknetNetworkSchema),
 				confirm: Type.Optional(Type.Boolean()),
 				amountUsd: Type.Optional(Type.Number({ minimum: 0 })),
@@ -72,8 +93,108 @@ export function createStarknetExecuteTools() {
 			execute: async (_id, params) => {
 				const network = parseStarknetNetwork(params.network);
 				const dryRun = params.dryRun !== false;
+				const actionType = params.actionType || "generic";
 				const amountUsd = Number(params.amountUsd || 0);
 				const maxAmountUsd = Number(params.maxAmountUsd || 100);
+				const feeBps =
+					params.feeBps !== undefined ? Number(params.feeBps) : undefined;
+				const feeCapBps =
+					params.maxFeeBps !== undefined ? Number(params.maxFeeBps) : undefined;
+				const amount =
+					params.amount !== undefined
+						? String(params.amount)
+						: String(amountUsd || "0");
+				const minAmountOut =
+					params.minAmountOut !== undefined ? String(params.minAmountOut) : "0";
+				const routeId = params.routeId ? String(params.routeId) : "";
+
+				if (actionType === "btc_bridge_swap") {
+					if (!routeId) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify({
+										ok: false,
+										mode: "blocked",
+										reason: "missing_route_id",
+										actionType,
+										network,
+									}),
+								},
+							],
+							details: {
+								ok: false,
+								mode: "blocked",
+								reason: "missing_route_id",
+								actionType,
+								network,
+							},
+						};
+					}
+					if (Number(amount) <= 0) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify({
+										ok: false,
+										mode: "blocked",
+										reason: "invalid_amount",
+										actionType,
+										network,
+									}),
+								},
+							],
+							details: {
+								ok: false,
+								mode: "blocked",
+								reason: "invalid_amount",
+								actionType,
+								network,
+							},
+						};
+					}
+					if (
+						feeCapBps !== undefined &&
+						feeBps !== undefined &&
+						feeBps > feeCapBps
+					) {
+						const boundaryProof = {
+							confirmPassed: false,
+							policyPassed: false,
+							reconcilePassed: false,
+							note: "blocked by fee cap",
+						};
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify({
+										ok: false,
+										mode: "blocked",
+										reason: "fee_exceeds_policy_cap",
+										feeBps,
+										maxFeeBps: feeCapBps,
+										network,
+										actionType,
+										boundaryProof,
+									}),
+								},
+							],
+							details: {
+								ok: false,
+								mode: "blocked",
+								reason: "fee_exceeds_policy_cap",
+								feeBps,
+								maxFeeBps: feeCapBps,
+								network,
+								actionType,
+								boundaryProof,
+							},
+						};
+					}
+				}
 
 				if (amountUsd > maxAmountUsd) {
 					const boundaryProof = {
@@ -93,6 +214,7 @@ export function createStarknetExecuteTools() {
 									amountUsd,
 									maxAmountUsd,
 									network,
+									actionType,
 									boundaryProof,
 								}),
 							},
@@ -104,6 +226,7 @@ export function createStarknetExecuteTools() {
 							amountUsd,
 							maxAmountUsd,
 							network,
+							actionType,
 							boundaryProof,
 						},
 					};
@@ -125,6 +248,7 @@ export function createStarknetExecuteTools() {
 									mode: "blocked",
 									reason: "missing_confirm_true",
 									network,
+									actionType,
 									boundaryProof,
 								}),
 							},
@@ -134,6 +258,7 @@ export function createStarknetExecuteTools() {
 							mode: "blocked",
 							reason: "missing_confirm_true",
 							network,
+							actionType,
 							boundaryProof,
 						},
 					};
@@ -155,8 +280,16 @@ export function createStarknetExecuteTools() {
 									mode: "simulate",
 									network,
 									intent: params.intent,
-									amountUsd,
-									guards: { requireConfirm: true, maxAmountUsd },
+									actionType,
+									routeId: routeId || undefined,
+									amount,
+									minAmountOut,
+									feeBps,
+									guards: {
+										requireConfirm: true,
+										maxAmountUsd,
+										maxFeeBps: feeCapBps,
+									},
 									boundaryProof,
 								}),
 							},
@@ -166,8 +299,16 @@ export function createStarknetExecuteTools() {
 							mode: "simulate",
 							network,
 							intent: params.intent,
-							amountUsd,
-							guards: { requireConfirm: true, maxAmountUsd },
+							actionType,
+							routeId: routeId || undefined,
+							amount,
+							minAmountOut,
+							feeBps,
+							guards: {
+								requireConfirm: true,
+								maxAmountUsd,
+								maxFeeBps: feeCapBps,
+							},
 							boundaryProof,
 						},
 					};
@@ -191,6 +332,7 @@ export function createStarknetExecuteTools() {
 									mode: "execute-ready",
 									network,
 									intent: params.intent,
+									actionType,
 									executeMode: commandSelection.mode,
 									boundaryProof,
 								}),
@@ -201,6 +343,7 @@ export function createStarknetExecuteTools() {
 							mode: "execute-ready",
 							network,
 							intent: params.intent,
+							actionType,
 							executeMode: commandSelection.mode,
 							boundaryProof,
 						},
@@ -215,7 +358,17 @@ export function createStarknetExecuteTools() {
 					.split("{amountUsd}")
 					.join(String(amountUsd))
 					.split("{runId}")
-					.join(runId);
+					.join(runId)
+					.split("{actionType}")
+					.join(actionType)
+					.split("{routeId}")
+					.join(routeId)
+					.split("{amount}")
+					.join(amount)
+					.split("{minAmountOut}")
+					.join(minAmountOut)
+					.split("{maxFeeBps}")
+					.join(feeCapBps !== undefined ? String(feeCapBps) : "");
 				const output = await runCommand("bash", ["-lc", cmd]);
 				const txHash = extractTxHash(output);
 				const boundaryProof = {
@@ -235,6 +388,8 @@ export function createStarknetExecuteTools() {
 								mode: commandSelection.mode,
 								network,
 								intent: params.intent,
+								actionType,
+								routeId: routeId || undefined,
 								txHash,
 								runId,
 								boundaryProof,
@@ -246,6 +401,8 @@ export function createStarknetExecuteTools() {
 						mode: commandSelection.mode,
 						network,
 						intent: params.intent,
+						actionType,
+						routeId: routeId || undefined,
 						txHash,
 						runId,
 						commandMode: true,

@@ -282,11 +282,15 @@ export { createKaspaToolset } from "./chains/kaspa/toolset.js";
 export {
 	STARKNET_TOOL_PREFIX,
 	callStarknetRpc,
+	getStarknetBtcRouteQuote,
 	getStarknetRpcEndpoint,
 	parseStarknetNetwork,
 	starknetNetworkSchema,
 } from "./chains/starknet/runtime.js";
-export type { StarknetNetwork } from "./chains/starknet/runtime.js";
+export type {
+	StarknetBtcRouteQuote,
+	StarknetNetwork,
+} from "./chains/starknet/runtime.js";
 export { createStarknetReadTools } from "./chains/starknet/tools/read.js";
 export { createStarknetComposeTools } from "./chains/starknet/tools/compose.js";
 export { createStarknetExecuteTools } from "./chains/starknet/tools/execute.js";
