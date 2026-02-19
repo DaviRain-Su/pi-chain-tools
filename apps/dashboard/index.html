@@ -1784,8 +1784,6 @@
           .sort((a, b) => b.cnt - a.cnt)
           .slice(0, 8);
         const normRows = Array.isArray(normalizationHealth?.topRows) ? normalizationHealth.topRows : [];
-        const normBand = String(normalizationHealth?.band || "unknown");
-        const normStatus = String(normalizationHealth?.status || "unknown");
         const normChips = normRows
           .map((row) => {
             const protocol = String(row?.protocol || "-");
