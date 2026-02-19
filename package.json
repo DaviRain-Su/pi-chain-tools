@@ -56,7 +56,8 @@
 		"solana:bridge:batch": "node scripts/solana-bridge-safe-batch.mjs",
 		"solana:bridge:heartbeat": "node scripts/solana-bridge-heartbeat.mjs",
 		"sdk:upgrade-readiness": "node scripts/sdk-upgrade-readiness.mjs",
-		"sdk:capability-diff": "node scripts/sdk-capability-diff.mjs"
+		"sdk:capability-diff": "node scripts/sdk-capability-diff.mjs",
+		"bsc:live": "bash scripts/run-bsc-live.sh"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",

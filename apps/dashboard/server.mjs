@@ -5151,16 +5151,21 @@ async function getBscProtocolAprHints(protocol) {
 	let value = null;
 	try {
 		value = await fetchAprHintsFromApi(apiUrl, key);
-		health.lastSuccessAt = new Date().toISOString();
-		health.lastError = null;
+		if (!value) {
+			value = parseAprHintsFromJson(envJson, key);
+			health.lastError = null;
+		} else {
+			health.lastSuccessAt = new Date().toISOString();
+			health.lastError = null;
+		}
 	} catch (error) {
 		health.lastErrorAt = new Date().toISOString();
 		health.lastError = error instanceof Error ? error.message : String(error);
 		value = parseAprHintsFromJson(envJson, key);
 	}
 	cache.ts = Date.now();
-	cache.value = value;
-	return value;
+	cache.value = value || parseAprHintsFromJson(envJson, key);
+	return cache.value;
 }
 
 async function getBscStableAprHints() {
