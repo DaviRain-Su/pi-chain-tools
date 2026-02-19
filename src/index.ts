@@ -1,10 +1,25 @@
 export { registerChainToolsets } from "./core/register.js";
+export {
+	PI_MCP_ENVELOPE_INVALID,
+	PI_MCP_EXECUTE_BLOCKED,
+	createPiMcpAdapter,
+	validatePiMcpEnvelope,
+} from "./core/pi-mcp-adapter.js";
 export type {
 	ChainToolGroup,
 	ChainToolGroupName,
 	ChainToolset,
 	RegisteredTool,
 } from "./core/types.js";
+export type {
+	PiMcpAdapter,
+	PiMcpRoute,
+	PiMcpRouteContext,
+	PiMcpRouteResult,
+	PiMcpTaskEnvelope,
+	PiMcpTaskPhase,
+	PiMcpValidationResult,
+} from "./core/pi-mcp-adapter.js";
 
 export {
 	DANGEROUS_RPC_METHODS,

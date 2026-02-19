@@ -18,6 +18,9 @@ Multi-chain toolset library for Pi extensions with a chain-agnostic grouping mod
   - Schema-first constrained strategy model
   - Async job lifecycle and deterministic execution expectations
   - Marketplace monetization and fee-split baseline
+- **PI SDK-first MCP adapter boundary (Phase 1 scaffold)**: [`docs/pi-mcp-adapter-architecture.md`](docs/pi-mcp-adapter-architecture.md)
+  - Orchestration ergonomics (read/plan discovery + envelope normalization)
+  - Hard boundary: mutating actions remain in PI SDK confirm/risk/policy/reconcile path
 
 ## SDK Replacement Completion Summary (Item 5)
 
