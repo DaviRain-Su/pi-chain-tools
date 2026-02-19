@@ -158,6 +158,25 @@
 
       .card.hidden-by-demo { display: none; }
 
+      .status-banner {
+        margin: 0 0 12px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(22, 35, 71, 0.6);
+        font-size: 13px;
+      }
+      .status-banner.warn {
+        border-color: rgba(255, 212, 134, 0.45);
+        background: rgba(79, 58, 23, 0.35);
+        color: var(--warn);
+      }
+      .status-banner.ok {
+        border-color: rgba(137, 245, 174, 0.4);
+        background: rgba(20, 67, 41, 0.28);
+        color: var(--ok);
+      }
+
       #yieldHealth,
       #bscProtocolHealth,
       #bscYieldReadiness,
@@ -193,6 +212,7 @@
         <button id="viewFull">Full View</button>
         <span id="meta" class="muted"></span>
       </div>
+      <div id="statusBanner" class="status-banner" style="display:none"></div>
 
       <div class="grid">
         <div class="card"><h3>NEAR Wallet</h3><div id="near">-</div></div>
@@ -516,6 +536,7 @@
       const refreshBtn = document.getElementById("refresh");
       const viewDemoBtn = document.getElementById("viewDemo");
       const viewFullBtn = document.getElementById("viewFull");
+      const statusBannerEl = document.getElementById("statusBanner");
       const nearEl = document.getElementById("near");
       const burrowRegEl = document.getElementById("burrowReg");
       const workerEl = document.getElementById("worker");
@@ -1462,6 +1483,26 @@
         const monadAgentProfilePayload = monadAgentProfileRes ? await monadAgentProfileRes.json().catch(() => ({ ok: false, profile: null })) : { ok: false, profile: null };
         const piMcpDiscover = piMcpDiscoverRes ? await piMcpDiscoverRes.json().catch(() => ({ ok: false, data: {} })) : { ok: false, data: {} };
         lastCiSignatures = ciSignatures;
+
+        const warnings = [];
+        if (data?.stale) warnings.push(`snapshot stale: ${data?.staleReason || data?.error || "upstream temporary issue"}`);
+        if (unified?.stale) warnings.push(`unified stale: ${unified?.error || "partial fallback"}`);
+        if (bscYieldPlan?.ok === false && bscYieldPlan?.error) warnings.push(`bsc plan: ${bscYieldPlan.error}`);
+        if (acpStatus?.ok === false && acpStatus?.error) warnings.push(`acp: ${acpStatus.error}`);
+        if (statusBannerEl) {
+          if (warnings.length) {
+            statusBannerEl.style.display = "block";
+            statusBannerEl.classList.remove("ok");
+            statusBannerEl.classList.add("warn");
+            statusBannerEl.textContent = `⚠ Runtime warning: ${warnings.join(" · ")}`;
+          } else {
+            statusBannerEl.style.display = "block";
+            statusBannerEl.classList.remove("warn");
+            statusBannerEl.classList.add("ok");
+            statusBannerEl.textContent = "✅ Data source healthy";
+          }
+        }
+
         if (!snapRes || !snapRes.ok) {
           metaEl.textContent = `Error: ${data.error || "Unknown"}`;
           return;
