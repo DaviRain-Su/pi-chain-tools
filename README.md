@@ -31,9 +31,13 @@ export EVM_SECURITY_NOTIFY_QUIET_HOURS=23-08
 export EVM_SECURITY_NOTIFY_WARN_AGG_WINDOW_SEC=900
 export EVM_SECURITY_NOTIFY_CRITICAL_COOLDOWN_SEC=900
 export EVM_SECURITY_NOTIFY_DAILY_SUMMARY_AT=08:30
+# optional: merge same severity+kind class within 24h
+export EVM_SECURITY_NOTIFY_SAME_CLASS_MERGE_24H=true
 
 # service deployment helper (prints systemd/pm2 next steps)
 npm run security:watch:service:help
+# one-click non-destructive bootstrap checker (JSON + summary)
+npm run ops:bootstrap
 ```
 
 Reports are written to:
@@ -133,6 +137,20 @@ Limitations:
 - Breeze flow is **read + plan only** in unified adapter path.
 - Endpoint mapping is inferred unless your Breeze deployment exposes a stable MCP/search route.
 - If endpoint or env is missing, provider returns normalized errors/warnings (no execute bypass).
+
+Smoke proof helper:
+```bash
+npm run breeze:smoke
+```
+
+Outputs:
+- JSON artifact: `apps/dashboard/data/proofs/breeze/latest.json`
+- dated markdown proof: `docs/execution-proofs/YYYY-MM-DD/proof-breeze-smoke.md`
+- if Breeze env is missing, command exits with clear `skipped` status (fail-open).
+
+Dashboard proof summary surface:
+- API: `GET /api/proof/summary`
+- UI: **Proof Summary** card (Starknet/BSC/Security/Breeze latest status + updatedAt + links)
 
 ### Why this avoids vendor lock-in
 

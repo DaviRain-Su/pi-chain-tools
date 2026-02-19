@@ -538,9 +538,13 @@ npm run security:watch:notify:test
   - 可选：`EVM_SECURITY_NOTIFY_WARN_AGG_WINDOW_SEC=900`（warn/info 聚合窗口）
   - 可选：`EVM_SECURITY_NOTIFY_CRITICAL_COOLDOWN_SEC=900`（critical 去重冷却）
   - 可选：`EVM_SECURITY_NOTIFY_DAILY_SUMMARY_AT=08:30`（quiet 时段也会在该时刻触发日汇总）
+  - 可选：`EVM_SECURITY_NOTIFY_SAME_CLASS_MERGE_24H=true`（同 severity+kind 类别 24h 内合并去噪）
+  - 可选：`EVM_SECURITY_NOTIFY_SAME_CLASS_MERGE_WINDOW_SEC=86400`（合并窗口，默认 24h）
 - 推送策略：
   - `critical`：逐条即时推送（按 fingerprint + cooldown 去重，状态持久化在 `security-state.json`）
   - `warn/info`：聚合入 pending summary，按窗口或 daily summary flush
+  - 同类告警（severity+kind）可按 24h 窗口合并，降低重复噪音
+  - 若上轮 active fingerprint 本轮消失，会补发 recovery 通知（已恢复清单）
   - quiet hours 内抑制非 critical；critical 仍即时推送（可带 urgent 标记）
 - 推送失败不会中断 scan/watch 循环（日志记录为 non-fatal）。
 
@@ -570,7 +574,10 @@ journalctl -u evm-security-watch.service -f
 辅助指引脚本：
 ```bash
 npm run security:watch:service:help
+npm run ops:bootstrap
 ```
+
+`ops:bootstrap` 为非破坏性自检：检查关键 env、service 模板、cron/doc 就绪度，并同时输出 JSON 结果和简明 next steps。
 
 PM2 备选：
 ```bash

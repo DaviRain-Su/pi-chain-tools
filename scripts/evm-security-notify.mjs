@@ -9,6 +9,7 @@ const DEFAULT_CRITICAL_COOLDOWN_SEC = 15 * 60;
 const DEFAULT_WARN_AGG_WINDOW_SEC = 15 * 60;
 const DEFAULT_QUIET_HOURS = "";
 const MAX_PENDING_AGG_ITEMS = 200;
+const DEFAULT_SAME_CLASS_MERGE_WINDOW_SEC = 24 * 60 * 60;
 
 function readJsonFileSafe(filePath, fallback) {
 	try {
@@ -137,6 +138,29 @@ function buildFindingMessage(finding, { urgent = false } = {}) {
 	];
 	if (link) lines.push(`Evidence: ${link}`);
 	return lines.filter(Boolean).join("\n");
+}
+
+function findingClassKey(finding) {
+	return [
+		String(finding?.severity || "info").toLowerCase(),
+		String(finding?.chainId || "?"),
+		String(finding?.kind || "unknown").toLowerCase(),
+	].join("|");
+}
+
+function buildRecoveryMessage(entries) {
+	const lines = [
+		"✅ *EVM Security Watch recovery*",
+		`resolved findings: ${entries.length}`,
+	];
+	for (const item of entries.slice(0, 8)) {
+		const contractLabel =
+			item?.contract?.label || item?.contract?.address || "contract";
+		lines.push(
+			`• [${String(item?.severity || "info").toUpperCase()}] ${contractLabel} · ${item?.kind || "finding"}`,
+		);
+	}
+	return lines.join("\n");
 }
 
 function buildAggregateSummaryMessage(report, entries, reason = "window") {
@@ -294,6 +318,15 @@ async function dispatchSecurityAlerts({ report, statePath }) {
 		notifyState.aggregate && typeof notifyState.aggregate === "object"
 			? notifyState.aggregate
 			: {};
+	const classSentAt =
+		notifyState.classSentAt && typeof notifyState.classSentAt === "object"
+			? notifyState.classSentAt
+			: {};
+	const activeFingerprintsPrev =
+		notifyState.activeFingerprints &&
+		typeof notifyState.activeFingerprints === "object"
+			? notifyState.activeFingerprints
+			: {};
 
 	const warnings = Array.isArray(report?.alerts?.warn?.findings)
 		? report.alerts.warn.findings
@@ -336,21 +369,50 @@ async function dispatchSecurityAlerts({ report, statePath }) {
 	const dailySummaryAtMinutes = parseDailySummaryAt(
 		process.env.EVM_SECURITY_NOTIFY_DAILY_SUMMARY_AT,
 	);
+	const sameClassMergeEnabled =
+		String(
+			process.env.EVM_SECURITY_NOTIFY_SAME_CLASS_MERGE_24H || "false",
+		).toLowerCase() === "true";
+	const sameClassMergeWindowSec = parseNumberEnv(
+		process.env.EVM_SECURITY_NOTIFY_SAME_CLASS_MERGE_WINDOW_SEC,
+		DEFAULT_SAME_CLASS_MERGE_WINDOW_SEC,
+	);
 
-	const sent = { critical: 0, warn: 0, info: 0, errors: [] };
+	const sent = { critical: 0, warn: 0, info: 0, recovery: 0, errors: [] };
 	const now = new Date();
 	const nowMs = now.getTime();
 	const quietActive = isInQuietHours(now, quietWindow);
 
+	const currentActive = {};
+	for (const finding of [...criticals, ...warnings, ...infos]) {
+		currentActive[findingFingerprint(finding)] = {
+			severity: String(finding?.severity || "info").toLowerCase(),
+			kind: finding?.kind || "unknown",
+			chainId: finding?.chainId || null,
+			contract: finding?.contract || null,
+			lastSeenAt: nowIso(),
+		};
+	}
+
 	for (const finding of criticals) {
 		const fingerprint = findingFingerprint(finding);
+		const classKey = findingClassKey(finding);
 		const lastAt = Number(criticalSentAt[fingerprint] || 0);
+		const classLastAt = Number(classSentAt[classKey] || 0);
 		if (lastAt > 0 && nowMs - lastAt < criticalCooldownSec * 1000) continue;
+		if (
+			sameClassMergeEnabled &&
+			classLastAt > 0 &&
+			nowMs - classLastAt < sameClassMergeWindowSec * 1000
+		) {
+			continue;
+		}
 		try {
 			await notifier.send(
 				buildFindingMessage(finding, { urgent: quietActive }),
 			);
 			criticalSentAt[fingerprint] = nowMs;
+			classSentAt[classKey] = nowMs;
 			sent.critical += 1;
 		} catch (error) {
 			sent.errors.push(
@@ -404,10 +466,30 @@ async function dispatchSecurityAlerts({ report, statePath }) {
 		}
 	}
 
+	const recoveredEntries = Object.entries(activeFingerprintsPrev)
+		.filter(([fingerprint, prev]) => {
+			if (currentActive[fingerprint]) return false;
+			const sev = String(prev?.severity || "info").toLowerCase();
+			return sev === "critical" || sev === "warn";
+		})
+		.map(([, prev]) => prev);
+	if (recoveredEntries.length > 0) {
+		try {
+			await notifier.send(buildRecoveryMessage(recoveredEntries));
+			sent.recovery = recoveredEntries.length;
+		} catch (error) {
+			sent.errors.push(
+				`recovery:${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
+	}
+
 	baseState.notify = {
 		...notifyState,
 		criticalSentAt,
+		classSentAt,
 		aggregate,
+		activeFingerprints: currentActive,
 		lastDispatchAt: nowIso(),
 		lastProvider: notifier.provider,
 		lastDispatchResult: sent,
@@ -416,6 +498,8 @@ async function dispatchSecurityAlerts({ report, statePath }) {
 			decision: decision.reason,
 			aggWindowSec,
 			criticalCooldownSec,
+			sameClassMergeEnabled,
+			sameClassMergeWindowSec,
 			quietHours: process.env.EVM_SECURITY_NOTIFY_QUIET_HOURS || "",
 			dailySummaryAt: process.env.EVM_SECURITY_NOTIFY_DAILY_SUMMARY_AT || "",
 		},

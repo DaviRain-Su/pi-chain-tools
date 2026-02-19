@@ -47,6 +47,8 @@
 		"ci:retry": "node scripts/ci-retry.mjs",
 		"ci:resilient": "node scripts/ci-resilient.mjs",
 		"ops:smoke": "node scripts/ops-smoke.mjs",
+		"ops:bootstrap": "node scripts/ops-bootstrap.mjs",
+		"breeze:smoke": "node scripts/breeze-smoke.mjs",
 		"ops:posture": "node scripts/system-posture.mjs",
 		"monad:morpho:replay": "node scripts/monad-morpho-replay-pack.mjs",
 		"submission:evidence": "node scripts/submission-evidence.mjs",

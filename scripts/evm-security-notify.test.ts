@@ -55,6 +55,8 @@ afterEach(() => {
 	process.env.EVM_SECURITY_NOTIFY_WARN_AGG_WINDOW_SEC = undefined;
 	process.env.EVM_SECURITY_NOTIFY_CRITICAL_COOLDOWN_SEC = undefined;
 	process.env.EVM_SECURITY_NOTIFY_DAILY_SUMMARY_AT = undefined;
+	process.env.EVM_SECURITY_NOTIFY_SAME_CLASS_MERGE_24H = undefined;
+	process.env.EVM_SECURITY_NOTIFY_SAME_CLASS_MERGE_WINDOW_SEC = undefined;
 	vi.restoreAllMocks();
 });
 
@@ -131,5 +133,69 @@ describe("evm-security-notify", () => {
 		});
 		expect(decision.shouldSend).toBe(true);
 		expect(decision.reason).toBe("window");
+	});
+
+	it("merges same-class critical alerts within configured 24h window", async () => {
+		const mod = await modPromise;
+		process.env.EVM_SECURITY_NOTIFY_SAME_CLASS_MERGE_24H = "true";
+		process.env.EVM_SECURITY_NOTIFY_SAME_CLASS_MERGE_WINDOW_SEC = "86400";
+		const tempDir = mkdtempSync(path.join(os.tmpdir(), "sec-notify-"));
+		const statePath = path.join(tempDir, "security-state.json");
+		const now = Date.now();
+		writeFileSync(
+			statePath,
+			JSON.stringify({
+				contracts: {},
+				notify: {
+					classSentAt: {
+						"critical|1|owner_drift": now,
+					},
+				},
+			}),
+			"utf8",
+		);
+		const result = await mod.dispatchSecurityAlerts({
+			report: makeReport(),
+			statePath,
+		});
+		expect(result.sent.critical).toBe(0);
+	});
+
+	it("sends recovery count when previously active warning is cleared", async () => {
+		const mod = await modPromise;
+		const tempDir = mkdtempSync(path.join(os.tmpdir(), "sec-notify-"));
+		const statePath = path.join(tempDir, "security-state.json");
+		const staleFinding = makeReport().alerts.warn.findings[0];
+		const staleFingerprint = mod.findingFingerprint(staleFinding);
+		writeFileSync(
+			statePath,
+			JSON.stringify({
+				contracts: {},
+				notify: {
+					activeFingerprints: {
+						[staleFingerprint]: {
+							severity: "warn",
+							kind: staleFinding.kind,
+							contract: staleFinding.contract,
+						},
+					},
+				},
+			}),
+			"utf8",
+		);
+		const emptyReport = {
+			scannedAt: new Date().toISOString(),
+			summary: { critical: 0, warn: 0, info: 0, total: 0 },
+			alerts: {
+				critical: { findings: [] },
+				warn: { findings: [] },
+				info: { findings: [] },
+			},
+		};
+		const result = await mod.dispatchSecurityAlerts({
+			report: emptyReport,
+			statePath,
+		});
+		expect(result.sent.recovery).toBe(1);
 	});
 });

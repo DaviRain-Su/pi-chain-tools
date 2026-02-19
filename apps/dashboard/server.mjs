@@ -68,6 +68,14 @@ const SECURITY_WATCH_STATE_PATH =
 const SECURITY_WATCH_REPORTS_ROOT =
 	process.env.EVM_SECURITY_WATCH_REPORTS_ROOT ||
 	path.join(__dirname, "data", "security-reports");
+const PROOFS_ROOT = path.join(__dirname, "data", "proofs");
+const EXECUTION_PROOFS_ROOT = path.join(
+	__dirname,
+	"..",
+	"..",
+	"docs",
+	"execution-proofs",
+);
 
 function deepGet(obj, dottedPath, fallback = undefined) {
 	const parts = String(dottedPath || "")
@@ -1871,6 +1879,79 @@ async function readSecurityWatchStatus() {
 		topFindings,
 		reportPath: latest.reportPath,
 		hasReport: Boolean(latest.report),
+	};
+}
+
+async function readJsonArtifactSafe(filePath) {
+	try {
+		const raw = await readFile(filePath, "utf8");
+		return JSON.parse(raw);
+	} catch {
+		return null;
+	}
+}
+
+async function findLatestExecutionProof(protocol) {
+	try {
+		const dayDirs = (await readdir(EXECUTION_PROOFS_ROOT)).sort((a, b) =>
+			b.localeCompare(a),
+		);
+		for (const day of dayDirs) {
+			const name = `proof-${protocol}.md`;
+			const filePath = path.join(EXECUTION_PROOFS_ROOT, day, name);
+			try {
+				const meta = await stat(filePath);
+				return {
+					status: "ok",
+					path: filePath,
+					date: day,
+					updatedAt: new Date(meta.mtimeMs).toISOString(),
+					link: `/docs/execution-proofs/${day}/${name}`,
+				};
+			} catch {
+				// keep looking
+			}
+		}
+	} catch {
+		// missing proof root
+	}
+	return {
+		status: "missing",
+		path: null,
+		date: null,
+		updatedAt: null,
+		link: null,
+	};
+}
+
+async function readProofSummary() {
+	const [starknet, bsc, securityStatus, breezeLatest] = await Promise.all([
+		findLatestExecutionProof("starknet"),
+		findLatestExecutionProof("bsc"),
+		readSecurityWatchStatus(),
+		readJsonArtifactSafe(path.join(PROOFS_ROOT, "breeze", "latest.json")),
+	]);
+	const security = {
+		status:
+			securityStatus?.health === "ok"
+				? "ok"
+				: securityStatus?.health || "missing",
+		updatedAt:
+			securityStatus?.scannedAt || securityStatus?.stateUpdatedAt || null,
+		link: "/api/security/watch/latest",
+		summary: securityStatus?.summary || null,
+	};
+	const breeze = {
+		status:
+			breezeLatest?.status || (breezeLatest?.skipped ? "skipped" : "missing"),
+		updatedAt: breezeLatest?.finishedAt || breezeLatest?.startedAt || null,
+		link: "/apps/dashboard/data/proofs/breeze/latest.json",
+		skipped: Boolean(breezeLatest?.skipped),
+		reason: breezeLatest?.reason || null,
+	};
+	return {
+		generatedAt: new Date().toISOString(),
+		items: { starknet, bsc, security, breeze },
 	};
 }
 
@@ -9001,6 +9082,14 @@ const server = http.createServer(async (req, res) => {
 				ok: true,
 				reportPath: latest.reportPath,
 				report: latest.report,
+			});
+		}
+
+		if (url.pathname === "/api/proof/summary" && req.method === "GET") {
+			const summary = await readProofSummary();
+			return json(res, 200, {
+				ok: true,
+				summary,
 			});
 		}
 
