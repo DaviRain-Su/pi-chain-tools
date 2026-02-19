@@ -117,6 +117,12 @@ describe("package.json script contracts", () => {
 		expect(scripts?.["dashboard:ensure"]).toBe(
 			"node scripts/dashboard-restart.mjs",
 		);
+		expect(scripts?.["sdk:upgrade-readiness"]).toBe(
+			"node scripts/sdk-upgrade-readiness.mjs",
+		);
+		expect(scripts?.["sdk:capability-diff"]).toBe(
+			"node scripts/sdk-capability-diff.mjs",
+		);
 	});
 
 	it("keeps CI schema validation as single-step command", () => {

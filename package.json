@@ -51,7 +51,8 @@
 		"dashboard:ensure": "node scripts/dashboard-restart.mjs",
 		"solana:bridge:batch": "node scripts/solana-bridge-safe-batch.mjs",
 		"solana:bridge:heartbeat": "node scripts/solana-bridge-heartbeat.mjs",
-		"sdk:upgrade-readiness": "node scripts/sdk-upgrade-readiness.mjs"
+		"sdk:upgrade-readiness": "node scripts/sdk-upgrade-readiness.mjs",
+		"sdk:capability-diff": "node scripts/sdk-capability-diff.mjs"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",

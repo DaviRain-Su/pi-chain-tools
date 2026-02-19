@@ -167,6 +167,8 @@ Generated at: 2026-02-19T05:35:10.546Z
 
 ## Workflow
 
-1. Run `node scripts/sdk-upgrade-readiness.mjs` after dependency updates.
-2. If target protocol status is `ready-to-promote`, run sdk coverage promotion runbook and remove canonical fallback markers.
-3. Keep this report committed for release/audit traceability.
+1. Run `node scripts/sdk-upgrade-readiness.mjs` (or `npm run sdk:upgrade-readiness`) after dependency updates.
+2. Run `npm run sdk:capability-diff` to generate action-level promotion recommendations from binding proof + coverage artifacts.
+3. Optional upstream metadata probe: `npm run sdk:capability-diff -- --upstream`.
+4. If target protocol status is `ready-to-promote`, run sdk coverage promotion runbook and remove canonical fallback markers.
+5. Keep readiness and capability-diff reports committed for release/audit traceability.

@@ -416,12 +416,18 @@ Phase-2（下期，最小目标）
 ```bash
 npm run sdk:upgrade-readiness
 # output -> docs/sdk-upgrade-readiness.md
+
+npm run sdk:capability-diff
+# output -> docs/sdk-capability-diff.md
+
+# optional: best-effort npm upstream metadata/API marker probe
+npm run sdk:capability-diff -- --upstream
 ```
 
 执行后检查：
 - `ready-to-promote`：可以进入 `sdk-coverage:promote <protocol> execute` 变更流程
-- `blocked-no-execute-surface`：保持 canonical fallback，继续跟踪 detector hook
-- `blocked-not-installed`：先修复依赖/包源，再评估升级
+- `partial`：保持 canonical fallback，继续跟踪 detector hook，并按 capability-diff 的 suggested next command/check 执行
+- `blocked` / `blocked-not-installed`：先修复依赖/包源，再评估升级
 
 运行态透明性：
 - `/api/snapshot` -> `sdkExecuteDetectors`
