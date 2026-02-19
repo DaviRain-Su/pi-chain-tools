@@ -278,3 +278,15 @@ export { createKaspaReadTools } from "./chains/kaspa/tools/read.js";
 export { createKaspaExecuteTools } from "./chains/kaspa/tools/execute.js";
 export { createKaspaWorkflowTools } from "./chains/kaspa/tools/workflow.js";
 export { createKaspaToolset } from "./chains/kaspa/toolset.js";
+
+export {
+	STARKNET_TOOL_PREFIX,
+	callStarknetRpc,
+	getStarknetRpcEndpoint,
+	parseStarknetNetwork,
+	starknetNetworkSchema,
+} from "./chains/starknet/runtime.js";
+export type { StarknetNetwork } from "./chains/starknet/runtime.js";
+export { createStarknetReadTools } from "./chains/starknet/tools/read.js";
+export { createStarknetComposeTools } from "./chains/starknet/tools/compose.js";
+export { createStarknetToolset } from "./chains/starknet/toolset.js";
