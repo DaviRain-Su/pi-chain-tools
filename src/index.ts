@@ -289,4 +289,5 @@ export {
 export type { StarknetNetwork } from "./chains/starknet/runtime.js";
 export { createStarknetReadTools } from "./chains/starknet/tools/read.js";
 export { createStarknetComposeTools } from "./chains/starknet/tools/compose.js";
+export { createStarknetExecuteTools } from "./chains/starknet/tools/execute.js";
 export { createStarknetToolset } from "./chains/starknet/toolset.js";

@@ -60,7 +60,7 @@ All non-green actions include explicit blocker, next action, and code marker ali
 - `src/chains/solana`: Solana runtime + grouped tools
 - `src/chains/sui`: Sui runtime + grouped tools
 - `src/chains/near`: NEAR runtime + grouped tools
-- `src/chains/starknet`: Starknet runtime + grouped tools (Re{define} privacy+bitcoin phase-1 scaffold)
+- `src/chains/starknet`: Starknet runtime + grouped tools (Re{define} privacy+bitcoin phase-2 scaffold: read/compose/guarded-execute)
 - `src/chains/evm`: shared EVM runtime/tool stack (Polymarket BTC 5m + transfer/read/compose/execute), with configurable multi-network support (including `bsc`) and mainnet-guard policy reuse
 - `src/pi`: Pi-specific adapter entrypoints
 - Workflow artifact summaries use a stable schema: `summaryLine` (string) + `summary` (`schema = w3rt.workflow.summary.v1`)
