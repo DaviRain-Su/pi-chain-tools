@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, openSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 
@@ -19,6 +19,11 @@ const CONFIG_PATH = path.join(
 	"config",
 	"dashboard.config.json",
 );
+const ENV_FILES = [
+	path.join(ROOT, ".env"),
+	path.join(ROOT, ".env.local"),
+	path.join(ROOT, ".env.bsc.local"),
+];
 
 function parseArgs(argv) {
 	const flags = new Set(argv.slice(2));
@@ -112,13 +117,47 @@ async function waitHealthy(port, healthPath, timeoutMs) {
 	return false;
 }
 
+function parseEnvFile(content) {
+	const out = {};
+	for (const line of String(content || "").split(/\r?\n/)) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) continue;
+		const idx = trimmed.indexOf("=");
+		if (idx <= 0) continue;
+		const key = trimmed.slice(0, idx).trim();
+		let val = trimmed.slice(idx + 1).trim();
+		if (
+			(val.startsWith('"') && val.endsWith('"')) ||
+			(val.startsWith("'") && val.endsWith("'"))
+		) {
+			val = val.slice(1, -1);
+		}
+		out[key] = val;
+	}
+	return out;
+}
+
+function loadEnvOverrides() {
+	const merged = {};
+	for (const filePath of ENV_FILES) {
+		if (!existsSync(filePath)) continue;
+		try {
+			Object.assign(merged, parseEnvFile(readFileSync(filePath, "utf8")));
+		} catch {
+			// ignore parse errors; keep startup resilient
+		}
+	}
+	return merged;
+}
+
 function startDashboard() {
 	mkdirSync(path.dirname(LOG_PATH), { recursive: true });
 	const fd = openSync(LOG_PATH, "a");
+	const env = { ...process.env, ...loadEnvOverrides() };
 	const child = spawn("npm", ["run", "dashboard:start"], {
 		detached: true,
 		stdio: ["ignore", fd, fd],
-		env: process.env,
+		env,
 		shell: process.platform === "win32",
 	});
 	child.unref();
