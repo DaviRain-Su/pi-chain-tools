@@ -15,44 +15,11 @@ import {
 	getEvmChainId,
 	parseEvmNetwork,
 } from "../runtime.js";
+import { lifiGet, planLifiQuoteRoutes } from "./lifi-planning.js";
 import {
-	LIFI_API_BASE,
 	LIFI_DEFAULT_SLIPPAGE,
-	type LifiQuoteResponse,
 	type LifiStatusResponse,
 } from "./lifi-types.js";
-
-// ---------------------------------------------------------------------------
-// HTTP helpers
-// ---------------------------------------------------------------------------
-
-async function lifiGet<T>(
-	path: string,
-	params: Record<string, string>,
-): Promise<T> {
-	const apiBase = process.env.LIFI_API_BASE?.trim() || LIFI_API_BASE;
-	const url = new URL(path, apiBase);
-	for (const [k, v] of Object.entries(params)) {
-		if (v) url.searchParams.set(k, v);
-	}
-
-	const headers: Record<string, string> = {
-		Accept: "application/json",
-	};
-	const apiKey = process.env.LIFI_API_KEY?.trim();
-	if (apiKey) {
-		headers["x-lifi-api-key"] = apiKey;
-	}
-
-	const res = await fetch(url.toString(), { headers });
-	if (!res.ok) {
-		const body = await res.text().catch(() => "");
-		throw new Error(
-			`LI.FI API error ${res.status}: ${res.statusText}. ${body}`,
-		);
-	}
-	return (await res.json()) as T;
-}
 
 function formatDuration(seconds: number): string {
 	if (seconds < 60) return `${seconds}s`;
@@ -155,13 +122,15 @@ export function createLifiReadTools() {
 					slippage: slippage.toString(),
 				};
 				if (toAddress) queryParams.toAddress = toAddress;
-				if (params.order) queryParams.order = params.order;
-
 				const integrator =
 					process.env.LIFI_INTEGRATOR?.trim() || "pi-chain-tools";
 				queryParams.integrator = integrator;
 
-				const quote = await lifiGet<LifiQuoteResponse>("/quote", queryParams);
+				const planned = await planLifiQuoteRoutes({
+					baseParams: queryParams,
+					preferredOrder: params.order,
+				});
+				const quote = planned.selected.quote;
 
 				const fromDec = quote.action.fromToken.decimals;
 				const toDec = quote.action.toToken.decimals;
@@ -220,6 +189,30 @@ export function createLifiReadTools() {
 							toToken: s.action.toToken.symbol,
 						})),
 						approvalAddress: quote.estimate.approvalAddress,
+						routeSelection: {
+							selectedOrder: planned.selected.order,
+							score: planned.selected.score,
+							rationale: planned.selected.rationale,
+							riskHints: planned.selected.riskHints,
+							candidateCount: planned.candidates.length,
+							candidates: planned.candidates.map((candidate) => ({
+								order: candidate.order,
+								score: candidate.score,
+								effectiveCostBps: candidate.metrics.effectiveCostBps,
+								hops: candidate.metrics.hops,
+								durationSeconds: candidate.metrics.durationSeconds,
+								riskHints: candidate.riskHints,
+							})),
+						},
+						fallback: planned.fallback,
+						metrics: {
+							lifiQuote: planned.metrics,
+						},
+						executionBoundary: {
+							planningAuthority: "lifi",
+							executionAuthority: "pi-sdk",
+							mutatingExecutionAllowed: false,
+						},
 						transactionRequest: {
 							to: quote.transactionRequest.to,
 							value: quote.transactionRequest.value,

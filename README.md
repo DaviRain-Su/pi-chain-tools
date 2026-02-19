@@ -21,6 +21,9 @@ Multi-chain toolset library for Pi extensions with a chain-agnostic grouping mod
 - **PI SDK-first MCP adapter boundary (Phase 1 scaffold)**: [`docs/pi-mcp-adapter-architecture.md`](docs/pi-mcp-adapter-architecture.md)
   - Orchestration ergonomics (read/plan discovery + envelope normalization)
   - Hard boundary: mutating actions remain in PI SDK confirm/risk/policy/reconcile path
+- **LI.FI integration hardening runbook**: [`docs/lifi-integration-hardening.md`](docs/lifi-integration-hardening.md)
+  - Deterministic route scoring + fallback behavior + error normalization
+  - Enforced planning-vs-execution boundary (PI SDK remains mutation authority)
 
 ## SDK Replacement Completion Summary (Item 5)
 

@@ -1,12 +1,12 @@
 /**
- * LI.FI execute tools — cross-chain bridge execution with approval handling.
+ * LI.FI execute-facing tools — quote planning preview for bridge execution.
  *
- * - `evm_lifiExecuteBridge`: approve (if needed) + send bridge transaction
+ * - `evm_lifiExecuteBridge`: plan approval+bridge steps and return PI SDK handoff artifacts
  *
  * Safety gates:
  * - Defaults to dryRun=true (preview only)
- * - Requires confirmMainnet=true for mainnet chains
- * - Uses EvmSignerProvider for pluggable signing (Local/Privy)
+ * - Requires confirmMainnet=true for mainnet intent acknowledgment
+ * - Direct mutation is blocked; PI SDK remains execution authority
  */
 
 import { Type } from "@sinclair/typebox";
@@ -18,11 +18,8 @@ import {
 	getEvmChainId,
 	parseEvmNetwork,
 } from "../runtime.js";
-import type {
-	LifiQuoteResponse,
-	LifiTransactionRequest,
-} from "./lifi-types.js";
-import { LIFI_API_BASE, LIFI_DEFAULT_SLIPPAGE } from "./lifi-types.js";
+import { planLifiQuoteRoutes } from "./lifi-planning.js";
+import { LIFI_DEFAULT_SLIPPAGE } from "./lifi-types.js";
 import { resolveEvmSignerForTool } from "./signer-resolve.js";
 
 // ---------------------------------------------------------------------------
@@ -35,29 +32,6 @@ function assertAddress(value: string, label: string): string {
 		throw new Error(`${label} must be a valid EVM address (0x + 40 hex)`);
 	}
 	return addr;
-}
-
-async function lifiGet<T>(
-	path: string,
-	params: Record<string, string>,
-): Promise<T> {
-	const apiBase = process.env.LIFI_API_BASE?.trim() || LIFI_API_BASE;
-	const url = new URL(path, apiBase);
-	for (const [k, v] of Object.entries(params)) {
-		if (v) url.searchParams.set(k, v);
-	}
-	const headers: Record<string, string> = { Accept: "application/json" };
-	const apiKey = process.env.LIFI_API_KEY?.trim();
-	if (apiKey) headers["x-lifi-api-key"] = apiKey;
-
-	const res = await fetch(url.toString(), { headers });
-	if (!res.ok) {
-		const body = await res.text().catch(() => "");
-		throw new Error(
-			`LI.FI API error ${res.status}: ${res.statusText}. ${body}`,
-		);
-	}
-	return (await res.json()) as T;
 }
 
 // ERC-20 approve selector: approve(address,uint256)
@@ -153,9 +127,11 @@ export function createLifiExecuteTools() {
 					slippage: slippage.toString(),
 					integrator: process.env.LIFI_INTEGRATOR?.trim() || "pi-chain-tools",
 				};
-				if (params.order) queryParams.order = params.order;
-
-				const quote = await lifiGet<LifiQuoteResponse>("/quote", queryParams);
+				const planned = await planLifiQuoteRoutes({
+					baseParams: queryParams,
+					preferredOrder: params.order,
+				});
+				const quote = planned.selected.quote;
 				const tx = quote.transactionRequest;
 
 				// Check if ERC-20 approval is needed
@@ -189,17 +165,17 @@ export function createLifiExecuteTools() {
 					value: tx.value,
 				});
 
-				// Dry run — preview only
+				// Dry run — planning preview only
 				if (dryRun) {
 					return {
 						content: [
 							{
 								type: "text",
-								text: `LI.FI bridge preview: ${steps.length} step(s). ${fromNetwork} → ${toNetwork} via ${quote.tool}. Set dryRun=false to execute.`,
+								text: `LI.FI bridge preview: ${steps.length} step(s). ${fromNetwork} → ${toNetwork} via ${quote.tool}. Execution remains gated by PI SDK confirm/policy/reconcile flow.`,
 							},
 						],
 						details: {
-							schema: "evm.lifi.bridge.preview.v1",
+							schema: "evm.lifi.bridge.preview.v2",
 							dryRun: true,
 							fromNetwork,
 							toNetwork,
@@ -216,11 +192,36 @@ export function createLifiExecuteTools() {
 								description: s.description,
 								to: s.to,
 							})),
+							routeSelection: {
+								selectedOrder: planned.selected.order,
+								score: planned.selected.score,
+								rationale: planned.selected.rationale,
+								riskHints: planned.selected.riskHints,
+								candidateCount: planned.candidates.length,
+							},
+							fallback: planned.fallback,
+							metrics: {
+								lifiQuote: planned.metrics,
+							},
+							executionBoundary: {
+								planningAuthority: "lifi",
+								executionAuthority: "pi-sdk",
+								mutatingExecutionAllowed: false,
+							},
+							reconciliation: {
+								selectedRouteOrder: planned.selected.order,
+								rationale: planned.selected.rationale,
+								txPreview: {
+									to: tx.to,
+									value: tx.value,
+									chainId: tx.chainId,
+									hasData: !!tx.data,
+								},
+							},
 						},
 					};
 				}
 
-				// Mainnet safety gate
 				const mainnetLike =
 					isMainnetLikeEvmNetwork(fromNetwork) ||
 					isMainnetLikeEvmNetwork(toNetwork);
@@ -230,55 +231,9 @@ export function createLifiExecuteTools() {
 					);
 				}
 
-				// Execute
-				const txHashes: string[] = [];
-
-				// Step 1: Approve (if needed)
-				if (needsApproval) {
-					const approveResult = await signer.signAndSend({
-						network: fromNetwork,
-						to: steps[0].to,
-						data: steps[0].data,
-						value: "0x0",
-					});
-					txHashes.push(approveResult.txHash);
-				}
-
-				// Step 2: Bridge transaction
-				const bridgeStep = steps[steps.length - 1];
-				const bridgeResult = await signer.signAndSend({
-					network: fromNetwork,
-					to: bridgeStep.to,
-					data: bridgeStep.data,
-					value: bridgeStep.value,
-					gasLimit: tx.gasLimit,
-				});
-				txHashes.push(bridgeResult.txHash);
-
-				return {
-					content: [
-						{
-							type: "text",
-							text: `LI.FI bridge submitted: ${txHashes.length} tx(es). Bridge tx: ${bridgeResult.txHash}. Track with evm_lifiGetStatus.`,
-						},
-					],
-					details: {
-						schema: "evm.lifi.bridge.execute.v1",
-						dryRun: false,
-						fromNetwork,
-						toNetwork,
-						tool: quote.tool,
-						fromToken: quote.action.fromToken.symbol,
-						toToken: quote.action.toToken.symbol,
-						fromAmount: params.fromAmount,
-						fromAddress,
-						toAddress,
-						txHashes,
-						bridgeTxHash: bridgeResult.txHash,
-						needsApproval,
-						quoteId: quote.id,
-					},
-				};
+				throw new Error(
+					"LI.FI direct mutation is disabled in this tool. Use PI SDK execution flow after quote planning.",
+				);
 			},
 		}),
 	];

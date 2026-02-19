@@ -128,7 +128,7 @@ const MOCK_QUOTE = {
 // ---------------------------------------------------------------------------
 describe("lifiGetQuote", () => {
 	it("returns formatted quote on success", async () => {
-		mockFetch.mockResolvedValueOnce({
+		mockFetch.mockResolvedValue({
 			ok: true,
 			json: async () => MOCK_QUOTE,
 		});
@@ -154,8 +154,8 @@ describe("lifiGetQuote", () => {
 		expect((d.to as Record<string, unknown>).network).toBe("base");
 	});
 
-	it("throws on API error", async () => {
-		mockFetch.mockResolvedValueOnce({
+	it("throws normalized error when all candidate quotes fail", async () => {
+		mockFetch.mockResolvedValue({
 			ok: false,
 			status: 400,
 			statusText: "Bad Request",
@@ -172,7 +172,7 @@ describe("lifiGetQuote", () => {
 				fromAmount: "1000",
 				fromAddress: "0xABCDEF1234567890ABCDEF1234567890ABCDEF12",
 			}),
-		).rejects.toThrow("LI.FI API error 400");
+		).rejects.toThrow("LIFI_API_BAD_REQUEST");
 	});
 
 	it("rejects invalid fromAddress", async () => {
@@ -259,7 +259,7 @@ describe("lifiGetStatus", () => {
 // ---------------------------------------------------------------------------
 describe("lifiExecuteBridge", () => {
 	it("returns preview in dryRun mode (default)", async () => {
-		mockFetch.mockResolvedValueOnce({
+		mockFetch.mockResolvedValue({
 			ok: true,
 			json: async () => MOCK_QUOTE,
 		});
@@ -275,14 +275,14 @@ describe("lifiExecuteBridge", () => {
 
 		const d = result.details as Record<string, unknown>;
 		expect(d.dryRun).toBe(true);
-		expect(d.schema).toBe("evm.lifi.bridge.preview.v1");
+		expect(d.schema).toBe("evm.lifi.bridge.preview.v2");
 		expect(d.tool).toBe("stargate");
 		expect(d.needsApproval).toBe(true);
 		expect(d.stepsCount).toBe(2); // approve + bridge
 	});
 
 	it("blocks mainnet execute without confirmMainnet", async () => {
-		mockFetch.mockResolvedValueOnce({
+		mockFetch.mockResolvedValue({
 			ok: true,
 			json: async () => MOCK_QUOTE,
 		});
@@ -317,7 +317,7 @@ describe("lifiExecuteBridge", () => {
 			},
 		};
 
-		mockFetch.mockResolvedValueOnce({
+		mockFetch.mockResolvedValue({
 			ok: true,
 			json: async () => nativeQuote,
 		});
@@ -334,5 +334,76 @@ describe("lifiExecuteBridge", () => {
 		const d = result.details as Record<string, unknown>;
 		expect(d.needsApproval).toBe(false);
 		expect(d.stepsCount).toBe(1); // bridge only, no approve
+	});
+
+	it("falls back to alternate order when one quote route fails", async () => {
+		mockFetch
+			.mockResolvedValueOnce({
+				ok: false,
+				status: 429,
+				statusText: "Too Many Requests",
+				text: async () => "rate limit",
+			})
+			.mockResolvedValue({
+				ok: true,
+				json: async () => MOCK_QUOTE,
+			});
+
+		const tool = findTool(createLifiReadTools, "lifiGetQuote");
+		const result = await tool.execute("q-fallback", {
+			fromNetwork: "bsc",
+			toNetwork: "base",
+			fromToken: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+			toToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+			fromAmount: "1000000000000000000",
+			fromAddress: "0xABCDEF1234567890ABCDEF1234567890ABCDEF12",
+		});
+		const d = result.details as {
+			fallback: { used: boolean };
+			metrics: { lifiQuote: { quoteFailure: number } };
+		};
+		expect(d.fallback.used).toBe(true);
+		expect(d.metrics.lifiQuote.quoteFailure).toBeGreaterThan(0);
+	});
+
+	it("enforces boundary and blocks direct LI.FI mutation", async () => {
+		mockFetch.mockResolvedValue({
+			ok: true,
+			json: async () => MOCK_QUOTE,
+		});
+
+		const tool = findTool(createLifiExecuteTools, "lifiExecuteBridge");
+		await expect(
+			tool.execute("e4", {
+				fromNetwork: "bsc",
+				toNetwork: "base",
+				fromToken: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+				toToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+				fromAmount: "1000000000000000000",
+				dryRun: false,
+				confirmMainnet: true,
+			}),
+		).rejects.toThrow("direct mutation is disabled");
+	});
+
+	it("normalizes LI.FI error code on quote failure", async () => {
+		mockFetch.mockResolvedValue({
+			ok: false,
+			status: 400,
+			statusText: "Bad Request",
+			text: async () => "invalid",
+		});
+
+		const tool = findTool(createLifiReadTools, "lifiGetQuote");
+		await expect(
+			tool.execute("q-bad", {
+				fromNetwork: "bsc",
+				toNetwork: "base",
+				fromToken: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+				toToken: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+				fromAmount: "1000",
+				fromAddress: "0xABCDEF1234567890ABCDEF1234567890ABCDEF12",
+			}),
+		).rejects.toThrow("LIFI_API_BAD_REQUEST");
 	});
 });
