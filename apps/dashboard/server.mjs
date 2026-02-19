@@ -11156,19 +11156,33 @@ const server = http.createServer(async (req, res) => {
 		}
 
 		if (url.pathname === "/api/bsc/yield/plan") {
-			const plan = await computeBscYieldPlan({
-				account: url.searchParams.get("account") || undefined,
-				targetUsdcBps: url.searchParams.get("targetUsdcBps") || undefined,
-				minDriftBps: url.searchParams.get("minDriftBps") || undefined,
-				maxStepUsd: url.searchParams.get("maxStepUsd") || undefined,
-				minAprDeltaBps: url.searchParams.get("minAprDeltaBps") || undefined,
-				amountUsd: url.searchParams.get("amountUsd") || undefined,
-				rebalanceIntervalDays:
-					url.searchParams.get("rebalanceIntervalDays") || undefined,
-				executionProtocol:
-					url.searchParams.get("executionProtocol") || undefined,
-			});
-			return json(res, 200, plan);
+			try {
+				const plan = await computeBscYieldPlan({
+					account: url.searchParams.get("account") || undefined,
+					targetUsdcBps: url.searchParams.get("targetUsdcBps") || undefined,
+					minDriftBps: url.searchParams.get("minDriftBps") || undefined,
+					maxStepUsd: url.searchParams.get("maxStepUsd") || undefined,
+					minAprDeltaBps: url.searchParams.get("minAprDeltaBps") || undefined,
+					amountUsd: url.searchParams.get("amountUsd") || undefined,
+					rebalanceIntervalDays:
+						url.searchParams.get("rebalanceIntervalDays") || undefined,
+					executionProtocol:
+						url.searchParams.get("executionProtocol") || undefined,
+				});
+				return json(res, 200, plan);
+			} catch (error) {
+				return json(res, 200, {
+					ok: false,
+					chain: "bsc",
+					mode: "stable-yield-plan",
+					error: error instanceof Error ? error.message : String(error),
+					plan: {
+						action: "hold",
+						reason: "missing_or_invalid_bsc_account",
+						recommendedAmountRaw: "0",
+					},
+				});
+			}
 		}
 
 		if (url.pathname === "/api/bsc/yield/markets") {
