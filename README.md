@@ -820,6 +820,7 @@ Quick references:
 - Hackathon 5-min pitch script: `docs/hackathon-5min-pitch-script.md`
 - Monad + Morpho SDK integration plan: `docs/monad-morpho-sdk-integration-plan.md`
 - Sol-agent integration plan: `docs/sol-agent-integration-plan.md`
+- Final release notes: `docs/final-release-notes.md`
 - Sol-agent risk boundary (production safety contract): `docs/sol-agent-risk-boundary.md`
 - Sol-agent bridge + registry mapping (Phase B, safe): `src/chains/solana/sol-agent-bridge.ts`, `src/chains/solana/registry/*`
 - Submission evidence artifact guide: `npm run submission:evidence` (writes `docs/submission-evidence.md`)
