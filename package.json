@@ -41,6 +41,7 @@
 		"security:scan:once": "node scripts/evm-security-scan-once.mjs",
 		"security:watch": "node scripts/evm-security-worker.mjs",
 		"security:watch:notify:test": "node scripts/evm-security-notify.mjs",
+		"security:watch:service:help": "node scripts/security-watch-service-help.mjs",
 		"test": "vitest run",
 		"ci": "node scripts/ci.mjs",
 		"ci:retry": "node scripts/ci-retry.mjs",

@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import path from "node:path";
 
 const DEFAULT_PROVIDER = "noop";
-const DEFAULT_COOLDOWN_MS = 15 * 60 * 1000;
+const DEFAULT_CRITICAL_COOLDOWN_SEC = 15 * 60;
+const DEFAULT_WARN_AGG_WINDOW_SEC = 15 * 60;
+const DEFAULT_QUIET_HOURS = "";
+const MAX_PENDING_AGG_ITEMS = 200;
 
 function readJsonFileSafe(filePath, fallback) {
 	try {
@@ -16,7 +20,9 @@ function readJsonFileSafe(filePath, fallback) {
 
 function writeJsonFileSafe(filePath, payload) {
 	try {
-		writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+		const tmpPath = `${filePath}.tmp`;
+		writeFileSync(tmpPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+		renameSync(tmpPath, filePath);
 	} catch {
 		// best-effort
 	}
@@ -32,6 +38,68 @@ function normalizeProvider(value) {
 
 function nowIso() {
 	return new Date().toISOString();
+}
+
+function parseNumberEnv(value, fallback) {
+	const parsed = Number(value);
+	if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+	return Math.floor(parsed);
+}
+
+function parseDailySummaryAt(value) {
+	const raw = String(value || "").trim();
+	if (!raw) return null;
+	const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+	if (!match) return null;
+	const hour = Number(match[1]);
+	const minute = Number(match[2]);
+	if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+	return hour * 60 + minute;
+}
+
+function parseQuietHours(value) {
+	const raw = String(value || "").trim();
+	if (!raw) return null;
+	const match = raw.match(/^(\d{1,2})-(\d{1,2})$/);
+	if (!match) return null;
+	const startHour = Number(match[1]);
+	const endHour = Number(match[2]);
+	if (
+		!Number.isInteger(startHour) ||
+		!Number.isInteger(endHour) ||
+		startHour < 0 ||
+		startHour > 23 ||
+		endHour < 0 ||
+		endHour > 23
+	) {
+		return null;
+	}
+	if (startHour === endHour) {
+		return { startHour, endHour, fullDay: true };
+	}
+	return { startHour, endHour, fullDay: false };
+}
+
+function isInQuietHours(date, quietWindow) {
+	if (!quietWindow) return false;
+	if (quietWindow.fullDay) return true;
+	const hour = date.getHours();
+	const { startHour, endHour } = quietWindow;
+	if (startHour < endHour) {
+		return hour >= startHour && hour < endHour;
+	}
+	return hour >= startHour || hour < endHour;
+}
+
+function localDateKey(date) {
+	const y = date.getFullYear();
+	const m = String(date.getMonth() + 1).padStart(2, "0");
+	const d = String(date.getDate()).padStart(2, "0");
+	return `${y}-${m}-${d}`;
+}
+
+function localMinutes(date) {
+	return date.getHours() * 60 + date.getMinutes();
 }
 
 function findingFingerprint(finding) {
@@ -52,7 +120,7 @@ function severityEmoji(severity) {
 	return "ℹ️";
 }
 
-function buildFindingMessage(finding) {
+function buildFindingMessage(finding, { urgent = false } = {}) {
 	const sev = String(finding?.severity || "info").toLowerCase();
 	const contractLabel =
 		finding?.contract?.label || finding?.contract?.address || "contract";
@@ -60,7 +128,7 @@ function buildFindingMessage(finding) {
 	const link =
 		finding?.evidence?.txLink || finding?.evidence?.addressLink || "";
 	const lines = [
-		`${severityEmoji(sev)} *EVM Security Watch*`,
+		`${severityEmoji(sev)} *EVM Security Watch*${urgent ? " [URGENT]" : ""}`,
 		`Severity: *${sev.toUpperCase()}*`,
 		`Chain: ${chain}`,
 		`Contract: ${contractLabel}`,
@@ -71,17 +139,20 @@ function buildFindingMessage(finding) {
 	return lines.filter(Boolean).join("\n");
 }
 
-function buildWarnBatchMessage(report, warnings) {
+function buildAggregateSummaryMessage(report, entries, reason = "window") {
 	const summary = report?.summary || {};
-	const top = warnings.slice(0, 6).map((row) => {
+	const warnCount = entries.filter((item) => item.severity === "warn").length;
+	const infoCount = entries.filter((item) => item.severity === "info").length;
+	const top = entries.slice(0, 8).map((row) => {
 		const contractLabel =
 			row?.contract?.label || row?.contract?.address || "contract";
-		return `• ${contractLabel} · ${row?.kind || "warn"}`;
+		return `• [${String(row?.severity || "info").toUpperCase()}] ${contractLabel} · ${row?.kind || "finding"}`;
 	});
 	return [
-		"⚠️ *EVM Security Watch warning summary*",
+		`🧾 *EVM Security Watch summary* (${reason})`,
 		`scan: ${report?.scannedAt || nowIso()}`,
-		`counts: critical=${summary.critical || 0} warn=${summary.warn || 0} info=${summary.info || 0}`,
+		`this scan: critical=${summary.critical || 0} warn=${summary.warn || 0} info=${summary.info || 0}`,
+		`aggregated: warn=${warnCount} info=${infoCount} total=${entries.length}`,
 		...top,
 	].join("\n");
 }
@@ -140,11 +211,75 @@ function createNotifier() {
 	};
 }
 
-async function dispatchSecurityAlerts({
-	report,
-	statePath,
-	cooldownMs = DEFAULT_COOLDOWN_MS,
+function decideAggregateDispatch({
+	now,
+	quietWindow,
+	dailySummaryAtMinutes,
+	aggWindowSec,
+	aggregate,
 }) {
+	const pending = Array.isArray(aggregate?.pending) ? aggregate.pending : [];
+	if (pending.length === 0) {
+		return {
+			shouldSend: false,
+			reason: "no_pending",
+			quiet: isInQuietHours(now, quietWindow),
+		};
+	}
+	const quiet = isInQuietHours(now, quietWindow);
+	const firstQueuedAtMs = Number(aggregate?.firstQueuedAtMs || 0);
+	const windowElapsed =
+		firstQueuedAtMs > 0 &&
+		now.getTime() - firstQueuedAtMs >= aggWindowSec * 1000;
+
+	const today = localDateKey(now);
+	const minuteNow = localMinutes(now);
+	const canDaily =
+		dailySummaryAtMinutes != null &&
+		minuteNow >= dailySummaryAtMinutes &&
+		aggregate?.lastDailySummaryDate !== today;
+
+	if (canDaily) {
+		return { shouldSend: true, reason: "daily_summary", quiet };
+	}
+	if (!quiet && windowElapsed) {
+		return { shouldSend: true, reason: "window", quiet };
+	}
+	if (quiet) {
+		return { shouldSend: false, reason: "quiet_hours_hold", quiet };
+	}
+	return { shouldSend: false, reason: "window_not_elapsed", quiet };
+}
+
+function mergeAggregatePending(aggregate, findings, nowMs) {
+	const pending = Array.isArray(aggregate?.pending)
+		? [...aggregate.pending]
+		: [];
+	for (const finding of findings) {
+		pending.push({
+			severity: String(finding?.severity || "info").toLowerCase(),
+			kind: finding?.kind || "unknown",
+			contract: finding?.contract || null,
+			chainId: finding?.chainId || null,
+			chainName: finding?.chainName || null,
+			detectedAt: finding?.detectedAt || nowIso(),
+			fingerprint: findingFingerprint(finding),
+		});
+	}
+	const trimmed = pending.slice(-MAX_PENDING_AGG_ITEMS);
+	const firstQueuedAtMs =
+		trimmed.length > 0 ? Number(aggregate?.firstQueuedAtMs || nowMs) : null;
+	return {
+		pending: trimmed,
+		firstQueuedAtMs,
+		lastQueuedAtMs: trimmed.length > 0 ? nowMs : null,
+		lastFlushAt: aggregate?.lastFlushAt || null,
+		lastFlushReason: aggregate?.lastFlushReason || null,
+		lastDailySummaryDate: aggregate?.lastDailySummaryDate || null,
+	};
+}
+
+async function dispatchSecurityAlerts({ report, statePath }) {
 	const notifier = createNotifier();
 	const baseState = readJsonFileSafe(statePath, { contracts: {}, notify: {} });
 	const notifyState =
@@ -155,6 +290,11 @@ async function dispatchSecurityAlerts({
 		notifyState.criticalSentAt && typeof notifyState.criticalSentAt === "object"
 			? notifyState.criticalSentAt
 			: {};
+	const aggregateState =
+		notifyState.aggregate && typeof notifyState.aggregate === "object"
+			? notifyState.aggregate
+			: {};
+
 	const warnings = Array.isArray(report?.alerts?.warn?.findings)
 		? report.alerts.warn.findings
 		: Array.isArray(report?.findings)
@@ -182,15 +322,34 @@ async function dispatchSecurityAlerts({
 				: []
 		: [];
 
+	const criticalCooldownSec = parseNumberEnv(
+		process.env.EVM_SECURITY_NOTIFY_CRITICAL_COOLDOWN_SEC,
+		DEFAULT_CRITICAL_COOLDOWN_SEC,
+	);
+	const aggWindowSec = parseNumberEnv(
+		process.env.EVM_SECURITY_NOTIFY_WARN_AGG_WINDOW_SEC,
+		DEFAULT_WARN_AGG_WINDOW_SEC,
+	);
+	const quietWindow = parseQuietHours(
+		process.env.EVM_SECURITY_NOTIFY_QUIET_HOURS || DEFAULT_QUIET_HOURS,
+	);
+	const dailySummaryAtMinutes = parseDailySummaryAt(
+		process.env.EVM_SECURITY_NOTIFY_DAILY_SUMMARY_AT,
+	);
+
 	const sent = { critical: 0, warn: 0, info: 0, errors: [] };
-	const nowMs = Date.now();
+	const now = new Date();
+	const nowMs = now.getTime();
+	const quietActive = isInQuietHours(now, quietWindow);
 
 	for (const finding of criticals) {
 		const fingerprint = findingFingerprint(finding);
 		const lastAt = Number(criticalSentAt[fingerprint] || 0);
-		if (lastAt > 0 && nowMs - lastAt < cooldownMs) continue;
+		if (lastAt > 0 && nowMs - lastAt < criticalCooldownSec * 1000) continue;
 		try {
-			await notifier.send(buildFindingMessage(finding));
+			await notifier.send(
+				buildFindingMessage(finding, { urgent: quietActive }),
+			);
 			criticalSentAt[fingerprint] = nowMs;
 			sent.critical += 1;
 		} catch (error) {
@@ -200,36 +359,66 @@ async function dispatchSecurityAlerts({
 		}
 	}
 
-	if (warnings.length > 0) {
+	let aggregate = mergeAggregatePending(
+		aggregateState,
+		[...warnings, ...infos],
+		nowMs,
+	);
+	const decision = decideAggregateDispatch({
+		now,
+		quietWindow,
+		dailySummaryAtMinutes,
+		aggWindowSec,
+		aggregate,
+	});
+	if (decision.shouldSend) {
 		try {
-			await notifier.send(buildWarnBatchMessage(report, warnings));
-			sent.warn = 1;
+			await notifier.send(
+				buildAggregateSummaryMessage(
+					report,
+					aggregate.pending,
+					decision.reason,
+				),
+			);
+			sent.warn = aggregate.pending.filter(
+				(item) => item.severity === "warn",
+			).length;
+			sent.info = aggregate.pending.filter(
+				(item) => item.severity === "info",
+			).length;
+			aggregate = {
+				...aggregate,
+				pending: [],
+				firstQueuedAtMs: null,
+				lastFlushAt: nowIso(),
+				lastFlushReason: decision.reason,
+				lastDailySummaryDate:
+					decision.reason === "daily_summary"
+						? localDateKey(now)
+						: aggregate.lastDailySummaryDate || null,
+			};
 		} catch (error) {
 			sent.errors.push(
-				`warn_batch:${error instanceof Error ? error.message : String(error)}`,
+				`aggregate:${error instanceof Error ? error.message : String(error)}`,
 			);
-		}
-	}
-
-	if (infos.length > 0) {
-		for (const finding of infos.slice(0, 10)) {
-			try {
-				await notifier.send(buildFindingMessage(finding));
-				sent.info += 1;
-			} catch (error) {
-				sent.errors.push(
-					`info:${finding?.kind || "unknown"}:${error instanceof Error ? error.message : String(error)}`,
-				);
-			}
 		}
 	}
 
 	baseState.notify = {
 		...notifyState,
 		criticalSentAt,
+		aggregate,
 		lastDispatchAt: nowIso(),
 		lastProvider: notifier.provider,
 		lastDispatchResult: sent,
+		lastDecision: {
+			quietActive,
+			decision: decision.reason,
+			aggWindowSec,
+			criticalCooldownSec,
+			quietHours: process.env.EVM_SECURITY_NOTIFY_QUIET_HOURS || "",
+			dailySummaryAt: process.env.EVM_SECURITY_NOTIFY_DAILY_SUMMARY_AT || "",
+		},
 	};
 	writeJsonFileSafe(statePath, baseState);
 
@@ -293,4 +482,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 	});
 }
 
-export { createNotifier, dispatchSecurityAlerts, findingFingerprint };
+export {
+	createNotifier,
+	decideAggregateDispatch,
+	dispatchSecurityAlerts,
+	findingFingerprint,
+	isInQuietHours,
+	parseDailySummaryAt,
+	parseQuietHours,
+};

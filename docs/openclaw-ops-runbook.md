@@ -534,10 +534,14 @@ npm run security:watch:notify:test
   - `TELEGRAM_BOT_TOKEN=<bot token>`
   - `TELEGRAM_CHAT_ID=<chat id>`
   - 可选：`EVM_SECURITY_NOTIFY_INFO=true`（默认关闭 info 级别推送）
+  - 可选：`EVM_SECURITY_NOTIFY_QUIET_HOURS=23-08`（本地时间 quiet window）
+  - 可选：`EVM_SECURITY_NOTIFY_WARN_AGG_WINDOW_SEC=900`（warn/info 聚合窗口）
+  - 可选：`EVM_SECURITY_NOTIFY_CRITICAL_COOLDOWN_SEC=900`（critical 去重冷却）
+  - 可选：`EVM_SECURITY_NOTIFY_DAILY_SUMMARY_AT=08:30`（quiet 时段也会在该时刻触发日汇总）
 - 推送策略：
   - `critical`：逐条即时推送（按 fingerprint + cooldown 去重，状态持久化在 `security-state.json`）
-  - `warn`：每轮扫描聚合为一条 summary
-  - `info`：可选（默认 off）
+  - `warn/info`：聚合入 pending summary，按窗口或 daily summary flush
+  - quiet hours 内抑制非 critical；critical 仍即时推送（可带 urgent 标记）
 - 推送失败不会中断 scan/watch 循环（日志记录为 non-fatal）。
 
 运维建议：
@@ -545,6 +549,38 @@ npm run security:watch:notify:test
   `cp apps/dashboard/config/security-watchlist.example.json apps/dashboard/config/security-watchlist.json`
 - 每次修改 watchlist 后先跑 `npm run security:scan:once` 校验格式与连通性。
 - 常驻模式建议配合 systemd/cron（见 `docs/evm-security-watch-cron.md`）。
+
+systemd 模板（生产建议）：
+- `ops/systemd/evm-security-watch.service`
+- `ops/systemd/evm-security-watch.env.example`
+
+快速部署（手工执行，避免脚本自动提权）：
+```bash
+cp ops/systemd/evm-security-watch.env.example ops/systemd/evm-security-watch.env
+# 编辑 bot/rpc/quiet-hours 配置
+
+sudo cp ops/systemd/evm-security-watch.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now evm-security-watch.service
+
+systemctl status evm-security-watch.service --no-pager
+journalctl -u evm-security-watch.service -f
+```
+
+辅助指引脚本：
+```bash
+npm run security:watch:service:help
+```
+
+PM2 备选：
+```bash
+pm2 start npm --name evm-security-watch -- run security:watch -- --interval 120
+pm2 save
+```
+
+restart-safe 说明：
+- `security-state.json` 持久化 `criticalSentAt` + warn/info 聚合 pending 队列。
+- worker 重启后会继续沿用 cooldown 与聚合状态，不会因重启导致告警风暴。
 
 ### 6.3 Compact posture snapshot (security + stale + last good check)
 

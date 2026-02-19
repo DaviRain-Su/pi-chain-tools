@@ -51,6 +51,10 @@ afterEach(() => {
 	process.env.EVM_SECURITY_NOTIFY_PROVIDER = undefined;
 	process.env.TELEGRAM_BOT_TOKEN = undefined;
 	process.env.TELEGRAM_CHAT_ID = undefined;
+	process.env.EVM_SECURITY_NOTIFY_QUIET_HOURS = undefined;
+	process.env.EVM_SECURITY_NOTIFY_WARN_AGG_WINDOW_SEC = undefined;
+	process.env.EVM_SECURITY_NOTIFY_CRITICAL_COOLDOWN_SEC = undefined;
+	process.env.EVM_SECURITY_NOTIFY_DAILY_SUMMARY_AT = undefined;
 	vi.restoreAllMocks();
 });
 
@@ -74,12 +78,58 @@ describe("evm-security-notify", () => {
 		const result = await mod.dispatchSecurityAlerts({
 			report,
 			statePath,
-			cooldownMs: 60_000,
 		});
 		expect(result.provider).toBe("noop");
 		expect(result.sent.critical).toBe(1);
 		const updated = JSON.parse(readFileSync(statePath, "utf8"));
 		expect(updated.notify.criticalSentAt).toBeTruthy();
 		expect(Object.keys(updated.notify.criticalSentAt).length).toBe(1);
+	});
+
+	it("parses quiet hours and checks local-hour inclusion", async () => {
+		const mod = await modPromise;
+		const quiet = mod.parseQuietHours("23-08");
+		expect(quiet).toEqual({ startHour: 23, endHour: 8, fullDay: false });
+		expect(mod.isInQuietHours(new Date("2026-02-20T23:30:00"), quiet)).toBe(
+			true,
+		);
+		expect(mod.isInQuietHours(new Date("2026-02-20T07:59:00"), quiet)).toBe(
+			true,
+		);
+		expect(mod.isInQuietHours(new Date("2026-02-20T08:01:00"), quiet)).toBe(
+			false,
+		);
+	});
+
+	it("holds aggregated warn/info during quiet hours", async () => {
+		const mod = await modPromise;
+		const decision = mod.decideAggregateDispatch({
+			now: new Date("2026-02-20T23:30:00"),
+			quietWindow: mod.parseQuietHours("23-08"),
+			dailySummaryAtMinutes: null,
+			aggWindowSec: 60,
+			aggregate: {
+				pending: [{ severity: "warn", kind: "pause_flag_changed" }],
+				firstQueuedAtMs: new Date("2026-02-20T22:00:00").getTime(),
+			},
+		});
+		expect(decision.shouldSend).toBe(false);
+		expect(decision.reason).toBe("quiet_hours_hold");
+	});
+
+	it("flushes aggregated warn/info after window outside quiet hours", async () => {
+		const mod = await modPromise;
+		const decision = mod.decideAggregateDispatch({
+			now: new Date("2026-02-20T14:30:00"),
+			quietWindow: mod.parseQuietHours("23-08"),
+			dailySummaryAtMinutes: null,
+			aggWindowSec: 60,
+			aggregate: {
+				pending: [{ severity: "warn", kind: "pause_flag_changed" }],
+				firstQueuedAtMs: new Date("2026-02-20T14:00:00").getTime(),
+			},
+		});
+		expect(decision.shouldSend).toBe(true);
+		expect(decision.reason).toBe("window");
 	});
 });

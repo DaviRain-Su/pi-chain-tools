@@ -25,10 +25,25 @@ npm run security:watch
 npm run security:watch:notify:test
 # compact posture snapshot (security + stale + last successful check)
 npm run ops:posture
+
+# noise controls (optional, local time)
+export EVM_SECURITY_NOTIFY_QUIET_HOURS=23-08
+export EVM_SECURITY_NOTIFY_WARN_AGG_WINDOW_SEC=900
+export EVM_SECURITY_NOTIFY_CRITICAL_COOLDOWN_SEC=900
+export EVM_SECURITY_NOTIFY_DAILY_SUMMARY_AT=08:30
+
+# service deployment helper (prints systemd/pm2 next steps)
+npm run security:watch:service:help
 ```
 
 Reports are written to:
 `apps/dashboard/data/security-reports/YYYY-MM-DD/latest.json`
+
+Notify behavior:
+- `critical`: immediate, deduped by fingerprint + cooldown.
+- `warn/info`: aggregated and flushed by window (`EVM_SECURITY_NOTIFY_WARN_AGG_WINDOW_SEC`).
+- quiet hours (`EVM_SECURITY_NOTIFY_QUIET_HOURS`) suppress non-critical pushes; critical still sends as urgent.
+- aggregation/dedupe state persists in `apps/dashboard/data/security-state.json`, so restart keeps cooldown + pending summary continuity.
 
 Dashboard security watch APIs/UI:
 - `GET /api/security/watch/status`

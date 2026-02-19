@@ -1,0 +1,23 @@
+[Unit]
+Description=EVM Security Watch Worker (pi-chain-tools)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=davirain
+WorkingDirectory=/home/davirain/clawd/pi-chain-tools
+EnvironmentFile=/home/davirain/clawd/pi-chain-tools/ops/systemd/evm-security-watch.env
+ExecStart=/usr/bin/env npm run security:watch -- --interval 120
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/davirain/clawd/pi-chain-tools/apps/dashboard/data
+
+[Install]
+WantedBy=multi-user.target
