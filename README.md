@@ -23,6 +23,8 @@ npm run security:scan:once
 npm run security:watch
 # dry test notifier payload dispatch (uses latest report or built-in sample)
 npm run security:watch:notify:test
+# compact posture snapshot (security + stale + last successful check)
+npm run ops:posture
 ```
 
 Reports are written to:
@@ -70,8 +72,12 @@ This repo now uses a provider-pluggable MCP architecture:
 - Unified adapter (`src/core/mcp-adapter.ts`): normalized `mcp.search`, `mcp.quote`, `mcp.plan`.
 - Skill entrypoint (`skills/mcp-unified-adapter/SKILL.md`): usage examples via adapter, not provider-specific calls.
 
-### Default provider: DFlow
+### Providers: DFlow + Mock (proof of decoupling)
 
+- `dflow` (default): real MCP endpoint, search capability
+- `mock` (read-only stub): deterministic local provider for non-lock-in wiring tests (`search` + `plan`)
+
+DFlow details:
 - Provider id: `dflow`
 - MCP URL: `https://pond.dflow.net/mcp`
 - Docs page: `https://pond.dflow.net/build/mcp`
@@ -79,6 +85,7 @@ This repo now uses a provider-pluggable MCP architecture:
 Configuration (optional overrides):
 
 - `PI_MCP_PROVIDER=dflow` (default resolver target)
+- switch to stub provider: `PI_MCP_PROVIDER=mock`
 - `DFLOW_MCP_URL=https://pond.dflow.net/mcp`
 
 Quick DFlow test (if `mcporter` is installed):
@@ -138,6 +145,12 @@ All non-green actions include explicit blocker, next action, and code marker ali
     - `mode=native-sepolia` via `STARKNET_NATIVE_EXECUTE_COMMAND_SEPOLIA`
     - `mode=native-mainnet` via `STARKNET_NATIVE_EXECUTE_COMMAND_MAINNET`
     - fallback `mode=command` via `STARKNET_EXECUTE_COMMAND`
+    - adapter seam preference: `STARKNET_EXECUTE_ADAPTER=command|signer-native` (`signer-native` currently falls back to command with explicit marker)
+  - execute result markers (ops/audit proof):
+    - `execution.adapterPreference`
+    - `execution.executeMode`
+    - `execution.executePath` (`command` / `command-fallback` / `not-executed`)
+    - `execution.resultMarker` (`guardrail_blocked` / `simulate_only` / `execute_ready` / `execute_success`)
   - placeholders: `{intent}` `{network}` `{amountUsd}` `{runId}` `{actionType}` `{routeId}` `{amount}` `{minAmountOut}` `{maxFeeBps}`
   - env setup:
     - `STARKNET_BTC_QUOTE_API_URL` (optional, live quote endpoint)

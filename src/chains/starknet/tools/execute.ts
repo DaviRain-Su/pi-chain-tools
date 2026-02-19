@@ -32,6 +32,24 @@ function extractTxHash(text: string): string | null {
 	return fallback ? fallback[0] : null;
 }
 
+type StarknetExecuteTransportMode =
+	| "native-sepolia"
+	| "native-mainnet"
+	| "command"
+	| "execute-ready";
+
+type StarknetExecuteAdapterPreference = "command" | "signer-native";
+
+type StarknetExecutePath = "command" | "command-fallback" | "not-executed";
+
+interface StarknetExecuteSelection {
+	mode: StarknetExecuteTransportMode;
+	template: string;
+	adapterPreference: StarknetExecuteAdapterPreference;
+	path: StarknetExecutePath;
+	fallbackReason?: string;
+}
+
 function resolveExecuteCommand(network: "mainnet" | "sepolia") {
 	const nativeSepolia = String(
 		process.env.STARKNET_NATIVE_EXECUTE_COMMAND_SEPOLIA || "",
@@ -40,17 +58,67 @@ function resolveExecuteCommand(network: "mainnet" | "sepolia") {
 		process.env.STARKNET_NATIVE_EXECUTE_COMMAND_MAINNET || "",
 	).trim();
 	const commandMode = String(process.env.STARKNET_EXECUTE_COMMAND || "").trim();
+	const adapterPreference = String(
+		process.env.STARKNET_EXECUTE_ADAPTER || "command",
+	)
+		.trim()
+		.toLowerCase() as StarknetExecuteAdapterPreference;
+	const wantsSignerNative = adapterPreference === "signer-native";
+	const fallbackReason = wantsSignerNative
+		? "signer_native_adapter_not_implemented_fallback_to_command"
+		: undefined;
 
 	if (network === "sepolia" && nativeSepolia) {
-		return { mode: "native-sepolia", template: nativeSepolia } as const;
+		return {
+			mode: "native-sepolia",
+			template: nativeSepolia,
+			adapterPreference,
+			path: wantsSignerNative ? "command-fallback" : "command",
+			fallbackReason,
+		} as const satisfies StarknetExecuteSelection;
 	}
 	if (network === "mainnet" && nativeMainnet) {
-		return { mode: "native-mainnet", template: nativeMainnet } as const;
+		return {
+			mode: "native-mainnet",
+			template: nativeMainnet,
+			adapterPreference,
+			path: wantsSignerNative ? "command-fallback" : "command",
+			fallbackReason,
+		} as const satisfies StarknetExecuteSelection;
 	}
 	if (commandMode) {
-		return { mode: "command", template: commandMode } as const;
+		return {
+			mode: "command",
+			template: commandMode,
+			adapterPreference,
+			path: wantsSignerNative ? "command-fallback" : "command",
+			fallbackReason,
+		} as const satisfies StarknetExecuteSelection;
 	}
-	return { mode: "execute-ready", template: "" } as const;
+	return {
+		mode: "execute-ready",
+		template: "",
+		adapterPreference,
+		path: "not-executed",
+		fallbackReason,
+	} as const satisfies StarknetExecuteSelection;
+}
+
+function createExecutionMarkers(args: {
+	selection: StarknetExecuteSelection;
+	resultMarker:
+		| "guardrail_blocked"
+		| "simulate_only"
+		| "execute_ready"
+		| "execute_success";
+}) {
+	return {
+		adapterPreference: args.selection.adapterPreference,
+		executeMode: args.selection.mode,
+		executePath: args.selection.path,
+		resultMarker: args.resultMarker,
+		fallbackReason: args.selection.fallbackReason,
+	};
 }
 
 export function createStarknetExecuteTools() {
@@ -107,6 +175,11 @@ export function createStarknetExecuteTools() {
 				const minAmountOut =
 					params.minAmountOut !== undefined ? String(params.minAmountOut) : "0";
 				const routeId = params.routeId ? String(params.routeId) : "";
+				const selection = resolveExecuteCommand(network);
+				const guardrailMarkers = createExecutionMarkers({
+					selection,
+					resultMarker: "guardrail_blocked",
+				});
 
 				if (actionType === "btc_bridge_swap") {
 					if (!routeId) {
@@ -120,6 +193,7 @@ export function createStarknetExecuteTools() {
 										reason: "missing_route_id",
 										actionType,
 										network,
+										execution: guardrailMarkers,
 									}),
 								},
 							],
@@ -129,6 +203,7 @@ export function createStarknetExecuteTools() {
 								reason: "missing_route_id",
 								actionType,
 								network,
+								execution: guardrailMarkers,
 							},
 						};
 					}
@@ -143,6 +218,7 @@ export function createStarknetExecuteTools() {
 										reason: "invalid_amount",
 										actionType,
 										network,
+										execution: guardrailMarkers,
 									}),
 								},
 							],
@@ -152,6 +228,7 @@ export function createStarknetExecuteTools() {
 								reason: "invalid_amount",
 								actionType,
 								network,
+								execution: guardrailMarkers,
 							},
 						};
 					}
@@ -179,6 +256,7 @@ export function createStarknetExecuteTools() {
 										network,
 										actionType,
 										boundaryProof,
+										execution: guardrailMarkers,
 									}),
 								},
 							],
@@ -191,6 +269,7 @@ export function createStarknetExecuteTools() {
 								network,
 								actionType,
 								boundaryProof,
+								execution: guardrailMarkers,
 							},
 						};
 					}
@@ -216,6 +295,7 @@ export function createStarknetExecuteTools() {
 									network,
 									actionType,
 									boundaryProof,
+									execution: guardrailMarkers,
 								}),
 							},
 						],
@@ -228,6 +308,7 @@ export function createStarknetExecuteTools() {
 							network,
 							actionType,
 							boundaryProof,
+							execution: guardrailMarkers,
 						},
 					};
 				}
@@ -250,6 +331,7 @@ export function createStarknetExecuteTools() {
 									network,
 									actionType,
 									boundaryProof,
+									execution: guardrailMarkers,
 								}),
 							},
 						],
@@ -260,6 +342,7 @@ export function createStarknetExecuteTools() {
 							network,
 							actionType,
 							boundaryProof,
+							execution: guardrailMarkers,
 						},
 					};
 				}
@@ -291,6 +374,10 @@ export function createStarknetExecuteTools() {
 										maxFeeBps: feeCapBps,
 									},
 									boundaryProof,
+									execution: createExecutionMarkers({
+										selection,
+										resultMarker: "simulate_only",
+									}),
 								}),
 							},
 						],
@@ -310,13 +397,16 @@ export function createStarknetExecuteTools() {
 								maxFeeBps: feeCapBps,
 							},
 							boundaryProof,
+							execution: createExecutionMarkers({
+								selection,
+								resultMarker: "simulate_only",
+							}),
 						},
 					};
 				}
 
 				const runId = String(params.runId || `starknet-${Date.now()}`);
-				const commandSelection = resolveExecuteCommand(network);
-				if (!commandSelection.template) {
+				if (!selection.template) {
 					const boundaryProof = {
 						confirmPassed: true,
 						policyPassed: true,
@@ -333,7 +423,10 @@ export function createStarknetExecuteTools() {
 									network,
 									intent: params.intent,
 									actionType,
-									executeMode: commandSelection.mode,
+									execution: createExecutionMarkers({
+										selection,
+										resultMarker: "execute_ready",
+									}),
 									boundaryProof,
 								}),
 							},
@@ -344,13 +437,16 @@ export function createStarknetExecuteTools() {
 							network,
 							intent: params.intent,
 							actionType,
-							executeMode: commandSelection.mode,
+							execution: createExecutionMarkers({
+								selection,
+								resultMarker: "execute_ready",
+							}),
 							boundaryProof,
 						},
 					};
 				}
 
-				const cmd = commandSelection.template
+				const cmd = selection.template
 					.split("{intent}")
 					.join(params.intent)
 					.split("{network}")
@@ -379,34 +475,39 @@ export function createStarknetExecuteTools() {
 						? "tx hash detected from execute output"
 						: "execute output returned without explicit tx hash; verify adapter output format",
 				};
+				const execution = createExecutionMarkers({
+					selection,
+					resultMarker: "execute_success",
+				});
 				return {
 					content: [
 						{
 							type: "text",
 							text: JSON.stringify({
 								ok: true,
-								mode: commandSelection.mode,
+								mode: selection.mode,
 								network,
 								intent: params.intent,
 								actionType,
 								routeId: routeId || undefined,
 								txHash,
 								runId,
+								execution,
 								boundaryProof,
 							}),
 						},
 					],
 					details: {
 						ok: true,
-						mode: commandSelection.mode,
+						mode: selection.mode,
 						network,
 						intent: params.intent,
 						actionType,
 						routeId: routeId || undefined,
 						txHash,
 						runId,
-						commandMode: true,
 						output,
+						execution,
 						boundaryProof,
 					},
 				};
@@ -414,3 +515,5 @@ export function createStarknetExecuteTools() {
 		}),
 	];
 }
+
+export { resolveExecuteCommand };

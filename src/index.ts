@@ -11,6 +11,7 @@ export {
 	createMcpProviderRegistry,
 } from "./mcp/registry.js";
 export { createDflowMcpProvider } from "./mcp/providers/dflow.js";
+export { createMockMcpProvider } from "./mcp/providers/mock.js";
 export type {
 	ChainToolGroup,
 	ChainToolGroupName,

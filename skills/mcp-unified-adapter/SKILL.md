@@ -38,4 +38,6 @@ const plan = await adapter.plan({
 
 - `providerId` is optional. If omitted, adapter resolves the configured default provider.
 - Current default provider: `dflow` (when configured/available).
+- Built-in read-only stub provider: `mock` (useful for local/offline decoupling checks).
+- Switch provider globally via env: `PI_MCP_PROVIDER=mock` (or `dflow`).
 - Unsupported capabilities return normalized `{ error.code: "not_supported" }`.

@@ -545,3 +545,29 @@ npm run security:watch:notify:test
   `cp apps/dashboard/config/security-watchlist.example.json apps/dashboard/config/security-watchlist.json`
 - 每次修改 watchlist 后先跑 `npm run security:scan:once` 校验格式与连通性。
 - 常驻模式建议配合 systemd/cron（见 `docs/evm-security-watch-cron.md`）。
+
+### 6.3 Compact posture snapshot (security + stale + last good check)
+
+```bash
+npm run ops:posture
+```
+
+输出为单个 JSON，聚合：
+- `securityWatch.health`（ok/warn/critical/stale/missing）
+- `checkStatus.freshness`（fresh/stale/unknown）
+- `checkStatus.lastSuccessfulCheck`
+
+Graceful degradation：
+- 若 `security-state`/`security-reports` 缺失，返回 `health=missing` 而非报错退出。
+- 若 `ci-signatures.jsonl` 缺失，返回 `lastCheck=null`/`lastSuccessfulCheck=null`。
+
+### 6.4 Foundry crystallization fallback（当无匹配候选）
+
+若 `foundry_overseer` + `foundry_crystallize` 本轮没有给出直接匹配（python/cwd/check-churn）候选，先按以下本地模式兜底：
+1. 固定入口：优先 `npm run ci:resilient`，避免直接裸跑 `npm run ci`。
+2. 失败分类：读取 `apps/dashboard/data/ci-signatures.jsonl`，按 `checkFailureKind` 聚类。
+3. 快速处置：
+   - `python-missing`：安装/暴露 `python3`（或保留 shim），再跑 `npm run ci:resilient`。
+   - `normalize-runtime-metrics*`：先执行 `node scripts/normalize-runtime-metrics.mjs`，确认目标 JSON 可写。
+   - `check-interrupted/sigterm`：避免并发 CI，执行一次 `npm run ci:retry`。
+4. 复盘沉淀：将重复簇（>=3 次）回写到 runbook 并在下一轮再次尝试 crystallize。

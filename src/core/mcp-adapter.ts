@@ -4,6 +4,7 @@ import type {
 	McpProviderResult,
 } from "../mcp/provider.js";
 import { createDflowMcpProvider } from "../mcp/providers/dflow.js";
+import { createMockMcpProvider } from "../mcp/providers/mock.js";
 import {
 	type McpProviderRegistry,
 	createMcpProviderRegistry,
@@ -115,7 +116,7 @@ export function createMcpAdapter(args?: {
 		createMcpProviderRegistry({
 			providers: args?.providers?.length
 				? args.providers
-				: [createDflowMcpProvider()],
+				: [createDflowMcpProvider(), createMockMcpProvider()],
 			defaultProviderId: args?.defaultProviderId,
 		});
 
