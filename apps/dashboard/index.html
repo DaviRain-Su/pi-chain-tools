@@ -203,13 +203,13 @@
   </head>
   <body>
     <div class="wrap">
-      <h1>NEAR Agent Dashboard</h1>
-      <p class="muted">Portfolio + Burrow + worker/runtime status in one page.</p>
+      <h1>NEAR · BSC 智能理财面板</h1>
+      <p class="muted">小白模式：只看关键资产、是否可执行、最近交易。</p>
       <div class="row" style="margin-bottom:16px">
         <input id="accountId" size="36" placeholder="account.near" />
         <button id="refresh">Refresh</button>
-        <button id="viewDemo">Demo View</button>
-        <button id="viewFull">Full View</button>
+        <button id="viewDemo">小白模式</button>
+        <button id="viewFull">专业模式</button>
         <span id="meta" class="muted"></span>
       </div>
       <div id="statusBanner" class="status-banner" style="display:none"></div>
@@ -222,10 +222,10 @@
       </div>
 
       <div class="grid" style="margin-top:12px">
-        <div class="card"><h3>KPI · NEAR</h3><div id="kpiNear" class="muted">-</div></div>
-        <div class="card"><h3>KPI · BSC</h3><div id="kpiBsc" class="muted">-</div></div>
-        <div class="card"><h3>KPI · Worker</h3><div id="kpiWorker" class="muted">-</div></div>
-        <div class="card"><h3>KPI · Last Tx</h3><div id="kpiLastTx" class="muted">-</div></div>
+        <div class="card"><h3>我的 NEAR</h3><div id="kpiNear" class="muted">-</div></div>
+        <div class="card"><h3>我的 BSC 稳定币</h3><div id="kpiBsc" class="muted">-</div></div>
+        <div class="card"><h3>自动执行状态</h3><div id="kpiWorker" class="muted">-</div></div>
+        <div class="card"><h3>最近一笔交易</h3><div id="kpiLastTx" class="muted">-</div></div>
       </div>
 
       <div class="card" style="margin-top:16px">
