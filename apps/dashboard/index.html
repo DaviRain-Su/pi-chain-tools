@@ -34,9 +34,9 @@
       }
 
       .wrap {
-        max-width: 1120px;
+        max-width: 1320px;
         margin: 0 auto;
-        padding: 28px 20px 40px;
+        padding: 24px 24px 40px;
       }
 
       h1 {
@@ -51,7 +51,17 @@
         letter-spacing: 0.2px;
       }
 
-      .muted { color: var(--muted); }
+      .muted {
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .dense-data {
+        font-size: 13px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
 
       .grid {
         display: grid;
@@ -63,7 +73,7 @@
         background: linear-gradient(180deg, var(--card) 0%, var(--card-2) 100%);
         border: 1px solid var(--border);
         border-radius: 16px;
-        padding: 14px;
+        padding: 16px;
         backdrop-filter: blur(10px);
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
       }
@@ -145,6 +155,29 @@
       }
 
       a:hover { text-decoration: underline; }
+
+      #yieldHealth,
+      #bscProtocolHealth,
+      #bscYieldReadiness,
+      #bscMarketHealth,
+      #execQuality,
+      #burrowPos,
+      #worker,
+      #acpOps,
+      #acpFailureHeatmap,
+      #monadMorphoReadiness,
+      #monadMorphoMarkets,
+      #monadMorphoStrategy,
+      #monadMorphoWorker,
+      #monadMorphoRewards,
+      #monadMorphoRewardsClaim,
+      #monadMorphoLast,
+      #monadMorphoTrend {
+        font-size: 13px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
     </style>
   </head>
   <body>
