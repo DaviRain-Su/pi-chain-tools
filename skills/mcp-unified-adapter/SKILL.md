@@ -29,8 +29,11 @@ const quote = await adapter.quote({
 });
 
 const plan = await adapter.plan({
-  providerId: "dflow",
-  params: { intent: "best route for stable swap" },
+  providerId: "breeze",
+  params: {
+    intent: "stablecoin yield review",
+    balances: [{ symbol: "USDC", amount: "250" }],
+  },
 });
 ```
 
@@ -38,6 +41,7 @@ const plan = await adapter.plan({
 
 - `providerId` is optional. If omitted, adapter resolves the configured default provider.
 - Current default provider: `dflow` (when configured/available).
+- Breeze provider (`breeze`) supports read-only `search + plan` for yield strategy discovery/proposals.
 - Built-in read-only stub provider: `mock` (useful for local/offline decoupling checks).
-- Switch provider globally via env: `PI_MCP_PROVIDER=mock` (or `dflow`).
+- Switch provider globally via env: `PI_MCP_PROVIDER=breeze` (or `mock` / `dflow`).
 - Unsupported capabilities return normalized `{ error.code: "not_supported" }`.

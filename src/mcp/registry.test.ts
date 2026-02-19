@@ -17,15 +17,22 @@ const demoProvider: McpProvider = {
 	capabilities: ["search", "quote", "plan"],
 };
 
+const breezeProvider: McpProvider = {
+	id: "breeze",
+	label: "Breeze",
+	capabilities: ["search", "plan"],
+};
+
 describe("mcp provider registry", () => {
 	it("resolves explicit provider by id", () => {
 		const registry = createMcpProviderRegistry({
-			providers: [dflowProvider, demoProvider],
+			providers: [dflowProvider, breezeProvider, demoProvider],
 			defaultProviderId: DEFAULT_MCP_PROVIDER_ID,
 		});
 
 		expect(registry.resolve("demo")?.id).toBe("demo");
 		expect(registry.resolve("DFLOW")?.id).toBe("dflow");
+		expect(registry.resolve("breeze")?.id).toBe("breeze");
 	});
 
 	it("falls back to configured default when providerId is omitted", () => {

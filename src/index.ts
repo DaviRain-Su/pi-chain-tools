@@ -10,6 +10,7 @@ export {
 	DEFAULT_MCP_PROVIDER_ID,
 	createMcpProviderRegistry,
 } from "./mcp/registry.js";
+export { createBreezeMcpProvider } from "./mcp/providers/breeze.js";
 export { createDflowMcpProvider } from "./mcp/providers/dflow.js";
 export { createMockMcpProvider } from "./mcp/providers/mock.js";
 export type {

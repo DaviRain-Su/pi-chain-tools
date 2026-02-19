@@ -59,8 +59,16 @@ describe("unified mcp adapter", () => {
 				return { ok: true, data: { provider: "dflow", query } };
 			},
 		};
+		const breezeProvider: McpProvider = {
+			id: "breeze",
+			label: "Breeze",
+			capabilities: ["search", "plan"],
+			async search(query) {
+				return { ok: true, data: { provider: "breeze", query } };
+			},
+		};
 		const adapter = createMcpAdapter({
-			providers: [dflowProvider, mockProvider],
+			providers: [dflowProvider, breezeProvider, mockProvider],
 			defaultProviderId: "dflow",
 		});
 
@@ -69,12 +77,18 @@ describe("unified mcp adapter", () => {
 			query: "btc",
 			providerId: "mock",
 		});
+		const viaBreeze = await adapter.search({
+			query: "btc",
+			providerId: "breeze",
+		});
 		expect(viaDefault.ok).toBe(true);
 		expect(viaDefault.provider.id).toBe("dflow");
 		expect(viaDefault.action).toBe("mcp.search");
 		expect(viaSwitch.ok).toBe(true);
 		expect(viaSwitch.provider.id).toBe("mock");
 		expect(viaSwitch.action).toBe("mcp.search");
+		expect(viaBreeze.ok).toBe(true);
+		expect(viaBreeze.provider.id).toBe("breeze");
 	});
 
 	it("respects PI_MCP_PROVIDER env default when available", async () => {

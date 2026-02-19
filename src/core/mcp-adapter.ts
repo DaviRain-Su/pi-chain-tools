@@ -3,6 +3,7 @@ import type {
 	McpProvider,
 	McpProviderResult,
 } from "../mcp/provider.js";
+import { createBreezeMcpProvider } from "../mcp/providers/breeze.js";
 import { createDflowMcpProvider } from "../mcp/providers/dflow.js";
 import { createMockMcpProvider } from "../mcp/providers/mock.js";
 import {
@@ -116,7 +117,11 @@ export function createMcpAdapter(args?: {
 		createMcpProviderRegistry({
 			providers: args?.providers?.length
 				? args.providers
-				: [createDflowMcpProvider(), createMockMcpProvider()],
+				: [
+						createDflowMcpProvider(),
+						createBreezeMcpProvider(),
+						createMockMcpProvider(),
+					],
 			defaultProviderId: args?.defaultProviderId,
 		});
 

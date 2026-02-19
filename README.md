@@ -87,9 +87,10 @@ This repo now uses a provider-pluggable MCP architecture:
 - Unified adapter (`src/core/mcp-adapter.ts`): normalized `mcp.search`, `mcp.quote`, `mcp.plan`.
 - Skill entrypoint (`skills/mcp-unified-adapter/SKILL.md`): usage examples via adapter, not provider-specific calls.
 
-### Providers: DFlow + Mock (proof of decoupling)
+### Providers: DFlow + Breeze + Mock (proof of decoupling)
 
 - `dflow` (default): real MCP endpoint, search capability
+- `breeze` (read/plan): inferred strategy/info API integration for `search` + yield `plan` proposals (no execute)
 - `mock` (read-only stub): deterministic local provider for non-lock-in wiring tests (`search` + `plan`)
 
 DFlow details:
@@ -100,8 +101,10 @@ DFlow details:
 Configuration (optional overrides):
 
 - `PI_MCP_PROVIDER=dflow` (default resolver target)
-- switch to stub provider: `PI_MCP_PROVIDER=mock`
+- switch providers: `PI_MCP_PROVIDER=breeze` (or `mock`)
 - `DFLOW_MCP_URL=https://pond.dflow.net/mcp`
+- `BREEZE_API_BASE_URL=<required_if_using_breeze>`
+- `BREEZE_API_KEY=<optional_or_required_by_your_breeze_deployment>`
 
 Quick DFlow test (if `mcporter` is installed):
 
@@ -110,6 +113,26 @@ mcporter call https://pond.dflow.net/mcp.fetch query="imperative trade"
 ```
 
 > If your MCP client expects named servers, use the included `.mcp.json` with server name `DFlow`.
+
+### Breeze integration (read/plan only)
+
+Current integrated abilities:
+- `search`: attempts Breeze MCP/strategy/info read endpoints and normalizes strategy-like items.
+- `plan`: builds read-only yield action proposals from strategy data + optional wallet balances input.
+
+Environment setup:
+
+```bash
+export PI_MCP_PROVIDER=breeze
+export BREEZE_API_BASE_URL="https://<your-breeze-api>"
+# optional when Breeze deployment requires auth
+export BREEZE_API_KEY="<your-api-key>"
+```
+
+Limitations:
+- Breeze flow is **read + plan only** in unified adapter path.
+- Endpoint mapping is inferred unless your Breeze deployment exposes a stable MCP/search route.
+- If endpoint or env is missing, provider returns normalized errors/warnings (no execute bypass).
 
 ### Why this avoids vendor lock-in
 
