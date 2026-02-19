@@ -156,6 +156,8 @@
 
       a:hover { text-decoration: underline; }
 
+      .card.hidden-by-demo { display: none; }
+
       #yieldHealth,
       #bscProtocolHealth,
       #bscYieldReadiness,
@@ -187,6 +189,8 @@
       <div class="row" style="margin-bottom:16px">
         <input id="accountId" size="36" placeholder="account.near" />
         <button id="refresh">Refresh</button>
+        <button id="viewDemo">Demo View</button>
+        <button id="viewFull">Full View</button>
         <span id="meta" class="muted"></span>
       </div>
 
@@ -510,6 +514,8 @@
     <script>
       const accountInput = document.getElementById("accountId");
       const refreshBtn = document.getElementById("refresh");
+      const viewDemoBtn = document.getElementById("viewDemo");
+      const viewFullBtn = document.getElementById("viewFull");
       const nearEl = document.getElementById("near");
       const burrowRegEl = document.getElementById("burrowReg");
       const workerEl = document.getElementById("worker");
@@ -734,6 +740,30 @@
 
       const TARGET_KEY = "near-dashboard-targets-v1";
       const ACP_FILTERS_KEY = "near-dashboard-acp-filters-v1";
+      const VIEW_MODE_KEY = "near-dashboard-view-mode-v1";
+
+      function applyViewMode(mode = "demo") {
+        const keepTitles = new Set([
+          "NEAR Wallet",
+          "Burrow Registration",
+          "Yield Worker",
+          "Yield Health",
+          "Target Allocation Alert",
+          "Recent Executions (local session)",
+        ]);
+        const cards = Array.from(document.querySelectorAll(".card"));
+        for (const card of cards) {
+          const title = (card.querySelector("h3")?.textContent || "").trim();
+          if (mode === "full") {
+            card.classList.remove("hidden-by-demo");
+          } else {
+            const keep = keepTitles.has(title);
+            card.classList.toggle("hidden-by-demo", !keep);
+          }
+        }
+        if (viewDemoBtn) viewDemoBtn.style.opacity = mode === "demo" ? "1" : "0.65";
+        if (viewFullBtn) viewFullBtn.style.opacity = mode === "full" ? "1" : "0.65";
+      }
 
       function loadTargets() {
         try {
@@ -3047,9 +3077,20 @@
         acpAsyncMetaEl.textContent = "ACP filters reset";
         load().catch(() => {});
       });
+
+      viewDemoBtn?.addEventListener("click", () => {
+        localStorage.setItem(VIEW_MODE_KEY, "demo");
+        applyViewMode("demo");
+      });
+      viewFullBtn?.addEventListener("click", () => {
+        localStorage.setItem(VIEW_MODE_KEY, "full");
+        applyViewMode("full");
+      });
+
       applyAcpFiltersFromStorage();
       applyAcpFiltersFromUrl();
       syncAcpFiltersToUrl();
+      applyViewMode(localStorage.getItem(VIEW_MODE_KEY) || "demo");
       load().catch((e) => (metaEl.textContent = e.message));
       setInterval(() => load().catch(() => {}), 30000);
     </script>
