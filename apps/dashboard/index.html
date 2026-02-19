@@ -1356,46 +1356,47 @@
         const accountId = accountInput.value.trim();
         const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
         const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
+        const safeFetch = (input) => fetch(input).catch(() => null);
         const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes] = await Promise.all([
-          fetch(`/api/snapshot${query}`),
-          fetch(`/api/portfolio/unified${query}`),
-          fetch(`/api/bsc/yield/plan${query ? `${query}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
-          fetch(`/api/bsc/yield/markets${query || ""}`),
-          fetch("/api/acp/status"),
-          fetch("/api/acp/jobs/summary"),
-          fetch("/api/acp/jobs"),
-          fetch("/api/payments"),
-          fetch("/api/acp/jobs/dead-letter"),
-          fetch("/api/acp/jobs/dismissed"),
-          fetch("/api/ops/ci-signatures?limit=30"),
-          fetch("/api/monad/morpho/earn/readiness"),
-          fetch("/api/monad/morpho/earn/markets"),
-          fetch("/api/monad/morpho/earn/strategy"),
-          fetch("/api/monad/morpho/worker/status"),
-          fetch("/api/monad/morpho/earn/rewards"),
-          fetch("/api/monad/agent/profile"),
-          fetch("/api/pi-mcp/discover"),
+          safeFetch(`/api/snapshot${query}`),
+          safeFetch(`/api/portfolio/unified${query}`),
+          safeFetch(`/api/bsc/yield/plan${query ? `${query}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
+          safeFetch(`/api/bsc/yield/markets${query || ""}`),
+          safeFetch("/api/acp/status"),
+          safeFetch("/api/acp/jobs/summary"),
+          safeFetch("/api/acp/jobs"),
+          safeFetch("/api/payments"),
+          safeFetch("/api/acp/jobs/dead-letter"),
+          safeFetch("/api/acp/jobs/dismissed"),
+          safeFetch("/api/ops/ci-signatures?limit=30"),
+          safeFetch("/api/monad/morpho/earn/readiness"),
+          safeFetch("/api/monad/morpho/earn/markets"),
+          safeFetch("/api/monad/morpho/earn/strategy"),
+          safeFetch("/api/monad/morpho/worker/status"),
+          safeFetch("/api/monad/morpho/earn/rewards"),
+          safeFetch("/api/monad/agent/profile"),
+          safeFetch("/api/pi-mcp/discover"),
         ]);
-        const data = await snapRes.json();
-        const unified = await unifiedRes.json().catch(() => ({ ok: false }));
-        const bscYieldPlan = await bscYieldPlanRes.json().catch(() => ({ ok: false }));
-        const bscYieldMarkets = await bscYieldMarketsRes.json().catch(() => ({ ok: false }));
-        const acpStatus = await acpStatusRes.json().catch(() => ({ ok: false }));
-        const acpSummary = await acpSummaryRes.json().catch(() => ({ ok: false }));
-        const acpJobs = await acpJobsRes.json().catch(() => ({ ok: false, jobs: [] }));
-        const payments = await paymentsRes.json().catch(() => ({ ok: false, payments: [] }));
-        const acpDead = await acpDeadRes.json().catch(() => ({ ok: false, deadLetters: [] }));
-        const acpDismissed = await acpDismissedRes.json().catch(() => ({ ok: false, dismissed: [] }));
-        const ciSignatures = await ciSignaturesRes.json().catch(() => ({ ok: false, signatures: [] }));
-        const monadMorphoReadiness = await monadMorphoReadinessRes.json().catch(() => ({ ok: false }));
-        const monadMorphoMarkets = await monadMorphoMarketsRes.json().catch(() => ({ ok: false, markets: [] }));
-        const monadMorphoStrategy = await monadMorphoStrategyRes.json().catch(() => ({ ok: false, strategy: null }));
-        const monadMorphoWorker = await monadMorphoWorkerRes.json().catch(() => ({ ok: false, worker: {} }));
-        const monadMorphoRewards = await monadMorphoRewardsRes.json().catch(() => ({ ok: false, rewards: [] }));
-        const monadAgentProfilePayload = await monadAgentProfileRes.json().catch(() => ({ ok: false, profile: null }));
-        const piMcpDiscover = await piMcpDiscoverRes.json().catch(() => ({ ok: false, data: {} }));
+        const data = snapRes ? await snapRes.json().catch(() => ({ error: "snapshot_parse_failed" })) : { error: "snapshot_unreachable" };
+        const unified = unifiedRes ? await unifiedRes.json().catch(() => ({ ok: false })) : { ok: false };
+        const bscYieldPlan = bscYieldPlanRes ? await bscYieldPlanRes.json().catch(() => ({ ok: false })) : { ok: false };
+        const bscYieldMarkets = bscYieldMarketsRes ? await bscYieldMarketsRes.json().catch(() => ({ ok: false })) : { ok: false };
+        const acpStatus = acpStatusRes ? await acpStatusRes.json().catch(() => ({ ok: false })) : { ok: false };
+        const acpSummary = acpSummaryRes ? await acpSummaryRes.json().catch(() => ({ ok: false })) : { ok: false };
+        const acpJobs = acpJobsRes ? await acpJobsRes.json().catch(() => ({ ok: false, jobs: [] })) : { ok: false, jobs: [] };
+        const payments = paymentsRes ? await paymentsRes.json().catch(() => ({ ok: false, payments: [] })) : { ok: false, payments: [] };
+        const acpDead = acpDeadRes ? await acpDeadRes.json().catch(() => ({ ok: false, deadLetters: [] })) : { ok: false, deadLetters: [] };
+        const acpDismissed = acpDismissedRes ? await acpDismissedRes.json().catch(() => ({ ok: false, dismissed: [] })) : { ok: false, dismissed: [] };
+        const ciSignatures = ciSignaturesRes ? await ciSignaturesRes.json().catch(() => ({ ok: false, signatures: [] })) : { ok: false, signatures: [] };
+        const monadMorphoReadiness = monadMorphoReadinessRes ? await monadMorphoReadinessRes.json().catch(() => ({ ok: false })) : { ok: false };
+        const monadMorphoMarkets = monadMorphoMarketsRes ? await monadMorphoMarketsRes.json().catch(() => ({ ok: false, markets: [] })) : { ok: false, markets: [] };
+        const monadMorphoStrategy = monadMorphoStrategyRes ? await monadMorphoStrategyRes.json().catch(() => ({ ok: false, strategy: null })) : { ok: false, strategy: null };
+        const monadMorphoWorker = monadMorphoWorkerRes ? await monadMorphoWorkerRes.json().catch(() => ({ ok: false, worker: {} })) : { ok: false, worker: {} };
+        const monadMorphoRewards = monadMorphoRewardsRes ? await monadMorphoRewardsRes.json().catch(() => ({ ok: false, rewards: [] })) : { ok: false, rewards: [] };
+        const monadAgentProfilePayload = monadAgentProfileRes ? await monadAgentProfileRes.json().catch(() => ({ ok: false, profile: null })) : { ok: false, profile: null };
+        const piMcpDiscover = piMcpDiscoverRes ? await piMcpDiscoverRes.json().catch(() => ({ ok: false, data: {} })) : { ok: false, data: {} };
         lastCiSignatures = ciSignatures;
-        if (!snapRes.ok) {
+        if (!snapRes || !snapRes.ok) {
           metaEl.textContent = `Error: ${data.error || "Unknown"}`;
           return;
         }
