@@ -61,9 +61,16 @@ All non-green actions include explicit blocker, next action, and code marker ali
 - `src/chains/sui`: Sui runtime + grouped tools
 - `src/chains/near`: NEAR runtime + grouped tools
 - `src/chains/starknet`: Starknet runtime + grouped tools (Re{define} privacy+bitcoin phase-2 scaffold: read/compose/guarded-execute)
-  - command-mode execute can be wired with `STARKNET_EXECUTE_COMMAND` placeholders: `{intent}` `{network}` `{amountUsd}` `{runId}`
-  - quick start example:
+  - execute adapter mode selection:
+    - `mode=native-sepolia` via `STARKNET_NATIVE_EXECUTE_COMMAND_SEPOLIA`
+    - `mode=native-mainnet` via `STARKNET_NATIVE_EXECUTE_COMMAND_MAINNET`
+    - fallback `mode=command` via `STARKNET_EXECUTE_COMMAND`
+  - placeholders: `{intent}` `{network}` `{amountUsd}` `{runId}`
+  - quick start examples:
+    - `export STARKNET_NATIVE_EXECUTE_COMMAND_SEPOLIA='bash scripts/starknet-execute-example.sh "{intent}" "sepolia" "{amountUsd}" "{runId}"'`
+    - `export STARKNET_NATIVE_EXECUTE_COMMAND_MAINNET='bash scripts/starknet-execute-example.sh "{intent}" "mainnet" "{amountUsd}" "{runId}"'`
     - `export STARKNET_EXECUTE_COMMAND='bash scripts/starknet-execute-example.sh "{intent}" "{network}" "{amountUsd}" "{runId}"'`
+  - proof artifact command: `npm run execute:proof:starknet -- --tx 0x...`
 - `src/chains/evm`: shared EVM runtime/tool stack (Polymarket BTC 5m + transfer/read/compose/execute), with configurable multi-network support (including `bsc`) and mainnet-guard policy reuse
 - `src/pi`: Pi-specific adapter entrypoints
 - Workflow artifact summaries use a stable schema: `summaryLine` (string) + `summary` (`schema = w3rt.workflow.summary.v1`)

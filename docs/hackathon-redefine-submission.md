@@ -67,6 +67,14 @@ In short, PI Chain Tools turns Starknet privacy/BTC narratives into a practical,
 - [ ] 3-minute demo video
 - [ ] Starknet wallet address for rewards
 
+## Starknet Tx Proof Checklist (Execution Artifact)
+- [ ] At least one Starknet tx hash captured from execute output (sepolia/mainnet)
+- [ ] Generate proof file:
+  - `npm run execute:proof:starknet -- --tx 0xYOUR_STARKNET_TX_HASH`
+- [ ] Attach generated markdown:
+  - `docs/execution-proofs/YYYY-MM-DD/proof-starknet.md`
+- [ ] Verify links open on Starkscan (mainnet/sepolia)
+
 ## Notes
 - Hackathon page: https://dorahacks.io/hackathon/redefine/detail
 - Track focus: Privacy + Bitcoin on Starknet
