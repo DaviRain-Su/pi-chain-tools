@@ -31,6 +31,26 @@ Multi-chain toolset library for Pi extensions with a chain-agnostic grouping mod
 - `execute`
 - `rpc`
 
+## DFlow MCP Integration (enabled)
+
+This project can now connect to DFlow's hosted MCP server:
+
+- MCP URL: `https://pond.dflow.net/mcp`
+- Docs page: `https://pond.dflow.net/build/mcp`
+
+Quick setup options:
+
+1. Project-level MCP config (`.mcp.json` in repo root)
+2. `mcporter` direct calls for testing/querying DFlow docs/tools
+
+Quick test (if `mcporter` is installed):
+
+```bash
+mcporter call https://pond.dflow.net/mcp.fetch query="imperative trade"
+```
+
+> If your MCP client expects named servers, use the included `.mcp.json` with server name `DFlow`.
+
 ## Architecture Core
 
 - **Core architecture principles**: [`docs/core-architecture-principles.md`](docs/core-architecture-principles.md)
@@ -88,6 +108,7 @@ All non-green actions include explicit blocker, next action, and code marker ali
 - **`docs/near-hackathon.md`：NEAR Innovation Sandbox — Autonomous Stablecoin Yield Agent**
 - `docs/monad-ai-hackathon.md`：Monad AI Hackathon 参赛文档（赛道选择、架构优势、展示脚本与评审话术）
 - `docs/monad-agent-identity-v1.4-notes.md`：Monad agent v1.4 productization notes（profile/name/delegation gate）
+- `docs/dflow-mcp-integration.md`：DFlow MCP 接入与快速验证
 
 ## Solana Tool Groups
 

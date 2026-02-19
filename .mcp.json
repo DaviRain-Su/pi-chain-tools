@@ -1,0 +1,8 @@
+{
+	"mcpServers": {
+		"DFlow": {
+			"type": "http",
+			"url": "https://pond.dflow.net/mcp"
+		}
+	}
+}
