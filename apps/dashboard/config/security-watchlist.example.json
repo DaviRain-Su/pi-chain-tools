@@ -1,0 +1,41 @@
+{
+	"chains": [
+		{
+			"chainId": 1,
+			"name": "ethereum",
+			"rpcUrlEnv": "ETHEREUM_RPC_URL",
+			"explorerBaseUrl": "https://etherscan.io"
+		},
+		{
+			"chainId": 56,
+			"name": "bsc",
+			"rpcUrlEnv": "BSC_RPC_URL",
+			"explorerBaseUrl": "https://bscscan.com"
+		}
+	],
+	"contracts": [
+		{
+			"chainId": 1,
+			"address": "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+			"label": "USDC",
+			"type": "erc20",
+			"ownerExpected": "0x0000000000000000000000000000000000000000"
+		},
+		{
+			"chainId": 56,
+			"address": "0x55d398326f99059fF775485246999027B3197955",
+			"label": "USDT-BSC",
+			"type": "erc20"
+		}
+	],
+	"thresholds": {
+		"largeApprovalUsd": 100000,
+		"largeTransferUsd": 250000,
+		"checkIntervalSec": 300
+	},
+	"notify": {
+		"enabled": true,
+		"severityMin": "warn",
+		"channelHint": "telegram:ops"
+	}
+}

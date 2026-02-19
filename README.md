@@ -4,6 +4,20 @@ Gradience is a multi-chain AI agent runtime — 44 NEAR tools, 30+ EVM tools, fu
 
 **Featured: [Autonomous Stablecoin Yield Agent on NEAR](docs/near-hackathon.md)** — an AI agent that continuously monitors Burrow lending markets and autonomously rebalances stablecoin positions to maximize yield. Starts with one command, keeps working after you close the tab.
 
+## EVM Security Watch (Quickstart)
+
+Read-only drift monitor for watched EVM contracts (code hash / proxy impl / owner / paused / optional approval spikes).
+
+```bash
+cp apps/dashboard/config/security-watchlist.example.json apps/dashboard/config/security-watchlist.json
+# set envs referenced by chains[].rpcUrlEnv, e.g. ETHEREUM_RPC_URL / BSC_RPC_URL
+npm run security:scan:once
+npm run security:watch
+```
+
+Reports are written to:
+`apps/dashboard/data/security-reports/YYYY-MM-DD/latest.json`
+
 ## 🏆 BSC Hackathon Focus (Good Vibes Only)
 
 > This repo is currently submission-focused for the BSC hackathon track.

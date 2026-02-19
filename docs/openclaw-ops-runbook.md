@@ -493,3 +493,42 @@ curl -s -X POST http://127.0.0.1:4173/api/monad/agent/delegation/prepare \
 ```
 
 > 说明：v1.4 的 name/profile 为安全可复现的本地状态脚手架，默认不做风险链上写入；涉及链上执行的动作仍需 `confirm=true`。
+
+### 6.2 EVM Security Watch
+
+用途：持续对关键 EVM 合约做只读安全漂移扫描（不发交易、不写链）。
+
+关键文件：
+- 配置模板：`apps/dashboard/config/security-watchlist.example.json`
+- 状态快照：`apps/dashboard/data/security-state.json`
+- 每日报告：`apps/dashboard/data/security-reports/YYYY-MM-DD/latest.json`
+
+命令：
+```bash
+# 单次扫描
+npm run security:scan:once
+
+# 常驻 worker（默认 300s 一轮）
+npm run security:watch
+
+# 自定义间隔（秒）
+node scripts/evm-security-worker.mjs --interval 120
+```
+
+支持的检测（best-effort）：
+- 合约 bytecode hash 漂移（critical）
+- EIP-1967 implementation slot 漂移（critical）
+- `owner()` 变更或偏离预期（critical）
+- `paused()` 状态切换（warn/info）
+- ERC20 Approval 异常大额（allowance spike，info/warn）
+
+配置说明：
+- `chains[].rpcUrlEnv` 必须映射到环境变量（例如 `ETHEREUM_RPC_URL`）。
+- 若某链 RPC 环境变量缺失，本轮会记录 `missing_rpc_env`（warn）并跳过该链，不会导致 worker 崩溃。
+- `notify` 当前用于报告分级过滤（`severityMin`），便于后续接入系统通知。
+
+运维建议：
+- 先复制模板为实际配置：
+  `cp apps/dashboard/config/security-watchlist.example.json apps/dashboard/config/security-watchlist.json`
+- 每次修改 watchlist 后先跑 `npm run security:scan:once` 校验格式与连通性。
+- 常驻模式建议配合 systemd/cron（见 `docs/evm-security-watch-cron.md`）。

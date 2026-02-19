@@ -38,6 +38,8 @@
 		"schema:ci-check": "npm run schema:check-files:json && npm run schema:validate",
 		"schema:audit": "npm run schema:check-files:json && npm run schema:validate -- --strict --json",
 		"security:check": "node scripts/security-audit.mjs",
+		"security:scan:once": "node scripts/evm-security-scan-once.mjs",
+		"security:watch": "node scripts/evm-security-worker.mjs",
 		"test": "vitest run",
 		"ci": "npm run check && npm run security:check && npm test",
 		"ci:retry": "node scripts/ci-retry.mjs",
