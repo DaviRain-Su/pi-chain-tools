@@ -2,15 +2,15 @@
 
 ## 1) Latest Commit
 
-- Hash: `28ca64ae6b00e25d58548325b4ad0a52ace0ed94`
-- Commit Date (ISO): 2026-02-19T12:54:24+08:00
-- Subject: feat(evm): harden lifi route planning safety and observability
+- Hash: `286e2f814086fa2f964be9703a19ca2b4f1dd4b5`
+- Commit Date (ISO): 2026-02-19T13:28:06+08:00
+- Subject: feat(dashboard): prove explicit sdk bindings across morpho/venus/lista/wombat
 
 ## 2) Quality Snapshot (best-effort)
 
 | Command | Status | Exit Code | Timestamp | Source Session |
 | --- | --- | --- | --- | --- |
-| npm run check | pass | 0 | 2026-02-19T05:27:38.778Z | 8c4b7be7-976a-4e14-a663-1dcc56caa0ee |
+| npm run check | unknown | - | 2026-02-19T05:37:08.681Z | 8467a750-d831-44fe-b4f4-08904fc82c8a |
 | npm run test | unknown | - | - | - |
 | npm run security:check | pass | 0 | 2026-02-19T05:27:19.917Z | 8c4b7be7-976a-4e14-a663-1dcc56caa0ee |
 
@@ -26,7 +26,7 @@
 
 - Dashboard status: stopped_or_unknown
 - Dashboard listen line: NEAR dashboard listening on http://127.0.0.1:4173
-- Latest OpenClaw session id: 8c4b7be7-976a-4e14-a663-1dcc56caa0ee
+- Latest OpenClaw session id: 8467a750-d831-44fe-b4f4-08904fc82c8a
 
 ## 5) Onchain Tx Proof Template
 

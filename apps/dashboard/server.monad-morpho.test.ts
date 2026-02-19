@@ -53,6 +53,9 @@ describe("monad morpho earn mvp", () => {
 		expect(serverSource).toContain("executionArtifact");
 		expect(serverSource).toContain("executionReconciliation");
 		expect(serverSource).toContain('action: "monad_morpho_earn_execute"');
+		expect(serverSource).toContain("boundaryProof");
+		expect(serverSource).toContain("buildExecutionBoundaryProof(");
+		expect(serverSource).toContain("executeDetectors");
 	});
 
 	it("contains sdk markets/strategy branch with fallback warnings", () => {

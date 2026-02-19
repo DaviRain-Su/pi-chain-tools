@@ -411,6 +411,23 @@ Phase-2（下期，最小目标）
 - native slot 协议级用例继续扩充（真实链路回放 + 异常分类覆盖）
 - Dashboard readiness 卡片继续补齐协议级 fix pack 提示
 
+### SDK upgrade-readiness workflow
+
+```bash
+npm run sdk:upgrade-readiness
+# output -> docs/sdk-upgrade-readiness.md
+```
+
+执行后检查：
+- `ready-to-promote`：可以进入 `sdk-coverage:promote <protocol> execute` 变更流程
+- `blocked-no-execute-surface`：保持 canonical fallback，继续跟踪 detector hook
+- `blocked-not-installed`：先修复依赖/包源，再评估升级
+
+运行态透明性：
+- `/api/snapshot` -> `sdkExecuteDetectors`
+- `/api/bsc/yield/markets` / `plan` -> `executionReadiness.detectors`
+- execute 响应 -> `boundaryProof` + `executeDetectors` + `remainingNonSdkPath.checks`
+
 ### 6.1 Security exception policy（npm audit / security:check）
 
 - 默认策略：优先升级直接依赖；其次通过兼容的 overrides/resolutions 拉升传递依赖；仅在无安全可行替代时进入 allowlist。

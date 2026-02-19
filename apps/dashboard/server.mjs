@@ -2275,6 +2275,26 @@ async function buildSnapshot(accountId) {
 			metrics: { ...MONAD_AGENT_STATE.metrics },
 			profile: buildMonadAgentProfile(),
 		},
+		sdkExecuteDetectors: {
+			bsc: buildBscExecuteDetectorSnapshot(),
+			morpho: {
+				scope: "monad.morpho.execute",
+				detectorHook: "morpho_detector_hook_blue_sdk_execute_surface_ready",
+				machineReadable: true,
+				checks: {
+					sdkEnabled: MONAD_MORPHO_USE_SDK,
+					executeEnabled: MONAD_EXECUTE_ENABLED,
+				},
+				canonicalFallback: {
+					active: true,
+					marker:
+						"morpho_execute_canonical_ethers_path_no_official_sdk_executor",
+					reason: MONAD_MORPHO_USE_SDK
+						? "official_morpho_blue_sdk_has_no_public_execute_signer_pipeline"
+						: "sdk_disabled_or_execute_mode_native",
+				},
+			},
+		},
 	};
 }
 
@@ -5340,6 +5360,79 @@ function buildMorphoSdkBinding(sdkMeta = null) {
 	});
 }
 
+function buildBscExecuteDetectorSnapshot() {
+	return {
+		venus: {
+			scope: "bsc.venus.execute",
+			detectorHook: "venus_detector_hook_execute_sdk_surface_ready",
+			machineReadable: true,
+			checks: {
+				sdkEnabled: BSC_VENUS_USE_SDK,
+				executeEnabled: true,
+			},
+			canonicalFallback: {
+				active: true,
+				marker: "venus_execute_canonical_ethers_path_no_official_sdk_executor",
+				reason: BSC_VENUS_USE_SDK
+					? "official_venus_execute_sdk_not_available"
+					: "sdk_disabled_or_execute_mode_native",
+			},
+		},
+		lista: {
+			scope: "bsc.lista.execute",
+			detectorHook: "lista_detector_hook_execute_sdk_surface_ready",
+			machineReadable: true,
+			checks: {
+				sdkEnabled: BSC_LISTA_USE_SDK,
+				executeEnabled: BSC_LISTA_EXECUTE_ENABLED,
+				nativeEnabled: BSC_LISTA_NATIVE_EXECUTE_ENABLED,
+			},
+			canonicalFallback: {
+				active: true,
+				marker: "lista_execute_canonical_ethers_path_no_official_sdk_executor",
+				reason: BSC_LISTA_USE_SDK
+					? "official_lista_execute_sdk_not_available"
+					: "sdk_disabled_or_execute_mode_native",
+			},
+		},
+		wombat: {
+			scope: "bsc.wombat.execute",
+			detectorHook: "wombat_detector_hook_execute_sdk_surface_ready",
+			machineReadable: true,
+			checks: {
+				sdkEnabled: BSC_WOMBAT_USE_SDK,
+				executeEnabled: BSC_WOMBAT_EXECUTE_ENABLED,
+				nativeEnabled: BSC_WOMBAT_NATIVE_EXECUTE_ENABLED,
+			},
+			canonicalFallback: {
+				active: true,
+				marker: "wombat_execute_canonical_ethers_path_no_official_sdk_executor",
+				reason: BSC_WOMBAT_USE_SDK
+					? "official_wombat_execute_sdk_not_available"
+					: "sdk_disabled_or_execute_mode_native",
+			},
+		},
+	};
+}
+
+function buildExecutionBoundaryProof({
+	confirmPassed,
+	policyPassed,
+	reconcilePassed,
+	sdkBinding,
+	fallback,
+	detectors,
+} = {}) {
+	return {
+		confirmPassed: confirmPassed === true,
+		policyPassed: policyPassed === true,
+		reconcilePassed: reconcilePassed !== false,
+		sdkBinding: sdkBinding || null,
+		fallbackReason: fallback?.reason || null,
+		detectors: detectors || null,
+	};
+}
+
 async function getBscLendingMarketCompare(options = {}) {
 	const native = await getBscLendingMarketCompareNative(options);
 	const sdkMeta = {
@@ -6508,6 +6601,7 @@ async function computeBscYieldPlan(input = {}) {
 						fullTemplate: fullFixPack,
 					}
 				: null,
+		detectors: buildBscExecuteDetectorSnapshot(),
 	};
 	return {
 		ok: true,
@@ -10262,6 +10356,23 @@ const server = http.createServer(async (req, res) => {
 			});
 			return json(res, 200, {
 				ok: true,
+				executeDetectors: {
+					scope: "monad.morpho.execute",
+					detectorHook: "morpho_detector_hook_blue_sdk_execute_surface_ready",
+					machineReadable: true,
+					checks: {
+						sdkEnabled: MONAD_MORPHO_USE_SDK,
+						executeEnabled: MONAD_EXECUTE_ENABLED,
+					},
+					canonicalFallback: {
+						active: true,
+						marker:
+							"morpho_execute_canonical_ethers_path_no_official_sdk_executor",
+						reason: MONAD_MORPHO_USE_SDK
+							? "official_morpho_blue_sdk_has_no_public_execute_signer_pipeline"
+							: "sdk_disabled_or_execute_mode_native",
+					},
+				},
 				sdkBinding: buildMorphoSdkBinding({
 					officialSdkWired: MONAD_MORPHO_USE_SDK,
 					sdkBinding: {
@@ -10311,6 +10422,23 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, {
 				ok: true,
 				chain: "monad",
+				executeDetectors: {
+					scope: "monad.morpho.execute",
+					detectorHook: "morpho_detector_hook_blue_sdk_execute_surface_ready",
+					machineReadable: true,
+					checks: {
+						sdkEnabled: MONAD_MORPHO_USE_SDK,
+						executeEnabled: MONAD_EXECUTE_ENABLED,
+					},
+					canonicalFallback: {
+						active: true,
+						marker:
+							"morpho_execute_canonical_ethers_path_no_official_sdk_executor",
+						reason: MONAD_MORPHO_USE_SDK
+							? "official_morpho_blue_sdk_has_no_public_execute_signer_pipeline"
+							: "sdk_disabled_or_execute_mode_native",
+					},
+				},
 				sdkBinding: buildMorphoSdkBinding({
 					officialSdkWired: MONAD_MORPHO_USE_SDK,
 					sdkBinding: {
@@ -10739,9 +10867,19 @@ const server = http.createServer(async (req, res) => {
 			}
 			try {
 				const result = await executeMonadMorphoDeposit(payload);
+				const sdkBinding = buildMorphoSdkBinding(result?.sdk?.meta);
 				return json(res, 200, {
 					...result,
-					sdkBinding: buildMorphoSdkBinding(result?.sdk?.meta),
+					sdkBinding,
+					boundaryProof: buildExecutionBoundaryProof({
+						confirmPassed: payload.confirm === true,
+						policyPassed: true,
+						reconcilePassed: result?.executionReconciliation?.ok === true,
+						sdkBinding,
+						fallback: result?.fallback || null,
+						detectors:
+							result?.executeDetectors || result?.remainingNonSdkPath || null,
+					}),
 				});
 			} catch (error) {
 				const normalized = classifyMonadMorphoExecuteError(error);
@@ -10838,6 +10976,7 @@ const server = http.createServer(async (req, res) => {
 					listaNativeEnabled: BSC_LISTA_NATIVE_EXECUTE_ENABLED,
 					wombatNativeEnabled: BSC_WOMBAT_NATIVE_EXECUTE_ENABLED,
 					nativeSlotImplemented: BSC_NATIVE_SLOT_IMPLEMENTED,
+					detectors: buildBscExecuteDetectorSnapshot(),
 				},
 				minAprDeltaBpsDefault: BSC_YIELD_MIN_APR_DELTA_BPS,
 			});
@@ -11002,18 +11141,34 @@ const server = http.createServer(async (req, res) => {
 					postActionArtifact,
 					postActionReconciliation,
 				});
+				const sdkBinding = {
+					...buildBscSdkBindings(plan?.sdk),
+					lifi: {
+						package: "@lifi/sdk",
+						versionHint: "@lifi/sdk",
+						importMode: "static",
+						loaded: true,
+					},
+				};
+				const boundaryProof = buildExecutionBoundaryProof({
+					confirmPassed: payload.confirm === true,
+					policyPassed: plan.executeReadiness?.canExecute === true,
+					reconcilePassed: postActionReconciliation
+						? postActionReconciliation.ok === true
+						: true,
+					sdkBinding,
+					fallback: postAction?.fallback || null,
+					detectors:
+						postAction?.executeDetectors ||
+						postAction?.remainingNonSdkPath ||
+						buildBscExecuteDetectorSnapshot()[plan.executionProtocol] ||
+						null,
+				});
 				return json(res, 200, {
 					ok: true,
 					mode: "execute",
-					sdkBinding: {
-						...buildBscSdkBindings(plan?.sdk),
-						lifi: {
-							package: "@lifi/sdk",
-							versionHint: "@lifi/sdk",
-							importMode: "static",
-							loaded: true,
-						},
-					},
+					sdkBinding,
+					boundaryProof,
 					plan,
 					result,
 					postAction,

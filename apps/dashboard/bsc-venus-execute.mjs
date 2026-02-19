@@ -225,6 +225,16 @@ export async function executeVenusSupplySdkFirst(params) {
 		} else if (!sdkEnabled) {
 			warnings.push("venus_execute_path_native_mode_active");
 		}
+		const detectorChecks = {
+			sdkEnabled,
+			sdkAdapterResolved: sdkEnabled && !fallback.used,
+			fallbackUsed: fallback.used,
+		};
+		const detectorReason = !sdkEnabled
+			? "sdk_disabled_or_execute_mode_native"
+			: fallback.used
+				? fallback.reason || "sdk_unavailable_or_resolution_failed"
+				: "official_venus_execute_sdk_not_available";
 		return {
 			...native,
 			mode:
@@ -242,6 +252,18 @@ export async function executeVenusSupplySdkFirst(params) {
 			},
 			fallback,
 			error: null,
+			executeDetectors: {
+				scope: "bsc.venus.execute",
+				machineReadable: true,
+				detectorHook: VENUS_EXECUTE_UNBLOCK_DETECTOR_MARKER,
+				canonicalFallback: {
+					active: true,
+					marker:
+						"venus_execute_canonical_ethers_path_no_official_sdk_executor",
+					reason: detectorReason,
+				},
+				checks: detectorChecks,
+			},
 			remainingNonSdkPath: {
 				active: !sdkEnabled || fallback.used,
 				detectorHook: VENUS_EXECUTE_UNBLOCK_DETECTOR_MARKER,
@@ -255,6 +277,7 @@ export async function executeVenusSupplySdkFirst(params) {
 					: fallback.used
 						? fallback.reason || "sdk_unavailable_or_resolution_failed"
 						: null,
+				checks: detectorChecks,
 			},
 		};
 	} catch (error) {

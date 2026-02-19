@@ -30,6 +30,12 @@ describe("wombat execute sdk-first routing", () => {
 		);
 		expect(result.sdk?.used).toBe(true);
 		expect(result.fallback?.used).toBe(false);
+		expect(result.executeDetectors?.machineReadable).toBe(true);
+		expect(result.remainingNonSdkPath?.checks).toMatchObject({
+			sdkEnabled: true,
+			sdkAdapterResolved: true,
+			fallbackUsed: false,
+		});
 	});
 
 	it("falls back to native canonical executor when sdk adapter init fails", async () => {

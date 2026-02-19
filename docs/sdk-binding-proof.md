@@ -42,4 +42,24 @@ Where applicable, BSC aggregate routes expose per-protocol bindings:
 }
 ```
 
+## Execute boundary proof (compact)
+
+Execute responses now include `boundaryProof`:
+
+```json
+{
+  "confirmPassed": true,
+  "policyPassed": true,
+  "reconcilePassed": true,
+  "sdkBinding": { "package": "@venusprotocol/chains", "importMode": "static", "loaded": true },
+  "fallbackReason": null,
+  "detectors": { "scope": "bsc.venus.execute", "machineReadable": true }
+}
+```
+
+For non-full-SDK execute paths (Venus/Lista/Wombat/Morpho), machine-readable detector snapshots are exposed via:
+- execute responses (`executeDetectors`, `remainingNonSdkPath.checks`)
+- dashboard snapshot (`/api/snapshot` → `sdkExecuteDetectors`)
+- readiness payloads (`executionReadiness.detectors`)
+
 Safety boundaries are unchanged: mutating paths still require explicit confirm/policy/reconcile gates and do not bypass existing controls.

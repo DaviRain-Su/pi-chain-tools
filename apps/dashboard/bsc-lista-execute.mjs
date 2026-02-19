@@ -7,6 +7,30 @@ function toErrorMessage(error) {
 	return error instanceof Error ? error.message : String(error);
 }
 
+function buildListaExecuteDetector({ sdkEnabled, fallback }) {
+	const fallbackUsed = fallback?.used === true;
+	const reason = fallbackUsed
+		? fallback?.reason || "sdk_resolution_failed"
+		: sdkEnabled
+			? "official_lista_execute_sdk_not_available"
+			: "sdk_disabled_or_execute_mode_native";
+	return {
+		scope: "bsc.lista.execute",
+		machineReadable: true,
+		detectorHook: LISTA_EXECUTE_UNBLOCK_DETECTOR_MARKER,
+		canonicalFallback: {
+			active: true,
+			reason,
+			marker: "lista_execute_canonical_ethers_path_no_official_sdk_executor",
+		},
+		checks: {
+			sdkEnabled,
+			sdkAdapterResolved: sdkEnabled && !fallbackUsed,
+			fallbackUsed,
+		},
+	};
+}
+
 export async function executeListaSupplySdkFirst(params) {
 	const sdkEnabled = params?.sdkEnabled === true;
 	const fallbackToNative = params?.fallbackToNative !== false;
@@ -54,6 +78,7 @@ export async function executeListaSupplySdkFirst(params) {
 	} else if (!sdkEnabled) {
 		warnings.push("lista_execute_path_native_mode_active");
 	}
+	const detector = buildListaExecuteDetector({ sdkEnabled, fallback });
 
 	return {
 		...native,
@@ -75,13 +100,13 @@ export async function executeListaSupplySdkFirst(params) {
 		},
 		fallback,
 		error: null,
+		executeDetectors: detector,
 		remainingNonSdkPath: {
 			active: true,
-			detectorHook: LISTA_EXECUTE_UNBLOCK_DETECTOR_MARKER,
-			marker: "lista_execute_canonical_ethers_path_no_official_sdk_executor",
-			reason: fallback.used
-				? fallback.reason || "sdk_resolution_failed"
-				: "official_lista_execute_sdk_not_available",
+			detectorHook: detector.detectorHook,
+			marker: detector.canonicalFallback.marker,
+			reason: detector.canonicalFallback.reason,
+			checks: detector.checks,
 		},
 	};
 }

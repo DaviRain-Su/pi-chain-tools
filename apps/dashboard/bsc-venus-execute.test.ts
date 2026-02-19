@@ -118,6 +118,12 @@ describe("bsc venus execute sdk-first", () => {
 			"venus_execute_tx_uses_canonical_ethers_signer_no_official_sdk_executor",
 		);
 		expect(result.remainingNonSdkPath?.active).toBe(false);
+		expect(result.executeDetectors?.machineReadable).toBe(true);
+		expect(result.remainingNonSdkPath?.checks).toMatchObject({
+			sdkEnabled: true,
+			sdkAdapterResolved: true,
+			fallbackUsed: false,
+		});
 	});
 
 	it("marks explicit native-fallback path when sdk resolution fails", async () => {
