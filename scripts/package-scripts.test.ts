@@ -100,8 +100,7 @@ describe("package.json script contracts", () => {
 				"node scripts/normalize-runtime-metrics.mjs &&",
 			),
 		).toBe(true);
-		expect(scripts?.ci).toContain("npm run check");
-		expect(scripts?.ci).toContain("npm test");
+		expect(scripts?.ci).toBe("node scripts/ci.mjs");
 		expect(typeof scripts?.["ci:resilient"]).toBe("string");
 		expect(String(scripts?.["ci:resilient"])).toContain(
 			"node scripts/ci-resilient.mjs",

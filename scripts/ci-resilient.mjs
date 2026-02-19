@@ -1,18 +1,28 @@
 #!/usr/bin/env node
-import { spawn, spawnSync } from "node:child_process";
-import {
-	appendFileSync,
-	mkdirSync,
-	mkdtempSync,
-	symlinkSync,
-	writeFileSync,
-} from "node:fs";
-import os from "node:os";
+import { spawn } from "node:child_process";
+import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { ensurePythonAliasEnv } from "./python-runtime.mjs";
+import { resolveFromRepo } from "./runtime-paths.mjs";
 
-const CI_SIGNATURES_JSONL_PATH =
-	process.env.CI_SIGNATURES_JSONL_PATH ||
+const DEFAULT_SIGNATURES_RELATIVE_PATH =
 	"apps/dashboard/data/ci-signatures.jsonl";
+
+function resolveSignaturesPath() {
+	if (process.env.CI_SIGNATURES_JSONL_PATH) {
+		return process.env.CI_SIGNATURES_JSONL_PATH;
+	}
+	const resolved = resolveFromRepo(
+		DEFAULT_SIGNATURES_RELATIVE_PATH,
+		process.cwd(),
+	);
+	if (!resolved.absolutePath) {
+		return DEFAULT_SIGNATURES_RELATIVE_PATH;
+	}
+	return resolved.absolutePath;
+}
+
+const CI_SIGNATURES_JSONL_PATH = resolveSignaturesPath();
 
 function run(command, args, label, env = process.env) {
 	return new Promise((resolve) => {
@@ -56,54 +66,6 @@ async function runWithSigtermRetry(command, args, label, env, signatures) {
 		result = await run(command, args, `${label}(sigterm-retry)`, env);
 	}
 	return result;
-}
-
-function commandPath(bin, env = process.env) {
-	const result = spawnSync("bash", ["-lc", `command -v ${bin}`], {
-		encoding: "utf8",
-		env,
-	});
-	if (result.status !== 0) return "";
-	return String(result.stdout || "").trim();
-}
-
-function ensurePythonAliasEnv(baseEnv = process.env) {
-	const pythonPath = commandPath("python", baseEnv);
-	if (pythonPath) {
-		return {
-			env: { ...baseEnv },
-			shimDir: null,
-			strategy: "native-python",
-		};
-	}
-
-	const python3Path = commandPath("python3", baseEnv);
-	if (!python3Path) {
-		return {
-			env: { ...baseEnv },
-			shimDir: null,
-			strategy: "python-missing",
-		};
-	}
-
-	const shimDir = mkdtempSync(
-		path.join(os.tmpdir(), "ci-resilient-python-shim-"),
-	);
-	const shimPath = path.join(shimDir, "python");
-	try {
-		symlinkSync(python3Path, shimPath);
-	} catch {
-		const script = `#!/usr/bin/env bash\nexec "${python3Path}" "$@"\n`;
-		writeFileSync(shimPath, script, { encoding: "utf8", mode: 0o755 });
-	}
-	return {
-		env: {
-			...baseEnv,
-			PATH: `${shimDir}:${baseEnv.PATH || ""}`,
-		},
-		shimDir,
-		strategy: "python3-shim",
-	};
 }
 
 function shouldApplyBiomeHotfix(output) {
@@ -255,7 +217,10 @@ async function main() {
 		checkFailureKind: "",
 	};
 
-	const runtime = ensurePythonAliasEnv(process.env);
+	const runtime = ensurePythonAliasEnv(
+		process.env,
+		"ci-resilient-python-shim-",
+	);
 	if (runtime.strategy === "python3-shim") {
 		signatures.pythonShimApplied = 1;
 		console.log(

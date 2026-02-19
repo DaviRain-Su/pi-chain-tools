@@ -797,7 +797,22 @@ pi remove https://github.com/<your-org>/pi-chain-tools
 pi remove /Users/davirian/dev/pi-chain-tools
 ```
 
-### 11) Publish To npm (optional)
+### 11) Common local failure auto-recovery behavior
+
+- `npm run ci` now routes through `scripts/ci.mjs` -> `npm run ci:resilient` by default, so local runs automatically inherit:
+  - python alias resilience (`python3` shim when `python` is absent)
+  - deterministic runtime metrics normalization before lint
+  - bounded retries for SIGTERM and one flaky test retry
+- Python resolver behavior:
+  - prefer native `python` if available
+  - fallback to temporary `python3` shim (`python` -> `python3`)
+  - if neither exists, fail with explicit precheck guidance instead of cascading unrelated failures
+- Generated runtime files (`apps/dashboard/data/**`) are excluded from Biome source checks to avoid CI churn from local runtime drift. Source files remain strict.
+- Path-safety behavior:
+  - `scripts/normalize-runtime-metrics.mjs` safely no-ops with warning when run outside repo root or when runtime file is absent
+  - `npm run dashboard:start` uses `scripts/dashboard-start.mjs`, which warns and exits cleanly if `apps/dashboard/server.mjs` cannot be resolved
+
+### 12) Publish To npm (optional)
 
 Before publish:
 

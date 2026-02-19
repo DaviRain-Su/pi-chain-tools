@@ -31,6 +31,7 @@ describe("normalize-runtime-metrics", () => {
 			const first = spawnSync(process.execPath, [scriptPath], {
 				cwd: tmpDir,
 				encoding: "utf8",
+				env: { ...process.env, NEAR_DASHBOARD_METRICS_PATH: targetPath },
 			});
 			expect(first.status).toBe(0);
 			expect(first.stdout).toContain("normalized");
@@ -44,6 +45,7 @@ describe("normalize-runtime-metrics", () => {
 			const second = spawnSync(process.execPath, [scriptPath], {
 				cwd: tmpDir,
 				encoding: "utf8",
+				env: { ...process.env, NEAR_DASHBOARD_METRICS_PATH: targetPath },
 			});
 			expect(second.status).toBe(0);
 			expect(second.stdout).toContain("already normalized");
