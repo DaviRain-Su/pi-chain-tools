@@ -11,8 +11,8 @@ import {
 } from "./sol-agent-bridge.js";
 
 describe("sol-agent bridge phase A contract", () => {
-	it("exposes phase-b registry mapping version marker", () => {
-		expect(SOL_AGENT_BRIDGE_VERSION).toContain("phase-b");
+	it("exposes phase-c safe orchestration version marker", () => {
+		expect(SOL_AGENT_BRIDGE_VERSION).toContain("phase-c");
 	});
 
 	it("only allows read/profile/task_discovery task kinds", () => {

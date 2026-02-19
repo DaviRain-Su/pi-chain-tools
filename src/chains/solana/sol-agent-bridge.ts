@@ -4,7 +4,8 @@ import {
 	findSolanaBridgeDescriptorByTaskId,
 } from "./registry/index.js";
 
-export const SOL_AGENT_BRIDGE_VERSION = "phase-b-registry-mapping-v1" as const;
+export const SOL_AGENT_BRIDGE_VERSION =
+	"phase-c-safe-orchestration-v1" as const;
 
 /**
  * Safety contract:

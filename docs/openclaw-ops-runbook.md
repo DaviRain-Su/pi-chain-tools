@@ -313,6 +313,44 @@ npm run dashboard:ensure
 # 预期: message="dashboard already healthy; skipped restart"
 ```
 
+### 5.8 Sol Agent Bridge 批处理（cron/heartbeat 友好，默认 safe）
+- 目标：对 bridge-discovered Solana 任务做**运营侧批处理筛选**，仅保留 read/plan；拒绝 execute/mutate。
+- 默认模式 `safe`；可显式 `--mode research`，但仍不放行 execute/mutate。
+- 所有真正的链上变更仍需走既有 confirm/policy/reconcile 流水线。
+
+```bash
+# 1) safe 模式批处理（推荐）
+npm run solana:bridge:batch -- --input ./tmp/solana-bridge-tasks.json
+
+# 2) research 模式（仅实验筛选，不执行）
+npm run solana:bridge:batch -- --input ./tmp/solana-bridge-tasks.json --mode research
+
+# 3) heartbeat 包装（固定 safe）
+npm run solana:bridge:heartbeat -- --input ./tmp/solana-bridge-tasks.json
+```
+
+输入文件示例：
+```json
+{
+  "tasks": [
+    {
+      "taskId": "read:solana_getPortfolio",
+      "kind": "read",
+      "metadata": { "operationKind": "read" }
+    },
+    {
+      "taskId": "plan:solana_buildSolTransferTransaction",
+      "kind": "task_discovery",
+      "metadata": { "operationKind": "plan" }
+    }
+  ]
+}
+```
+
+输出字段：
+- `accepted`: 可进入 read/plan 处理队列
+- `rejected`: 被 safe/research 过滤掉（含 execute/mutate 意图）
+- `reason`: 拒绝原因（用于运营审计）
 
 ---
 

@@ -48,7 +48,9 @@
 		"demo:monad-bsc": "node scripts/demo-monad-bsc.mjs",
 		"dashboard:start": "node apps/dashboard/server.mjs",
 		"dashboard:restart": "node scripts/dashboard-restart.mjs --restart",
-		"dashboard:ensure": "node scripts/dashboard-restart.mjs"
+		"dashboard:ensure": "node scripts/dashboard-restart.mjs",
+		"solana:bridge:batch": "node scripts/solana-bridge-safe-batch.mjs",
+		"solana:bridge:heartbeat": "node scripts/solana-bridge-heartbeat.mjs"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",

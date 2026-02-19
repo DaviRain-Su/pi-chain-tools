@@ -109,6 +109,16 @@ export type {
 	SolAgentProfileDescriptor,
 	SolAgentTaskEnvelope,
 } from "./chains/solana/sol-agent-bridge.js";
+export {
+	discoverBridgeReadPlanTasks,
+	filterBridgeTasksForMode,
+	runBridgeBatchReadPlanTasks,
+} from "./chains/solana/bridge-orchestrator.js";
+export type {
+	SolanaBridgeBatchMode,
+	SolanaBridgeBatchRunResult,
+	SolanaBridgeBatchTaskResult,
+} from "./chains/solana/bridge-orchestrator.js";
 export { createMetaReadTools } from "./chains/meta/tools/read.js";
 export { createMetaToolset } from "./chains/meta/toolset.js";
 

@@ -162,6 +162,11 @@ These stay disabled in production; if needed, allow only in isolated research mo
   - bridge discovery now resolves descriptors back to existing handlers (no signature/validation drift)
   - safety boundary unchanged: execute override is still blocked in bridge path
   - added compatibility and no-behavior-drift tests for mapping/dispatch
-- ⏳ Phase C remains optional and safe-mode only
+- ✅ Phase C completed (safe-mode orchestration ergonomics):
+  - added safe-mode batch orchestrator wrappers for bridge-discovered Solana read/plan tasks
+  - explicit mode gating (`safe` default, `research` opt-in) with shared execute/mutate rejection in both modes
+  - mutating paths remain blocked unless routed through existing confirm/policy/reconcile pipeline
+  - added compatibility tests for wrapper filtering/rejection/output behavior against Solana bridge handlers
+  - added cron/heartbeat-oriented script wrappers for operator batch usage
 
 This preserves existing guarded execution while improving Solana discovery ergonomics.
