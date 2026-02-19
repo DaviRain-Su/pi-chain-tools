@@ -19,6 +19,7 @@ describe("submission-evidence script", () => {
 		expect(content).toContain("## 2) Quality Snapshot (best-effort)");
 		expect(content).toContain("## 4) Dashboard Runtime (local)");
 		expect(content).toContain("## 5) Onchain Tx Proof Template");
+		expect(content).toContain("## 6) Auto-linked Execution Proof Docs");
 		expect(content).toContain("npm run check");
 		expect(content).toContain("npm run test");
 		expect(content).toContain("npm run security:check");

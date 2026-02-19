@@ -12,7 +12,10 @@ npm run dashboard:start
 辅助命令（提交流程常用）：
 
 ```bash
-# 生成提交证据文档（docs/submission-evidence.md）
+# 生成执行证明（docs/execution-proofs/YYYY-MM-DD/*.md）
+npm run execute:proof
+
+# 生成提交证据文档（docs/submission-evidence.md，自动引用最新 proof）
 npm run submission:evidence
 
 # 一键 Demo（默认 dry-run；不会自动上链执行）
@@ -24,6 +27,23 @@ npm run demo:monad-bsc -- --execute --confirm-execute I_UNDERSTAND_THIS_WILL_EXE
 
 默认地址：
 - `http://127.0.0.1:4173`
+
+### 1.1 执行证明工作流（审计/复现）
+
+```bash
+# 1) 完成一次真实 execute（含 txHash）后生成 proof
+npm run execute:proof
+
+# 2) 可按协议缩小范围
+npm run execute:proof:morpho
+npm run execute:proof:bsc
+npm run execute:proof:lifi
+
+# 3) 生成 submission artifact（自动引用最新 proof 文档）
+npm run submission:evidence
+```
+
+输出目录：`docs/execution-proofs/YYYY-MM-DD/`
 
 ---
 

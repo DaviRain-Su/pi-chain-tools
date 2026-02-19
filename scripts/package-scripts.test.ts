@@ -109,6 +109,16 @@ describe("package.json script contracts", () => {
 		expect(scripts?.["submission:evidence"]).toBe(
 			"node scripts/submission-evidence.mjs",
 		);
+		expect(scripts?.["execute:proof"]).toBe("node scripts/execute-proof.mjs");
+		expect(scripts?.["execute:proof:morpho"]).toBe(
+			"node scripts/execute-proof.mjs --protocol=morpho",
+		);
+		expect(scripts?.["execute:proof:bsc"]).toBe(
+			"node scripts/execute-proof.mjs --protocol=bsc",
+		);
+		expect(scripts?.["execute:proof:lifi"]).toBe(
+			"node scripts/execute-proof.mjs --protocol=lifi",
+		);
 		expect(scripts?.["demo:monad-bsc"]).toBe("node scripts/demo-monad-bsc.mjs");
 		expect(scripts?.["ops:smoke"]).toBe("node scripts/ops-smoke.mjs");
 		expect(scripts?.["dashboard:restart"]).toContain(
