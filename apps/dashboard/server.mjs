@@ -605,6 +605,27 @@ const BSC_YIELD_DEFAULT_QUOTE_USD = Math.max(
 		),
 	) || 100,
 );
+const BSC_YIELD_MIN_HOLD_SECONDS = Math.max(
+	0,
+	Number.parseInt(
+		String(
+			envOrCfg(
+				"BSC_YIELD_MIN_HOLD_SECONDS",
+				"bsc.yield.minHoldSeconds",
+				"86400",
+			),
+		),
+		10,
+	) || 86400,
+);
+const BSC_YIELD_MAX_PAYBACK_DAYS = Math.max(
+	1,
+	Number.parseFloat(
+		String(
+			envOrCfg("BSC_YIELD_MAX_PAYBACK_DAYS", "bsc.yield.maxPaybackDays", "7"),
+		),
+	) || 7,
+);
 const BSC_STABLE_APR_HINTS_JSON = String(
 	envOrCfg("BSC_STABLE_APR_HINTS_JSON", "bsc.yield.stableAprHintsJson", ""),
 ).trim();
@@ -1230,11 +1251,14 @@ const BSC_YIELD_WORKER = {
 	maxStepUsd: 100,
 	minDriftBps: 500,
 	minAprDeltaBps: BSC_YIELD_MIN_APR_DELTA_BPS,
+	minHoldSeconds: BSC_YIELD_MIN_HOLD_SECONDS,
+	maxPaybackDays: BSC_YIELD_MAX_PAYBACK_DAYS,
 	targetUsdcBps: 7000,
 	lastRunAt: null,
 	lastPlan: null,
 	lastExecute: null,
 	lastError: null,
+	lastExecuteAt: null,
 	timer: null,
 };
 const PI_MCP_EXECUTE_BLOCKED = "PI_MCP_EXECUTE_BLOCKED";
@@ -8716,6 +8740,50 @@ async function runBscYieldWorkerTick() {
 		};
 		return;
 	}
+	const nowMs = Date.now();
+	if (BSC_YIELD_WORKER.lastExecuteAt && BSC_YIELD_WORKER.minHoldSeconds > 0) {
+		const elapsedMs = nowMs - Date.parse(BSC_YIELD_WORKER.lastExecuteAt);
+		const holdMs = BSC_YIELD_WORKER.minHoldSeconds * 1000;
+		if (Number.isFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs < holdMs) {
+			BSC_YIELD_WORKER.lastExecute = {
+				dryRun: BSC_YIELD_WORKER.dryRun,
+				blocked: true,
+				reason: "min_hold_active",
+				remainingSeconds: Math.ceil((holdMs - elapsedMs) / 1000),
+				timestamp: new Date().toISOString(),
+			};
+			return;
+		}
+	}
+	const netDelta = Number(
+		planSnapshot?.netYieldInsight?.netYieldDelta?.venusNetDeltaBps ??
+			Number.NaN,
+	);
+	if (Number.isFinite(netDelta)) {
+		if (netDelta <= 0) {
+			BSC_YIELD_WORKER.lastExecute = {
+				dryRun: BSC_YIELD_WORKER.dryRun,
+				blocked: true,
+				reason: "net_yield_not_positive",
+				netDeltaBps: netDelta,
+				timestamp: new Date().toISOString(),
+			};
+			return;
+		}
+		const paybackDays = 365 / netDelta;
+		if (paybackDays > BSC_YIELD_WORKER.maxPaybackDays) {
+			BSC_YIELD_WORKER.lastExecute = {
+				dryRun: BSC_YIELD_WORKER.dryRun,
+				blocked: true,
+				reason: "payback_too_slow",
+				netDeltaBps: netDelta,
+				paybackDays,
+				maxPaybackDays: BSC_YIELD_WORKER.maxPaybackDays,
+				timestamp: new Date().toISOString(),
+			};
+			return;
+		}
+	}
 	if (BSC_YIELD_WORKER.dryRun) {
 		BSC_YIELD_WORKER.lastExecute = {
 			dryRun: true,
@@ -8737,6 +8805,7 @@ async function runBscYieldWorkerTick() {
 		timestamp: new Date().toISOString(),
 		result: actionResult,
 	};
+	BSC_YIELD_WORKER.lastExecuteAt = new Date().toISOString();
 }
 
 function stopBscYieldWorker() {
@@ -8777,6 +8846,19 @@ function startBscYieldWorker(options = {}) {
 			String(options.minAprDeltaBps || BSC_YIELD_WORKER.minAprDeltaBps),
 			10,
 		) || BSC_YIELD_WORKER.minAprDeltaBps,
+	);
+	BSC_YIELD_WORKER.minHoldSeconds = Math.max(
+		0,
+		Number.parseInt(
+			String(options.minHoldSeconds || BSC_YIELD_WORKER.minHoldSeconds),
+			10,
+		) || BSC_YIELD_WORKER.minHoldSeconds,
+	);
+	BSC_YIELD_WORKER.maxPaybackDays = Math.max(
+		1,
+		Number.parseFloat(
+			String(options.maxPaybackDays || BSC_YIELD_WORKER.maxPaybackDays),
+		) || BSC_YIELD_WORKER.maxPaybackDays,
 	);
 	BSC_YIELD_WORKER.targetUsdcBps = Math.max(
 		0,
