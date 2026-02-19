@@ -481,6 +481,13 @@ const BSC_USDC = String(
 		"0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
 	),
 );
+const BSC_WBNB = String(
+	envOrCfg(
+		"BSC_WBNB",
+		"bsc.tokens.wbnb",
+		"0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+	),
+);
 const BSC_ROUTER_V2 = String(
 	envOrCfg(
 		"BSC_ROUTER_V2",
@@ -498,6 +505,10 @@ const BSC_USDT_DECIMALS = Number.parseInt(
 );
 const BSC_USDC_DECIMALS = Number.parseInt(
 	String(envOrCfg("BSC_USDC_DECIMALS", "bsc.decimals.usdc", "18")),
+	10,
+);
+const BSC_WBNB_DECIMALS = Number.parseInt(
+	String(envOrCfg("BSC_WBNB_DECIMALS", "bsc.decimals.wbnb", "18")),
 	10,
 );
 const BSC_EXECUTE_ENABLED =
@@ -4896,7 +4907,34 @@ function quoteDivergenceBps(aRaw, bRaw) {
 	return Number((diff * 10_000n) / base);
 }
 
-async function getBscPancakeV2Quote(amountInRaw) {
+function resolveBscSwapToken(tokenLike, fallbackSymbol = "USDT") {
+	const input = String(tokenLike || fallbackSymbol)
+		.trim()
+		.toUpperCase();
+	if (input === "BNB" || input === "WBNB") {
+		return { symbol: "BNB", address: BSC_WBNB, decimals: BSC_WBNB_DECIMALS };
+	}
+	if (input === "USDT") {
+		return { symbol: "USDT", address: BSC_USDT, decimals: BSC_USDT_DECIMALS };
+	}
+	if (input === "USDC" || input === "USDC.E") {
+		return { symbol: "USDC", address: BSC_USDC, decimals: BSC_USDC_DECIMALS };
+	}
+	if (/^0x[a-fA-F0-9]{40}$/.test(input)) {
+		return { symbol: input, address: input, decimals: 18 };
+	}
+	throw new Error(
+		`unsupported token '${String(tokenLike || "").trim() || fallbackSymbol}' (allowed: BNB, USDT, USDC, or 0x token address)`,
+	);
+}
+
+async function getBscPancakeV2QuoteForPair({
+	amountInRaw,
+	tokenIn,
+	tokenOut,
+	decimalsIn = 18,
+	decimalsOut = 18,
+}) {
 	const provider = new JsonRpcProvider(BSC_RPC_URL, {
 		name: "bsc",
 		chainId: BSC_CHAIN_ID,
@@ -4906,14 +4944,14 @@ async function getBscPancakeV2Quote(amountInRaw) {
 	]);
 	const data = routerIface.encodeFunctionData("getAmountsOut", [
 		String(amountInRaw),
-		[BSC_USDT, BSC_USDC],
+		[tokenIn, tokenOut],
 	]);
 	const raw = await provider.call({ to: BSC_ROUTER_V2, data });
 	const decoded = routerIface.decodeFunctionResult("getAmountsOut", raw);
 	const amounts = decoded?.[0] || [];
 	const outRaw = String(amounts?.[1]?.toString?.() || "0");
-	const inUi = rawToUi(amountInRaw, BSC_USDT_DECIMALS);
-	const outUi = rawToUi(outRaw, BSC_USDC_DECIMALS);
+	const inUi = rawToUi(amountInRaw, decimalsIn);
+	const outUi = rawToUi(outRaw, decimalsOut);
 	const rate = inUi > 0 ? outUi / inUi : 0;
 	return {
 		source: "pancake-v2-router",
@@ -4922,6 +4960,16 @@ async function getBscPancakeV2Quote(amountInRaw) {
 		pairAddress: "",
 		liquidityUsd: 0,
 	};
+}
+
+async function getBscPancakeV2Quote(amountInRaw) {
+	return getBscPancakeV2QuoteForPair({
+		amountInRaw,
+		tokenIn: BSC_USDT,
+		tokenOut: BSC_USDC,
+		decimalsIn: BSC_USDT_DECIMALS,
+		decimalsOut: BSC_USDC_DECIMALS,
+	});
 }
 
 async function getBscUsdtUsdcQuote(amountInRaw) {
@@ -8116,7 +8164,19 @@ async function executeAction(payload) {
 				.trim()
 				.toLowerCase();
 			if (chain === "bsc") {
-				const amountRaw = parsePositiveRaw(payload.amountRaw, "amountRaw");
+				const tokenInMeta = resolveBscSwapToken(payload.tokenIn, "USDT");
+				const tokenOutMeta = resolveBscSwapToken(payload.tokenOut, "USDC");
+				if (
+					tokenInMeta.address.toLowerCase() ===
+					tokenOutMeta.address.toLowerCase()
+				) {
+					throw new Error("tokenIn and tokenOut must be different");
+				}
+				let amountRaw = String(payload.amountRaw || "").trim();
+				if (!amountRaw && payload.amountInUi !== undefined) {
+					amountRaw = uiToRaw(payload.amountInUi, tokenInMeta.decimals);
+				}
+				amountRaw = parsePositiveRaw(amountRaw, "amountRaw");
 				const slippageBps = Number.parseInt(
 					String(payload.slippageBps || "50"),
 					10,
@@ -8129,7 +8189,18 @@ async function executeAction(payload) {
 					throw new Error("slippageBps must be between 0 and 5000");
 				}
 				const runId = String(payload.runId || `run-${Date.now()}`).trim();
-				const quote = await getBscUsdtUsdcQuote(amountRaw);
+				const isUsdtUsdcPair =
+					tokenInMeta.address.toLowerCase() === BSC_USDT.toLowerCase() &&
+					tokenOutMeta.address.toLowerCase() === BSC_USDC.toLowerCase();
+				const quote = isUsdtUsdcPair
+					? await getBscUsdtUsdcQuote(amountRaw)
+					: await getBscPancakeV2QuoteForPair({
+							amountInRaw: amountRaw,
+							tokenIn: tokenInMeta.address,
+							tokenOut: tokenOutMeta.address,
+							decimalsIn: tokenInMeta.decimals,
+							decimalsOut: tokenOutMeta.decimals,
+						});
 				const divergenceBps = Number(quote?.divergenceBps ?? -1);
 				if (
 					Number.isFinite(divergenceBps) &&
@@ -8144,8 +8215,8 @@ async function executeAction(payload) {
 				const executeResult = await executeBscSwap({
 					amountInRaw: amountRaw,
 					minAmountOutRaw,
-					tokenIn: BSC_USDT,
-					tokenOut: BSC_USDC,
+					tokenIn: tokenInMeta.address,
+					tokenOut: tokenOutMeta.address,
 					router: BSC_ROUTER_V2,
 					rpcUrl: BSC_RPC_URL,
 					chainId: BSC_CHAIN_ID,
@@ -8194,8 +8265,10 @@ async function executeAction(payload) {
 						rpcUrl: BSC_RPC_URL,
 						chainId: BSC_CHAIN_ID,
 						router: BSC_ROUTER_V2,
-						tokenIn: BSC_USDT,
-						tokenOut: BSC_USDC,
+						tokenIn: tokenInMeta.address,
+						tokenOut: tokenOutMeta.address,
+						tokenInSymbol: tokenInMeta.symbol,
+						tokenOutSymbol: tokenOutMeta.symbol,
 						amountInRaw: amountRaw,
 						quotedOutRaw: quote.amountOutRaw,
 						minAmountOutRaw,
@@ -10911,6 +10984,78 @@ const server = http.createServer(async (req, res) => {
 					message: error instanceof Error ? error.message : String(error),
 				});
 			}
+		}
+
+		if (url.pathname === "/api/bsc/swap" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			if (payload.confirm !== true) {
+				return json(res, 400, { ok: false, error: "Missing confirm=true" });
+			}
+			const tokenIn = String(payload.tokenIn || "BNB").trim() || "BNB";
+			const tokenOut = String(payload.tokenOut || "USDT").trim() || "USDT";
+			const actionResult = await executeAction({
+				action: "rebalance_usdt_to_usdce_txn",
+				chain: "bsc",
+				tokenIn,
+				tokenOut,
+				amountRaw: payload.amountInRaw,
+				amountInUi: payload.amountInUi,
+				slippageBps: Number.parseInt(String(payload.slippageBps || 50), 10),
+				runId: payload.runId || `bsc-swap-${Date.now()}`,
+				step: payload.step || "bsc-direct-swap",
+			});
+			const receiptSummary = actionResult?.execution?.receipt
+				? {
+						status: actionResult.execution.receipt.status ?? null,
+						blockNumber: actionResult.execution.receipt.blockNumber ?? null,
+						gasUsed: actionResult.execution.receipt.gasUsed ?? null,
+						reconcileOk: actionResult.execution.receipt.reconcileOk ?? null,
+						tokenInDeltaRaw:
+							actionResult.execution.receipt.tokenInDeltaRaw ?? null,
+						tokenOutDeltaRaw:
+							actionResult.execution.receipt.tokenOutDeltaRaw ?? null,
+						minAmountOutRaw:
+							actionResult.execution.receipt.minAmountOutRaw ?? null,
+					}
+				: null;
+			const sdkBinding = {
+				...buildBscSdkBindings(),
+				swap: {
+					package: "ethers",
+					versionHint: "ethers",
+					importMode: "static",
+					loaded: true,
+				},
+			};
+			const boundaryProof = buildExecutionBoundaryProof({
+				confirmPassed: payload.confirm === true,
+				policyPassed: BSC_EXECUTE_ENABLED,
+				reconcilePassed: receiptSummary
+					? receiptSummary.reconcileOk !== false
+					: true,
+				sdkBinding,
+				detectors: {
+					scope: "bsc.swap.execute",
+					checks: {
+						executeEnabled: BSC_EXECUTE_ENABLED,
+						executeMode: BSC_EXECUTE_MODE,
+					},
+				},
+			});
+			return json(res, 200, {
+				ok: true,
+				mode: actionResult?.mode || "execute",
+				txHash: actionResult?.txHash || null,
+				explorerUrl: actionResult?.explorerUrl || null,
+				receiptSummary,
+				plan: actionResult?.plan || null,
+				execution: actionResult?.execution || null,
+				sdkBinding,
+				boundaryProof,
+			});
 		}
 
 		if (url.pathname === "/api/bsc/yield/plan") {
