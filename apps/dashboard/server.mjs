@@ -5286,6 +5286,60 @@ async function getBscLendingMarketCompareNative(options = {}) {
 	};
 }
 
+function normalizeSdkBinding(binding, fallback = {}) {
+	return {
+		package: String(binding?.package || fallback.package || "unknown"),
+		versionHint: String(
+			binding?.versionHint ||
+				fallback.versionHint ||
+				binding?.package ||
+				"unknown",
+		),
+		importMode:
+			binding?.importMode === "dynamic"
+				? "dynamic"
+				: fallback.importMode === "dynamic"
+					? "dynamic"
+					: "static",
+		loaded: Boolean(binding?.loaded ?? fallback.loaded ?? false),
+	};
+}
+
+function buildBscSdkBindings(sdkMeta = {}) {
+	const venusBinding = normalizeSdkBinding(sdkMeta?.venus?.meta?.sdkBinding, {
+		package: "@venusprotocol/chains",
+		versionHint: "@venusprotocol/chains",
+		importMode: "static",
+		loaded: Boolean(sdkMeta?.venus?.used),
+	});
+	const listaBinding = normalizeSdkBinding(sdkMeta?.lista?.meta?.sdkBinding, {
+		package: "ethers",
+		versionHint: "ethers",
+		importMode: "static",
+		loaded: true,
+	});
+	const wombatBinding = normalizeSdkBinding(sdkMeta?.wombat?.meta?.sdkBinding, {
+		package: "@wombat-exchange/configx",
+		versionHint: "@wombat-exchange/configx",
+		importMode: "static",
+		loaded: Boolean(sdkMeta?.wombat?.used),
+	});
+	return {
+		venus: venusBinding,
+		lista: listaBinding,
+		wombat: wombatBinding,
+	};
+}
+
+function buildMorphoSdkBinding(sdkMeta = null) {
+	return normalizeSdkBinding(sdkMeta?.sdkBinding, {
+		package: "@morpho-org/blue-sdk",
+		versionHint: "@morpho-org/blue-sdk",
+		importMode: "static",
+		loaded: Boolean(sdkMeta?.officialSdkWired),
+	});
+}
+
 async function getBscLendingMarketCompare(options = {}) {
 	const native = await getBscLendingMarketCompareNative(options);
 	const sdkMeta = {
@@ -5418,6 +5472,7 @@ async function getBscLendingMarketCompare(options = {}) {
 		// explicit marker for tests/runbook: dataSource: "native-fallback"
 		dataSource: usedFallback ? "native-fallback" : usedSdk ? "sdk" : "native",
 		sdk: sdkMeta,
+		sdkBinding: buildBscSdkBindings(sdkMeta),
 		warnings: [...new Set(warnings)],
 	};
 }
@@ -6466,6 +6521,7 @@ async function computeBscYieldPlan(input = {}) {
 				fallback: BSC_VENUS_USE_SDK,
 			},
 		},
+		sdkBinding: compare?.sdkBinding || buildBscSdkBindings(compare?.sdk),
 		warnings: [...new Set([...(compare?.warnings || [])])],
 		account,
 		balances,
@@ -10206,6 +10262,15 @@ const server = http.createServer(async (req, res) => {
 			});
 			return json(res, 200, {
 				ok: true,
+				sdkBinding: buildMorphoSdkBinding({
+					officialSdkWired: MONAD_MORPHO_USE_SDK,
+					sdkBinding: {
+						package: MONAD_MORPHO_SDK_PACKAGE,
+						versionHint: "@morpho-org/blue-sdk",
+						importMode: "static",
+						loaded: MONAD_MORPHO_USE_SDK,
+					},
+				}),
 				...readiness,
 				config: {
 					rpcUrl: MONAD_RPC_URL,
@@ -10246,6 +10311,15 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, {
 				ok: true,
 				chain: "monad",
+				sdkBinding: buildMorphoSdkBinding({
+					officialSdkWired: MONAD_MORPHO_USE_SDK,
+					sdkBinding: {
+						package: MONAD_MORPHO_SDK_PACKAGE,
+						versionHint: "@morpho-org/blue-sdk",
+						importMode: "static",
+						loaded: MONAD_MORPHO_USE_SDK,
+					},
+				}),
 				protocol: "morpho-earn",
 				intent: "deposit",
 				readiness,
@@ -10275,6 +10349,7 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, {
 				ok: true,
 				chain: "monad",
+				sdkBinding: buildMorphoSdkBinding(strategyView.sdk),
 				protocol: "morpho-earn",
 				strategy: strategyView.strategy,
 				markets: strategyView.markets,
@@ -10298,6 +10373,7 @@ const server = http.createServer(async (req, res) => {
 			});
 			return json(res, 200, {
 				ok: true,
+				sdkBinding: buildMorphoSdkBinding(snapshot?.meta),
 				...snapshot,
 				claim: {
 					enabled: MONAD_MORPHO_REWARDS_CLAIM_ENABLED,
@@ -10319,6 +10395,15 @@ const server = http.createServer(async (req, res) => {
 				return json(res, 200, {
 					ok: true,
 					chain: "monad",
+					sdkBinding: buildMorphoSdkBinding({
+						officialSdkWired: MONAD_MORPHO_USE_SDK,
+						sdkBinding: {
+							package: MONAD_MORPHO_SDK_PACKAGE,
+							versionHint: "@morpho-org/blue-sdk",
+							importMode: "static",
+							loaded: MONAD_MORPHO_USE_SDK,
+						},
+					}),
 					protocol: "morpho-earn",
 					markets: [],
 					readiness,
@@ -10333,6 +10418,7 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, {
 				ok: true,
 				chain: "monad",
+				sdkBinding: buildMorphoSdkBinding(marketView.sdk),
 				protocol: "morpho-earn",
 				markets: marketView.markets,
 				strategy: marketView.strategy,
@@ -10653,7 +10739,10 @@ const server = http.createServer(async (req, res) => {
 			}
 			try {
 				const result = await executeMonadMorphoDeposit(payload);
-				return json(res, 200, result);
+				return json(res, 200, {
+					...result,
+					sdkBinding: buildMorphoSdkBinding(result?.sdk?.meta),
+				});
 			} catch (error) {
 				const normalized = classifyMonadMorphoExecuteError(error);
 				recordMonadMorphoExecuteMetrics({
@@ -10916,6 +11005,15 @@ const server = http.createServer(async (req, res) => {
 				return json(res, 200, {
 					ok: true,
 					mode: "execute",
+					sdkBinding: {
+						...buildBscSdkBindings(plan?.sdk),
+						lifi: {
+							package: "@lifi/sdk",
+							versionHint: "@lifi/sdk",
+							importMode: "static",
+							loaded: true,
+						},
+					},
 					plan,
 					result,
 					postAction,

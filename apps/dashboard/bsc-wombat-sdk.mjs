@@ -1,5 +1,6 @@
 import { Interface } from "@ethersproject/abi";
 import { JsonRpcProvider } from "@ethersproject/providers";
+import * as wombatConfigx from "@wombat-exchange/configx";
 
 // TODO(sdk-coverage): migrate from configx metadata client to a full official Wombat execute/read SDK when available.
 // Current package provides canonical config metadata only; runtime still needs ethers RPC for balances/execution.
@@ -30,8 +31,17 @@ function normalizeSdkPackageName(input) {
 	return text || DEFAULT_WOMBAT_SDK_PACKAGE;
 }
 
-async function tryLoadSdkPackage(packageName) {
+async function resolveWombatSdkBinding(packageName) {
 	const normalized = normalizeSdkPackageName(packageName);
+	if (normalized === DEFAULT_WOMBAT_SDK_PACKAGE) {
+		return {
+			loaded: true,
+			packageName: normalized,
+			moduleKeys: Object.keys(wombatConfigx || {}),
+			error: null,
+			importMode: "static",
+		};
+	}
 	try {
 		const mod = await import(normalized);
 		return {
@@ -39,6 +49,7 @@ async function tryLoadSdkPackage(packageName) {
 			packageName: normalized,
 			moduleKeys: Object.keys(mod || {}),
 			error: null,
+			importMode: "dynamic",
 		};
 	} catch (error) {
 		return {
@@ -46,6 +57,7 @@ async function tryLoadSdkPackage(packageName) {
 			packageName: normalized,
 			moduleKeys: [],
 			error: error instanceof Error ? error.message : String(error),
+			importMode: "dynamic",
 		};
 	}
 }
@@ -81,7 +93,9 @@ export async function createWombatSdkAdapter({
 		chainId: Number(chainId || 56),
 	});
 	const sdkLoader =
-		typeof loadSdkPackage === "function" ? loadSdkPackage : tryLoadSdkPackage;
+		typeof loadSdkPackage === "function"
+			? loadSdkPackage
+			: resolveWombatSdkBinding;
 	const sdk = await sdkLoader(sdkPackage);
 	const warnings = [];
 	if (!sdk.loaded) {
@@ -102,6 +116,12 @@ export async function createWombatSdkAdapter({
 			sdkPackage: sdk.packageName,
 			sdkError: sdk.error,
 			moduleKeys: sdk.moduleKeys,
+			sdkBinding: {
+				package: sdk.packageName,
+				versionHint: "@wombat-exchange/configx",
+				importMode: sdk.importMode,
+				loaded: sdk.loaded,
+			},
 			warnings,
 		},
 	};

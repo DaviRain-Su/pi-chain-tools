@@ -4,6 +4,7 @@ import {
 	MainnetChainId,
 	vTokens as venusChainVTokens,
 } from "@venusprotocol/chains";
+import * as venusChainsSdk from "@venusprotocol/chains";
 
 function safeBigInt(value, fallback = 0n) {
 	try {
@@ -34,8 +35,17 @@ function normalizeSdkPackageName(input) {
 	return text || DEFAULT_VENUS_SDK_PACKAGE;
 }
 
-async function tryLoadSdkPackage(packageName) {
+async function resolveVenusSdkBinding(packageName) {
 	const normalized = normalizeSdkPackageName(packageName);
+	if (normalized === DEFAULT_VENUS_SDK_PACKAGE) {
+		return {
+			loaded: true,
+			packageName: normalized,
+			moduleKeys: Object.keys(venusChainsSdk || {}),
+			error: null,
+			importMode: "static",
+		};
+	}
 	try {
 		const mod = await import(normalized);
 		return {
@@ -43,6 +53,7 @@ async function tryLoadSdkPackage(packageName) {
 			packageName: normalized,
 			moduleKeys: Object.keys(mod || {}),
 			error: null,
+			importMode: "dynamic",
 		};
 	} catch (error) {
 		return {
@@ -50,6 +61,7 @@ async function tryLoadSdkPackage(packageName) {
 			packageName: normalized,
 			moduleKeys: [],
 			error: error instanceof Error ? error.message : String(error),
+			importMode: "dynamic",
 		};
 	}
 }
@@ -83,7 +95,7 @@ export async function createVenusSdkAdapter({
 		name: "bsc",
 		chainId: Number(chainId || 56),
 	});
-	const sdk = await tryLoadSdkPackage(sdkPackage);
+	const sdk = await resolveVenusSdkBinding(sdkPackage);
 	const warnings = [];
 	if (!sdk.loaded) {
 		warnings.push(
@@ -104,6 +116,12 @@ export async function createVenusSdkAdapter({
 			sdkPackage: sdk.packageName,
 			sdkError: sdk.error,
 			moduleKeys: sdk.moduleKeys,
+			sdkBinding: {
+				package: sdk.packageName,
+				versionHint: "@venusprotocol/chains",
+				importMode: sdk.importMode,
+				loaded: sdk.loaded,
+			},
 			warnings,
 		},
 	};

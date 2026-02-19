@@ -44,6 +44,7 @@ describe("bsc lista/wombat sdk-first read/plan routing", () => {
 		);
 		expect(serverSource).toContain("dataSource:");
 		expect(serverSource).toContain("sdk:");
+		expect(serverSource).toContain("sdkBinding: buildBscSdkBindings");
 		expect(serverSource).toContain("warnings:");
 	});
 

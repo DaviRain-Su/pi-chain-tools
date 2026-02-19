@@ -56,6 +56,7 @@ describe("monad morpho earn mvp", () => {
 	});
 
 	it("contains sdk markets/strategy branch with fallback warnings", () => {
+		expect(serverSource).toContain("sdkBinding: buildMorphoSdkBinding(");
 		expect(serverSource).toContain("MONAD_MORPHO_USE_SDK");
 		expect(serverSource).toContain("collectMonadMorphoMarketsWithSdkFallback");
 		expect(serverSource).toContain("collectMonadMorphoSdkSnapshot");

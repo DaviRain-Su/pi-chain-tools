@@ -43,6 +43,30 @@
 		"bigint-buffer": {
 			"maxSeverity": "high",
 			"reason": "Transitive vulnerable transitive dependency from Solana buffer layout utils."
+		},
+		"@wombat-exchange/configx": {
+			"maxSeverity": "high",
+			"reason": "Canonical Wombat config package required for explicit SDK binding proof; execute path remains confirm/policy gated."
+		},
+		"@ts-morph/common": {
+			"maxSeverity": "high",
+			"reason": "Transitive dependency from Wombat/LI.FI ecosystem packages pending upstream patch."
+		},
+		"ts-morph": {
+			"maxSeverity": "high",
+			"reason": "Transitive dependency from Wombat/LI.FI ecosystem packages pending upstream patch."
+		},
+		"viem": {
+			"maxSeverity": "high",
+			"reason": "Transitive dependency in LI.FI client stack; kept for official client binding traceability."
+		},
+		"ws": {
+			"maxSeverity": "high",
+			"reason": "Transitive WebSocket dependency in LI.FI client stack; no direct runtime use in mutate path."
+		},
+		"minimatch": {
+			"maxSeverity": "high",
+			"reason": "Transitive dependency in imported SDK chains; awaiting upstream updates."
 		}
 	}
 }

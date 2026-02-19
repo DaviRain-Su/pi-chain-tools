@@ -16,6 +16,11 @@ describe("bsc venus sdk scaffold adapter", () => {
 		expect(adapter.meta.officialSdkWired).toBe(true);
 		expect(adapter.meta.client).toBe("venus-sdk");
 		expect(adapter.meta.sdkPackage).toBe("@venusprotocol/chains");
+		expect(adapter.meta.sdkBinding).toMatchObject({
+			package: "@venusprotocol/chains",
+			importMode: "static",
+			loaded: true,
+		});
 	});
 	it("normalizes market view into dashboard-compatible venus shape", async () => {
 		const adapter = {

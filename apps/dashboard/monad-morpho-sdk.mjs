@@ -3,6 +3,7 @@ import { MaxUint256 } from "@ethersproject/constants";
 import { JsonRpcProvider } from "@ethersproject/providers";
 import { Wallet } from "@ethersproject/wallet";
 import { VaultUtils } from "@morpho-org/blue-sdk";
+import * as morphoBlueSdk from "@morpho-org/blue-sdk";
 
 const DEFAULT_MORPHO_SDK_PACKAGE = "@morpho-org/blue-sdk";
 const MORPHO_EXECUTE_UNBLOCK_DETECTOR_MARKER =
@@ -80,25 +81,38 @@ function normalizeSdkPackageName(input) {
 	return text || DEFAULT_MORPHO_SDK_PACKAGE;
 }
 
-async function tryLoadMorphoSdk(packageName, chainId) {
+async function resolveMorphoSdkBinding(packageName, chainId) {
 	const normalized = normalizeSdkPackageName(packageName);
+	const resolveChainAddresses = (mod) => {
+		const chainIdNumber = Number(chainId || 0);
+		if (typeof mod?.getChainAddresses !== "function" || chainIdNumber <= 0) {
+			return null;
+		}
+		try {
+			return mod.getChainAddresses(chainIdNumber) || null;
+		} catch {
+			return null;
+		}
+	};
+	if (normalized === DEFAULT_MORPHO_SDK_PACKAGE) {
+		return {
+			loaded: true,
+			packageName: normalized,
+			moduleKeys: Object.keys(morphoBlueSdk || {}),
+			chainAddresses: resolveChainAddresses(morphoBlueSdk),
+			error: null,
+			importMode: "static",
+		};
+	}
 	try {
 		const mod = await import(normalized);
-		const chainIdNumber = Number(chainId || 0);
-		let chainAddresses = null;
-		if (typeof mod?.getChainAddresses === "function" && chainIdNumber > 0) {
-			try {
-				chainAddresses = mod.getChainAddresses(chainIdNumber) || null;
-			} catch {
-				chainAddresses = null;
-			}
-		}
 		return {
 			loaded: true,
 			packageName: normalized,
 			moduleKeys: Object.keys(mod || {}),
-			chainAddresses,
+			chainAddresses: resolveChainAddresses(mod),
 			error: null,
+			importMode: "dynamic",
 		};
 	} catch (error) {
 		return {
@@ -107,6 +121,7 @@ async function tryLoadMorphoSdk(packageName, chainId) {
 			moduleKeys: [],
 			chainAddresses: null,
 			error: error instanceof Error ? error.message : String(error),
+			importMode: "dynamic",
 		};
 	}
 }
@@ -130,7 +145,7 @@ export async function createMorphoSdkAdapter({
 		name: "monad",
 		chainId: resolvedChainId,
 	});
-	const sdk = await tryLoadMorphoSdk(sdkPackage, resolvedChainId);
+	const sdk = await resolveMorphoSdkBinding(sdkPackage, resolvedChainId);
 	const warnings = [];
 	if (!sdk.loaded) {
 		warnings.push(
@@ -163,6 +178,12 @@ export async function createMorphoSdkAdapter({
 			sdkError: sdk.error,
 			moduleKeys: sdk.moduleKeys,
 			chainAddresses: sdk.chainAddresses,
+			sdkBinding: {
+				package: sdk.packageName,
+				versionHint: "@morpho-org/blue-sdk",
+				importMode: sdk.importMode,
+				loaded: sdk.loaded,
+			},
 			warnings,
 		},
 	};

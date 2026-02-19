@@ -20,6 +20,11 @@ describe("bsc lista/wombat sdk-first read adapters", () => {
 		meta: {
 			officialSdkWired: false,
 			sdkPackage: "scaffold",
+			sdkBinding: {
+				package: "ethers",
+				importMode: "static",
+				loaded: true,
+			},
 			warnings: [],
 		},
 	};
@@ -40,6 +45,11 @@ describe("bsc lista/wombat sdk-first read adapters", () => {
 		expect(market.lista.dataSource).toBe("sdk-scaffold");
 		expect(market.lista.usdcSupplyAprBps).toBe(123);
 		expect(market.warnings).toContain("lista_pool_missing_config");
+		expect(market.sdk?.sdkBinding).toMatchObject({
+			package: "ethers",
+			importMode: "static",
+			loaded: true,
+		});
 
 		const position = await collectListaSdkPositionView(adapter, {
 			accountAddress: "0x000000000000000000000000000000000000dEaD",
@@ -62,6 +72,7 @@ describe("bsc lista/wombat sdk-first read adapters", () => {
 				packageName: String(packageName || ""),
 				moduleKeys: [],
 				error: "ERR_MODULE_NOT_FOUND",
+				importMode: "dynamic",
 			}),
 		});
 		expect(adapterWithMissingSdk.meta.officialSdkWired).toBe(false);
@@ -81,11 +92,17 @@ describe("bsc lista/wombat sdk-first read adapters", () => {
 				packageName: String(packageName || ""),
 				moduleKeys: ["default"],
 				error: null,
+				importMode: "dynamic",
 			}),
 		});
 		expect(adapterWithSdk.meta.officialSdkWired).toBe(true);
 		expect(adapterWithSdk.meta.client).toBe("wombat-configx");
 		expect(adapterWithSdk.meta.warnings).toEqual([]);
+		expect(adapterWithSdk.meta.sdkBinding).toMatchObject({
+			package: "@wombat-exchange/configx",
+			importMode: "dynamic",
+			loaded: true,
+		});
 	});
 
 	it("normalizes wombat market + position shape with sdk markers", async () => {

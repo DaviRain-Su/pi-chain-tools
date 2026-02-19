@@ -106,6 +106,15 @@ export async function createListaSdkAdapter({
 			sdkCandidatesChecked: LISTA_OFFICIAL_SDK_CANDIDATES,
 			sdkCandidatesMissing: candidateProbe.missing,
 			moduleKeys: [],
+			sdkBinding: {
+				package:
+					candidateProbe.available.length > 0
+						? candidateProbe.available[0]
+						: normalizedPackage,
+				versionHint: "ethers",
+				importMode: "static",
+				loaded: true,
+			},
 			warnings,
 		},
 	};
