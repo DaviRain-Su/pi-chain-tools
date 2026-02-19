@@ -1,11 +1,6 @@
-# Good Vibes Only: OpenClaw Edition（BSC）提交文档模板
+# Good Vibes Only: OpenClaw Edition（BSC）提交文档
 
 > 赛事页面：<https://dorahacks.io/hackathon/goodvibes/detail>
->
-> 本文档用于直接整理 DoraHacks 提交材料，覆盖：
-> - Onchain proof
-> - Demo + Repo + Repro steps
-> - AI Build Log（加分项）
 
 ---
 
@@ -47,46 +42,43 @@ Recommended track(s):
 
 ---
 
-## 5) Onchain proof (Required)
-
-> Replace placeholders with your real BSC/opBNB proofs.
+## 5) Onchain proof
 
 - Network: `BSC mainnet` / `opBNB`
-- Key transaction hashes:
-  - `0x...` (Lista native supply)
-  - `0x...` (Wombat native deposit)
-  - `0x...` (rebalance-related swap/supply flow)
-- Optional contract addresses (if any):
-  - `0x...`
+- Proof artifact source: `docs/submission-evidence.md`
 
-Explorer links:
-- <https://bscscan.com/tx/0x...>
-- <https://bscscan.com/tx/0x...>
-- <https://bscscan.com/tx/0x...>
+### Required before submission (blocking)
+
+- [ ] Add at least one valid BSC/opBNB tx hash
+- [ ] Add explorer link(s) for every tx hash
+- [ ] If contract addresses are referenced, add verified address(es)
+- [ ] Ensure described action and tx content are consistent
 
 ---
 
-## 6) Demo (Required)
+## 6) Demo
 
-- Live / recorded demo link:
-  - `https://...`
-- What demo shows (keep it short):
-  1. Stable yield plan generation.
-  2. Native BSC execution (Lista/Wombat path).
-  3. Reconciliation and reliability/ops panel update.
+- Local demo base: `http://127.0.0.1:4173`
+- Demo should show:
+  1. stable yield plan generation,
+  2. native BSC execution (Lista/Wombat path),
+  3. reconciliation and reliability/ops panel update.
 
----
+### Required before submission (blocking)
 
-## 7) Repository (Required)
-
-- Repo URL:
-  - `https://github.com/DaviRain-Su/pi-chain-tools`
-- Branch/commit used for submission:
-  - `main @ <commit-hash>`
+- [ ] Replace with public live/recorded demo link
 
 ---
 
-## 8) How to reproduce (Required)
+## 7) Repository
+
+- Repo URL: `https://github.com/DaviRain-Su/pi-chain-tools`
+- Branch used for submission: `main`
+- Commit used for submission: `8107ba4b97b3dd58dcc72cef788e66cd6f0df071`
+
+---
+
+## 8) How to reproduce
 
 ## Prerequisites
 
@@ -118,15 +110,15 @@ export BSC_RPC_URL=https://bsc-dataseed.binance.org
 export BSC_LISTA_EXECUTE_ENABLED=true
 export BSC_LISTA_EXECUTE_MODE=native
 export BSC_LISTA_NATIVE_EXECUTE_ENABLED=true
-export BSC_LISTA_POOL=0x...
-export BSC_LISTA_EXECUTE_PRIVATE_KEY=0x...
+export BSC_LISTA_POOL=0xYOUR_LISTA_POOL_ADDRESS
+export BSC_LISTA_EXECUTE_PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HEX
 
 # Wombat native
 export BSC_WOMBAT_EXECUTE_ENABLED=true
 export BSC_WOMBAT_EXECUTE_MODE=native
 export BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=true
-export BSC_WOMBAT_POOL=0x...
-export BSC_WOMBAT_EXECUTE_PRIVATE_KEY=0x...
+export BSC_WOMBAT_POOL=0xYOUR_WOMBAT_POOL_ADDRESS
+export BSC_WOMBAT_EXECUTE_PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HEX
 ```
 
 Run quality checks:
@@ -172,14 +164,14 @@ Most hackathon demos stop at planning or simulated execution. This project empha
 
 ---
 
-## 11) Compliance checklist (before submit)
+## 11) Submission compliance
 
+- [x] Repo is public
+- [x] Reproduction steps are clear and runnable
+- [x] No token launch / liquidity opening / airdrop pumping during event window
+- [x] Submission text includes what is built + judged requirement coverage
 - [ ] At least one valid BSC/opBNB tx hash included
 - [ ] Demo link works and shows end-to-end flow
-- [ ] Repo is public
-- [ ] Reproduction steps are clear and runnable
-- [ ] No token launch / liquidity opening / airdrop pumping during event window
-- [ ] Submission text includes what is built + how judged requirements are met
 
 ---
 

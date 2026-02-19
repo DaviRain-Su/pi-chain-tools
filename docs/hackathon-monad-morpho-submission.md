@@ -1,6 +1,4 @@
-# Monad × Morpho Hackathon Submission Template
-
-> Draft for rapid submission. Replace placeholders before final submit.
+# Monad × Morpho Hackathon Submission
 
 ---
 
@@ -42,40 +40,43 @@ Recommended:
 
 ---
 
-## 5) Onchain Proof (Required)
-
-> Replace with real Monad tx hashes / explorer links.
+## 5) Onchain Proof
 
 - Network: `Monad`
-- Transactions:
-  - `0x...` (Morpho deposit)
-  - `0x...` (rebalance/adjust)
-  - `0x...` (optional second scenario)
+- Proof artifact source: `docs/submission-evidence.md`
 
-Explorer links:
-- `https://.../tx/0x...`
-- `https://.../tx/0x...`
+### Required before submission (blocking)
+
+- [ ] Add at least 1 real Monad tx hash
+- [ ] Add 2-3 tx hashes total if available (deposit/rebalance/reconcile coverage)
+- [ ] Add explorer links for each hash
+- [ ] Ensure each hash matches the described action
 
 ---
 
-## 6) Demo (Required)
+## 6) Demo
 
-- Demo URL: `https://...`
-- Demo should show:
+- Local demo base: `http://127.0.0.1:4173`
+- Suggested demo flow:
   1. market read + plan generation,
   2. confirmed onchain execution,
   3. reconciliation + reliability panel update.
 
+### Required before submission (blocking)
+
+- [ ] Replace with public live or recorded demo URL
+
 ---
 
-## 7) Repository (Required)
+## 7) Repository
 
 - Repo: `https://github.com/DaviRain-Su/pi-chain-tools`
-- Submission commit/tag: `main @ <commit-hash>`
+- Submission branch: `main`
+- Submission commit: `8107ba4b97b3dd58dcc72cef788e66cd6f0df071`
 
 ---
 
-## 8) Reproduction Steps (Required)
+## 8) Reproduction Steps
 
 ## Prerequisites
 
@@ -92,19 +93,19 @@ cd pi-chain-tools
 npm install
 ```
 
-Set env/config (example placeholders):
+Set env/config (example values):
 
 ```bash
-export MONAD_RPC_URL=https://...
+export MONAD_RPC_URL=https://rpc.monad.xyz
 export MONAD_CHAIN_ID=143
 export MONAD_EXECUTE_ENABLED=true
-export MONAD_EXECUTE_PRIVATE_KEY=0x...
-export MONAD_MORPHO_VAULT=0x...
-export MONAD_MORPHO_ASSET=0x...
+export MONAD_EXECUTE_PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HEX
+export MONAD_MORPHO_VAULT=0xYOUR_TARGET_VAULT_ADDRESS
+export MONAD_MORPHO_ASSET=0xYOUR_TARGET_ASSET_ADDRESS
 export MONAD_MORPHO_MAX_AMOUNT_RAW=1000000000000000000000
 export MONAD_MORPHO_COOLDOWN_SECONDS=30
 export MONAD_MORPHO_DAILY_CAP_RAW=5000000000000000000000
-export MONAD_MORPHO_REWARDS_JSON='[{"vault":"0x...","rewardToken":"0x...","claimableRaw":"0"}]'
+export MONAD_MORPHO_REWARDS_JSON='[{"vault":"0xYOUR_TARGET_VAULT_ADDRESS","rewardToken":"0xYOUR_REWARD_TOKEN_ADDRESS","claimableRaw":"0"}]'
 # optional claim execution wiring (safe default disabled)
 export MONAD_MORPHO_REWARDS_CLAIM_ENABLED=false
 export MONAD_MORPHO_REWARDS_CLAIM_COMMAND=''
@@ -123,8 +124,6 @@ Run dashboard/service:
 npm run dashboard:start
 # open http://127.0.0.1:4173
 ```
-
-Execute one scenario, capture tx hash, and include it in submission.
 
 ---
 
@@ -145,13 +144,13 @@ This is not only a strategy simulator: it emphasizes **real onchain execution + 
 
 ---
 
-## 11) Compliance Checklist
+## 11) Submission Compliance
 
-- [ ] onchain tx hash(es) included
-- [ ] demo link works
-- [ ] repo is public
-- [ ] reproduction instructions are clear
-- [ ] no disallowed token-launch behavior during event window
+- [x] Repo is public
+- [x] Reproduction instructions are clear
+- [x] No token-launch mechanics in scope
+- [ ] Onchain tx hash(es) included
+- [ ] Demo link works
 
 ---
 
