@@ -31,25 +31,44 @@ Multi-chain toolset library for Pi extensions with a chain-agnostic grouping mod
 - `execute`
 - `rpc`
 
-## DFlow MCP Integration (enabled)
+## MCP Integration (provider-pluggable)
 
-This project can now connect to DFlow's hosted MCP server:
+This repo now uses a provider-pluggable MCP architecture:
 
+`provider layer -> unified MCP adapter -> OpenClaw skill`
+
+- Provider layer (`src/mcp/*`): provider interface + registry resolver.
+- Unified adapter (`src/core/mcp-adapter.ts`): normalized `mcp.search`, `mcp.quote`, `mcp.plan`.
+- Skill entrypoint (`skills/mcp-unified-adapter/SKILL.md`): usage examples via adapter, not provider-specific calls.
+
+### Default provider: DFlow
+
+- Provider id: `dflow`
 - MCP URL: `https://pond.dflow.net/mcp`
 - Docs page: `https://pond.dflow.net/build/mcp`
 
-Quick setup options:
+Configuration (optional overrides):
 
-1. Project-level MCP config (`.mcp.json` in repo root)
-2. `mcporter` direct calls for testing/querying DFlow docs/tools
+- `PI_MCP_PROVIDER=dflow` (default resolver target)
+- `DFLOW_MCP_URL=https://pond.dflow.net/mcp`
 
-Quick test (if `mcporter` is installed):
+Quick DFlow test (if `mcporter` is installed):
 
 ```bash
 mcporter call https://pond.dflow.net/mcp.fetch query="imperative trade"
 ```
 
 > If your MCP client expects named servers, use the included `.mcp.json` with server name `DFlow`.
+
+### Why this avoids vendor lock-in
+
+The app consumes a single normalized adapter contract. DFlow is just one provider implementation behind the registry, so adding/replacing providers does not require rewriting skill usage or upstream orchestration.
+
+### Add a new provider (minimal steps)
+
+1. Implement `McpProvider` under `src/mcp/providers/<id>.ts` (support one or more: `search/quote/plan`).
+2. Register it in `createMcpAdapter({ providers: [...] })` or your own `createMcpProviderRegistry(...)` wiring.
+3. Keep returning normalized `McpProviderResult` so adapter output stays stable for skills.
 
 ## Architecture Core
 
@@ -76,7 +95,8 @@ All non-green actions include explicit blocker, next action, and code marker ali
 
 ## Structure
 
-- `src/core`: common toolset abstractions and registration helpers
+- `src/core`: common toolset abstractions, registration helpers, and unified MCP adapter facade
+- `src/mcp`: provider interface, registry resolver, and provider implementations (e.g., DFlow)
 - `src/chains/solana`: Solana runtime + grouped tools
 - `src/chains/sui`: Sui runtime + grouped tools
 - `src/chains/near`: NEAR runtime + grouped tools

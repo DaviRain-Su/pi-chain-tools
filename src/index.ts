@@ -5,6 +5,12 @@ export {
 	createPiMcpAdapter,
 	validatePiMcpEnvelope,
 } from "./core/pi-mcp-adapter.js";
+export { createMcpAdapter } from "./core/mcp-adapter.js";
+export {
+	DEFAULT_MCP_PROVIDER_ID,
+	createMcpProviderRegistry,
+} from "./mcp/registry.js";
+export { createDflowMcpProvider } from "./mcp/providers/dflow.js";
 export type {
 	ChainToolGroup,
 	ChainToolGroupName,
@@ -20,6 +26,14 @@ export type {
 	PiMcpTaskPhase,
 	PiMcpValidationResult,
 } from "./core/pi-mcp-adapter.js";
+export type { McpAdapter, McpAdapterResponse } from "./core/mcp-adapter.js";
+export type {
+	McpAdapterProviderMeta,
+	McpCapability,
+	McpProvider,
+	McpProviderContext,
+	McpProviderResult,
+} from "./mcp/provider.js";
 export {
 	PI_MCP_TASK_NOT_FOUND,
 	createPiMcpSolanaApi,
