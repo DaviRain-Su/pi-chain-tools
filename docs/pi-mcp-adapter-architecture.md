@@ -66,18 +66,49 @@ Operationally, this means:
 - Execute requests fail fast before route resolution.
 - Normalization strips ambiguity and pins phase semantics to validated top-level fields.
 
-## Phase-1 Scope
+## Current Scope (read/plan routed, execute blocked)
 
 Implemented now:
 - Envelope schema/shape validation helpers.
 - Discovery + normalization for read/plan tasks.
-- Routing stubs for read/plan.
-- Execute rejection scaffold.
+- Real Solana routing via `createPiMcpSolanaApi()` + Solana registry descriptors.
+- Stable execute rejection at adapter boundary (`PI_MCP_EXECUTE_BLOCKED`).
+- Lightweight dashboard summary fields for operators:
+  - discovered task count
+  - recent run summary
+  - execute rejection count
 
 Deferred to later phases:
 - Policy-aware handoff contracts into PI SDK execution core.
 - Rich intent-level type registries.
 - Multi-chain capability catalogs and negotiated routing profiles.
+
+## Usage Runbook (internal discover/run routes)
+
+```ts
+import { createPiMcpSolanaApi } from "pi-chain-tools";
+
+const piMcp = createPiMcpSolanaApi();
+
+// discover (read/plan only)
+const discovered = piMcp.discover();
+
+// run read/plan via envelope
+const result = await piMcp.run({
+  id: "task-1",
+  phase: "read",
+  intent: "read:solana_getPortfolio",
+  payload: { account: "..." },
+});
+
+// lightweight dashboard visibility
+const summary = piMcp.getDashboardSummary();
+```
+
+Safe-mode semantics:
+- `phase=read|plan` → routed to existing Solana handlers with no behavior drift.
+- `phase=execute` → always rejected with `PI_MCP_EXECUTE_BLOCKED`.
+- Unknown task ids return `PI_MCP_TASK_NOT_FOUND`.
 
 ## Security Invariant
 

@@ -20,6 +20,16 @@ export type {
 	PiMcpTaskPhase,
 	PiMcpValidationResult,
 } from "./core/pi-mcp-adapter.js";
+export {
+	PI_MCP_TASK_NOT_FOUND,
+	createPiMcpSolanaApi,
+} from "./core/pi-mcp-solana.js";
+export type {
+	PiMcpDashboardSummary,
+	PiMcpDiscoverResponse,
+	PiMcpRunResponse,
+	PiMcpSolanaApi,
+} from "./core/pi-mcp-solana.js";
 
 export {
 	DANGEROUS_RPC_METHODS,
