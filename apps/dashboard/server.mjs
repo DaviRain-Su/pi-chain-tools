@@ -9002,13 +9002,38 @@ const server = http.createServer(async (req, res) => {
 						portfolio: LAST_GOOD_UNIFIED,
 					});
 				}
+				const bscAccount = String(BSC_EXECUTE_RECIPIENT || "").trim();
+				let bscLayer = {
+					chain: "bsc",
+					status: "degraded",
+					note: "missing BSC_EXECUTE_RECIPIENT; cannot query wallet balances",
+				};
+				if (bscAccount) {
+					try {
+						const balances = await getBscWalletStableBalances(bscAccount);
+						bscLayer = {
+							chain: "bsc",
+							status: "active",
+							account: bscAccount,
+							positions: { wallet: balances },
+						};
+					} catch (bscError) {
+						bscLayer = {
+							chain: "bsc",
+							status: "degraded",
+							account: bscAccount,
+							note:
+								bscError instanceof Error ? bscError.message : String(bscError),
+						};
+					}
+				}
 				return json(res, 200, {
 					ok: false,
 					stale: true,
 					error: error instanceof Error ? error.message : String(error),
 					portfolio: {
 						updatedAt: new Date().toISOString(),
-						executionLayers: [],
+						executionLayers: [bscLayer],
 						identityLayer: {
 							ok: false,
 							error: "unified portfolio temporarily unavailable",
