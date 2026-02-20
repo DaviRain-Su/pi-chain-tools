@@ -75,6 +75,36 @@ body {
 	margin-top: 1rem;
 }
 
+.top-nav {
+	backdrop-filter: blur(8px);
+	background: rgba(18, 29, 47, 0.66);
+	border: 1px solid var(--line);
+	border-radius: 0.9rem;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.45rem;
+	margin-bottom: 1rem;
+	padding: 0.55rem;
+	position: sticky;
+	top: 0.75rem;
+	z-index: 10;
+}
+
+.top-nav a {
+	background: rgba(109, 125, 255, 0.16);
+	border: 1px solid rgba(166, 178, 255, 0.24);
+	border-radius: 0.55rem;
+	color: #dfe6ff;
+	font-family: "IBM Plex Mono", "Menlo", "Monaco", monospace;
+	font-size: 0.74rem;
+	padding: 0.35rem 0.55rem;
+	text-decoration: none;
+}
+
+.top-nav a:hover {
+	background: rgba(109, 125, 255, 0.28);
+}
+
 .badge {
 	background: rgba(109, 125, 255, 0.2);
 	border: 1px solid rgba(166, 178, 255, 0.4);
@@ -112,6 +142,22 @@ h3 {
 	font-size: clamp(1rem, 2.4vw, 1.25rem);
 	margin: 0;
 	max-width: 44rem;
+}
+
+.hero-highlights {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	margin-top: 0.95rem;
+}
+
+.hero-highlights span {
+	background: rgba(30, 201, 177, 0.16);
+	border: 1px solid rgba(63, 211, 189, 0.28);
+	border-radius: 999px;
+	color: #c9fff6;
+	font-size: 0.78rem;
+	padding: 0.25rem 0.62rem;
 }
 
 .hero-actions {
