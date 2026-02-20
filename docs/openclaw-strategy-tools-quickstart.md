@@ -118,6 +118,13 @@ npm run stable-yield:auto-migrate:v1 -- --execute true --confirm I_ACKNOWLEDGE_A
 npm run stable-yield:auto-migrate:v1 -- --maxMoveUsd 5 --minApyDeltaBps 20 --minMoveUsd 1 --allowSwap true
 ```
 
+每 30 分钟自动评估并在满足阈值时执行：
+
+```bash
+npm run stable-yield:auto-migrate:v1:cron-install
+# logs: logs/stable-yield-auto-migrate.log
+```
+
 
 ## 0) 查看可上架策略模板（Market Manifests）
 
