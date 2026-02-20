@@ -177,6 +177,26 @@
         color: var(--ok);
       }
 
+      .chain-tabs {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 0 0 12px;
+      }
+      .chain-tab {
+        border-radius: 999px;
+        padding: 6px 12px;
+        border: 1px solid #3d5896;
+        background: linear-gradient(180deg, #17274d 0%, #12203f 100%);
+        color: var(--text);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .chain-tab.active {
+        border-color: var(--accent-2);
+        box-shadow: 0 0 0 2px rgba(137,240,255,0.18);
+      }
+
       #yieldHealth,
       #bscProtocolHealth,
       #bscYieldReadiness,
@@ -203,7 +223,7 @@
   </head>
   <body>
     <div class="wrap">
-      <h1>NEAR · BSC 智能理财面板</h1>
+      <h1>Multi-Chain 智能理财面板</h1>
       <p class="muted">小白模式：只看关键资产、是否可执行、最近交易。</p>
       <div class="row" style="margin-bottom:16px">
         <input id="accountId" size="36" placeholder="account.near" />
@@ -213,6 +233,17 @@
         <span id="meta" class="muted"></span>
       </div>
       <div id="statusBanner" class="status-banner" style="display:none"></div>
+
+      <div class="chain-tabs" id="chainTabs">
+        <button class="chain-tab active" data-chain="all">All</button>
+        <button class="chain-tab" data-chain="bsc">BSC</button>
+        <button class="chain-tab" data-chain="base">Base</button>
+        <button class="chain-tab" data-chain="solana">Solana</button>
+        <button class="chain-tab" data-chain="sui">Sui</button>
+        <button class="chain-tab" data-chain="starknet">Starknet</button>
+        <button class="chain-tab" data-chain="near">NEAR</button>
+        <button class="chain-tab" data-chain="monad">Monad</button>
+      </div>
 
       <div class="grid">
         <div class="card"><h3>NEAR Wallet</h3><div id="near">-</div></div>
@@ -552,6 +583,7 @@
 
     <script>
       const accountInput = document.getElementById("accountId");
+      const chainTabsEl = document.getElementById("chainTabs");
       const refreshBtn = document.getElementById("refresh");
       const viewDemoBtn = document.getElementById("viewDemo");
       const viewFullBtn = document.getElementById("viewFull");
