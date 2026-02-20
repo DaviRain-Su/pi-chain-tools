@@ -250,7 +250,9 @@ async function prepareLifiQuoteFromIntent(
 	const fromToken = String(quoteContext.fromToken || "").trim();
 	const toToken = String(quoteContext.toToken || "").trim();
 	const fromAmountRawInput = String(quoteContext.fromAmount || "").trim();
-	const fromAmountHuman = String(quoteContext.fromAmountHuman || "").trim();
+	const fromAmountHumanInput = String(
+		quoteContext.fromAmountHuman || "",
+	).trim();
 	const fromAddress = String(quoteContext.fromAddress || "").trim();
 	const toAddress = String(quoteContext.toAddress || "").trim() || fromAddress;
 	const orderRaw = String(quoteContext.order || "RECOMMENDED").toUpperCase();
@@ -273,6 +275,10 @@ async function prepareLifiQuoteFromIntent(
 	}
 
 	const fromTokenDecimals = await fetchErc20Decimals(fromChain, fromToken);
+	const derivedHumanFromIntent = Number(executeIntent.amountUsd || 0);
+	const fromAmountHuman =
+		fromAmountHumanInput ||
+		(derivedHumanFromIntent > 0 ? String(derivedHumanFromIntent) : "");
 	let fromAmount = fromAmountRawInput;
 	if (fromAmountHuman) {
 		const computedRaw = humanAmountToRaw(fromAmountHuman, fromTokenDecimals);
@@ -290,7 +296,7 @@ async function prepareLifiQuoteFromIntent(
 		return {
 			ok: false,
 			errors: [
-				"prepareQuote requires quoteContext.fromAmount or quoteContext.fromAmountHuman",
+				"prepareQuote requires amount; provide quoteContext.fromAmount OR set strategy risk.maxPerRunUsd so amountUsd can be derived",
 			],
 		};
 	}
@@ -327,6 +333,13 @@ async function prepareLifiQuoteFromIntent(
 				fromTokenDecimals,
 				fromAmountRaw: fromAmount,
 				fromAmountHuman: fromAmountHuman || null,
+				amountSource: fromAmountHumanInput
+					? "quoteContext.fromAmountHuman"
+					: derivedHumanFromIntent > 0
+						? "executeIntent.amountUsd(auto-derived)"
+						: fromAmountRawInput
+							? "quoteContext.fromAmount(raw)"
+							: "unknown",
 			},
 		},
 	};
@@ -741,27 +754,6 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					params.prepareQuote === true &&
 					simulated.result?.status === "ready"
 				) {
-					if (
-						params.live === true &&
-						!String(asObject(params.quoteContext)?.fromAmountHuman || "").trim()
-					) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: JSON.stringify(
-										{
-											status: "blocked",
-											reason:
-												"live prepareQuote now requires quoteContext.fromAmountHuman for precision-safe execution",
-										},
-										null,
-										2,
-									),
-								},
-							],
-						};
-					}
 					const quoteResult = await prepareLifiQuoteFromIntent(
 						asObject(simulated.result.executeIntent) || {},
 						asObject(params.quoteContext) || {},
