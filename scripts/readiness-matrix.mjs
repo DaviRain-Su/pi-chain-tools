@@ -2,11 +2,10 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const REPO_ROOT = path.resolve(__dirname, "..");
+import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
+
+const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) ?? process.cwd();
 
 const OUTPUT_JSON_PATH = path.join(
 	REPO_ROOT,
@@ -56,6 +55,7 @@ const SECURITY_REPORTS_ROOT = path.join(
 );
 
 const MODULE_ORDER = [
+	"bsc_autonomous_track",
 	"bsc_execute",
 	"starknet_execute",
 	"near_flows",
@@ -126,10 +126,64 @@ function buildModule({
 	};
 }
 
+function evaluateAutonomousReadiness(env) {
+	const enabled =
+		String(env.BSC_AUTONOMOUS_MODE || "")
+			.trim()
+			.toLowerCase() === "true";
+	if (!enabled) {
+		return {
+			enabled: false,
+			status: "green",
+			blockers: [],
+			actions: [
+				"Legacy track active; set BSC_AUTONOMOUS_MODE=true to run autonomous rollout checks.",
+			],
+			evidence: ["autonomous mode disabled"],
+			evidenceFields: { autonomousMode: false, cycleConfigPresent: false },
+		};
+	}
+	const cycleId = String(env.BSC_AUTONOMOUS_CYCLE_ID || "").trim();
+	const intervalRaw = String(
+		env.BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS || "",
+	).trim();
+	const interval = Number.parseInt(intervalRaw, 10);
+	const cycleConfigPresent = Boolean(
+		cycleId && Number.isFinite(interval) && interval > 0,
+	);
+	const blockers = [];
+	if (!cycleConfigPresent) {
+		blockers.push(
+			"deterministic cycle config missing (set BSC_AUTONOMOUS_CYCLE_ID and BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS)",
+		);
+	}
+	return {
+		enabled: true,
+		status: blockers.length ? "red" : "green",
+		blockers,
+		actions: blockers.length
+			? [
+					"Define deterministic cycle id + interval before enabling autonomous execution.",
+					"Use legacy/manual trigger path only when BSC_AUTONOMOUS_MODE is off.",
+				]
+			: ["Deterministic cycle config present; keep manual triggers disabled."],
+		evidence: [
+			"autonomous mode enabled",
+			`cycle id: ${cycleId || "missing"}`,
+			`cycle interval seconds: ${Number.isFinite(interval) ? interval : "missing"}`,
+		],
+		evidenceFields: {
+			autonomousMode: true,
+			cycleConfigPresent,
+			cycleId: cycleId || undefined,
+			intervalSeconds: Number.isFinite(interval) ? interval : undefined,
+		},
+	};
+}
+
 async function buildMatrix() {
 	const generatedAt = nowIso();
-	const bscAutonomousMode =
-		String(process.env.BSC_AUTONOMOUS_MODE || "").toLowerCase() === "true";
+	const autonomousState = evaluateAutonomousReadiness(process.env);
 	const [proofBsc, proofStarknet, liveTest, breezeLatest, securityState] =
 		await Promise.all([
 			findLatestExecutionProof("bsc"),
@@ -141,6 +195,19 @@ async function buildMatrix() {
 
 	const securityLatest = await readLatestSecurityReport();
 	const modules = [];
+
+	modules.push(
+		buildModule({
+			key: "bsc_autonomous_track",
+			label: "BSC autonomous track",
+			status: autonomousState.status,
+			evidence: autonomousState.evidence,
+			blockers: autonomousState.blockers,
+			lastValidatedAt: generatedAt,
+			nextAction:
+				autonomousState.actions[0] || "Review autonomous rollout blockers",
+		}),
+	);
 
 	{
 		const blockers = [];
@@ -432,17 +499,25 @@ async function buildMatrix() {
 			topBlockers: allBlockers.slice(0, 5),
 		},
 		modules: sortedModules,
-		autonomousTrack: bscAutonomousMode
-			? {
-					chain: "bsc",
-					enabled: true,
-					execution: {
+		autonomousTrack: {
+			chain: "bsc",
+			enabled: autonomousState.enabled,
+			health: autonomousState.status === "green" ? "healthy" : "blocked",
+			blockers: autonomousState.blockers,
+			actions: autonomousState.actions,
+			evidence: autonomousState.evidenceFields,
+			execution: autonomousState.enabled
+				? {
 						track: "autonomous",
 						governance: "hybrid",
 						trigger: "deterministic_contract_cycle",
+					}
+				: {
+						track: "legacy",
+						governance: "onchain_only",
+						trigger: "external",
 					},
-				}
-			: undefined,
+		},
 	};
 }
 
@@ -485,6 +560,7 @@ function toMarkdown(matrix) {
 		"",
 		`- Generated at: ${matrix.generatedAt}`,
 		`- Overall status: ${moduleEmoji(matrix.overall.status)} ${matrix.overall.status.toUpperCase()}`,
+		`- Autonomous track: ${matrix.autonomousTrack?.health || "unknown"}${matrix.autonomousTrack?.blockers?.length ? ` (blockers: ${matrix.autonomousTrack.blockers.length})` : ""}`,
 		"",
 		"## Summary",
 		"",

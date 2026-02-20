@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const PACKAGE_NAME = "pi-chain-tools";
 
@@ -37,4 +38,10 @@ export function resolveFromRepo(relativePath, startDir = process.cwd()) {
 		repoRoot,
 		absolutePath: path.join(repoRoot, relativePath),
 	};
+}
+
+export function resolveRepoRootFromMetaUrl(metaUrl) {
+	if (!metaUrl) return null;
+	const filePath = fileURLToPath(metaUrl);
+	return resolveRepoRoot(path.dirname(filePath));
 }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { getBscExecutionMarkers, isBscAutonomousModeEnabled } from "./track.js";
+import {
+	evaluateBscAutonomousPolicy,
+	getBscExecutionMarkers,
+	isBscAutonomousModeEnabled,
+	parseDeterministicCycleConfig,
+} from "./track.js";
 
 describe("bsc autonomous mode routing", () => {
 	it("keeps legacy markers when flag is off/missing", () => {
@@ -23,6 +28,70 @@ describe("bsc autonomous mode routing", () => {
 			track: "autonomous",
 			governance: "hybrid",
 			trigger: "deterministic_contract_cycle",
+		});
+	});
+
+	it("requires deterministic cycle config when autonomous mode is on", () => {
+		const result = evaluateBscAutonomousPolicy({
+			env: { BSC_AUTONOMOUS_MODE: "true" },
+			requestTrigger: "deterministic_contract_cycle",
+		});
+		expect(result.allowed).toBe(false);
+		expect(result.blockers.map((x) => x.code)).toContain(
+			"AUTONOMOUS_CYCLE_CONFIG_MISSING",
+		);
+		expect(result.blockers[0]?.remediation).toContain(
+			"BSC_AUTONOMOUS_CYCLE_ID",
+		);
+		expect(result.evidence.cycleConfigPresent).toBe(false);
+	});
+
+	it("blocks external/manual triggers in autonomous mode", () => {
+		const result = evaluateBscAutonomousPolicy({
+			env: {
+				BSC_AUTONOMOUS_MODE: "true",
+				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
+				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
+			},
+			requestTrigger: "external",
+		});
+		expect(result.allowed).toBe(false);
+		expect(result.blockers.map((x) => x.code)).toContain(
+			"AUTONOMOUS_EXTERNAL_TRIGGER_BLOCKED",
+		);
+		expect(result.evidence.requestTrigger).toBe("external");
+	});
+
+	it("marks deterministic autonomous request as ready with evidence", () => {
+		const result = evaluateBscAutonomousPolicy({
+			env: {
+				BSC_AUTONOMOUS_MODE: "true",
+				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
+				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
+			},
+			requestTrigger: "deterministic_contract_cycle",
+		});
+		expect(result.allowed).toBe(true);
+		expect(result.blockers).toHaveLength(0);
+		expect(result.evidence).toMatchObject({
+			autonomousMode: true,
+			requestTrigger: "deterministic_contract_cycle",
+			cycleConfigPresent: true,
+			deterministicReady: true,
+		});
+	});
+
+	it("parses deterministic cycle config from env", () => {
+		expect(
+			parseDeterministicCycleConfig({
+				env: {
+					BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
+					BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
+				},
+			}),
+		).toEqual({
+			cycleId: "cycle-bsc-mainnet-v1",
+			intervalSeconds: 300,
 		});
 	});
 });

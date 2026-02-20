@@ -4,10 +4,13 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
+
 const VALID_MODES = new Set(["preflight", "dryrun", "execute", "full"]);
 const VALID_CHAINS = new Set(["bsc", "starknet", "solana", "all"]);
+const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) ?? process.cwd();
 const PROOFS_DIR = path.join(
-	process.cwd(),
+	REPO_ROOT,
 	"apps",
 	"dashboard",
 	"data",
@@ -73,6 +76,61 @@ function parseArgs(rawArgs = process.argv.slice(2)) {
 function selectedChains(targetChain) {
 	if (targetChain === "all") return ["bsc", "starknet", "solana"];
 	return [targetChain];
+}
+
+function evaluateAutonomousTrack(env, mode) {
+	const autonomousMode =
+		String(env.BSC_AUTONOMOUS_MODE || "")
+			.trim()
+			.toLowerCase() === "true";
+	if (!autonomousMode) {
+		return {
+			enabled: false,
+			health: "legacy-track",
+			blockers: [],
+			actions: [
+				"Set BSC_AUTONOMOUS_MODE=true to validate autonomous controls.",
+			],
+			evidence: { autonomousMode: false, cycleConfigPresent: false },
+		};
+	}
+	const cycleId = String(env.BSC_AUTONOMOUS_CYCLE_ID || "").trim();
+	const interval = Number.parseInt(
+		String(env.BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS || "").trim(),
+		10,
+	);
+	const blockers = [];
+	if (!cycleId || !Number.isFinite(interval) || interval <= 0) {
+		blockers.push(
+			"deterministic cycle config missing (BSC_AUTONOMOUS_CYCLE_ID, BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS)",
+		);
+	}
+	if (mode !== "full") {
+		blockers.push(
+			`manual mode '${mode}' is external; autonomous track allows deterministic contract cycle only`,
+		);
+	}
+	return {
+		enabled: true,
+		health: blockers.length === 0 ? "healthy" : "blocked",
+		blockers,
+		actions:
+			blockers.length === 0
+				? ["Maintain deterministic cycle execution path only."]
+				: [
+						"Route calls through deterministic contract cycle.",
+						"Disable BSC_AUTONOMOUS_MODE for manual preflight/dryrun testing.",
+					],
+		evidence: {
+			autonomousMode: true,
+			cycleConfigPresent: Boolean(
+				cycleId && Number.isFinite(interval) && interval > 0,
+			),
+			cycleId: cycleId || undefined,
+			intervalSeconds: Number.isFinite(interval) ? interval : undefined,
+			requestMode: mode,
+		},
+	};
 }
 
 async function fetchJson(url, init = {}) {
@@ -281,6 +339,7 @@ function toMarkdown(report) {
 		`- preflight: ${report.phases.preflight?.ok ? "ok" : "failed/skipped"}`,
 		`- dryrun: ${report.phases.dryrun?.ok ? "ok" : "failed/skipped"}`,
 		`- execute: ${report.phases.execute?.ok ? "ok" : "failed/skipped"}`,
+		`- autonomous health: ${report.autonomousTrack?.health ?? "legacy-track"}`,
 		"",
 		"## Rollback guidance",
 		"",
@@ -305,8 +364,7 @@ export async function runLiveTestRunner(rawArgs = process.argv.slice(2)) {
 		.trim()
 		.replace(/\/$/, "");
 
-	const bscAutonomousMode =
-		String(process.env.BSC_AUTONOMOUS_MODE || "").toLowerCase() === "true";
+	const autonomousTrack = evaluateAutonomousTrack(process.env, args.mode);
 	const report = {
 		suite: "live-test-runner",
 		version: 1,
@@ -320,17 +378,25 @@ export async function runLiveTestRunner(rawArgs = process.argv.slice(2)) {
 			execute: null,
 		},
 		rollbackGuidance: null,
-		autonomousTrack: bscAutonomousMode
-			? {
-					chain: "bsc",
-					enabled: true,
-					execution: {
+		autonomousTrack: {
+			chain: "bsc",
+			enabled: autonomousTrack.enabled,
+			health: autonomousTrack.health,
+			blockers: autonomousTrack.blockers,
+			actions: autonomousTrack.actions,
+			evidence: autonomousTrack.evidence,
+			execution: autonomousTrack.enabled
+				? {
 						track: "autonomous",
 						governance: "hybrid",
 						trigger: "deterministic_contract_cycle",
+					}
+				: {
+						track: "legacy",
+						governance: "onchain_only",
+						trigger: "external",
 					},
-				}
-			: undefined,
+		},
 	};
 
 	const shouldRunPreflight = [

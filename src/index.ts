@@ -311,3 +311,33 @@ export { createStarknetReadTools } from "./chains/starknet/tools/read.js";
 export { createStarknetComposeTools } from "./chains/starknet/tools/compose.js";
 export { createStarknetExecuteTools } from "./chains/starknet/tools/execute.js";
 export { createStarknetToolset } from "./chains/starknet/toolset.js";
+
+export {
+	evaluateBscAutonomousPolicy,
+	getBscExecutionMarkers,
+	isBscAutonomousModeEnabled,
+	parseDeterministicCycleConfig,
+} from "./chains/bsc-autonomous/track.js";
+export {
+	getAsterDexCapability,
+	getAsterDexReadiness,
+	parseAsterDexConfig,
+	readAsterDexHealth,
+} from "./chains/bsc-autonomous/asterdex.js";
+export type {
+	AutonomousBlocker,
+	AutonomousBlockerCode,
+	BscAutonomousDecision,
+	BscAutonomousDecisionEvidence,
+	DeterministicCycleConfig,
+	ExecutionGovernance,
+	ExecutionMarkers,
+	ExecutionTrack,
+	ExecutionTrigger,
+} from "./chains/bsc-autonomous/track.js";
+export type {
+	AsterDexCapability,
+	AsterDexConfig,
+	AsterDexHealthStatus,
+	AsterDexReadiness,
+} from "./chains/bsc-autonomous/asterdex.js";

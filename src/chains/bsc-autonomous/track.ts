@@ -8,6 +8,38 @@ export type ExecutionMarkers = {
 	trigger: ExecutionTrigger;
 };
 
+export type AutonomousBlockerCode =
+	| "AUTONOMOUS_CYCLE_CONFIG_MISSING"
+	| "AUTONOMOUS_EXTERNAL_TRIGGER_BLOCKED";
+
+export type AutonomousBlocker = {
+	code: AutonomousBlockerCode;
+	reason: string;
+	remediation: string;
+};
+
+export type DeterministicCycleConfig = {
+	cycleId: string;
+	intervalSeconds: number;
+};
+
+export type BscAutonomousDecisionEvidence = {
+	autonomousMode: boolean;
+	requestTrigger: ExecutionTrigger;
+	requiredTrigger: "deterministic_contract_cycle";
+	cycleConfigPresent: boolean;
+	cycleConfig?: DeterministicCycleConfig;
+	deterministicReady: boolean;
+};
+
+export type BscAutonomousDecision = {
+	markers: ExecutionMarkers;
+	allowed: boolean;
+	blockers: AutonomousBlocker[];
+	actions: string[];
+	evidence: BscAutonomousDecisionEvidence;
+};
+
 export function isBscAutonomousModeEnabled(input?: {
 	env?: Record<string, string | undefined>;
 	defaultValue?: boolean;
@@ -32,5 +64,83 @@ export function getBscExecutionMarkers(autonomous: boolean): ExecutionMarkers {
 		track: "legacy",
 		governance: "onchain_only",
 		trigger: "external",
+	};
+}
+
+export function parseDeterministicCycleConfig(input?: {
+	env?: Record<string, string | undefined>;
+}): DeterministicCycleConfig | null {
+	const env = input?.env ?? process.env;
+	const cycleId = env.BSC_AUTONOMOUS_CYCLE_ID?.trim() ?? "";
+	const intervalRaw = env.BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS?.trim() ?? "";
+	const intervalSeconds = Number.parseInt(intervalRaw, 10);
+	if (!cycleId || !Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
+		return null;
+	}
+	return { cycleId, intervalSeconds };
+}
+
+export function evaluateBscAutonomousPolicy(input?: {
+	env?: Record<string, string | undefined>;
+	requestTrigger?: ExecutionTrigger;
+}): BscAutonomousDecision {
+	const env = input?.env ?? process.env;
+	const autonomousMode = isBscAutonomousModeEnabled({ env });
+	const requestTrigger = input?.requestTrigger ?? "external";
+	const markers = getBscExecutionMarkers(autonomousMode);
+	const cycleConfig = parseDeterministicCycleConfig({ env });
+	const blockers: AutonomousBlocker[] = [];
+	const actions: string[] = [];
+
+	if (autonomousMode && !cycleConfig) {
+		blockers.push({
+			code: "AUTONOMOUS_CYCLE_CONFIG_MISSING",
+			reason:
+				"Autonomous mode requires deterministic cycle config (cycle id + interval seconds).",
+			remediation:
+				"Set BSC_AUTONOMOUS_CYCLE_ID and BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS to deterministic values.",
+		});
+		actions.push(
+			"Define deterministic cycle env vars before autonomous rollout (BSC_AUTONOMOUS_CYCLE_ID, BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS).",
+		);
+	}
+
+	if (autonomousMode && requestTrigger !== "deterministic_contract_cycle") {
+		blockers.push({
+			code: "AUTONOMOUS_EXTERNAL_TRIGGER_BLOCKED",
+			reason:
+				"External/manual trigger paths are blocked while autonomous mode is enabled.",
+			remediation:
+				"Route execution through deterministic contract cycle, or disable BSC_AUTONOMOUS_MODE for manual/testing paths.",
+		});
+		actions.push(
+			"Use deterministic cycle trigger path only in autonomous mode; keep manual trigger for legacy mode.",
+		);
+	}
+
+	if (!autonomousMode) {
+		actions.push(
+			"Legacy path active. Enable BSC_AUTONOMOUS_MODE=true to validate deterministic autonomous controls.",
+		);
+	}
+
+	const evidence: BscAutonomousDecisionEvidence = {
+		autonomousMode,
+		requestTrigger,
+		requiredTrigger: "deterministic_contract_cycle",
+		cycleConfigPresent: cycleConfig != null,
+		cycleConfig: cycleConfig ?? undefined,
+		deterministicReady:
+			autonomousMode &&
+			requestTrigger === "deterministic_contract_cycle" &&
+			cycleConfig != null,
+	};
+
+	return {
+		markers,
+		allowed: blockers.length === 0,
+		blockers,
+		actions,
+		evidence,
 	};
 }
