@@ -9317,6 +9317,12 @@ function startBscYieldWorker(options = {}) {
 	}, BSC_YIELD_WORKER.intervalMs);
 }
 
+const BSC_POOL_DISCOVERY_CACHE = {
+	lista: { ts: 0, value: null },
+	wombat: { ts: 0, value: null },
+};
+const BSC_POOL_DISCOVERY_CACHE_TTL_MS = 60_000;
+
 function parseAddressCandidates(raw) {
 	return String(raw || "")
 		.split(/[\n,;\s]+/)
@@ -9595,6 +9601,13 @@ async function scorePoolCandidates(candidates, protocol) {
 
 async function discoverBscPoolsByProtocol(protocol) {
 	const key = String(protocol || "").toLowerCase();
+	const cache = BSC_POOL_DISCOVERY_CACHE[key];
+	if (
+		cache?.value &&
+		Date.now() - Number(cache.ts || 0) < BSC_POOL_DISCOVERY_CACHE_TTL_MS
+	) {
+		return cache.value;
+	}
 	const candidateRaw =
 		key === "lista" ? BSC_LISTA_POOL_CANDIDATES : BSC_WOMBAT_POOL_CANDIDATES;
 	let candidates = parseAddressCandidates(candidateRaw);
@@ -9651,7 +9664,7 @@ async function discoverBscPoolsByProtocol(protocol) {
 				: recommended
 					? "low"
 					: "none";
-	return {
+	const result = {
 		protocol: key,
 		source,
 		reasonCode,
@@ -9660,6 +9673,11 @@ async function discoverBscPoolsByProtocol(protocol) {
 		recommended,
 		warning,
 	};
+	if (cache) {
+		cache.ts = Date.now();
+		cache.value = result;
+	}
+	return result;
 }
 
 function parseDotEnv(raw) {
