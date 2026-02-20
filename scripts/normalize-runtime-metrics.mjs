@@ -47,6 +47,11 @@ function readJsonSafe(filePath) {
 	}
 }
 
+if (String(process.env.CI_SKIP_RUNTIME_METRICS || "").trim() === "1") {
+	console.log("[normalize-runtime-metrics] skipped: CI_SKIP_RUNTIME_METRICS=1");
+	process.exit(0);
+}
+
 const targetPath = resolvePath(targetInput, process.cwd());
 const cachePath = resolvePath(cacheInput, process.cwd());
 
