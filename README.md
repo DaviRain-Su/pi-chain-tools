@@ -25,6 +25,14 @@ Details: `docs/live-test-runbook.md`
 
 Current operating model is **offchain orchestrator + onchain execution evidence + guardrails**.
 
+### Quick Start (Local Offchain)
+
+```bash
+npm run autonomous:hyperliquid:bootstrap
+npm run autonomous:hyperliquid:testnet:evidence
+npm run autonomous:submission:validate
+```
+
 - Default/canonical path: `HYPERLIQUID_AUTONOMOUS_MODE=false`
 - Optional experimental path: `HYPERLIQUID_AUTONOMOUS_MODE=true` (not required for release gate)
 

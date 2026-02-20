@@ -76,6 +76,7 @@
 		"autonomous:hyperliquid:rollout:gate": "npm run check && npm test && npm run live:test:preflight && npm run readiness:refresh",
 		"autonomous:rollout:gate": "npm run autonomous:hyperliquid:rollout:gate",
 		"autonomous:hyperliquid:cycle": "node scripts/hyperliquid-autonomous-cycle.mjs",
+		"autonomous:hyperliquid:bootstrap": "node scripts/hyperliquid-local-bootstrap.mjs",
 		"autonomous:hyperliquid:dryrun": "node scripts/autonomous-hyperliquid-dryrun-checklist.mjs && node scripts/hyperliquid-autonomous-cycle.mjs --mode dryrun",
 		"autonomous:hyperliquid:runs": "node scripts/autonomous-cycle-runs.mjs",
 		"doctor:paths": "node scripts/diagnose-runtime-paths.mjs",

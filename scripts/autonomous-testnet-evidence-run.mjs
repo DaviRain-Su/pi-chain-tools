@@ -18,6 +18,24 @@ const DEFAULT_OUTPUT = path.join(
 	"testnet-cycle-evidence.json",
 );
 
+const BASE_REQUIRED_KEYS = [
+	"HYPERLIQUID_TESTNET_RPC_URL or BSC_RPC_URL",
+	"HYPERLIQUID_TESTNET_PRIVATE_KEY or BSC_EXECUTE_PRIVATE_KEY",
+	"HYPERLIQUID_AUTONOMOUS_TOKEN_IN or BSC_USDC",
+	"HYPERLIQUID_AUTONOMOUS_TOKEN_OUT or BSC_USDT",
+	"HYPERLIQUID_AUTONOMOUS_AMOUNT_RAW",
+];
+
+const OPTIONAL_KEYS = [
+	"HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE",
+	"HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND",
+	"HYPERLIQUID_AUTONOMOUS_CONFIRM_TEXT",
+	"HYPERLIQUID_AUTONOMOUS_MAX_AMOUNT_RAW",
+	"HYPERLIQUID_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS",
+	"HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS",
+	"HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS",
+];
+
 function parseDotEnv(content) {
 	const out = {};
 	for (const line of String(content).split(/\r?\n/)) {
@@ -99,6 +117,33 @@ function resolveEvidenceMode(env) {
 
 function pushMissing(missing, condition, field) {
 	if (condition) missing.push(field);
+}
+
+function resolveChecklist(modeInfo) {
+	const requiredKeys = [...BASE_REQUIRED_KEYS];
+	if (modeInfo.onchainMode) {
+		requiredKeys.push(
+			"HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS or HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS",
+		);
+	}
+	return { requiredKeys, optionalKeys: OPTIONAL_KEYS };
+}
+
+function printChecklistSummary(phase, summary) {
+	console.log(`[evidence:${phase}] mode=${summary.mode}`);
+	console.log(`[evidence:${phase}] output=${summary.output}`);
+	console.log(`[evidence:${phase}] required keys:`);
+	for (const key of summary.requiredKeys) {
+		console.log(`  - ${key}`);
+	}
+	console.log(`[evidence:${phase}] optional keys:`);
+	for (const key of summary.optionalKeys) {
+		console.log(`  - ${key}`);
+	}
+	if (summary.missing?.length) {
+		console.log(`[evidence:${phase}] missing:`);
+		for (const key of summary.missing) console.log(`  - ${key}`);
+	}
 }
 
 export function validatePrerequisites(
@@ -216,10 +261,27 @@ export async function runAutonomousTestnetEvidence(
 	const args = parseArgs(rawArgs);
 	const env = loadEnv(envIn);
 	const modeInfo = resolveEvidenceMode(env);
+	const checklist = resolveChecklist(modeInfo);
 	const precheck = validatePrerequisites(env, modeInfo);
+
+	printChecklistSummary("start", {
+		mode: modeInfo.mode,
+		output: args.output,
+		requiredKeys: checklist.requiredKeys,
+		optionalKeys: checklist.optionalKeys,
+		missing: precheck.missing,
+	});
+
 	if (!precheck.ok) {
 		const guidance = deterministicGuidance(precheck);
 		console.error(JSON.stringify(guidance, null, 2));
+		printChecklistSummary("end", {
+			mode: modeInfo.mode,
+			output: args.output,
+			requiredKeys: checklist.requiredKeys,
+			optionalKeys: checklist.optionalKeys,
+			missing: precheck.missing,
+		});
 		process.exitCode = 2;
 		return { ok: false, guidance };
 	}
@@ -321,6 +383,13 @@ export async function runAutonomousTestnetEvidence(
 			`${JSON.stringify(evidence, null, 2)}\n`,
 			"utf8",
 		);
+		printChecklistSummary("end", {
+			mode: modeInfo.mode,
+			output: args.output,
+			requiredKeys: checklist.requiredKeys,
+			optionalKeys: checklist.optionalKeys,
+			missing: [],
+		});
 		console.log(
 			JSON.stringify(
 				{
@@ -371,6 +440,13 @@ export async function runAutonomousTestnetEvidence(
 		`${JSON.stringify(evidence, null, 2)}\n`,
 		"utf8",
 	);
+	printChecklistSummary("end", {
+		mode: modeInfo.mode,
+		output: args.output,
+		requiredKeys: checklist.requiredKeys,
+		optionalKeys: checklist.optionalKeys,
+		missing: [],
+	});
 	console.log(
 		JSON.stringify(
 			{

@@ -160,6 +160,29 @@ Live lock controls (default-safe):
 - `HYPERLIQUID_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS` (default `300`)
 - `HYPERLIQUID_AUTONOMOUS_CYCLE_LOCK_TTL_SECONDS` (default `900`)
 
+## Troubleshooting: top 5 env mistakes (and fast fixes)
+
+1. **`HYPERLIQUID_TESTNET_RPC_URL` missing or empty**
+   - Symptom: preflight/evidence says RPC URL missing.
+   - Fix: set `HYPERLIQUID_TESTNET_RPC_URL=<your testnet rpc>` (or legacy `BSC_RPC_URL`) and rerun bootstrap.
+
+2. **Private key var not set (`HYPERLIQUID_TESTNET_PRIVATE_KEY`)**
+   - Symptom: evidence precheck fails on signer key.
+   - Fix: set `HYPERLIQUID_TESTNET_PRIVATE_KEY=0x...` (or legacy `BSC_EXECUTE_PRIVATE_KEY`) in `.env.bsc.local`.
+
+3. **Token mapping keys missing (`HYPERLIQUID_AUTONOMOUS_TOKEN_IN/OUT`)**
+   - Symptom: cycle cannot resolve input/output token.
+   - Fix: set `HYPERLIQUID_AUTONOMOUS_TOKEN_IN` and `HYPERLIQUID_AUTONOMOUS_TOKEN_OUT` (or legacy `BSC_USDC/BSC_USDT`).
+
+4. **Amount key missing (`HYPERLIQUID_AUTONOMOUS_AMOUNT_RAW`)**
+   - Symptom: deterministic cycle precheck blocks before execution.
+   - Fix: set raw integer amount (for 6-decimal assets, `1000000` = 1 unit).
+
+5. **Mode mismatch (`HYPERLIQUID_AUTONOMOUS_MODE=true` accidentally enabled)**
+   - Symptom: command asks for contract/router even in local offchain setup.
+   - Fix: set `HYPERLIQUID_AUTONOMOUS_MODE=false` for offchain-orchestrator defaults, then rerun:
+     - `npm run autonomous:hyperliquid:bootstrap`
+
 ## Foundry crystallization note (targeted)
 
 A targeted crystallization attempt was executed for recurring `exec/path/check` interruptions; current candidate output was not directly path/check relevant (it suggested an `edit` ambiguity pattern). Until a suitable candidate appears, keep deterministic prevention in code/scripts:
