@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import type { EvmTransferPolicy } from "../src/chains/evm/policy.js";
 import {
 	parseRunMode as parseRunModeCompat,
 	resolveWorkflowRunMode as resolveWorkflowRunModeCompat,
 } from "../src/chains/shared/workflow-runtime.js";
 import { defineTool as defineToolCoreCompat } from "../src/core/types.js";
-import { EVM_TRANSFER_POLICY_SCHEMA } from "../src/w3rt-core/evm-transfer-policy-types.js";
+import {
+	EVM_TRANSFER_POLICY_SCHEMA,
+	type EvmTransferPolicy,
+} from "../src/w3rt-core/index.js";
 import { defineTool as defineToolW3rt } from "../src/w3rt-core/tool-types.js";
 import {
 	parseRunMode as parseRunModeW3rt,

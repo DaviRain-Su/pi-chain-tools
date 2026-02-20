@@ -48,6 +48,8 @@ export type {
 } from "./core/pi-mcp-solana.js";
 
 export {
+	EVM_TRANSFER_POLICY_SCHEMA,
+	EVM_TRANSFER_POLICY_STORE_SCHEMA,
 	parseRunMode,
 	parseRunModeHint,
 	parseRunModeWithCompose,
