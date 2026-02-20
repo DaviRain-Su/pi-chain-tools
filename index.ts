@@ -84,6 +84,57 @@ function validateStrategyStructure(specInput: unknown): {
 }
 
 const EXECUTE_CONFIRM_TOKEN = "I_ACKNOWLEDGE_EXECUTION";
+const EXECUTE_ALLOWED_TEMPLATE = "rebalance-crosschain-v0";
+const EXECUTE_ALLOWED_CHAINS = new Set(["base", "bsc"]);
+const EXECUTE_MAX_PER_RUN_USD = 5000;
+
+function evaluateExecutePolicy(spec: Record<string, unknown>) {
+	const metadata = asObject(spec.metadata);
+	const template = String(metadata?.template || "");
+	if (template !== EXECUTE_ALLOWED_TEMPLATE) {
+		return {
+			ok: false,
+			reason: `execute policy allows only template '${EXECUTE_ALLOWED_TEMPLATE}'`,
+		};
+	}
+
+	const constraints = asObject(spec.constraints);
+	const allow = asObject(constraints?.allow);
+	const risk = asObject(constraints?.risk);
+
+	const chains = Array.isArray(allow?.chains)
+		? (allow?.chains as unknown[]).map((v) => String(v).toLowerCase())
+		: [];
+	if (
+		chains.length === 0 ||
+		chains.some((c) => !EXECUTE_ALLOWED_CHAINS.has(c))
+	) {
+		return { ok: false, reason: "execute policy allows only base/bsc chains" };
+	}
+
+	const protocols = Array.isArray(allow?.protocols)
+		? (allow?.protocols as unknown[]).map((v) => String(v).toLowerCase())
+		: [];
+	if (!protocols.includes("lifi")) {
+		return { ok: false, reason: "execute policy requires lifi protocol" };
+	}
+
+	const maxPerRunUsd = Number(risk?.maxPerRunUsd || 0);
+	if (!Number.isFinite(maxPerRunUsd) || maxPerRunUsd <= 0) {
+		return {
+			ok: false,
+			reason: "execute policy requires valid risk.maxPerRunUsd",
+		};
+	}
+	if (maxPerRunUsd > EXECUTE_MAX_PER_RUN_USD) {
+		return {
+			ok: false,
+			reason: `execute policy maxPerRunUsd exceeded (${maxPerRunUsd} > ${EXECUTE_MAX_PER_RUN_USD})`,
+		};
+	}
+
+	return { ok: true, reason: "policy-passed" };
+}
 
 function simulateStrategyRun(
 	specInput: unknown,
@@ -100,6 +151,15 @@ function simulateStrategyRun(
 	if (steps.length === 0) {
 		return { ok: false, errors: ["strategy plan.steps is required"] };
 	}
+
+	const executePolicy = mode === "execute" ? evaluateExecutePolicy(spec) : null;
+	const executeStepStatus =
+		mode !== "execute"
+			? null
+			: executePolicy?.ok
+				? "EXECUTE_READY_NOOP"
+				: "EXECUTION_BLOCKED_BY_POLICY";
+
 	const trace = steps.map((step, index) => ({
 		index,
 		id: String(step.id || `step-${index}`),
@@ -109,16 +169,18 @@ function simulateStrategyRun(
 			mode === "plan"
 				? "PLANNED"
 				: mode === "execute"
-					? "EXECUTION_BLOCKED_BY_POLICY"
+					? executeStepStatus
 					: "SIMULATED_OK",
 		ts: new Date().toISOString(),
 	}));
 	return {
 		ok: true,
 		result: {
-			status: mode === "execute" ? "blocked" : "ok",
+			status:
+				mode === "execute" ? (executePolicy?.ok ? "ready" : "blocked") : "ok",
 			mode,
 			strategyId: spec.id || null,
+			policy: executePolicy,
 			steps: trace,
 			evidence: {
 				type: "strategy_execution_trace@v0",
