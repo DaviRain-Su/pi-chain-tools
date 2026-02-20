@@ -25,4 +25,35 @@ describe("bsc-autonomous-cycle", () => {
 			Array.isArray(result.proof.coreRouteSelection?.evidenceMarkers),
 		).toBe(true);
 	});
+
+	it("uses contract emitted transition evidence in live mode", async () => {
+		const out = "/tmp/bsc-autonomous-cycle-live-test.json";
+		const unique = Date.now();
+		const result = await runBscAutonomousCycle(
+			[
+				"--mode",
+				"live",
+				"--run-id",
+				`cycle-live-${unique}`,
+				"--out",
+				out,
+				"--state-path",
+				`/tmp/bsc-autonomous-cycle-live-state-${unique}.json`,
+			],
+			{
+				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE: "true",
+				BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND:
+					"node -e \"console.log(JSON.stringify({txHash:'0x' + 'ef'.repeat(32),emittedEvents:['CycleStateTransition','ExecutionDecision'],stateDelta:{previousState:'0',nextState:'0'},transition:{cycleId:'cycle-live',transitionId:'1',eventName:'CycleStateTransition',emittedEvents:['CycleStateTransition'],stateDelta:{previousState:'0',nextState:'0'}}}))\"",
+				BSC_AUTONOMOUS_ASTERDEX_CONFIRM_TEXT: "ASTERDEX_EXECUTE_LIVE",
+				BSC_AUTONOMOUS_CONTRACT_ENTRYPOINT_ENABLED: "true",
+				BSC_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS: "1",
+			},
+		);
+		expect(result.ok).toBe(true);
+		expect(result.proof.cycleTransitionEvidence?.verifiable).toBe(true);
+		expect(result.proof.txEvidence?.emittedEvents).toContain(
+			"CycleStateTransition",
+		);
+		expect(result.proof.txEvidence?.stateDelta?.previousState).toBe("0");
+	});
 });

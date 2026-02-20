@@ -422,10 +422,15 @@ export async function runBscAutonomousCycle(
 		String(env.BSC_AUTONOMOUS_ONCHAIN_TRIGGER_REQUIRED || "true")
 			.trim()
 			.toLowerCase() === "true";
+	const contractEntrypointEnabled =
+		String(env.BSC_AUTONOMOUS_CONTRACT_ENTRYPOINT_ENABLED || "true")
+			.trim()
+			.toLowerCase() === "true";
 	if (
 		args.mode === "live" &&
 		requireOnchainTrigger &&
-		!transitionEvidence.verifiable
+		!transitionEvidence.verifiable &&
+		!contractEntrypointEnabled
 	) {
 		const proof = {
 			suite: "bsc-autonomous-cycle",
@@ -501,6 +506,15 @@ export async function runBscAutonomousCycle(
 				? "execute"
 				: "simulate_execute"
 			: "hold_blocked";
+		const runtimeTransition = execution.evidence?.transition || null;
+		const mergedTransitionEvidence = runtimeTransition
+			? {
+					verifiable: true,
+					onchainTrigger: transitionEvidence.onchainTrigger,
+					transition: runtimeTransition,
+					blockers: [],
+				}
+			: transitionEvidence;
 		proof = {
 			suite: "bsc-autonomous-cycle",
 			version: 3,
@@ -515,7 +529,7 @@ export async function runBscAutonomousCycle(
 				isCoreRoute: true,
 				evidenceMarkers: ["ROUTE_CORE_ASTERDEX_EARN", "FUNDING_PATH_PRIMARY"],
 			},
-			cycleTransitionEvidence: transitionEvidence,
+			cycleTransitionEvidence: mergedTransitionEvidence,
 			safety: {
 				minLiveIntervalSeconds: safety.minIntervalSeconds,
 				lockTtlSeconds: safety.lockTtlSeconds,
@@ -526,8 +540,14 @@ export async function runBscAutonomousCycle(
 				txHash:
 					execution.txHash || transitionEvidence.onchainTrigger?.txHash || null,
 				evidence: execution.evidence || null,
-				emittedEvents: transitionEvidence.transition?.emittedEvents || [],
-				stateDelta: transitionEvidence.transition?.stateDelta || null,
+				emittedEvents:
+					execution.evidence?.decodedEvents ||
+					transitionEvidence.transition?.emittedEvents ||
+					[],
+				stateDelta:
+					execution.evidence?.stateDelta ||
+					transitionEvidence.transition?.stateDelta ||
+					null,
 				receiptNormalized: normalizeTxReceipt(
 					{
 						txHash: execution.txHash || null,

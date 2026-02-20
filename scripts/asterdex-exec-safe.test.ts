@@ -70,11 +70,13 @@ describe("asterdex-exec-safe", () => {
 			{
 				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE: "true",
 				BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND:
-					"node -e \"console.log('0x' + 'cd'.repeat(32))\"",
+					"node -e \"console.log(JSON.stringify({txHash:'0x' + 'cd'.repeat(32),emittedEvents:['CycleStateTransition','ExecutionDecision'],stateDelta:{previousState:'0',nextState:'0'}}))\"",
 			},
 		);
 		expect(result.ok).toBe(true);
 		expect(result.status).toBe("executed");
 		expect(result.evidence?.confirmationMode).toBe("onchain_trigger");
+		expect(result.evidence?.decodedEvents).toContain("CycleStateTransition");
+		expect(result.evidence?.stateDelta?.previousState).toBe("0");
 	});
 });

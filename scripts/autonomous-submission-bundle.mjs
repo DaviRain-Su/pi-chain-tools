@@ -47,6 +47,14 @@ export async function buildAutonomousSubmissionBundle() {
 	);
 	const cycle = await readJsonSafe(cyclePath);
 	const liveTest = await readJsonSafe(liveTestPath);
+	const deploymentPath = path.join(
+		REPO_ROOT,
+		"contracts",
+		"bsc-autonomous",
+		"deployments",
+		"bscTestnet.latest.json",
+	);
+	const deployment = await readJsonSafe(deploymentPath);
 	const generatedAt = new Date().toISOString();
 
 	const bundle = {
@@ -57,6 +65,9 @@ export async function buildAutonomousSubmissionBundle() {
 			cycleProofPath: cyclePath,
 			liveTestPath,
 			readinessPath,
+			contractDeploymentPath: deploymentPath,
+			contractAbiPath:
+				"contracts/bsc-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json",
 		},
 		summary: {
 			cycleMode: cycle?.mode || "missing",
@@ -74,6 +85,24 @@ export async function buildAutonomousSubmissionBundle() {
 			stateDelta: cycle?.txEvidence?.stateDelta || null,
 			receiptNormalized: cycle?.txEvidence?.receiptNormalized || null,
 			transition: cycle?.cycleTransitionEvidence?.transition || null,
+			contractAddress:
+				deployment?.address ||
+				process.env.BSC_AUTONOMOUS_CONTRACT_ADDRESS ||
+				null,
+			routerAddress:
+				deployment?.routerAddress ||
+				process.env.BSC_AUTONOMOUS_ROUTER_ADDRESS ||
+				null,
+			entryFunction:
+				"runDeterministicCycle((bytes32,uint256,uint256,address,address,bytes,bytes32,bool))",
+		},
+		contractBinding: {
+			network: deployment?.network || "bscTestnet",
+			chainId: deployment?.chainId || null,
+			address: deployment?.address || null,
+			abiPath:
+				"contracts/bsc-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json",
+			verifyScript: "npm run contracts:bsc:verify:testnet",
 		},
 		reproducibility: {
 			oneCommand: "npm run autonomous:evidence:regen",
@@ -88,6 +117,7 @@ export async function buildAutonomousSubmissionBundle() {
 			repo: "https://github.com/davirain/pi-chain-tools",
 			demoRunbook: "docs/autonomous-bsc-demo.md",
 			readiness: "docs/mainnet-readiness-matrix.md",
+			architecture: "docs/autonomous-contract-architecture.md",
 		},
 	};
 
@@ -105,9 +135,13 @@ export async function buildAutonomousSubmissionBundle() {
 		"",
 		"## Onchain evidence",
 		"",
+		`- Strategy contract: ${bundle.onchainEvidence.contractAddress || "n/a"}`,
+		`- Router contract: ${bundle.onchainEvidence.routerAddress || "n/a"}`,
+		`- Entry function: ${bundle.onchainEvidence.entryFunction}`,
 		`- Tx hash: ${bundle.onchainEvidence.txHash || "n/a"}`,
 		`- Emitted events: ${Array.isArray(bundle.onchainEvidence.emittedEvents) ? bundle.onchainEvidence.emittedEvents.length : 0}`,
 		`- State delta: ${bundle.onchainEvidence.stateDelta ? JSON.stringify(bundle.onchainEvidence.stateDelta) : "n/a"}`,
+		`- ABI path: ${bundle.contractBinding.abiPath}`,
 		"",
 		"## Reproducibility",
 		"",
@@ -119,12 +153,15 @@ export async function buildAutonomousSubmissionBundle() {
 		`- Repo: ${bundle.links.repo}`,
 		`- Demo script: ${bundle.links.demoRunbook}`,
 		`- Readiness matrix: ${bundle.links.readiness}`,
+		`- Contract architecture: ${bundle.links.architecture}`,
 		"",
 		"## Included artifacts",
 		"",
 		`- ${bundle.artifacts.cycleProofPath}`,
 		`- ${bundle.artifacts.liveTestPath}`,
 		`- ${bundle.artifacts.readinessPath}`,
+		`- ${bundle.artifacts.contractDeploymentPath}`,
+		`- ${bundle.artifacts.contractAbiPath}`,
 		"",
 	].join("\n");
 

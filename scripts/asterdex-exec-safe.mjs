@@ -68,19 +68,24 @@ function parseTriggerProof(raw) {
 	}
 }
 
+function parseStructuredOutput(text) {
+	if (!text) return null;
+	const trimmed = String(text).trim();
+	if (!trimmed) return null;
+	try {
+		return JSON.parse(trimmed);
+	} catch {
+		return null;
+	}
+}
+
 function parseTxHashFromOutput(text) {
 	if (!text) return null;
 	const direct = String(text).match(TX_HASH_PATTERN);
 	if (direct?.[0]) return direct[0];
-	const trimmed = String(text).trim();
-	if (!trimmed) return null;
-	try {
-		const parsed = JSON.parse(trimmed);
-		const hash = parsed?.txHash || parsed?.transactionHash || parsed?.hash;
-		return typeof hash === "string" && TX_HASH_PATTERN.test(hash) ? hash : null;
-	} catch {
-		return null;
-	}
+	const parsed = parseStructuredOutput(text);
+	const hash = parsed?.txHash || parsed?.transactionHash || parsed?.hash;
+	return typeof hash === "string" && TX_HASH_PATTERN.test(hash) ? hash : null;
 }
 
 function applyTemplate(template, intent) {
@@ -214,7 +219,13 @@ export function runAsterDexExecSafe(
 	});
 	const stdout = String(commandResult.stdout || "").trim();
 	const stderr = String(commandResult.stderr || "").trim();
-	const txHash = parseTxHashFromOutput(stdout) || parseTxHashFromOutput(stderr);
+	const stdoutJson = parseStructuredOutput(stdout);
+	const stderrJson = parseStructuredOutput(stderr);
+	const structured = stdoutJson || stderrJson || null;
+	const txHash =
+		parseTxHashFromOutput(stdout) ||
+		parseTxHashFromOutput(stderr) ||
+		(structured?.txHash ?? null);
 	return {
 		ok: commandResult.status === 0,
 		status: commandResult.status === 0 ? "executed" : "failed",
@@ -225,6 +236,9 @@ export function runAsterDexExecSafe(
 			exitCode: commandResult.status,
 			stdout: stdout.slice(-500),
 			stderr: stderr.slice(-500),
+			decodedEvents: structured?.emittedEvents || [],
+			stateDelta: structured?.stateDelta || null,
+			transition: structured?.transition || null,
 			primaryFundingRoute: "asterdex_earn_core",
 			routeSelection: "core",
 			confirmationMode: verifiableOnchainTrigger

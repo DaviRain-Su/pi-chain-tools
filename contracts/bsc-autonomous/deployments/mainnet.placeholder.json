@@ -1,0 +1,8 @@
+{
+	"network": "bscMainnet",
+	"chainId": 56,
+	"contract": "BscAutonomousStrategy",
+	"address": "0x0000000000000000000000000000000000000000",
+	"routerAddress": "0x0000000000000000000000000000000000000000",
+	"status": "placeholder_update_after_mainnet_deploy"
+}

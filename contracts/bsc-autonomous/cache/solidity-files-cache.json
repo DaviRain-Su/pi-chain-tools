@@ -1,0 +1,154 @@
+{
+  "_format": "hh-sol-cache-2",
+  "files": {
+    "/home/davirain/clawd/pi-chain-tools/contracts/bsc-autonomous/contracts/BscAutonomousStrategy.sol": {
+      "lastModificationDate": 1771554342305,
+      "contentHash": "b3eda6bce03ded4107a7e172b308958b",
+      "sourceName": "contracts/BscAutonomousStrategy.sol",
+      "solcConfig": {
+        "version": "0.8.24",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./IAsterDexEarnRouter.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.24"
+      ],
+      "artifacts": [
+        "BscAutonomousStrategy"
+      ]
+    },
+    "/home/davirain/clawd/pi-chain-tools/contracts/bsc-autonomous/contracts/IAsterDexEarnRouter.sol": {
+      "lastModificationDate": 1771554318141,
+      "contentHash": "63cc733b94d0d95eb7830e1dece46152",
+      "sourceName": "contracts/IAsterDexEarnRouter.sol",
+      "solcConfig": {
+        "version": "0.8.24",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.24"
+      ],
+      "artifacts": [
+        "IAsterDexEarnRouter"
+      ]
+    },
+    "/home/davirain/clawd/pi-chain-tools/contracts/bsc-autonomous/contracts/MockAsterDexEarnRouter.sol": {
+      "lastModificationDate": 1771554347326,
+      "contentHash": "f74b61222dc7848b420a3c37ad2e55d7",
+      "sourceName": "contracts/MockAsterDexEarnRouter.sol",
+      "solcConfig": {
+        "version": "0.8.24",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./IAsterDexEarnRouter.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.24"
+      ],
+      "artifacts": [
+        "MockAsterDexEarnRouter"
+      ]
+    },
+    "/home/davirain/clawd/pi-chain-tools/contracts/bsc-autonomous/contracts/MockForwarder.sol": {
+      "lastModificationDate": 1771554372821,
+      "contentHash": "1cd77f5e364a7b50cdd1855e534030bb",
+      "sourceName": "contracts/MockForwarder.sol",
+      "solcConfig": {
+        "version": "0.8.24",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.24"
+      ],
+      "artifacts": [
+        "IStrategyForward",
+        "MockForwarder"
+      ]
+    }
+  }
+}

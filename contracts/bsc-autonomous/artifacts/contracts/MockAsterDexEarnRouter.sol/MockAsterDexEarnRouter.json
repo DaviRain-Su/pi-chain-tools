@@ -1,0 +1,125 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "MockAsterDexEarnRouter",
+  "sourceName": "contracts/MockAsterDexEarnRouter.sol",
+  "abi": [
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amountRaw",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "tokenOut",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes",
+          "name": "routeData",
+          "type": "bytes"
+        }
+      ],
+      "name": "ExecuteEarnCalled",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "amountRaw",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenIn",
+          "type": "address"
+        },
+        {
+          "internalType": "address",
+          "name": "tokenOut",
+          "type": "address"
+        },
+        {
+          "internalType": "bytes",
+          "name": "routeData",
+          "type": "bytes"
+        }
+      ],
+      "name": "executeEarn",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "success",
+          "type": "bool"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "routeExecutionId",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "nextExecutionId",
+      "outputs": [
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bool",
+          "name": "ok",
+          "type": "bool"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "executionId",
+          "type": "bytes32"
+        }
+      ],
+      "name": "setResult",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "shouldSucceed",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x60806040526000805460ff191660019081179091557f310e190100814c79839e7690d3534f04ba03ad878284bbf16855009f562cb17c905534801561004357600080fd5b506102a6806100536000396000f3fe608060405234801561001057600080fd5b506004361061004c5760003560e01c80631c51667e1461005157806377d1349a14610078578063b5fd234114610094578063e77deb2c146100be575b600080fd5b61007661005f366004610135565b6000805460ff191692151592909217909155600155565b005b61008160015481565b6040519081526020015b60405180910390f35b6100a76100a2366004610182565b6100db565b60408051921515835260208301919091520161008b565b6000546100cb9060ff1681565b604051901515815260200161008b565b6000807fa88a5258c32ca6f2be943e535e026a4cfa932f5963e78d712fc3143b74a91a90878787878760405161011595949392919061021d565b60405180910390a1505060005460015460ff909116909550959350505050565b6000806040838503121561014857600080fd5b8235801515811461015857600080fd5b946020939093013593505050565b80356001600160a01b038116811461017d57600080fd5b919050565b60008060008060006080868803121561019a57600080fd5b853594506101aa60208701610166565b93506101b860408701610166565b9250606086013567ffffffffffffffff808211156101d557600080fd5b818801915088601f8301126101e957600080fd5b8135818111156101f857600080fd5b89602082850101111561020a57600080fd5b9699959850939650602001949392505050565b8581526001600160a01b0385811660208301528416604082015260806060820181905281018290526000828460a0840137600060a0848401015260a0601f19601f8501168301019050969550505050505056fea264697066735822122007675428d54643e000b083357417eee994712f66f326b7fe1b5cab73811a31ea64736f6c63430008180033",
+  "deployedBytecode": "0x608060405234801561001057600080fd5b506004361061004c5760003560e01c80631c51667e1461005157806377d1349a14610078578063b5fd234114610094578063e77deb2c146100be575b600080fd5b61007661005f366004610135565b6000805460ff191692151592909217909155600155565b005b61008160015481565b6040519081526020015b60405180910390f35b6100a76100a2366004610182565b6100db565b60408051921515835260208301919091520161008b565b6000546100cb9060ff1681565b604051901515815260200161008b565b6000807fa88a5258c32ca6f2be943e535e026a4cfa932f5963e78d712fc3143b74a91a90878787878760405161011595949392919061021d565b60405180910390a1505060005460015460ff909116909550959350505050565b6000806040838503121561014857600080fd5b8235801515811461015857600080fd5b946020939093013593505050565b80356001600160a01b038116811461017d57600080fd5b919050565b60008060008060006080868803121561019a57600080fd5b853594506101aa60208701610166565b93506101b860408701610166565b9250606086013567ffffffffffffffff808211156101d557600080fd5b818801915088601f8301126101e957600080fd5b8135818111156101f857600080fd5b89602082850101111561020a57600080fd5b9699959850939650602001949392505050565b8581526001600160a01b0385811660208301528416604082015260806060820181905281018290526000828460a0840137600060a0848401015260a0601f19601f8501168301019050969550505050505056fea264697066735822122007675428d54643e000b083357417eee994712f66f326b7fe1b5cab73811a31ea64736f6c63430008180033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

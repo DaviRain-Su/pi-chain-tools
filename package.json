@@ -42,7 +42,7 @@
 		"security:watch": "node scripts/evm-security-worker.mjs",
 		"security:watch:notify:test": "node scripts/evm-security-notify.mjs",
 		"security:watch:service:help": "node scripts/security-watch-service-help.mjs",
-		"test": "vitest run",
+		"test": "vitest run && npm run contracts:bsc:test",
 		"ci": "node scripts/ci.mjs",
 		"ci:retry": "node scripts/ci-retry.mjs",
 		"ci:resilient": "node scripts/ci-resilient.mjs",
@@ -78,7 +78,12 @@
 		"autonomous:bsc:runs": "node scripts/autonomous-cycle-runs.mjs",
 		"doctor:paths": "node scripts/diagnose-runtime-paths.mjs",
 		"autonomous:submission:bundle": "node scripts/autonomous-submission-bundle.mjs",
-		"autonomous:evidence:regen": "node scripts/autonomous-evidence-regen.mjs"
+		"autonomous:evidence:regen": "node scripts/autonomous-evidence-regen.mjs",
+		"contracts:bsc:compile": "hardhat compile --config contracts/bsc-autonomous/hardhat.config.cjs",
+		"contracts:bsc:test": "hardhat test --config contracts/bsc-autonomous/hardhat.config.cjs",
+		"contracts:bsc:deploy:testnet": "node contracts/bsc-autonomous/scripts/deploy.mjs",
+		"contracts:bsc:verify:testnet": "node contracts/bsc-autonomous/scripts/verify-placeholder.mjs",
+		"contracts:bsc:cycle:testnet": "node contracts/bsc-autonomous/scripts/run-cycle.mjs"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",
@@ -103,6 +108,7 @@
 		"@venusprotocol/chains": "^0.22.0",
 		"@wombat-exchange/configx": "^1.0.11",
 		"bs58": "^6.0.0",
+		"ethers": "^6.13.5",
 		"near-api-js": "^7.1.0",
 		"stable-layer-sdk": "^2.0.0"
 	},
@@ -125,6 +131,8 @@
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
 		"@kamino-finance/klend-sdk": "^7.3.18",
+		"@nomicfoundation/hardhat-ethers": "^3.0.8",
+		"hardhat": "^2.24.3",
 		"@meteora-ag/dlmm": "^1.9.3",
 		"@raydium-io/raydium-sdk-v2": "^0.2.32-alpha",
 		"@types/node": "^20.17.24",
