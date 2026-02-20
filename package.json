@@ -56,6 +56,7 @@
 		"ops:posture": "node scripts/system-posture.mjs",
 		"monad:morpho:replay": "node scripts/monad-morpho-replay-pack.mjs",
 		"submission:evidence": "node scripts/submission-evidence.mjs",
+		"arch:federation:plan": "node scripts/repo-federation-plan.mjs",
 		"execute:proof": "node scripts/execute-proof.mjs",
 		"execute:proof:morpho": "node scripts/execute-proof.mjs --protocol=morpho",
 		"execute:proof:bsc": "node scripts/execute-proof.mjs --protocol=bsc",

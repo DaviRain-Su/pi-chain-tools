@@ -1,0 +1,117 @@
+{
+	"generatedAt": "2026-02-20T23:15:31.542Z",
+	"strategy": "multi-mono-federation",
+	"phases": [
+		{
+			"name": "phase-1-core",
+			"deliverables": ["w3rt-core", "schema-contracts", "policy-types"]
+		},
+		{
+			"name": "phase-2-chain-split",
+			"deliverables": [
+				"chain-evm-tools",
+				"chain-hyperliquid-autonomous-tools",
+				"chain-kaspa-tools",
+				"chain-meta-tools",
+				"chain-near-tools",
+				"chain-shared-tools",
+				"chain-solana-tools",
+				"chain-starknet-tools",
+				"chain-sui-tools"
+			]
+		},
+		{
+			"name": "phase-3-strategy-split",
+			"deliverables": [
+				"strategy-near-yield",
+				"strategy-hyperliquid-offchain",
+				"strategy-evm-security-watch"
+			]
+		},
+		{
+			"name": "phase-4-composition",
+			"deliverables": ["gradience-openclaw-plugin", "gradience-dashboard"]
+		}
+	],
+	"domains": {
+		"chains": [
+			{
+				"chain": "evm",
+				"sourcePath": "src/chains/evm",
+				"files": 53,
+				"targetRepo": "chain-evm-tools",
+				"targetPackage": "@gradience/chain-evm-tools"
+			},
+			{
+				"chain": "hyperliquid-autonomous",
+				"sourcePath": "src/chains/hyperliquid-autonomous",
+				"files": 5,
+				"targetRepo": "chain-hyperliquid-autonomous-tools",
+				"targetPackage": "@gradience/chain-hyperliquid-autonomous-tools"
+			},
+			{
+				"chain": "kaspa",
+				"sourcePath": "src/chains/kaspa",
+				"files": 12,
+				"targetRepo": "chain-kaspa-tools",
+				"targetPackage": "@gradience/chain-kaspa-tools"
+			},
+			{
+				"chain": "meta",
+				"sourcePath": "src/chains/meta",
+				"files": 3,
+				"targetRepo": "chain-meta-tools",
+				"targetPackage": "@gradience/chain-meta-tools"
+			},
+			{
+				"chain": "near",
+				"sourcePath": "src/chains/near",
+				"files": 18,
+				"targetRepo": "chain-near-tools",
+				"targetPackage": "@gradience/chain-near-tools"
+			},
+			{
+				"chain": "shared",
+				"sourcePath": "src/chains/shared",
+				"files": 1,
+				"targetRepo": "chain-shared-tools",
+				"targetPackage": "@gradience/chain-shared-tools"
+			},
+			{
+				"chain": "solana",
+				"sourcePath": "src/chains/solana",
+				"files": 23,
+				"targetRepo": "chain-solana-tools",
+				"targetPackage": "@gradience/chain-solana-tools"
+			},
+			{
+				"chain": "starknet",
+				"sourcePath": "src/chains/starknet",
+				"files": 6,
+				"targetRepo": "chain-starknet-tools",
+				"targetPackage": "@gradience/chain-starknet-tools"
+			},
+			{
+				"chain": "sui",
+				"sourcePath": "src/chains/sui",
+				"files": 15,
+				"targetRepo": "chain-sui-tools",
+				"targetPackage": "@gradience/chain-sui-tools"
+			}
+		],
+		"integration": [
+			{
+				"repo": "gradience-openclaw-plugin",
+				"role": "dynamic tool loader"
+			},
+			{
+				"repo": "gradience-dashboard",
+				"role": "ops + strategy visibility"
+			}
+		]
+	},
+	"notes": [
+		"Keep pi-chain-tools as transition monolith until each target repo has passing CI.",
+		"Use npm package boundaries first; split git repos second."
+	]
+}
