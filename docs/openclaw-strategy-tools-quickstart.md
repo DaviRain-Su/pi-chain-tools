@@ -110,7 +110,12 @@ npm run stable-yield:smoke
 npm run stable-yield:auto-migrate:v1
 
 # 真执行（带确认 token）
-npm run stable-yield:auto-migrate:v1 -- --execute true --confirm I_ACKNOWLEDGE_AUTO_MIGRATE --maxMoveUsd 5
+npm run stable-yield:auto-migrate:v1 -- --execute true --confirm I_ACKNOWLEDGE_AUTO_MIGRATE --maxMoveUsd 5 --allowSwap true
+
+# 建议阈值（避免频繁抖动迁移）
+# minApyDeltaBps: 至少高 20 bps 才迁
+# minMoveUsd: 少于 1U 不迁
+npm run stable-yield:auto-migrate:v1 -- --maxMoveUsd 5 --minApyDeltaBps 20 --minMoveUsd 1 --allowSwap true
 ```
 
 

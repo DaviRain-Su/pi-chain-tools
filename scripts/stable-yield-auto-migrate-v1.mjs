@@ -166,9 +166,14 @@ async function main() {
 	}
 
 	const maxMoveUsd = Number(args.maxMoveUsd || 5);
+	const minMoveUsd = Number(args.minMoveUsd || 1);
+	const minApyDeltaBps = Number(args.minApyDeltaBps || 20);
+	const allowSwap = toBool(args.allowSwap, false);
 	const maxMoveRaw = ethers.parseUnits(String(maxMoveUsd), source.decimals);
+	const minMoveRaw = ethers.parseUnits(String(minMoveUsd), source.decimals);
 	const amountToMoveRaw =
 		sourceUnderlyingRaw > maxMoveRaw ? maxMoveRaw : sourceUnderlyingRaw;
+	const apyDeltaBps = Math.round((apy[targetSymbol] - apy[sourceSymbol]) * 100);
 
 	const plan = {
 		status: "planned",
@@ -179,21 +184,60 @@ async function main() {
 		sourceUnderlying: ethers.formatUnits(sourceUnderlyingRaw, source.decimals),
 		amountToMove: ethers.formatUnits(amountToMoveRaw, source.decimals),
 		execute,
+		apyDeltaBps,
+		thresholds: { minMoveUsd, minApyDeltaBps, allowSwap },
 	};
 
-	if (!execute) {
-		console.log(JSON.stringify(plan, null, 2));
-		return;
-	}
-
-	if (amountToMoveRaw <= 0n) {
+	if (amountToMoveRaw < minMoveRaw) {
 		console.log(
 			JSON.stringify(
-				{ ...plan, status: "noop", reason: "no source position to migrate" },
+				{
+					...plan,
+					status: "noop",
+					reason: `move amount below minMoveUsd (${ethers.formatUnits(amountToMoveRaw, source.decimals)} < ${minMoveUsd})`,
+				},
 				null,
 				2,
 			),
 		);
+		return;
+	}
+
+	if (apyDeltaBps < minApyDeltaBps) {
+		console.log(
+			JSON.stringify(
+				{
+					...plan,
+					status: "noop",
+					reason: `apy delta below threshold (${apyDeltaBps} bps < ${minApyDeltaBps} bps)`,
+				},
+				null,
+				2,
+			),
+		);
+		return;
+	}
+
+	if (
+		!allowSwap &&
+		source.address.toLowerCase() !== target.address.toLowerCase()
+	) {
+		console.log(
+			JSON.stringify(
+				{
+					...plan,
+					status: "noop",
+					reason: "token migration requires swap but allowSwap=false",
+				},
+				null,
+				2,
+			),
+		);
+		return;
+	}
+
+	if (!execute) {
+		console.log(JSON.stringify(plan, null, 2));
 		return;
 	}
 
