@@ -12,6 +12,7 @@ import {
 	planLifiQuoteRoutes,
 } from "./src/chains/evm/tools/lifi-planning.js";
 import { LIFI_DEFAULT_SLIPPAGE } from "./src/chains/evm/tools/lifi-types.js";
+import { createLocalKeySigner } from "./src/chains/evm/tools/signer-local.js";
 import { createNearToolset } from "./src/chains/near/toolset.js";
 import { registerChainToolsets } from "./src/core/register.js";
 import { defineTool } from "./src/core/types.js";
@@ -19,6 +20,9 @@ import type { ToolRegistrar } from "./src/core/types.js";
 
 const OPENCLAW_NEAR_REGISTERED = Symbol.for(
 	"pi-chain-tools/openclaw-near/registered",
+);
+const STRATEGY_LIVE_RUN_LEDGER = Symbol.for(
+	"pi-chain-tools/strategy-live-run-ledger",
 );
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -297,6 +301,27 @@ async function submitEvmSignedTx(params: {
 	return { network, rpcUrl, txHash };
 }
 
+async function autoSignAndBroadcastFromQuote(params: {
+	quotePlan: Record<string, unknown>;
+	networkHint?: string;
+}) {
+	const txReq = asObject(params.quotePlan.transactionRequest);
+	if (!txReq) throw new Error("quotePlan.transactionRequest is required");
+	const to = String(txReq.to || "").trim();
+	const data = String(txReq.data || "0x").trim();
+	const valueRaw = String(txReq.value || "0").trim();
+	if (!to) throw new Error("transactionRequest.to is required for autoSign");
+	const signer = createLocalKeySigner();
+	const network = parseEvmNetwork((params.networkHint || "bsc") as never);
+	const sent = await signer.signAndSend({
+		network,
+		to,
+		data,
+		value: valueRaw,
+	});
+	return { network, txHash: sent.txHash, from: sent.from, to };
+}
+
 function simulateStrategyRun(
 	specInput: unknown,
 	mode: "dry-run" | "plan" | "execute",
@@ -361,6 +386,12 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 	const globalState = globalThis as Record<PropertyKey, unknown>;
 	if (globalState[OPENCLAW_NEAR_REGISTERED] === true) return;
 	globalState[OPENCLAW_NEAR_REGISTERED] = true;
+	if (!(globalState[STRATEGY_LIVE_RUN_LEDGER] instanceof Map)) {
+		globalState[STRATEGY_LIVE_RUN_LEDGER] = new Map<
+			string,
+			Record<string, unknown>
+		>();
+	}
 	registerChainToolsets(pi, [createNearToolset()]);
 
 	pi.registerTool(
@@ -512,6 +543,10 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 				signedTxHex: Type.Optional(Type.String()),
 				broadcastNetwork: Type.Optional(Type.String()),
 				broadcastRpcUrl: Type.Optional(Type.String()),
+				autoSign: Type.Optional(Type.Boolean()),
+				trackAfterBroadcast: Type.Optional(Type.Boolean()),
+				runId: Type.Optional(Type.String()),
+				evidenceOutPath: Type.Optional(Type.String()),
 				quoteContext: Type.Optional(
 					Type.Object({}, { additionalProperties: true }),
 				),
@@ -559,6 +594,34 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 							},
 						],
 					};
+				}
+
+				const runId = String(params.runId || "").trim();
+				const ledger = globalState[STRATEGY_LIVE_RUN_LEDGER] as Map<
+					string,
+					Record<string, unknown>
+				>;
+				if (mode === "execute" && params.live === true && runId) {
+					const existing = ledger.get(runId);
+					if (existing) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify(
+										{
+											status: "blocked",
+											reason: `duplicate runId blocked (${runId})`,
+											runId,
+											previous: existing,
+										},
+										null,
+										2,
+									),
+								},
+							],
+						};
+					}
 				}
 
 				if (mode === "execute" && params.live === true) {
@@ -634,19 +697,27 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					let broadcastStatus =
 						params.live === true ? "awaiting-signed-tx" : "skipped";
 					let broadcast: Record<string, unknown> | null = null;
-					if (params.live === true && params.signedTxHex) {
+					if (params.live === true) {
 						try {
-							broadcast = await submitEvmSignedTx({
-								signedTxHex: params.signedTxHex,
-								network:
-									params.broadcastNetwork ||
-									String(
-										quoteResult.quotePlan?.transactionRequest?.fromChain ||
-											"bsc",
-									),
-								rpcUrl: params.broadcastRpcUrl,
-							});
-							broadcastStatus = "submitted";
+							if (params.autoSign === true) {
+								broadcast = await autoSignAndBroadcastFromQuote({
+									quotePlan: quoteResult.quotePlan,
+									networkHint: String(params.broadcastNetwork || "bsc"),
+								});
+								broadcastStatus = "submitted";
+							} else if (params.signedTxHex) {
+								broadcast = await submitEvmSignedTx({
+									signedTxHex: params.signedTxHex,
+									network:
+										params.broadcastNetwork ||
+										String(
+											asObject(simulated.result?.executeIntent)?.fromChain ||
+												"bsc",
+										),
+									rpcUrl: params.broadcastRpcUrl,
+								});
+								broadcastStatus = "submitted";
+							}
 						} catch (error) {
 							broadcastStatus = "failed";
 							broadcast = {
@@ -654,23 +725,50 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 							};
 						}
 					}
+					let tracking: Record<string, unknown> | null = null;
+					if (
+						params.trackAfterBroadcast === true &&
+						broadcastStatus === "submitted" &&
+						broadcast?.txHash
+					) {
+						const executeIntent =
+							asObject(simulated.result?.executeIntent) || asObject({});
+						tracking = await getLifiStatus({
+							txHash: String(broadcast.txHash),
+							fromNetwork: String(executeIntent.fromChain || "bsc"),
+							toNetwork: String(executeIntent.toChain || "base"),
+						});
+					}
+					const finalResult = {
+						...simulated.result,
+						quotePrepareStatus: "ok",
+						quotePlan: quoteResult.quotePlan,
+						liveRequested: params.live === true,
+						broadcastStatus,
+						broadcast,
+						tracking,
+						runId: runId || null,
+					};
+					if (
+						runId &&
+						(broadcastStatus === "submitted" || broadcastStatus === "failed")
+					) {
+						ledger.set(runId, {
+							broadcastStatus,
+							broadcast: broadcast || undefined,
+							ts: new Date().toISOString(),
+						});
+					}
+					if (params.evidenceOutPath) {
+						await writeFile(
+							params.evidenceOutPath,
+							`${JSON.stringify(finalResult, null, 2)}\n`,
+							"utf8",
+						);
+					}
 					return {
 						content: [
-							{
-								type: "text",
-								text: JSON.stringify(
-									{
-										...simulated.result,
-										quotePrepareStatus: "ok",
-										quotePlan: quoteResult.quotePlan,
-										liveRequested: params.live === true,
-										broadcastStatus,
-										broadcast,
-									},
-									null,
-									2,
-								),
-							},
+							{ type: "text", text: JSON.stringify(finalResult, null, 2) },
 						],
 					};
 				}
@@ -701,12 +799,45 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 							};
 						}
 					}
+					let tracking: Record<string, unknown> | null = null;
+					if (
+						params.trackAfterBroadcast === true &&
+						broadcastStatus === "submitted" &&
+						broadcast?.txHash
+					) {
+						const executeIntent =
+							asObject(simulated.result?.executeIntent) || asObject({});
+						tracking = await getLifiStatus({
+							txHash: String(broadcast.txHash),
+							fromNetwork: String(executeIntent.fromChain || "bsc"),
+							toNetwork: String(executeIntent.toChain || "base"),
+						});
+					}
 					baseResult = {
 						...baseResult,
 						liveRequested: true,
 						broadcastStatus,
 						broadcast,
+						tracking,
+						runId: runId || null,
 					};
+					if (
+						runId &&
+						(broadcastStatus === "submitted" || broadcastStatus === "failed")
+					) {
+						ledger.set(runId, {
+							broadcastStatus,
+							broadcast: broadcast || undefined,
+							ts: new Date().toISOString(),
+						});
+					}
+				}
+				if (params.evidenceOutPath) {
+					await writeFile(
+						params.evidenceOutPath,
+						`${JSON.stringify(baseResult, null, 2)}\n`,
+						"utf8",
+					);
 				}
 				return {
 					content: [

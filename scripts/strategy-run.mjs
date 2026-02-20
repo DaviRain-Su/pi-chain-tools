@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -68,6 +68,9 @@ function usage() {
 		"  --signedTxHex 0x... (optional, live execute only)",
 		"  --broadcastNetwork bsc|base (default: bsc)",
 		"  --broadcastRpcUrl https://... (optional override)",
+		"  --runId run-xxx (optional idempotency key)",
+		"  --idempotencyPath /tmp/pct-idem.json (optional)",
+		"  --evidenceOut /tmp/strategy-evidence.json (optional)",
 	].join("\n");
 }
 
@@ -125,6 +128,20 @@ function evaluateExecutePolicy(spec) {
 async function loadJson(filePath) {
 	const raw = await readFile(filePath, "utf8");
 	return JSON.parse(raw);
+}
+
+async function loadIdempotencyStore(filePath) {
+	if (!filePath) return {};
+	try {
+		return JSON.parse(await readFile(filePath, "utf8"));
+	} catch {
+		return {};
+	}
+}
+
+async function saveIdempotencyStore(filePath, data) {
+	if (!filePath) return;
+	await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
 }
 
 async function submitSignedTx(params) {
@@ -243,6 +260,26 @@ async function main() {
 		}
 	}
 
+	const runId = String(args.runId || "").trim();
+	const idempotencyPath =
+		String(args.idempotencyPath || "").trim() ||
+		"/tmp/pct-strategy-idempotency.json";
+	const idem = await loadIdempotencyStore(idempotencyPath);
+	if (mode === "execute" && live && runId && idem[runId]) {
+		const payload = {
+			status: "blocked",
+			reason: `duplicate runId blocked (${runId})`,
+			runId,
+			previous: idem[runId],
+		};
+		if (args.json) {
+			console.log(JSON.stringify(payload, null, 2));
+		} else {
+			console.log(JSON.stringify(payload));
+		}
+		process.exit(2);
+	}
+
 	const executionTrace = steps.map((step, index) => ({
 		index,
 		id: step.id,
@@ -282,6 +319,7 @@ async function main() {
 		strategyId: spec.id || null,
 		policy: mode === "execute" ? executePolicy : null,
 		liveRequested: mode === "execute" ? live : false,
+		runId: runId || null,
 		broadcastStatus,
 		broadcast,
 		steps: executionTrace,
@@ -290,6 +328,28 @@ async function main() {
 			generatedAt: new Date().toISOString(),
 		},
 	};
+
+	if (
+		mode === "execute" &&
+		live &&
+		runId &&
+		["submitted", "failed"].includes(String(broadcastStatus))
+	) {
+		idem[runId] = {
+			broadcastStatus,
+			broadcast,
+			ts: new Date().toISOString(),
+		};
+		await saveIdempotencyStore(idempotencyPath, idem);
+	}
+
+	if (args.evidenceOut) {
+		await writeFile(
+			String(args.evidenceOut),
+			`${JSON.stringify(result, null, 2)}\n`,
+			"utf8",
+		);
+	}
 
 	if (args.json) {
 		console.log(JSON.stringify(result, null, 2));
