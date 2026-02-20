@@ -83,14 +83,14 @@ function hasValue(env, key) {
 
 function validatePrerequisites(env) {
 	const missing = [];
-	const requiredAlways = [
-		"BSC_TESTNET_RPC_URL",
-		"BSC_TESTNET_PRIVATE_KEY",
-		"BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_IN_ADDRESS",
-		"BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_OUT_ADDRESS",
-	];
-	for (const key of requiredAlways) {
-		if (!hasValue(env, key)) missing.push(key);
+	if (!hasValue(env, "BSC_TESTNET_RPC_URL") && !hasValue(env, "BSC_RPC_URL")) {
+		missing.push("BSC_TESTNET_RPC_URL or BSC_RPC_URL");
+	}
+	if (
+		!hasValue(env, "BSC_TESTNET_PRIVATE_KEY") &&
+		!hasValue(env, "BSC_EXECUTE_PRIVATE_KEY")
+	) {
+		missing.push("BSC_TESTNET_PRIVATE_KEY or BSC_EXECUTE_PRIVATE_KEY");
 	}
 	if (
 		!hasValue(env, "BSC_AUTONOMOUS_CONTRACT_ADDRESS") &&
