@@ -2062,6 +2062,7 @@ async function readAutonomousCycleRunsLatest(limitInput = 8) {
 	const limit = Math.min(50, Math.max(1, Number(limitInput || 8)));
 	const rows = [];
 	const warnings = [];
+	let malformedSkippedCount = 0;
 	try {
 		const files = await readdir(AUTONOMOUS_CYCLE_RUNS_DIR);
 		const ordered = files
@@ -2070,8 +2071,18 @@ async function readAutonomousCycleRunsLatest(limitInput = 8) {
 		for (const name of ordered) {
 			if (rows.length >= limit) break;
 			const fullPath = path.join(AUTONOMOUS_CYCLE_RUNS_DIR, name);
-			const proof = await readJsonArtifactSafe(fullPath);
-			if (!proof) continue;
+			let proof = null;
+			try {
+				const raw = await readFile(fullPath, "utf8");
+				proof = JSON.parse(raw);
+			} catch {
+				malformedSkippedCount += 1;
+				continue;
+			}
+			if (!proof || typeof proof !== "object") {
+				malformedSkippedCount += 1;
+				continue;
+			}
 			rows.push(buildAutonomousCycleRunRow(proof, fullPath));
 		}
 	} catch {
@@ -2086,10 +2097,16 @@ async function readAutonomousCycleRunsLatest(limitInput = 8) {
 			warnings.push("autonomous_cycle_latest_missing");
 		}
 	}
+	if (malformedSkippedCount > 0) {
+		warnings.push(
+			`autonomous_cycle_malformed_skipped:${malformedSkippedCount}`,
+		);
+	}
 	return {
 		ok: rows.length > 0,
 		generatedAt: new Date().toISOString(),
 		runs: rows,
+		malformedSkippedCount,
 		paths: {
 			proofsRoot: AUTONOMOUS_CYCLE_PROOFS_ROOT,
 			runsDir: AUTONOMOUS_CYCLE_RUNS_DIR,

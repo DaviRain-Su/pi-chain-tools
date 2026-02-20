@@ -13,6 +13,10 @@ describe("bsc-autonomous-cycle", () => {
 		expect(result.proof.mode).toBe("dryrun");
 		expect(result.proof.decision).toBe("simulate_execute");
 		expect(result.proof.txEvidence).toBeTruthy();
+		expect(result.proof.txEvidence.receiptNormalized?.schema).toBe(
+			"tx-receipt-normalized/v1",
+		);
 		expect(result.proof.reconcileSummary).toBeTruthy();
+		expect(result.proof.reconcileSummary.reconcileSnapshot).toBeTruthy();
 	});
 });

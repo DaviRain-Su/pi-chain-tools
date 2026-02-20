@@ -1,9 +1,11 @@
 #!/usr/bin/env node
+import { spawnSync } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runAsterDexExecSafe } from "./asterdex-exec-safe.mjs";
 import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
+import { normalizeTxReceipt } from "./tx-receipt-normalize.mjs";
 
 const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) ?? process.cwd();
 const AUTONOMOUS_PROOFS_ROOT = path.join(
@@ -159,11 +161,104 @@ function buildIntent(runId, env) {
 	};
 }
 
-function summarizeReconcile(execResult) {
+function parseJsonText(raw) {
+	if (!raw) return null;
+	try {
+		return JSON.parse(String(raw));
+	} catch {
+		return null;
+	}
+}
+
+function pickSnapshotBalance(snapshotData) {
+	if (!snapshotData || typeof snapshotData !== "object") return null;
+	const wallet =
+		snapshotData.wallet && typeof snapshotData.wallet === "object"
+			? snapshotData.wallet
+			: snapshotData;
+	const usdcRaw =
+		wallet.usdcRaw ?? wallet.USDCRaw ?? wallet.usdc_balance_raw ?? null;
+	const usdtRaw =
+		wallet.usdtRaw ?? wallet.USDTRaw ?? wallet.usdt_balance_raw ?? null;
+	const usdcUi = wallet.usdcUi ?? wallet.usdc ?? null;
+	const usdtUi = wallet.usdtUi ?? wallet.usdt ?? null;
+	if (usdcRaw == null && usdtRaw == null && usdcUi == null && usdtUi == null) {
+		return null;
+	}
+	return {
+		usdcRaw: usdcRaw != null ? String(usdcRaw) : null,
+		usdtRaw: usdtRaw != null ? String(usdtRaw) : null,
+		usdcUi: usdcUi != null ? String(usdcUi) : null,
+		usdtUi: usdtUi != null ? String(usdtUi) : null,
+	};
+}
+
+function runSnapshotCommand(commandTemplate, env, stage) {
+	const command = String(commandTemplate || "").trim();
+	if (!command) {
+		return { stage, available: false, source: "not_configured" };
+	}
+	const timeoutMs = parsePositiveInt(
+		env.BSC_AUTONOMOUS_RECONCILE_SNAPSHOT_TIMEOUT_MS,
+		20000,
+	);
+	const out = spawnSync(command, {
+		shell: true,
+		encoding: "utf8",
+		env,
+		timeout: timeoutMs,
+	});
+	const stdout = String(out.stdout || "").trim();
+	const stderr = String(out.stderr || "").trim();
+	const parsed = parseJsonText(stdout) || parseJsonText(stderr);
+	return {
+		stage,
+		available: out.status === 0,
+		status: out.status,
+		timeoutMs,
+		parsed,
+		summary: {
+			stdoutTail: stdout.slice(-280),
+			stderrTail: stderr.slice(-280),
+		},
+	};
+}
+
+function buildReconcileSnapshot(beforeSnapshot, afterSnapshot) {
+	const beforeBalance = pickSnapshotBalance(beforeSnapshot?.parsed || null);
+	const afterBalance = pickSnapshotBalance(afterSnapshot?.parsed || null);
+	const delta =
+		beforeBalance && afterBalance
+			? {
+					usdcRawDelta:
+						beforeBalance.usdcRaw && afterBalance.usdcRaw
+							? (
+									BigInt(afterBalance.usdcRaw) - BigInt(beforeBalance.usdcRaw)
+								).toString()
+							: null,
+					usdtRawDelta:
+						beforeBalance.usdtRaw && afterBalance.usdtRaw
+							? (
+									BigInt(afterBalance.usdtRaw) - BigInt(beforeBalance.usdtRaw)
+								).toString()
+							: null,
+				}
+			: null;
+	return {
+		before: beforeSnapshot || { available: false, source: "not_captured" },
+		after: afterSnapshot || { available: false, source: "not_captured" },
+		beforeBalance,
+		afterBalance,
+		delta,
+	};
+}
+
+function summarizeReconcile(execResult, reconcileSnapshot) {
 	if (execResult.status === "executed") {
 		return {
 			status: execResult.txHash ? "submitted" : "submitted_without_hash",
 			notes: ["Execution command completed.", "Verify txHash on BSC explorer."],
+			reconcileSnapshot,
 		};
 	}
 	if (execResult.status === "dryrun") {
@@ -173,6 +268,7 @@ function summarizeReconcile(execResult) {
 				"No state change performed.",
 				"Live mode requires explicit confirmation and active binding.",
 			],
+			reconcileSnapshot,
 		};
 	}
 	return {
@@ -181,6 +277,7 @@ function summarizeReconcile(execResult) {
 			"Execution path blocked or failed.",
 			"Review blockers/evidence and resolve config guardrails.",
 		],
+		reconcileSnapshot,
 	};
 }
 
@@ -321,7 +418,25 @@ export async function runBscAutonomousCycle(
 
 	let proof;
 	try {
+		const beforeSnapshot = runSnapshotCommand(
+			env.BSC_AUTONOMOUS_RECONCILE_BEFORE_COMMAND ||
+				env.BSC_AUTONOMOUS_RECONCILE_SNAPSHOT_COMMAND ||
+				"",
+			env,
+			"before",
+		);
 		const execution = runAsterDexExecSafe(execArgs, env);
+		const afterSnapshot = runSnapshotCommand(
+			env.BSC_AUTONOMOUS_RECONCILE_AFTER_COMMAND ||
+				env.BSC_AUTONOMOUS_RECONCILE_SNAPSHOT_COMMAND ||
+				"",
+			env,
+			"after",
+		);
+		const reconcileSnapshot = buildReconcileSnapshot(
+			beforeSnapshot,
+			afterSnapshot,
+		);
 		const decision = execution.ok
 			? args.mode === "live"
 				? "execute"
@@ -344,10 +459,18 @@ export async function runBscAutonomousCycle(
 				status: execution.status,
 				txHash: execution.txHash || null,
 				evidence: execution.evidence || null,
+				receiptNormalized: normalizeTxReceipt(
+					{
+						txHash: execution.txHash || null,
+						status: execution.status,
+						exitCode: execution?.evidence?.exitCode,
+					},
+					{ chain: "bsc", runId: args.runId, mode: args.mode },
+				),
 				blockers: execution.blockers || [],
 				reason: execution.reason || null,
 			},
-			reconcileSummary: summarizeReconcile(execution),
+			reconcileSummary: summarizeReconcile(execution, reconcileSnapshot),
 			ok: execution.ok,
 		};
 		await mkdir(path.dirname(args.out), { recursive: true });

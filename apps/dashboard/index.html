@@ -1612,7 +1612,11 @@
           const warnText = Array.isArray(autonomousCycleRuns?.warnings) && autonomousCycleRuns.warnings.length
             ? ` · warnings=${autonomousCycleRuns.warnings.join(",")}`
             : "";
-          autonomousCycleRunsMetaEl.innerHTML = `latest runs: <span class="${cycleRuns.length > 0 ? "ok" : "warn"}">${cycleRuns.length}</span> · generated=${autonomousCycleRuns?.generatedAt ? new Date(autonomousCycleRuns.generatedAt).toLocaleString() : "-"}${warnText}`;
+          const malformedSkipped = Number(autonomousCycleRuns?.malformedSkippedCount || 0);
+          const malformedBadge = malformedSkipped > 0
+            ? ` · malformed skipped=<span class="warn">${malformedSkipped}</span>`
+            : " · malformed skipped=<span class=\"ok\">0</span>";
+          autonomousCycleRunsMetaEl.innerHTML = `latest runs: <span class="${cycleRuns.length > 0 ? "ok" : "warn"}">${cycleRuns.length}</span> · generated=${autonomousCycleRuns?.generatedAt ? new Date(autonomousCycleRuns.generatedAt).toLocaleString() : "-"}${malformedBadge}${warnText}`;
         }
         if (autonomousCycleRunsRowsEl) {
           autonomousCycleRunsRowsEl.innerHTML = cycleRuns.length

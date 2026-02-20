@@ -83,6 +83,7 @@ export async function listAutonomousCycleRuns(rawArgs = process.argv.slice(2)) {
 	const args = parseArgs(rawArgs);
 	const rows = [];
 	const errors = [];
+	let malformedSkippedCount = 0;
 
 	try {
 		const files = await readdir(args.historyDir);
@@ -94,7 +95,10 @@ export async function listAutonomousCycleRuns(rawArgs = process.argv.slice(2)) {
 			if (rows.length >= args.limit) break;
 			const fullPath = path.join(args.historyDir, name);
 			const proof = await readJsonSafe(fullPath);
-			if (!proof) continue;
+			if (!proof || typeof proof !== "object") {
+				malformedSkippedCount += 1;
+				continue;
+			}
 			rows.push(toRow(proof, fullPath));
 		}
 	} catch {
@@ -107,6 +111,10 @@ export async function listAutonomousCycleRuns(rawArgs = process.argv.slice(2)) {
 		else errors.push(`latest_missing_or_unreadable:${args.latestPath}`);
 	}
 
+	if (malformedSkippedCount > 0) {
+		errors.push(`malformed_skipped:${malformedSkippedCount}`);
+	}
+
 	return {
 		ok: rows.length > 0,
 		generatedAt: new Date().toISOString(),
@@ -114,6 +122,7 @@ export async function listAutonomousCycleRuns(rawArgs = process.argv.slice(2)) {
 		historyDir: args.historyDir,
 		latestPath: args.latestPath,
 		count: rows.length,
+		malformedSkippedCount,
 		runs: rows,
 		errors,
 	};

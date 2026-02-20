@@ -4,6 +4,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -50,6 +51,46 @@ describe("normalize-runtime-metrics", () => {
 			expect(second.status).toBe(0);
 			expect(second.stdout).toContain("already normalized");
 			expect(readFileSync(targetPath, "utf8")).toBe(afterFirst);
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+
+	it("fast-skips unchanged target when cache matches stat metadata", () => {
+		const tmpDir = mkdtempSync(
+			path.join(os.tmpdir(), "normalize-runtime-metrics-cache-hit-"),
+		);
+		try {
+			const dataDir = path.join(tmpDir, "apps", "dashboard", "data");
+			const targetPath = path.join(dataDir, "rebalance-metrics.json");
+			const cachePath = path.join(
+				dataDir,
+				".normalize-runtime-metrics-cache.json",
+			);
+			mkdirSync(dataDir, { recursive: true });
+			writeFileSync(
+				targetPath,
+				`${JSON.stringify({ a: 1 }, null, "\t")}\n`,
+				"utf8",
+			);
+			const targetStat = statSync(targetPath);
+			writeFileSync(
+				cachePath,
+				`${JSON.stringify({ targetPath, size: targetStat.size, mtimeMs: targetStat.mtimeMs }, null, 2)}\n`,
+				"utf8",
+			);
+
+			const run = spawnSync(process.execPath, [scriptPath], {
+				cwd: tmpDir,
+				encoding: "utf8",
+				env: {
+					...process.env,
+					NEAR_DASHBOARD_METRICS_PATH: targetPath,
+					NEAR_DASHBOARD_NORMALIZE_CACHE_PATH: cachePath,
+				},
+			});
+			expect(run.status).toBe(0);
+			expect(run.stdout).toContain("fast-skip unchanged");
 		} finally {
 			rmSync(tmpDir, { recursive: true, force: true });
 		}

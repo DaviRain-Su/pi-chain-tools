@@ -139,7 +139,9 @@ export function runAsterDexExecSafe(
 			ok: false,
 			status: "blocked",
 			reason: "confirm_mismatch",
-			blockers: ["Live mode requires exact confirmation text."],
+			blockers: [
+				`Live execution blocked: confirmation mismatch. Required input: --confirm ${confirmText}`,
+			],
 			evidence: { expectedConfirmText: confirmText, runId: intent.runId },
 		};
 	}
@@ -149,9 +151,12 @@ export function runAsterDexExecSafe(
 			status: "blocked",
 			reason: "execute_binding_not_active",
 			blockers: [
-				"BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE must be true for live execution.",
+				"Live execution blocked: missing/disabled env key BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE=true",
 			],
-			evidence: { runId: intent.runId },
+			evidence: {
+				runId: intent.runId,
+				missingEnvKeys: ["BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE"],
+			},
 		};
 	}
 	if (!liveCommandTemplate) {
@@ -160,9 +165,12 @@ export function runAsterDexExecSafe(
 			status: "blocked",
 			reason: "live_command_missing",
 			blockers: [
-				"BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND is required for live mode.",
+				"Live execution blocked: missing env key BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND",
 			],
-			evidence: { runId: intent.runId },
+			evidence: {
+				runId: intent.runId,
+				missingEnvKeys: ["BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND"],
+			},
 		};
 	}
 
