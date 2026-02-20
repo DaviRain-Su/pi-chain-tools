@@ -1,0 +1,40 @@
+{
+	"id": "cap.venus.lending",
+	"version": "0.1.0",
+	"kind": "lending",
+	"provider": "venus",
+	"actions": ["supply", "borrow", "repay", "withdraw", "read"],
+	"chains": ["bsc"],
+	"requires": {
+		"signer": true,
+		"rpc": true,
+		"apiKey": false,
+		"env": []
+	},
+	"limits": {
+		"minAmountUsd": 1,
+		"maxAmountUsd": 500000,
+		"maxSlippageBps": 100
+	},
+	"inputSchema": {
+		"type": "object",
+		"required": ["market", "asset", "amount"],
+		"properties": {
+			"market": { "type": "string" },
+			"asset": { "type": "string" },
+			"amount": { "type": "string" }
+		}
+	},
+	"outputSchema": {
+		"type": "object",
+		"required": ["txHash"],
+		"properties": {
+			"txHash": { "type": "string" },
+			"position": { "type": "object" }
+		}
+	},
+	"statusModel": {
+		"states": ["SUBMITTED", "CONFIRMED", "FAILED"],
+		"terminalStates": ["CONFIRMED", "FAILED"]
+	}
+}

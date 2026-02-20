@@ -1,0 +1,48 @@
+{
+	"id": "strategy.rebalance.usdc-crosschain-lifi",
+	"name": "Cross-chain USDC rebalance via LI.FI",
+	"version": "0.1.0",
+	"owner": {
+		"namespace": "community",
+		"author": "pi-chain-tools"
+	},
+	"goal": {
+		"kind": "rebalance",
+		"description": "Keep target allocations between Base and BSC using USDC routes",
+		"kpis": [
+			{ "name": "allocation_drift", "target": 2, "unit": "%" },
+			{ "name": "failure_rate", "target": 0.02 }
+		]
+	},
+	"constraints": {
+		"risk": {
+			"maxPerRunUsd": 5000,
+			"maxSlippageBps": 120,
+			"maxDailyRuns": 12
+		},
+		"allow": {
+			"chains": ["base", "bsc"],
+			"protocols": ["lifi"],
+			"assets": ["USDC", "USDT"]
+		}
+	},
+	"triggers": [
+		{ "type": "cron", "cron": "*/30 * * * *" },
+		{ "type": "threshold", "condition": "allocation_drift_pct > 2" }
+	],
+	"plan": {
+		"steps": [
+			{ "id": "s1", "action": "quote", "component": "cap.lifi.bridge-swap" },
+			{
+				"id": "s2",
+				"action": "execute",
+				"component": "cap.lifi.bridge-swap",
+				"onFailure": "fallback"
+			},
+			{ "id": "s3", "action": "status", "component": "cap.lifi.bridge-swap" }
+		]
+	},
+	"metadata": {
+		"template": "rebalance-crosschain-v0"
+	}
+}

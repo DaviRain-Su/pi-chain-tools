@@ -1,0 +1,49 @@
+{
+	"id": "strategy.lending.risk-balance-bsc-venus-morpho",
+	"name": "Lending risk balance between Venus and Morpho",
+	"version": "0.1.0",
+	"owner": {
+		"namespace": "community",
+		"author": "pi-chain-tools"
+	},
+	"goal": {
+		"kind": "yield",
+		"description": "Optimize lending APY while keeping conservative risk limits",
+		"kpis": [
+			{ "name": "apy_net", "target": 8, "unit": "%" },
+			{ "name": "liquidation_buffer", "target": 1.25 }
+		]
+	},
+	"constraints": {
+		"risk": {
+			"maxPerRunUsd": 3000,
+			"maxSlippageBps": 80,
+			"maxDailyRuns": 8
+		},
+		"allow": {
+			"chains": ["bsc", "base"],
+			"protocols": ["venus", "morpho"],
+			"assets": ["USDC", "USDT", "WETH"]
+		}
+	},
+	"triggers": [
+		{ "type": "cron", "cron": "0 */2 * * *" },
+		{ "type": "threshold", "condition": "liquidation_buffer < 1.25" }
+	],
+	"plan": {
+		"steps": [
+			{ "id": "s1", "action": "read", "component": "cap.venus.lending" },
+			{ "id": "s2", "action": "read", "component": "cap.morpho.lending" },
+			{
+				"id": "s3",
+				"action": "repay",
+				"component": "cap.venus.lending",
+				"onFailure": "retry"
+			},
+			{ "id": "s4", "action": "supply", "component": "cap.morpho.lending" }
+		]
+	},
+	"metadata": {
+		"template": "lending-risk-balance-v0"
+	}
+}

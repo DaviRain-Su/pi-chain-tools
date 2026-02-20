@@ -1,0 +1,43 @@
+{
+	"id": "cap.lifi.bridge-swap",
+	"version": "0.1.0",
+	"kind": "bridge",
+	"provider": "lifi",
+	"actions": ["quote", "execute", "status"],
+	"chains": ["ethereum", "base", "bsc", "arbitrum", "optimism", "polygon"],
+	"requires": {
+		"signer": true,
+		"rpc": true,
+		"apiKey": false,
+		"env": []
+	},
+	"limits": {
+		"minAmountUsd": 5,
+		"maxAmountUsd": 100000,
+		"maxSlippageBps": 300
+	},
+	"inputSchema": {
+		"type": "object",
+		"required": ["fromChain", "toChain", "fromToken", "toToken", "amount"],
+		"properties": {
+			"fromChain": { "type": "string" },
+			"toChain": { "type": "string" },
+			"fromToken": { "type": "string" },
+			"toToken": { "type": "string" },
+			"amount": { "type": "string" },
+			"slippageBps": { "type": "integer" }
+		}
+	},
+	"outputSchema": {
+		"type": "object",
+		"required": ["routeId", "transactionRequest"],
+		"properties": {
+			"routeId": { "type": "string" },
+			"transactionRequest": { "type": "object" }
+		}
+	},
+	"statusModel": {
+		"states": ["PENDING", "DONE", "FAILED", "REFUNDED"],
+		"terminalStates": ["DONE", "FAILED", "REFUNDED"]
+	}
+}

@@ -1,0 +1,40 @@
+{
+	"id": "cap.morpho.lending",
+	"version": "0.1.0",
+	"kind": "lending",
+	"provider": "morpho",
+	"actions": ["supply", "borrow", "repay", "withdraw", "read"],
+	"chains": ["ethereum", "base", "monad-testnet"],
+	"requires": {
+		"signer": true,
+		"rpc": true,
+		"apiKey": false,
+		"env": []
+	},
+	"limits": {
+		"minAmountUsd": 1,
+		"maxAmountUsd": 1000000,
+		"maxSlippageBps": 100
+	},
+	"inputSchema": {
+		"type": "object",
+		"required": ["marketId", "asset", "amount"],
+		"properties": {
+			"marketId": { "type": "string" },
+			"asset": { "type": "string" },
+			"amount": { "type": "string" }
+		}
+	},
+	"outputSchema": {
+		"type": "object",
+		"required": ["txHash"],
+		"properties": {
+			"txHash": { "type": "string" },
+			"healthFactor": { "type": "number" }
+		}
+	},
+	"statusModel": {
+		"states": ["SUBMITTED", "CONFIRMED", "FAILED"],
+		"terminalStates": ["CONFIRMED", "FAILED"]
+	}
+}

@@ -21,6 +21,16 @@
 - `capability-manifest.v0.schema.json`
   - 验证组件能力清单（actions/chains/requires/limits/input/output schema），用于跨协议可复用编排
 
+## v0 示例（可直接复用改参）
+
+位于 `docs/schemas/examples/`：
+
+- `capability-lifi-bridge-swap.v0.json`
+- `capability-venus-lending.v0.json`
+- `capability-morpho-lending.v0.json`
+- `strategy-crosschain-rebalance-lifi.v0.json`
+- `strategy-lending-risk-balance.v0.json`
+
 ## 本地校验
 
 建议在 CI 或提交前执行：
