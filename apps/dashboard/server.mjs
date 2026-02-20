@@ -9324,6 +9324,14 @@ function parseAddressCandidates(raw) {
 		.filter((x) => /^0x[a-fA-F0-9]{40}$/.test(x));
 }
 
+async function readWithFallback(callFn, fallback = null) {
+	try {
+		return await callFn();
+	} catch {
+		return fallback;
+	}
+}
+
 function parseUrlCandidates(raw) {
 	return String(raw || "")
 		.split(/[\n,;]+/)
@@ -9413,6 +9421,28 @@ async function discoverPoolCandidatesFromDefiLlama(protocol) {
 	}
 }
 
+async function discoverSeedCandidatesFromProtocolMeta(protocol) {
+	const key = String(protocol || "").toLowerCase();
+	const out = [];
+	if (key === "wombat") {
+		out.push(
+			"0xad6742a35fb341a9cc6ad674738dd8da98b94fb1",
+			"0x489833311676b566f888119c29bd997dc6c95830",
+		);
+	}
+	try {
+		const protocolSlug = key === "lista" ? "lista-dao" : "wombat-exchange";
+		const payload = await fetchJsonWithTimeout(
+			`https://api.llama.fi/protocol/${protocolSlug}`,
+		);
+		const extracted = extractEvmAddressesFromJson(payload || {});
+		for (const addr of extracted) out.push(addr);
+	} catch {
+		// ignore
+	}
+	return [...new Set(out)];
+}
+
 async function scorePoolCandidates(candidates) {
 	const provider = new JsonRpcProvider(BSC_RPC_URL, {
 		name: "bsc",
@@ -9456,15 +9486,25 @@ async function discoverBscPoolsByProtocol(protocol) {
 		source = "defillama";
 	}
 	if (candidates.length === 0) {
+		candidates = await discoverSeedCandidatesFromProtocolMeta(key);
+		source = "protocol-meta-seed";
+	}
+	if (candidates.length === 0) {
 		warning =
-			"auto-discovery found no BSC pool addresses from configured protocol API URLs or DeFiLlama; set BSC_*_POOL_DISCOVERY_API_URLS or BSC_*_POOL_CANDIDATES";
+			"auto-discovery found no BSC pool addresses from configured protocol API URLs / DeFiLlama / protocol metadata; set BSC_*_POOL_DISCOVERY_API_URLS or BSC_*_POOL_CANDIDATES";
 	}
 	const rows = await scorePoolCandidates(candidates);
+	const topScore = Number(rows[0]?.liquidityScore || 0);
+	const recommended = topScore > 0 ? (rows[0]?.pool ?? null) : null;
+	if (!warning && rows.length > 0 && topScore <= 0) {
+		warning =
+			"auto-discovery candidates found but liquidity score is zero; recommendation withheld for safety";
+	}
 	return {
 		protocol: key,
 		source,
 		candidates: rows,
-		recommended: rows[0]?.pool || null,
+		recommended,
 		warning,
 	};
 }
