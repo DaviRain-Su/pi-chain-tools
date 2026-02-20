@@ -224,11 +224,29 @@ h3 {
 	padding: 0.25rem 0.62rem;
 }
 
-.hero-actions {
+.hero-cta-row {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.7rem;
 	margin-top: 1.25rem;
+}
+
+.hero-cta-row .btn {
+	font-size: 0.9rem;
+	padding: 0.66rem 1rem;
+}
+
+.hero-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.52rem;
+	margin-top: 0.72rem;
+}
+
+.hero-actions .btn {
+	font-size: 0.82rem;
+	font-weight: 500;
+	padding: 0.44rem 0.68rem;
 }
 
 .btn {
