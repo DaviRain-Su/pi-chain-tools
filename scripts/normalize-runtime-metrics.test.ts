@@ -95,4 +95,35 @@ describe("normalize-runtime-metrics", () => {
 			rmSync(tmpDir, { recursive: true, force: true });
 		}
 	});
+
+	it("stays stable across repeated runs when target file is missing/rotating", () => {
+		const tmpDir = mkdtempSync(
+			path.join(os.tmpdir(), "normalize-runtime-metrics-missing-"),
+		);
+		try {
+			const missingPath = path.join(
+				tmpDir,
+				"apps",
+				"dashboard",
+				"data",
+				"rebalance-metrics.json",
+			);
+			const first = spawnSync(process.execPath, [scriptPath], {
+				cwd: tmpDir,
+				encoding: "utf8",
+				env: { ...process.env, NEAR_DASHBOARD_METRICS_PATH: missingPath },
+			});
+			const second = spawnSync(process.execPath, [scriptPath], {
+				cwd: tmpDir,
+				encoding: "utf8",
+				env: { ...process.env, NEAR_DASHBOARD_METRICS_PATH: missingPath },
+			});
+			expect(first.status).toBe(0);
+			expect(second.status).toBe(0);
+			expect(first.stdout).toContain("skipped: target missing");
+			expect(second.stdout).toContain("skipped: target missing");
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
 });

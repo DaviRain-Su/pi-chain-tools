@@ -98,4 +98,35 @@ describe("BscAutonomousStrategy state transitions", () => {
 		).wait();
 		assert.equal(await strategy.cycleState(), 0n);
 	});
+
+	it("preserves nonce invariant across halt recovery", async () => {
+		const { strategy, router, emergency } = await deployFixture();
+		await (
+			await router.setResult(
+				false,
+				ethers.keccak256(ethers.toUtf8Bytes("fail-1")),
+			)
+		).wait();
+		await (await strategy.runDeterministicCycle(cycleRequest())).wait();
+
+		assert.equal(await strategy.cycleState(), 3n);
+		assert.equal(await strategy.lastTransitionNonce(), 1n);
+
+		await (await strategy.connect(emergency).recoverFromHalt()).wait();
+		assert.equal(await strategy.cycleState(), 0n);
+		assert.equal(await strategy.lastTransitionNonce(), 1n);
+
+		await assert.rejects(
+			strategy.runDeterministicCycle(cycleRequest({ transitionNonce: 1 })),
+			/invalid_transition_nonce/,
+		);
+
+		await (
+			await router.setResult(true, ethers.keccak256(ethers.toUtf8Bytes("ok-2")))
+		).wait();
+		await (
+			await strategy.runDeterministicCycle(cycleRequest({ transitionNonce: 2 }))
+		).wait();
+		assert.equal(await strategy.lastTransitionNonce(), 2n);
+	});
 });

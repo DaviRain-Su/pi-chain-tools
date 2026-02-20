@@ -87,6 +87,17 @@ try {
 	current = readFileSync(targetPath, "utf8");
 	parsed = JSON.parse(current);
 } catch (error) {
+	if (
+		error &&
+		typeof error === "object" &&
+		"code" in error &&
+		String(error.code) === "ENOENT"
+	) {
+		console.log(
+			`[normalize-runtime-metrics] skipped: target disappeared during read (${targetInput})`,
+		);
+		process.exit(0);
+	}
 	console.warn(
 		`[normalize-runtime-metrics] skipped: invalid json (${error instanceof Error ? error.message : String(error)})`,
 	);

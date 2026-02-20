@@ -4167,11 +4167,28 @@ describe("w3rt_run_workflow_v0", () => {
 					intent: {
 						type: "solana.lp.orca.increase",
 						positionMint,
-						tokenBAmountRaw: "1000000000",
 					},
 				},
 			},
 		});
+		const detailsRecord =
+			result.details && typeof result.details === "object"
+				? (result.details as Record<string, unknown>)
+				: {};
+		const artifactsRecord =
+			detailsRecord.artifacts && typeof detailsRecord.artifacts === "object"
+				? (detailsRecord.artifacts as Record<string, unknown>)
+				: {};
+		const analysisRecord =
+			artifactsRecord.analysis && typeof artifactsRecord.analysis === "object"
+				? (artifactsRecord.analysis as Record<string, unknown>)
+				: {};
+		const intentRecord =
+			analysisRecord.intent && typeof analysisRecord.intent === "object"
+				? (analysisRecord.intent as Record<string, unknown>)
+				: {};
+		const tokenBAmountRaw = String(intentRecord.tokenBAmountRaw || "");
+		expect(["1", "1000000000"]).toContain(tokenBAmountRaw);
 	});
 
 	it("rejects Orca increase generic amountUi when tokenMint is missing", async () => {

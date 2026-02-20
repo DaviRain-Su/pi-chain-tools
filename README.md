@@ -85,10 +85,17 @@ npm run autonomous:bsc:runs -- --limit 8
 npm run doctor:paths
 ```
 
-Submission bundle generator:
+Submission bundle + strict checklist validator:
 
 ```bash
 npm run autonomous:submission:bundle
+npm run autonomous:submission:validate
+```
+
+Testnet evidence runner (real onchain cycle if env ready; deterministic missing-keys guidance otherwise):
+
+```bash
+npm run autonomous:bsc:testnet:evidence
 ```
 
 ## EVM Security Watch (Quickstart)

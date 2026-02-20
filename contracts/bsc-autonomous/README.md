@@ -26,6 +26,12 @@ npm run contracts:bsc:deploy:testnet
 npm run contracts:bsc:cycle:testnet -- --contract 0xYourStrategyAddress --transitionNonce 1
 ```
 
+## End-to-end testnet evidence (guided)
+
+```bash
+npm run autonomous:bsc:testnet:evidence
+```
+
 ## Verify placeholder
 
 ```bash

@@ -78,6 +78,8 @@
 		"autonomous:bsc:runs": "node scripts/autonomous-cycle-runs.mjs",
 		"doctor:paths": "node scripts/diagnose-runtime-paths.mjs",
 		"autonomous:submission:bundle": "node scripts/autonomous-submission-bundle.mjs",
+		"autonomous:submission:validate": "node scripts/autonomous-submission-validate.mjs",
+		"autonomous:bsc:testnet:evidence": "node scripts/autonomous-testnet-evidence-run.mjs",
 		"autonomous:evidence:regen": "node scripts/autonomous-evidence-regen.mjs",
 		"contracts:bsc:compile": "hardhat compile --config contracts/bsc-autonomous/hardhat.config.cjs",
 		"contracts:bsc:test": "hardhat test --config contracts/bsc-autonomous/hardhat.config.cjs",
