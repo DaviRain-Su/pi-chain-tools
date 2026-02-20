@@ -135,3 +135,8 @@ npm run stable-yield:smoke
 ```json
 { "sortBy": "recommendedMinUsd", "sortOrder": "asc", "limit": 10, "offset": 0 }
 ```
+
+支持关键词搜索：
+```json
+{ "q": "stable" }
+```

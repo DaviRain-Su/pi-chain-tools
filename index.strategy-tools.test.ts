@@ -103,6 +103,21 @@ describe("openclaw strategy tools", () => {
 		}
 	});
 
+	it("supports template text query search", async () => {
+		const registrar = createRegistrar();
+		openclawExtension(registrar);
+		const t = registrar.tools.find((x) => x.name === "pct_strategy_templates");
+		if (!t) throw new Error("pct_strategy_templates not registered");
+		const result = await t.execute("t5", { q: "stable" });
+		const payload = JSON.parse(result.content[0].text) as Record<
+			string,
+			unknown
+		>;
+		expect(payload.status).toBe("ok");
+		const templates = payload.templates as Record<string, unknown>[];
+		expect(templates.length).toBeGreaterThan(0);
+	});
+
 	it("supports template sorting and pagination", async () => {
 		const registrar = createRegistrar();
 		openclawExtension(registrar);

@@ -50,6 +50,20 @@ describe("strategy templates cli", () => {
 		}
 	});
 
+	it("supports text query search", () => {
+		const r = run(["--q", "stable", "--json"]);
+		expect(r.status).toBe(0);
+		const payload = JSON.parse(r.stdout);
+		expect(payload.status).toBe("ok");
+		expect(payload.templates.length).toBeGreaterThan(0);
+		for (const item of payload.templates) {
+			const haystack = [item.template, item.strategyType, ...(item.tags || [])]
+				.join(" ")
+				.toLowerCase();
+			expect(haystack.includes("stable")).toBe(true);
+		}
+	});
+
 	it("supports sorting and pagination", () => {
 		const r = run([
 			"--sortBy",

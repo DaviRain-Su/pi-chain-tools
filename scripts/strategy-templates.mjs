@@ -33,15 +33,35 @@ function parseArgs(argv) {
 
 function usage() {
 	return [
-		"Usage: node scripts/strategy-templates.mjs [--template <name>] [--riskTier <low|medium|high>] [--strategyType <yield|rebalance>] [--status <active|paused|deprecated>] [--sortBy <field>] [--sortOrder <asc|desc>] [--limit <n>] [--offset <n>] [--json]",
+		"Usage: node scripts/strategy-templates.mjs [--template <name>] [--q <keyword>] [--riskTier <low|medium|high>] [--strategyType <yield|rebalance>] [--status <active|paused|deprecated>] [--sortBy <field>] [--sortOrder <asc|desc>] [--limit <n>] [--offset <n>] [--json]",
 		"",
 		"Examples:",
 		"  npm run strategy:templates",
 		"  npm run strategy:templates -- --json",
 		"  npm run strategy:templates -- --template stable-yield-v1 --json",
+		"  npm run strategy:templates -- --q stable --json",
 		"  npm run strategy:templates -- --riskTier low --strategyType yield --json",
 		"  npm run strategy:templates -- --sortBy recommendedMinUsd --sortOrder asc --limit 10 --offset 0 --json",
 	].join("\n");
+}
+
+function matchesQuery(manifest, args) {
+	if (!args.q) return true;
+	const q = String(args.q).toLowerCase().trim();
+	if (!q) return true;
+	const fields = [
+		manifest.template,
+		manifest.strategyType,
+		manifest.author,
+		manifest.status,
+		...(Array.isArray(manifest.tags) ? manifest.tags : []),
+		...(Array.isArray(manifest.capabilities) ? manifest.capabilities : []),
+	];
+	return fields.some((x) =>
+		String(x || "")
+			.toLowerCase()
+			.includes(q),
+	);
 }
 
 function matchesFilter(manifest, args) {
@@ -138,8 +158,8 @@ if (args.template) {
 	process.exit(0);
 }
 
-const manifests = listStrategyTemplateManifests().filter((m) =>
-	matchesFilter(m, args),
+const manifests = listStrategyTemplateManifests().filter(
+	(m) => matchesQuery(m, args) && matchesFilter(m, args),
 );
 const paged = applySortAndPaging(manifests, args);
 if (args.json) {
