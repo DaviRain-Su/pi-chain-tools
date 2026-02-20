@@ -69,6 +69,11 @@ const SECURITY_WATCH_REPORTS_ROOT =
 	process.env.EVM_SECURITY_WATCH_REPORTS_ROOT ||
 	path.join(__dirname, "data", "security-reports");
 const PROOFS_ROOT = path.join(__dirname, "data", "proofs");
+const AUTONOMOUS_CYCLE_PROOFS_ROOT = path.join(PROOFS_ROOT, "autonomous-cycle");
+const AUTONOMOUS_CYCLE_RUNS_DIR = path.join(
+	AUTONOMOUS_CYCLE_PROOFS_ROOT,
+	"runs",
+);
 const READINESS_MATRIX_PATH = path.join(
 	__dirname,
 	"data",
@@ -2033,6 +2038,65 @@ async function readReadinessMatrixLatest() {
 	} catch {
 		return null;
 	}
+}
+
+function buildAutonomousCycleRunRow(proof, sourcePath) {
+	const blockers = Array.isArray(proof?.txEvidence?.blockers)
+		? proof.txEvidence.blockers
+		: [];
+	return {
+		runId: String(proof?.intent?.runId || proof?.runId || "unknown"),
+		mode: String(proof?.mode || "unknown"),
+		startedAt: proof?.startedAt || null,
+		finishedAt: proof?.finishedAt || null,
+		ok: proof?.ok === true,
+		status: String(proof?.txEvidence?.status || "unknown"),
+		txHash: proof?.txEvidence?.txHash || null,
+		blockers,
+		blockerCount: blockers.length,
+		sourcePath,
+	};
+}
+
+async function readAutonomousCycleRunsLatest(limitInput = 8) {
+	const limit = Math.min(50, Math.max(1, Number(limitInput || 8)));
+	const rows = [];
+	const warnings = [];
+	try {
+		const files = await readdir(AUTONOMOUS_CYCLE_RUNS_DIR);
+		const ordered = files
+			.filter((name) => name.endsWith(".json"))
+			.sort((a, b) => b.localeCompare(a));
+		for (const name of ordered) {
+			if (rows.length >= limit) break;
+			const fullPath = path.join(AUTONOMOUS_CYCLE_RUNS_DIR, name);
+			const proof = await readJsonArtifactSafe(fullPath);
+			if (!proof) continue;
+			rows.push(buildAutonomousCycleRunRow(proof, fullPath));
+		}
+	} catch {
+		warnings.push("autonomous_cycle_runs_dir_missing");
+	}
+	if (rows.length === 0) {
+		const latestPath = path.join(AUTONOMOUS_CYCLE_PROOFS_ROOT, "latest.json");
+		const latest = await readJsonArtifactSafe(latestPath);
+		if (latest) {
+			rows.push(buildAutonomousCycleRunRow(latest, latestPath));
+		} else {
+			warnings.push("autonomous_cycle_latest_missing");
+		}
+	}
+	return {
+		ok: rows.length > 0,
+		generatedAt: new Date().toISOString(),
+		runs: rows,
+		paths: {
+			proofsRoot: AUTONOMOUS_CYCLE_PROOFS_ROOT,
+			runsDir: AUTONOMOUS_CYCLE_RUNS_DIR,
+			latest: path.join(AUTONOMOUS_CYCLE_PROOFS_ROOT, "latest.json"),
+		},
+		warnings,
+	};
 }
 
 const TOKENS = [
@@ -9226,6 +9290,15 @@ const server = http.createServer(async (req, res) => {
 				ok: true,
 				summary,
 			});
+		}
+
+		if (url.pathname === "/api/autonomous/cycle/runs" && req.method === "GET") {
+			const limit = Number.parseInt(
+				String(url.searchParams.get("limit") || "8"),
+				10,
+			);
+			const data = await readAutonomousCycleRunsLatest(limit);
+			return json(res, 200, data);
 		}
 
 		if (url.pathname === "/api/readiness/matrix" && req.method === "GET") {

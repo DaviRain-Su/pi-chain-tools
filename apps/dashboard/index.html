@@ -224,6 +224,15 @@
         <div class="card"><h3>Proof Summary</h3><div id="proofSummaryCard" class="muted">-</div></div>
       </div>
 
+      <div class="card" style="margin-top:12px">
+        <h3>Autonomous Cycle Recent Runs</h3>
+        <div id="autonomousCycleRunsMeta" class="muted">-</div>
+        <table style="margin-top:8px">
+          <thead><tr><th>runId</th><th>mode</th><th>status</th><th>txHash</th><th>blockers</th><th>finished</th></tr></thead>
+          <tbody id="autonomousCycleRunsRows"></tbody>
+        </table>
+      </div>
+
       <div class="grid" style="margin-top:12px">
         <div class="card"><h3>我的 NEAR</h3><div id="kpiNear" class="muted">-</div></div>
         <div class="card"><h3>我的 BSC 稳定币</h3><div id="kpiBsc" class="muted">-</div></div>
@@ -558,6 +567,8 @@
       const readinessCardEl = document.getElementById("readinessCard");
       const securityWatchCardEl = document.getElementById("securityWatchCard");
       const proofSummaryCardEl = document.getElementById("proofSummaryCard");
+      const autonomousCycleRunsMetaEl = document.getElementById("autonomousCycleRunsMeta");
+      const autonomousCycleRunsRowsEl = document.getElementById("autonomousCycleRunsRows");
       const yieldHealthEl = document.getElementById("yieldHealth");
       const bscProtocolHealthEl = document.getElementById("bscProtocolHealth");
       const bscYieldReadinessEl = document.getElementById("bscYieldReadiness");
@@ -1461,7 +1472,7 @@
           : "";
         const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
         const safeFetch = (input) => fetch(input).catch(() => null);
-        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes, readinessMatrixRes, securityWatchStatusRes, proofSummaryRes] = await Promise.all([
+        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes, readinessMatrixRes, securityWatchStatusRes, proofSummaryRes, autonomousCycleRunsRes] = await Promise.all([
           safeFetch(`/api/snapshot${query}`),
           safeFetch(`/api/portfolio/unified${query}`),
           safeFetch(`/api/bsc/yield/plan${bscAccountQuery ? `${bscAccountQuery}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
@@ -1483,6 +1494,7 @@
           safeFetch("/api/readiness/matrix"),
           safeFetch("/api/security/watch/status"),
           safeFetch("/api/proof/summary"),
+          safeFetch("/api/autonomous/cycle/runs?limit=8"),
         ]);
         const data = snapRes ? await snapRes.json().catch(() => ({ error: "snapshot_parse_failed" })) : { error: "snapshot_unreachable" };
         const unified = unifiedRes ? await unifiedRes.json().catch(() => ({ ok: false })) : { ok: false };
@@ -1505,6 +1517,7 @@
         const readinessMatrix = readinessMatrixRes ? await readinessMatrixRes.json().catch(() => ({ ok: false, matrix: null })) : { ok: false, matrix: null };
         const securityWatchStatus = securityWatchStatusRes ? await securityWatchStatusRes.json().catch(() => ({ ok: false, status: null })) : { ok: false, status: null };
         const proofSummary = proofSummaryRes ? await proofSummaryRes.json().catch(() => ({ ok: false, summary: null })) : { ok: false, summary: null };
+        const autonomousCycleRuns = autonomousCycleRunsRes ? await autonomousCycleRunsRes.json().catch(() => ({ ok: false, runs: [] })) : { ok: false, runs: [] };
         lastCiSignatures = ciSignatures;
 
         const warnings = [];
@@ -1515,6 +1528,7 @@
         if (readinessMatrix?.ok === false) warnings.push("readiness matrix unavailable");
         if (securityWatchStatus?.ok === false) warnings.push("security watch status unavailable");
         if (proofSummary?.ok === false) warnings.push("proof summary unavailable");
+        if (autonomousCycleRuns?.ok === false) warnings.push("autonomous cycle runs unavailable");
         if (statusBannerEl) {
           if (warnings.length) {
             statusBannerEl.style.display = "block";
@@ -1592,6 +1606,28 @@
             renderProofRow("Security", proofItems.security),
             renderProofRow("Breeze", proofItems.breeze),
           ].join("<br/>");
+        }
+        const cycleRuns = Array.isArray(autonomousCycleRuns?.runs) ? autonomousCycleRuns.runs.slice(0, 8) : [];
+        if (autonomousCycleRunsMetaEl) {
+          const warnText = Array.isArray(autonomousCycleRuns?.warnings) && autonomousCycleRuns.warnings.length
+            ? ` · warnings=${autonomousCycleRuns.warnings.join(",")}`
+            : "";
+          autonomousCycleRunsMetaEl.innerHTML = `latest runs: <span class="${cycleRuns.length > 0 ? "ok" : "warn"}">${cycleRuns.length}</span> · generated=${autonomousCycleRuns?.generatedAt ? new Date(autonomousCycleRuns.generatedAt).toLocaleString() : "-"}${warnText}`;
+        }
+        if (autonomousCycleRunsRowsEl) {
+          autonomousCycleRunsRowsEl.innerHTML = cycleRuns.length
+            ? cycleRuns
+                .map((row) => {
+                  const blockers = Array.isArray(row?.blockers) ? row.blockers : [];
+                  const tx = row?.txHash ? `${String(row.txHash).slice(0, 10)}...` : "-";
+                  const status = String(row?.status || "unknown");
+                  const statusCls = status === "executed" || status === "submitted" ? "ok" : status.includes("dry") ? "muted" : "warn";
+                  const blockerText = blockers.length ? blockers.slice(0, 2).join(" | ") : "-";
+                  const finished = row?.finishedAt ? new Date(row.finishedAt).toLocaleString() : "-";
+                  return `<tr><td>${row?.runId || "-"}</td><td>${row?.mode || "-"}</td><td><span class="${statusCls}">${status}</span></td><td title="${row?.txHash || ""}">${tx}</td><td title="${blockers.join(" | ")}">${blockerText}</td><td>${finished}</td></tr>`;
+                })
+                .join("")
+            : `<tr><td colspan="6" class="muted">No autonomous cycle runs yet (run \`npm run autonomous:bsc:cycle -- --mode dryrun\`).</td></tr>`;
         }
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
         const yieldHealthText = computeYieldHealth(data);

@@ -1,26 +1,113 @@
 #!/usr/bin/env node
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runAsterDexExecSafe } from "./asterdex-exec-safe.mjs";
 import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
 
 const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) ?? process.cwd();
-const DEFAULT_OUT = path.join(
+const AUTONOMOUS_PROOFS_ROOT = path.join(
 	REPO_ROOT,
 	"apps",
 	"dashboard",
 	"data",
 	"proofs",
 	"autonomous-cycle",
-	"latest.json",
 );
+const DEFAULT_OUT = path.join(AUTONOMOUS_PROOFS_ROOT, "latest.json");
+const DEFAULT_HISTORY_DIR = path.join(AUTONOMOUS_PROOFS_ROOT, "runs");
+const DEFAULT_STATE_PATH = path.join(
+	REPO_ROOT,
+	"apps",
+	"dashboard",
+	"data",
+	"autonomous-cycle-state.json",
+);
+
+function nowIso() {
+	return new Date().toISOString();
+}
+
+function normalizeRunId(input) {
+	const raw = String(input || "").trim();
+	if (!raw) return `autonomous-cycle-${Date.now()}`;
+	return raw.replace(/[^a-zA-Z0-9._:-]/g, "-").slice(0, 120);
+}
+
+function parsePositiveInt(input, fallback) {
+	const value = Number.parseInt(String(input ?? ""), 10);
+	if (!Number.isFinite(value) || value <= 0) return fallback;
+	return value;
+}
+
+async function readJsonSafe(filePath, fallback = null) {
+	try {
+		const raw = await readFile(filePath, "utf8");
+		return JSON.parse(raw);
+	} catch {
+		return fallback;
+	}
+}
+
+async function writeJsonAtomic(filePath, payload) {
+	await mkdir(path.dirname(filePath), { recursive: true });
+	const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+	await writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`);
+	await rename(tempPath, filePath);
+}
+
+function buildInitialState() {
+	return {
+		version: 1,
+		updatedAt: nowIso(),
+		lastLiveAt: null,
+		activeLiveRunId: null,
+		activeLiveStartedAt: null,
+		replay: {
+			maxEntries: 200,
+			runs: {},
+		},
+	};
+}
+
+function compactReplayRuns(runs, maxEntries) {
+	const list = Object.entries(runs || {}).sort((a, b) => {
+		const aTs = Date.parse(String(a[1]?.updatedAt || a[1]?.startedAt || "0"));
+		const bTs = Date.parse(String(b[1]?.updatedAt || b[1]?.startedAt || "0"));
+		return bTs - aTs;
+	});
+	return Object.fromEntries(list.slice(0, Math.max(20, maxEntries)));
+}
+
+async function loadCycleState(statePath) {
+	const parsed = await readJsonSafe(statePath, null);
+	if (!parsed || typeof parsed !== "object") return buildInitialState();
+	const base = buildInitialState();
+	const replay =
+		parsed.replay && typeof parsed.replay === "object" ? parsed.replay : {};
+	return {
+		...base,
+		...parsed,
+		replay: {
+			maxEntries: parsePositiveInt(replay.maxEntries, 200),
+			runs:
+				replay.runs && typeof replay.runs === "object"
+					? compactReplayRuns(
+							replay.runs,
+							parsePositiveInt(replay.maxEntries, 200),
+						)
+					: {},
+		},
+	};
+}
 
 function parseArgs(rawArgs = process.argv.slice(2)) {
 	const args = {
 		mode: "dryrun",
 		out: DEFAULT_OUT,
-		runId: `autonomous-cycle-${Date.now()}`,
+		historyDir: DEFAULT_HISTORY_DIR,
+		statePath: DEFAULT_STATE_PATH,
+		runId: normalizeRunId(`autonomous-cycle-${Date.now()}`),
 	};
 	for (let i = 0; i < rawArgs.length; i += 1) {
 		const token = String(rawArgs[i] || "");
@@ -36,8 +123,14 @@ function parseArgs(rawArgs = process.argv.slice(2)) {
 			case "out":
 				args.out = path.resolve(String(value));
 				break;
+			case "history-dir":
+				args.historyDir = path.resolve(String(value));
+				break;
+			case "state-path":
+				args.statePath = path.resolve(String(value));
+				break;
 			case "run-id":
-				args.runId = String(value).trim();
+				args.runId = normalizeRunId(value);
 				break;
 			default:
 				throw new Error(`unknown argument: --${key}`);
@@ -91,16 +184,132 @@ function summarizeReconcile(execResult) {
 	};
 }
 
+function createLiveSafetyContext(env) {
+	return {
+		minIntervalSeconds: parsePositiveInt(
+			env.BSC_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS,
+			300,
+		),
+		lockTtlSeconds: parsePositiveInt(
+			env.BSC_AUTONOMOUS_CYCLE_LOCK_TTL_SECONDS,
+			900,
+		),
+	};
+}
+
+function guardAndMarkLiveRun({ state, runId, safety }) {
+	const nowMs = Date.now();
+	const replayRow = state.replay?.runs?.[runId] || null;
+	if (replayRow) {
+		throw new Error(
+			`idempotency guard: run-id replay blocked (${runId}, status=${replayRow.status || "unknown"})`,
+		);
+	}
+	if (state.activeLiveRunId && state.activeLiveRunId !== runId) {
+		const activeStartedMs = Date.parse(
+			String(state.activeLiveStartedAt || "0"),
+		);
+		if (
+			Number.isFinite(activeStartedMs) &&
+			nowMs - activeStartedMs <= safety.lockTtlSeconds * 1000
+		) {
+			throw new Error(
+				`live lock active: ${state.activeLiveRunId} (ttl=${safety.lockTtlSeconds}s)`,
+			);
+		}
+	}
+	if (state.lastLiveAt) {
+		const lastLiveMs = Date.parse(String(state.lastLiveAt));
+		if (Number.isFinite(lastLiveMs)) {
+			const deltaMs = nowMs - lastLiveMs;
+			if (deltaMs < safety.minIntervalSeconds * 1000) {
+				const waitMs = Math.max(0, safety.minIntervalSeconds * 1000 - deltaMs);
+				throw new Error(
+					`rate lock active: retry after ${Math.ceil(waitMs / 1000)}s (min interval ${safety.minIntervalSeconds}s)`,
+				);
+			}
+		}
+	}
+	state.activeLiveRunId = runId;
+	state.activeLiveStartedAt = nowIso();
+	state.replay.runs[runId] = {
+		status: "in_progress",
+		startedAt: state.activeLiveStartedAt,
+		updatedAt: state.activeLiveStartedAt,
+		txHash: null,
+		blockers: [],
+	};
+	state.replay.runs = compactReplayRuns(
+		state.replay.runs,
+		parsePositiveInt(state.replay.maxEntries, 200),
+	);
+	state.updatedAt = nowIso();
+}
+
+function finalizeLiveRunState({ state, runId, proof, error }) {
+	const current = state.replay.runs[runId] || {
+		status: "in_progress",
+		startedAt: nowIso(),
+	};
+	const blockerList = Array.isArray(proof?.txEvidence?.blockers)
+		? proof.txEvidence.blockers
+		: [];
+	const txHash = proof?.txEvidence?.txHash || null;
+	const status = error
+		? "failed"
+		: proof?.ok
+			? txHash
+				? "submitted"
+				: "ok_without_tx"
+			: "blocked";
+	state.replay.runs[runId] = {
+		...current,
+		status,
+		updatedAt: nowIso(),
+		txHash,
+		blockers: blockerList,
+		error: error
+			? String(error instanceof Error ? error.message : error)
+			: null,
+	};
+	if (!error && proof?.ok) {
+		state.lastLiveAt = nowIso();
+	}
+	if (state.activeLiveRunId === runId) {
+		state.activeLiveRunId = null;
+		state.activeLiveStartedAt = null;
+	}
+	state.replay.runs = compactReplayRuns(
+		state.replay.runs,
+		parsePositiveInt(state.replay.maxEntries, 200),
+	);
+	state.updatedAt = nowIso();
+}
+
+function buildHistoryPath({ historyDir, runId }) {
+	const stamp = nowIso().replace(/[:.]/g, "-");
+	return path.join(historyDir, `${stamp}-${runId}.json`);
+}
+
 export async function runBscAutonomousCycle(
 	rawArgs = process.argv.slice(2),
 	env = process.env,
 ) {
 	const args = parseArgs(rawArgs);
-	const startedAt = new Date().toISOString();
+	const startedAt = nowIso();
 	const intent = buildIntent(args.runId, env);
 	const confirm = String(
 		env.BSC_AUTONOMOUS_ASTERDEX_CONFIRM_TEXT || "ASTERDEX_EXECUTE_LIVE",
 	);
+	const safety = createLiveSafetyContext(env);
+	const state = await loadCycleState(args.statePath);
+	let liveMarked = false;
+	if (args.mode === "live") {
+		guardAndMarkLiveRun({ state, runId: args.runId, safety });
+		await writeJsonAtomic(args.statePath, state);
+		liveMarked = true;
+	}
+
 	const execArgs = [
 		"--mode",
 		args.mode,
@@ -109,33 +318,62 @@ export async function runBscAutonomousCycle(
 		"--confirm",
 		args.mode === "live" ? confirm : "",
 	];
-	const execution = runAsterDexExecSafe(execArgs, env);
-	const decision = execution.ok
-		? args.mode === "live"
-			? "execute"
-			: "simulate_execute"
-		: "hold_blocked";
-	const proof = {
-		suite: "bsc-autonomous-cycle",
-		version: 1,
-		startedAt,
-		finishedAt: new Date().toISOString(),
-		mode: args.mode,
-		decision,
-		intent,
-		txEvidence: {
-			status: execution.status,
-			txHash: execution.txHash || null,
-			evidence: execution.evidence || null,
-			blockers: execution.blockers || [],
-			reason: execution.reason || null,
-		},
-		reconcileSummary: summarizeReconcile(execution),
-		ok: execution.ok,
-	};
-	await mkdir(path.dirname(args.out), { recursive: true });
-	await writeFile(args.out, `${JSON.stringify(proof, null, 2)}\n`);
-	return { ok: proof.ok, out: args.out, proof };
+
+	let proof;
+	try {
+		const execution = runAsterDexExecSafe(execArgs, env);
+		const decision = execution.ok
+			? args.mode === "live"
+				? "execute"
+				: "simulate_execute"
+			: "hold_blocked";
+		proof = {
+			suite: "bsc-autonomous-cycle",
+			version: 2,
+			startedAt,
+			finishedAt: nowIso(),
+			mode: args.mode,
+			decision,
+			intent,
+			safety: {
+				minLiveIntervalSeconds: safety.minIntervalSeconds,
+				lockTtlSeconds: safety.lockTtlSeconds,
+				statePath: args.statePath,
+			},
+			txEvidence: {
+				status: execution.status,
+				txHash: execution.txHash || null,
+				evidence: execution.evidence || null,
+				blockers: execution.blockers || [],
+				reason: execution.reason || null,
+			},
+			reconcileSummary: summarizeReconcile(execution),
+			ok: execution.ok,
+		};
+		await mkdir(path.dirname(args.out), { recursive: true });
+		await writeFile(args.out, `${JSON.stringify(proof, null, 2)}\n`);
+		const historyPath = buildHistoryPath({
+			historyDir: args.historyDir,
+			runId: args.runId,
+		});
+		await writeJsonAtomic(historyPath, proof);
+		if (liveMarked) {
+			finalizeLiveRunState({ state, runId: args.runId, proof, error: null });
+			await writeJsonAtomic(args.statePath, state);
+		}
+		return { ok: proof.ok, out: args.out, historyPath, proof };
+	} catch (error) {
+		if (liveMarked) {
+			finalizeLiveRunState({
+				state,
+				runId: args.runId,
+				proof,
+				error,
+			});
+			await writeJsonAtomic(args.statePath, state);
+		}
+		throw error;
+	}
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

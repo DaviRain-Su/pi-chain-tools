@@ -72,9 +72,17 @@ Autonomous cycle runnable proof (deterministic BSC cycle):
 npm run autonomous:bsc:cycle -- --mode dryrun --run-id cycle-dryrun-001
 
 # guarded live run (requires active binding + confirm text + live command env)
+# extra safety: lock + replay guard are persisted in apps/dashboard/data/autonomous-cycle-state.json
 BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE=true \
 BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND='node -e "console.log(JSON.stringify({txHash:\"0x1111111111111111111111111111111111111111111111111111111111111111\"}))"' \
+BSC_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS=300 \
 npm run autonomous:bsc:cycle -- --mode live --run-id cycle-live-001
+
+# list latest cycle runs (status/txHash/blockers)
+npm run autonomous:bsc:runs -- --limit 8
+
+# quick cwd/path diagnosis for ENOENT/cwd mistakes
+npm run doctor:paths
 ```
 
 Submission bundle generator:

@@ -1,11 +1,15 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { resolveFromRepo } from "./runtime-paths.mjs";
 
 const DEFAULT_TARGET_RELATIVE = "apps/dashboard/data/rebalance-metrics.json";
+const DEFAULT_CACHE_RELATIVE =
+	"apps/dashboard/data/.normalize-runtime-metrics-cache.json";
 const targetInput =
 	process.env.NEAR_DASHBOARD_METRICS_PATH || DEFAULT_TARGET_RELATIVE;
+const cacheInput =
+	process.env.NEAR_DASHBOARD_NORMALIZE_CACHE_PATH || DEFAULT_CACHE_RELATIVE;
 
 function stableNormalize(value) {
 	if (Array.isArray(value)) {
@@ -22,9 +26,22 @@ function stableNormalize(value) {
 	return value;
 }
 
-const targetPath = path.isAbsolute(targetInput)
-	? targetInput
-	: resolveFromRepo(targetInput, process.cwd()).absolutePath;
+function resolvePath(input, cwd) {
+	if (path.isAbsolute(input)) return input;
+	const resolved = resolveFromRepo(input, cwd).absolutePath;
+	return resolved || null;
+}
+
+function readJsonSafe(filePath) {
+	try {
+		return JSON.parse(readFileSync(filePath, "utf8"));
+	} catch {
+		return null;
+	}
+}
+
+const targetPath = resolvePath(targetInput, process.cwd());
+const cachePath = resolvePath(cacheInput, process.cwd());
 
 if (!targetPath) {
 	console.warn(
@@ -40,9 +57,35 @@ if (!existsSync(targetPath)) {
 	process.exit(0);
 }
 
-let parsed;
+let targetStat;
 try {
-	parsed = JSON.parse(readFileSync(targetPath, "utf8"));
+	targetStat = statSync(targetPath);
+} catch {
+	console.log(
+		`[normalize-runtime-metrics] skipped: target unavailable (${targetInput})`,
+	);
+	process.exit(0);
+}
+
+const cache =
+	cachePath && existsSync(cachePath) ? readJsonSafe(cachePath) : null;
+if (
+	cache &&
+	cache.targetPath === targetPath &&
+	Number(cache.size) === Number(targetStat.size) &&
+	Number(cache.mtimeMs) === Number(targetStat.mtimeMs)
+) {
+	console.log(
+		`[normalize-runtime-metrics] fast-skip unchanged ${targetInput} (cache-hit)`,
+	);
+	process.exit(0);
+}
+
+let parsed;
+let current;
+try {
+	current = readFileSync(targetPath, "utf8");
+	parsed = JSON.parse(current);
 } catch (error) {
 	console.warn(
 		`[normalize-runtime-metrics] skipped: invalid json (${error instanceof Error ? error.message : String(error)})`,
@@ -51,12 +94,66 @@ try {
 }
 
 const normalized = `${JSON.stringify(stableNormalize(parsed), null, "\t")}\n`;
-const current = readFileSync(targetPath, "utf8");
-
 if (normalized === current) {
+	if (cachePath) {
+		try {
+			writeFileSync(
+				cachePath,
+				`${JSON.stringify(
+					{
+						targetPath,
+						size: targetStat.size,
+						mtimeMs: targetStat.mtimeMs,
+						updatedAt: new Date().toISOString(),
+					},
+					null,
+					2,
+				)}\n`,
+				"utf8",
+			);
+		} catch {
+			// best-effort cache write
+		}
+	}
 	console.log(`[normalize-runtime-metrics] already normalized ${targetInput}`);
 	process.exit(0);
 }
 
-writeFileSync(targetPath, normalized, "utf8");
-console.log(`[normalize-runtime-metrics] normalized ${targetInput}`);
+try {
+	writeFileSync(targetPath, normalized, "utf8");
+	const normalizedStat = statSync(targetPath);
+	if (cachePath) {
+		try {
+			writeFileSync(
+				cachePath,
+				`${JSON.stringify(
+					{
+						targetPath,
+						size: normalizedStat.size,
+						mtimeMs: normalizedStat.mtimeMs,
+						updatedAt: new Date().toISOString(),
+					},
+					null,
+					2,
+				)}\n`,
+				"utf8",
+			);
+		} catch {
+			// best-effort cache write
+		}
+	}
+	console.log(`[normalize-runtime-metrics] normalized ${targetInput}`);
+} catch (error) {
+	if (
+		error &&
+		typeof error === "object" &&
+		"code" in error &&
+		String(error.code) === "ENOENT"
+	) {
+		console.log(
+			`[normalize-runtime-metrics] skipped: target disappeared during write (${targetInput})`,
+		);
+		process.exit(0);
+	}
+	throw error;
+}

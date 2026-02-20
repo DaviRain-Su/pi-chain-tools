@@ -132,6 +132,12 @@ describe("package.json script contracts", () => {
 		expect(scripts?.["sdk:capability-diff"]).toBe(
 			"node scripts/sdk-capability-diff.mjs",
 		);
+		expect(scripts?.["autonomous:bsc:runs"]).toBe(
+			"node scripts/autonomous-cycle-runs.mjs",
+		);
+		expect(scripts?.["doctor:paths"]).toBe(
+			"node scripts/diagnose-runtime-paths.mjs",
+		);
 	});
 
 	it("keeps CI schema validation as single-step command", () => {

@@ -74,6 +74,8 @@
 		"readiness:refresh": "node scripts/readiness-refresh.mjs",
 		"autonomous:rollout:gate": "npm run check && npm test && npm run live:test:preflight && npm run readiness:refresh",
 		"autonomous:bsc:cycle": "node scripts/bsc-autonomous-cycle.mjs",
+		"autonomous:bsc:runs": "node scripts/autonomous-cycle-runs.mjs",
+		"doctor:paths": "node scripts/diagnose-runtime-paths.mjs",
 		"autonomous:submission:bundle": "node scripts/autonomous-submission-bundle.mjs"
 	},
 	"dependencies": {

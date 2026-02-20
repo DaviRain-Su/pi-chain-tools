@@ -129,3 +129,30 @@ Artifacts generated:
 - `docs/mainnet-readiness-matrix.md`
 - `apps/dashboard/data/readiness/latest.json`
 - Dashboard API: `GET /api/readiness/matrix`
+
+## Autonomous cycle observability + live safety lock
+
+- Cycle proof latest: `apps/dashboard/data/proofs/autonomous-cycle/latest.json`
+- Cycle proof history: `apps/dashboard/data/proofs/autonomous-cycle/runs/*.json`
+- Live lock/replay state: `apps/dashboard/data/autonomous-cycle-state.json`
+- Dashboard API: `GET /api/autonomous/cycle/runs?limit=8`
+
+Operator commands:
+
+```bash
+npm run autonomous:bsc:runs -- --limit 8
+npm run doctor:paths
+```
+
+Live lock controls (default-safe):
+
+- `BSC_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS` (default `300`)
+- `BSC_AUTONOMOUS_CYCLE_LOCK_TTL_SECONDS` (default `900`)
+
+## Foundry crystallization note (targeted)
+
+A targeted crystallization attempt was executed for recurring `exec/path/check` interruptions; current candidate output was not directly path/check relevant (it suggested an `edit` ambiguity pattern). Until a suitable candidate appears, keep deterministic prevention in code/scripts:
+
+- normalize step fast-skip cache + ENOENT-safe fallback (`scripts/normalize-runtime-metrics.mjs`)
+- cwd/path self-diagnosis command (`npm run doctor:paths`)
+- autonomous live lock + replay state (`apps/dashboard/data/autonomous-cycle-state.json`)
