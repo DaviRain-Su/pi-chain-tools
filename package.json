@@ -40,6 +40,7 @@
 		"strategy:compile": "node scripts/strategy-compile.mjs",
 		"strategy:validate": "node scripts/strategy-validate.mjs",
 		"strategy:run": "node scripts/strategy-run.mjs",
+		"strategy:smoke": "node scripts/strategy-smoke.mjs",
 		"security:check": "node scripts/security-audit.mjs",
 		"security:scan:once": "node scripts/evm-security-scan-once.mjs",
 		"security:watch": "node scripts/evm-security-worker.mjs",
