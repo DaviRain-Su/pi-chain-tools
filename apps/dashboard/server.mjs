@@ -947,6 +947,20 @@ const BSC_LISTA_POOL_CANDIDATES = String(
 const BSC_WOMBAT_POOL_CANDIDATES = String(
 	envOrCfg("BSC_WOMBAT_POOL_CANDIDATES", "bsc.wombat.poolCandidates", ""),
 ).trim();
+const BSC_LISTA_POOL_DISCOVERY_API_URLS = String(
+	envOrCfg(
+		"BSC_LISTA_POOL_DISCOVERY_API_URLS",
+		"bsc.lista.poolDiscoveryApiUrls",
+		"",
+	),
+).trim();
+const BSC_WOMBAT_POOL_DISCOVERY_API_URLS = String(
+	envOrCfg(
+		"BSC_WOMBAT_POOL_DISCOVERY_API_URLS",
+		"bsc.wombat.poolDiscoveryApiUrls",
+		"",
+	),
+).trim();
 const BSC_WOMBAT_EXECUTE_PRIVATE_KEY = String(
 	envOrCfg(
 		"BSC_WOMBAT_EXECUTE_PRIVATE_KEY",
@@ -9310,6 +9324,63 @@ function parseAddressCandidates(raw) {
 		.filter((x) => /^0x[a-fA-F0-9]{40}$/.test(x));
 }
 
+function parseUrlCandidates(raw) {
+	return String(raw || "")
+		.split(/[\n,;]+/)
+		.map((x) => x.trim())
+		.filter((x) => /^https?:\/\//i.test(x));
+}
+
+function extractEvmAddressesFromJson(payload) {
+	const text = JSON.stringify(payload || {});
+	const found = text.match(/0x[a-fA-F0-9]{40}/g) || [];
+	return [...new Set(found.map((x) => x.toLowerCase()))];
+}
+
+async function fetchJsonWithTimeout(url, timeoutMs = 8000) {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		const res = await fetch(url, {
+			headers: { accept: "application/json" },
+			signal: controller.signal,
+		});
+		if (!res.ok) return null;
+		return await res.json();
+	} catch {
+		return null;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+async function discoverPoolCandidatesFromProtocolApis(protocol) {
+	const key = String(protocol || "").toLowerCase();
+	const urlRaw =
+		key === "lista"
+			? BSC_LISTA_POOL_DISCOVERY_API_URLS
+			: BSC_WOMBAT_POOL_DISCOVERY_API_URLS;
+	const urls = parseUrlCandidates(urlRaw);
+	if (urls.length === 0) return [];
+	const excluded = new Set([
+		BSC_USDC.toLowerCase(),
+		BSC_USDT.toLowerCase(),
+		BSC_WBNB.toLowerCase(),
+		BSC_ROUTER_V2.toLowerCase(),
+		"0x0000000000000000000000000000000000000000",
+	]);
+	const out = [];
+	for (const url of urls) {
+		const payload = await fetchJsonWithTimeout(url);
+		if (!payload) continue;
+		const addrs = extractEvmAddressesFromJson(payload)
+			.filter((x) => !excluded.has(x))
+			.slice(0, 120);
+		for (const addr of addrs) out.push(addr);
+	}
+	return [...new Set(out)];
+}
+
 async function discoverPoolCandidatesFromDefiLlama(protocol) {
 	const key = String(protocol || "").toLowerCase();
 	const projectName = key === "lista" ? "lista" : "wombat-exchange";
@@ -9377,12 +9448,16 @@ async function discoverBscPoolsByProtocol(protocol) {
 	let source = "env";
 	let warning = null;
 	if (candidates.length === 0) {
+		candidates = await discoverPoolCandidatesFromProtocolApis(key);
+		source = "protocol-api";
+	}
+	if (candidates.length === 0) {
 		candidates = await discoverPoolCandidatesFromDefiLlama(key);
 		source = "defillama";
-		if (candidates.length === 0) {
-			warning =
-				"auto-discovery found no BSC pool addresses from DeFiLlama; you can still set BSC_*_POOL_CANDIDATES manually";
-		}
+	}
+	if (candidates.length === 0) {
+		warning =
+			"auto-discovery found no BSC pool addresses from configured protocol API URLs or DeFiLlama; set BSC_*_POOL_DISCOVERY_API_URLS or BSC_*_POOL_CANDIDATES";
 	}
 	const rows = await scorePoolCandidates(candidates);
 	return {

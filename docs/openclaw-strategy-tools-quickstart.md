@@ -144,12 +144,19 @@ npm run stable-yield:auto-migrate:v2:cron-install
 # last json: logs/stable-yield-auto-migrate-v2-last.json
 ```
 
-BSC 配置向导支持自动发现候选池（需提前配置候选地址列表）：
+BSC 配置向导支持自动发现候选池，优先级如下：
+1) `BSC_*_POOL_CANDIDATES`（手工候选）
+2) `BSC_*_POOL_DISCOVERY_API_URLS`（协议 API 自动抓取）
+3) DeFiLlama fallback
 
 ```bash
-# 逗号分隔多个候选池
+# 1) 逗号分隔多个候选池
 BSC_LISTA_POOL_CANDIDATES=0x...,0x...
 BSC_WOMBAT_POOL_CANDIDATES=0x...,0x...
+
+# 2) 可选：协议查询 API（逗号/分号分隔多个 URL）
+BSC_LISTA_POOL_DISCOVERY_API_URLS=https://.../lista/pools,https://.../bsc/lista
+BSC_WOMBAT_POOL_DISCOVERY_API_URLS=https://.../wombat/pools;https://.../bsc/wombat
 ```
 
 
