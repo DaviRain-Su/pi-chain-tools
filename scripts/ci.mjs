@@ -16,9 +16,12 @@ function run(command, args, env = process.env) {
 }
 
 const runtime = ensurePythonAliasEnv(process.env);
-if (runtime.strategy === "python3-direct") {
+if (
+	runtime.strategy === "python3-direct" ||
+	runtime.strategy === "python3-shim"
+) {
 	console.warn(
-		"[ci] python missing; using python3 directly for this run (PYTHON)",
+		`[ci] python missing; using python3 fallback for this run (${runtime.strategy})`,
 	);
 } else if (runtime.strategy === "python-missing") {
 	console.warn(

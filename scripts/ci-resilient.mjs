@@ -256,10 +256,13 @@ async function main() {
 	};
 
 	const runtime = ensurePythonAliasEnv(process.env);
-	if (runtime.strategy === "python3-direct") {
+	if (
+		runtime.strategy === "python3-direct" ||
+		runtime.strategy === "python3-shim"
+	) {
 		signatures.pythonShimApplied = 1;
 		console.log(
-			"[ci-resilient] python missing, using python3 directly for this CI run (PYTHON)",
+			`[ci-resilient] python missing, using python3 fallback for this CI run (${runtime.strategy})`,
 		);
 	} else if (runtime.strategy === "python-missing") {
 		signatures.pythonMissingDetections += 1;
