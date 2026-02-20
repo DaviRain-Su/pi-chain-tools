@@ -32,10 +32,7 @@ export function ensurePythonAliasEnv(baseEnv = process.env) {
 		};
 	}
 
-	const shimDir = path.join(
-		os.tmpdir(),
-		"pi-chain-tools-python-shim",
-	);
+	const shimDir = path.join(os.tmpdir(), "pi-chain-tools-python-shim");
 	const shimPath = path.join(shimDir, "python");
 	try {
 		mkdirSync(shimDir, { recursive: true });
