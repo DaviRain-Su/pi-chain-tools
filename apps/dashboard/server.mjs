@@ -941,6 +941,12 @@ const BSC_WOMBAT_NATIVE_EXECUTE_ENABLED =
 const BSC_WOMBAT_POOL = String(
 	envOrCfg("BSC_WOMBAT_POOL", "bsc.wombat.pool", ""),
 ).trim();
+const BSC_LISTA_POOL_CANDIDATES = String(
+	envOrCfg("BSC_LISTA_POOL_CANDIDATES", "bsc.lista.poolCandidates", ""),
+).trim();
+const BSC_WOMBAT_POOL_CANDIDATES = String(
+	envOrCfg("BSC_WOMBAT_POOL_CANDIDATES", "bsc.wombat.poolCandidates", ""),
+).trim();
 const BSC_WOMBAT_EXECUTE_PRIVATE_KEY = String(
 	envOrCfg(
 		"BSC_WOMBAT_EXECUTE_PRIVATE_KEY",
@@ -9297,6 +9303,62 @@ function startBscYieldWorker(options = {}) {
 	}, BSC_YIELD_WORKER.intervalMs);
 }
 
+function parseAddressCandidates(raw) {
+	return String(raw || "")
+		.split(/[\n,;\s]+/)
+		.map((x) => x.trim())
+		.filter((x) => /^0x[a-fA-F0-9]{40}$/.test(x));
+}
+
+async function discoverBscPoolsByProtocol(protocol) {
+	const key = String(protocol || "").toLowerCase();
+	const candidateRaw =
+		key === "lista" ? BSC_LISTA_POOL_CANDIDATES : BSC_WOMBAT_POOL_CANDIDATES;
+	const candidates = parseAddressCandidates(candidateRaw);
+	if (candidates.length === 0) {
+		return {
+			protocol: key,
+			candidates: [],
+			recommended: null,
+			warning:
+				"no configured pool candidates; set BSC_LISTA_POOL_CANDIDATES / BSC_WOMBAT_POOL_CANDIDATES",
+		};
+	}
+	const provider = new JsonRpcProvider(BSC_RPC_URL, {
+		name: "bsc",
+		chainId: BSC_CHAIN_ID,
+	});
+	const erc20Iface = new Interface([
+		"function balanceOf(address owner) view returns (uint256)",
+	]);
+	const readBalanceRaw = async (token, owner) => {
+		const data = erc20Iface.encodeFunctionData("balanceOf", [owner]);
+		const raw = await provider.call({ to: token, data });
+		return erc20Iface.decodeFunctionResult("balanceOf", raw)[0].toString();
+	};
+	const rows = [];
+	for (const pool of candidates) {
+		const [usdcRaw, usdtRaw] = await Promise.all([
+			readWithFallback(() => readBalanceRaw(BSC_USDC, pool), "0"),
+			readWithFallback(() => readBalanceRaw(BSC_USDT, pool), "0"),
+		]);
+		const usdcUi = Number(rawToUi(usdcRaw, BSC_USDC_DECIMALS));
+		const usdtUi = Number(rawToUi(usdtRaw, BSC_USDT_DECIMALS));
+		rows.push({
+			pool,
+			usdcUi,
+			usdtUi,
+			liquidityScore: usdcUi + usdtUi,
+		});
+	}
+	rows.sort((a, b) => b.liquidityScore - a.liquidityScore);
+	return {
+		protocol: key,
+		candidates: rows,
+		recommended: rows[0]?.pool || null,
+	};
+}
+
 function parseDotEnv(raw) {
 	const out = {};
 	for (const line of String(raw || "").split("\n")) {
@@ -9453,6 +9515,20 @@ const server = http.createServer(async (req, res) => {
 		if (url.pathname === "/api/bsc/config/status" && req.method === "GET") {
 			const status = await readBscConfigStatus();
 			return json(res, 200, { ok: true, status });
+		}
+
+		if (url.pathname === "/api/bsc/pools/discover" && req.method === "GET") {
+			const protocol = String(
+				url.searchParams.get("protocol") || "",
+			).toLowerCase();
+			if (protocol !== "lista" && protocol !== "wombat") {
+				return json(res, 400, {
+					ok: false,
+					error: "protocol must be lista|wombat",
+				});
+			}
+			const data = await discoverBscPoolsByProtocol(protocol);
+			return json(res, 200, { ok: true, data });
 		}
 
 		if (url.pathname === "/api/bsc/config/update" && req.method === "POST") {

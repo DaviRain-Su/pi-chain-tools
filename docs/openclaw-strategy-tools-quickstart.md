@@ -144,6 +144,14 @@ npm run stable-yield:auto-migrate:v2:cron-install
 # last json: logs/stable-yield-auto-migrate-v2-last.json
 ```
 
+BSC 配置向导支持自动发现候选池（需提前配置候选地址列表）：
+
+```bash
+# 逗号分隔多个候选池
+BSC_LISTA_POOL_CANDIDATES=0x...,0x...
+BSC_WOMBAT_POOL_CANDIDATES=0x...,0x...
+```
+
 
 ## 0) 查看可上架策略模板（Market Manifests）
 

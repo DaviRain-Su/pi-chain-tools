@@ -22,7 +22,7 @@ fi
 set +a
 
 CMD=(
-  npm run stable-yield:auto-migrate:v2 --
+  node scripts/stable-yield-auto-migrate-v2.mjs
   --maxMoveUsd 5
   --minMoveUsd 1
   --minApyDeltaBps 20

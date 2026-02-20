@@ -282,7 +282,7 @@
         <div class="card"><h3>Security Watch</h3><div id="securityWatchCard" class="muted">-</div></div>
         <div class="card"><h3>Proof Summary</h3><div id="proofSummaryCard" class="muted">-</div></div>
         <div class="card"><h3>Stable-Yield Auto-Migrate</h3><div id="stableYieldAutoMigrateCard" class="muted">-</div></div>
-        <div class="card"><h3>BSC Execute Config Wizard</h3><div id="bscConfigCard" class="muted">-</div><div class="row" style="margin-top:8px"><select id="bscConfigProtocol"><option value="lista">lista</option><option value="wombat">wombat</option></select><input id="bscConfigPool" placeholder="pool address 0x..." size="24"/><input id="bscConfigPrivateKey" placeholder="private key 0x... (optional)" size="24"/><label class="muted" style="display:flex;align-items:center;gap:4px"><input id="bscConfigEnabled" type="checkbox" checked/>enable</label><label class="muted" style="display:flex;align-items:center;gap:4px"><input id="bscConfigNativeEnabled" type="checkbox" checked/>native</label><button id="saveBscConfig">Save Config</button></div></div>
+        <div class="card"><h3>BSC Execute Config Wizard</h3><div id="bscConfigCard" class="muted">-</div><div class="row" style="margin-top:8px"><select id="bscConfigProtocol"><option value="lista">lista</option><option value="wombat">wombat</option></select><input id="bscConfigPool" placeholder="pool address 0x..." size="24"/><input id="bscConfigPrivateKey" placeholder="private key 0x... (optional)" size="24"/><label class="muted" style="display:flex;align-items:center;gap:4px"><input id="bscConfigEnabled" type="checkbox" checked/>enable</label><label class="muted" style="display:flex;align-items:center;gap:4px"><input id="bscConfigNativeEnabled" type="checkbox" checked/>native</label><button id="discoverBscPool">Auto Discover</button><button id="saveBscConfig">Save Config</button></div></div>
       </div>
 
       <div class="card" style="margin-top:12px">
@@ -639,6 +639,7 @@
       const bscConfigEnabledEl = document.getElementById("bscConfigEnabled");
       const bscConfigNativeEnabledEl = document.getElementById("bscConfigNativeEnabled");
       const saveBscConfigBtn = document.getElementById("saveBscConfig");
+      const discoverBscPoolBtn = document.getElementById("discoverBscPool");
       const autonomousCycleRunsMetaEl = document.getElementById("autonomousCycleRunsMeta");
       const autonomousCycleRunsRowsEl = document.getElementById("autonomousCycleRunsRows");
       const yieldHealthEl = document.getElementById("yieldHealth");
@@ -3343,6 +3344,28 @@
       viewFullBtn?.addEventListener("click", () => {
         localStorage.setItem(VIEW_MODE_KEY, "full");
         applyViewMode("full");
+      });
+
+      discoverBscPoolBtn?.addEventListener("click", async () => {
+        const protocol = String(bscConfigProtocolEl?.value || "lista");
+        try {
+          const res = await fetch(`/api/bsc/pools/discover?protocol=${encodeURIComponent(protocol)}`);
+          const data = await res.json().catch(() => ({ ok: false }));
+          if (!res.ok || data?.ok === false) throw new Error(data?.error || `discover failed (${res.status})`);
+          const recommended = data?.data?.recommended || "";
+          const top = (data?.data?.candidates || []).slice(0, 3).map((x) => `${x.pool} (liq=${Number(x.liquidityScore || 0).toFixed(2)})`);
+          if (recommended) {
+            bscConfigPoolEl.value = recommended;
+            metaEl.textContent = `Auto-discover ${protocol}: selected ${recommended}`;
+          } else {
+            metaEl.textContent = `Auto-discover ${protocol}: no candidate found. ${data?.data?.warning || ""}`;
+          }
+          if (bscConfigCardEl && top.length) {
+            bscConfigCardEl.innerHTML += `<br/>discovered top: <span class="muted">${top.join(" ; ")}</span>`;
+          }
+        } catch (error) {
+          metaEl.textContent = `Discover error: ${error?.message || error}`;
+        }
       });
 
       saveBscConfigBtn?.addEventListener("click", async () => {
