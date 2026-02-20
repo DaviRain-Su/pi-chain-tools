@@ -136,6 +136,34 @@ function evaluateExecutePolicy(spec: Record<string, unknown>) {
 	return { ok: true, reason: "policy-passed" };
 }
 
+function buildLifiExecuteIntent(spec: Record<string, unknown>) {
+	const constraints = asObject(spec.constraints);
+	const allow = asObject(constraints?.allow);
+	const risk = asObject(constraints?.risk);
+	const chains = Array.isArray(allow?.chains)
+		? (allow?.chains as unknown[]).map((v) => String(v).toLowerCase())
+		: [];
+	const assets = Array.isArray(allow?.assets)
+		? (allow?.assets as unknown[]).map((v) => String(v).toUpperCase())
+		: [];
+	const [fromChain = "base", toChain = "bsc"] = chains;
+	const asset = assets[0] || "USDC";
+	const chainToId: Record<string, number> = { base: 8453, bsc: 56 };
+	const amountUsd = Number(risk?.maxPerRunUsd || 0);
+	return {
+		type: "lifi_execution_intent@v0",
+		fromChain,
+		toChain,
+		fromChainId: chainToId[fromChain] || null,
+		toChainId: chainToId[toChain] || null,
+		asset,
+		amountUsd,
+		nextAction:
+			"Call LI.FI quote endpoint to resolve route + transactionRequest",
+		requiresSigner: true,
+	};
+}
+
 function simulateStrategyRun(
 	specInput: unknown,
 	mode: "dry-run" | "plan" | "execute",
@@ -173,6 +201,11 @@ function simulateStrategyRun(
 					: "SIMULATED_OK",
 		ts: new Date().toISOString(),
 	}));
+	const executeIntent =
+		mode === "execute" && executePolicy?.ok
+			? buildLifiExecuteIntent(spec)
+			: null;
+
 	return {
 		ok: true,
 		result: {
@@ -181,6 +214,7 @@ function simulateStrategyRun(
 			mode,
 			strategyId: spec.id || null,
 			policy: executePolicy,
+			executeIntent,
 			steps: trace,
 			evidence: {
 				type: "strategy_execution_trace@v0",
