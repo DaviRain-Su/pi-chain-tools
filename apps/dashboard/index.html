@@ -271,6 +271,7 @@
         <button class="group-tab" data-group="risk">风险</button>
         <button class="group-tab" data-group="history">历史</button>
       </div>
+      <div id="viewFilterMeta" class="muted" style="margin:-6px 0 10px">当前视图：All / 全部</div>
 
       <div class="grid">
         <div class="card"><h3>NEAR Wallet</h3><div id="near">-</div></div>
@@ -612,6 +613,7 @@
       const accountInput = document.getElementById("accountId");
       const chainTabsEl = document.getElementById("chainTabs");
       const groupTabsEl = document.getElementById("groupTabs");
+      const viewFilterMetaEl = document.getElementById("viewFilterMeta");
       const refreshBtn = document.getElementById("refresh");
       const viewDemoBtn = document.getElementById("viewDemo");
       const viewFullBtn = document.getElementById("viewFull");
