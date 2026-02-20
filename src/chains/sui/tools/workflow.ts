@@ -3,7 +3,7 @@ import { AggregatorClient, Env } from "@cetusprotocol/aggregator-sdk";
 import { Transaction } from "@mysten/sui/transactions";
 import { Type } from "@sinclair/typebox";
 import { type RegisteredTool, defineTool } from "../../../core/types.js";
-import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
+import { resolveWorkflowRunMode } from "../../../w3rt-core/index.js";
 import {
 	buildCetusFarmsHarvestTransaction,
 	buildCetusFarmsStakeTransaction,

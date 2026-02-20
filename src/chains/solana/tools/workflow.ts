@@ -20,7 +20,7 @@ import {
 	VersionedTransaction,
 } from "@solana/web3.js";
 import { defineTool } from "../../../core/types.js";
-import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
+import { resolveWorkflowRunMode } from "../../../w3rt-core/index.js";
 import {
 	KAMINO_MAINNET_MARKET_ADDRESS,
 	TOKEN_2022_PROGRAM_ID,

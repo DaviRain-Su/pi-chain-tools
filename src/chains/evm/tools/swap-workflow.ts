@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 
 import { defineTool } from "../../../core/types.js";
-import { resolveWorkflowRunMode } from "../../shared/workflow-runtime.js";
+import { resolveWorkflowRunMode } from "../../../w3rt-core/index.js";
 import { isMainnetLikeEvmNetwork } from "../policy.js";
 import {
 	EVM_TOOL_PREFIX,
