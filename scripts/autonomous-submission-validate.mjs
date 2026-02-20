@@ -48,7 +48,7 @@ export async function validateAutonomousSubmission() {
 	const bundle = await readJsonSafe(bundlePath);
 
 	const result = {
-		suite: "riquid-submission-validator",
+		suite: "hyperliquid-submission-validator",
 		version: 1,
 		generatedAt: new Date().toISOString(),
 		status: "PASS",

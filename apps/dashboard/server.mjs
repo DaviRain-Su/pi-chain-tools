@@ -8594,7 +8594,7 @@ async function runBscAutonomousExecution(payload, context) {
 		autonomous: {
 			enabled: true,
 			runner: "bsc-autonomous-template-v1",
-			note: "Aster/BNB autonomous template active (incremental compatibility mode)",
+			note: "Hyperliquid/BNB autonomous template active (incremental compatibility mode)",
 		},
 	};
 }

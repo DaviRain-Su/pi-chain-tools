@@ -2,15 +2,15 @@
 
 ## 1) Latest Commit
 
-- Hash: `54292a464ac77b18dead6c241e76a83b5918848a`
-- Commit Date (ISO): 2026-02-20T12:45:58+08:00
-- Subject: refactor: hyperliquid-only docs and readiness wording
+- Hash: `8bfaa0627b3bd067c0f0be6021cb675c086d28ee`
+- Commit Date (ISO): 2026-02-20T12:54:38+08:00
+- Subject: refactor: remove asterdex docs/config layer (step 2)
 
 ## 2) Quality Snapshot (best-effort)
 
 | Command | Status | Exit Code | Timestamp | Source Session |
 | --- | --- | --- | --- | --- |
-| npm run check | pass | 0 | 2026-02-20T04:53:51.686Z | adafc75b-cd0e-4685-967d-d7cbbf411c73 |
+| npm run check | pass | 0 | 2026-02-20T05:14:48.381Z | 691acfb2-7025-4971-a421-b7869d985ba0 |
 | npm run test | unknown | - | - | - |
 | npm run security:check | pass | 0 | 2026-02-18T12:33:00.912Z | 993a0f40-d72c-4933-aa85-4a238ff9c98e |
 
@@ -26,7 +26,7 @@
 
 - Dashboard status: stopped_or_unknown
 - Dashboard listen line: NEAR dashboard listening on http://127.0.0.1:4173
-- Latest OpenClaw session id: adafc75b-cd0e-4685-967d-d7cbbf411c73
+- Latest OpenClaw session id: 691acfb2-7025-4971-a421-b7869d985ba0
 
 ## 5) Onchain Tx Proof Template
 
