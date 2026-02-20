@@ -57,6 +57,29 @@ function apyFromRatePerBlock(raw) {
 	return (Number(raw) / 1e18) * BSC_BLOCKS_PER_YEAR * 100;
 }
 
+async function executeViaDashboardProtocol({ baseUrl, protocol, maxMoveUsd }) {
+	const res = await fetch(`${baseUrl}/api/bsc/yield/execute`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({
+			confirm: true,
+			executionProtocol: protocol,
+			amountUsd: maxMoveUsd,
+			runId: `stable-yield-v2-${Date.now()}`,
+			step: "stable-yield-v2-auto-migrate",
+		}),
+	});
+	const payload = await res
+		.json()
+		.catch(() => ({ ok: false, error: "dashboard_execute_parse_failed" }));
+	if (!res.ok || payload?.ok === false) {
+		throw new Error(
+			`dashboard execute failed (${res.status}): ${payload?.error || "unknown"}`,
+		);
+	}
+	return payload;
+}
+
 async function runV1WithCurrentArgs(rawArgs) {
 	const child = spawn(
 		process.execPath,
@@ -112,8 +135,16 @@ async function main() {
 	const candidates = [
 		{ key: "venus-usdc", apy: venusUsdcApy, executable: true },
 		{ key: "venus-usdt", apy: venusUsdtApy, executable: true },
-		{ key: "lista-usdt", apy: listaUsdtApy, executable: false },
-		{ key: "wombat-usdt", apy: wombatUsdtApy, executable: false },
+		{
+			key: "lista-usdt",
+			apy: listaUsdtApy,
+			executable: toBool(process.env.BSC_LISTA_EXECUTE_ENABLED, false),
+		},
+		{
+			key: "wombat-usdt",
+			apy: wombatUsdtApy,
+			executable: toBool(process.env.BSC_WOMBAT_EXECUTE_ENABLED, false),
+		},
 	].filter((x) => Number.isFinite(x.apy));
 
 	const best = [...candidates].sort((a, b) => b.apy - a.apy)[0] || null;

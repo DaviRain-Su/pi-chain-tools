@@ -134,6 +134,10 @@ npm run stable-yield:auto-migrate:v2 -- --maxMoveUsd 5 --minApyDeltaBps 20
 # 可通过参数/环境注入外部APY用于比较
 npm run stable-yield:auto-migrate:v2 -- --listaUsdtApy 1.8 --wombatUsdtApy 1.2
 
+# 当 best market 是 lista/wombat，且对应 execute enabled 时，v2 会调用 dashboard 执行端点自动实盘迁移
+# 可指定 dashboard 地址
+npm run stable-yield:auto-migrate:v2 -- --execute true --dashboardBaseUrl http://127.0.0.1:4173
+
 # 安装 v2 cron（每30分钟评估一次）
 npm run stable-yield:auto-migrate:v2:cron-install
 # logs: logs/stable-yield-auto-migrate-v2.log
