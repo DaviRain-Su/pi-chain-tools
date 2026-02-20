@@ -2,7 +2,11 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "@sinclair/typebox";
-import { getEvmChainId, parseEvmNetwork } from "./src/chains/evm/runtime.js";
+import {
+	getEvmChainId,
+	getEvmRpcEndpoint,
+	parseEvmNetwork,
+} from "./src/chains/evm/runtime.js";
 import {
 	lifiGet,
 	planLifiQuoteRoutes,
@@ -255,6 +259,44 @@ async function prepareLifiQuoteFromIntent(
 	};
 }
 
+async function submitEvmSignedTx(params: {
+	signedTxHex: string;
+	network?: string;
+	rpcUrl?: string;
+}) {
+	const signedTxHex = String(params.signedTxHex || "").trim();
+	if (!/^0x[0-9a-fA-F]+$/.test(signedTxHex)) {
+		throw new Error("signedTxHex must be a 0x-prefixed hex string");
+	}
+	const network = parseEvmNetwork(String(params.network || "bsc") as never);
+	const rpcUrl = getEvmRpcEndpoint(network, params.rpcUrl);
+	const response = await fetch(rpcUrl, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "eth_sendRawTransaction",
+			params: [signedTxHex],
+		}),
+	});
+	if (!response.ok) {
+		throw new Error(`broadcast rpc failed: HTTP ${response.status}`);
+	}
+	const payload = (await response.json()) as {
+		result?: unknown;
+		error?: { message?: string };
+	};
+	if (payload.error) {
+		throw new Error(
+			`broadcast rpc error: ${payload.error.message || "unknown"}`,
+		);
+	}
+	const txHash = String(payload.result || "").trim();
+	if (!txHash) throw new Error("broadcast rpc returned empty tx hash");
+	return { network, rpcUrl, txHash };
+}
+
 function simulateStrategyRun(
 	specInput: unknown,
 	mode: "dry-run" | "plan" | "execute",
@@ -467,6 +509,9 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 				prepareQuote: Type.Optional(Type.Boolean()),
 				live: Type.Optional(Type.Boolean()),
 				liveConfirmToken: Type.Optional(Type.String()),
+				signedTxHex: Type.Optional(Type.String()),
+				broadcastNetwork: Type.Optional(Type.String()),
+				broadcastRpcUrl: Type.Optional(Type.String()),
 				quoteContext: Type.Optional(
 					Type.Object({}, { additionalProperties: true }),
 				),
@@ -586,6 +631,29 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 							],
 						};
 					}
+					let broadcastStatus =
+						params.live === true ? "awaiting-signed-tx" : "skipped";
+					let broadcast: Record<string, unknown> | null = null;
+					if (params.live === true && params.signedTxHex) {
+						try {
+							broadcast = await submitEvmSignedTx({
+								signedTxHex: params.signedTxHex,
+								network:
+									params.broadcastNetwork ||
+									String(
+										quoteResult.quotePlan?.transactionRequest?.fromChain ||
+											"bsc",
+									),
+								rpcUrl: params.broadcastRpcUrl,
+							});
+							broadcastStatus = "submitted";
+						} catch (error) {
+							broadcastStatus = "failed";
+							broadcast = {
+								error: error instanceof Error ? error.message : String(error),
+							};
+						}
+					}
 					return {
 						content: [
 							{
@@ -596,8 +664,8 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 										quotePrepareStatus: "ok",
 										quotePlan: quoteResult.quotePlan,
 										liveRequested: params.live === true,
-										broadcastStatus:
-											params.live === true ? "not-implemented-yet" : "skipped",
+										broadcastStatus,
+										broadcast,
 									},
 									null,
 									2,
@@ -607,14 +675,39 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					};
 				}
 
-				const baseResult =
-					mode === "execute" && params.live === true
-						? {
-								...simulated.result,
-								liveRequested: true,
-								broadcastStatus: "not-implemented-yet",
-							}
-						: simulated.result;
+				let baseResult: Record<string, unknown> = simulated.result as Record<
+					string,
+					unknown
+				>;
+				if (mode === "execute" && params.live === true) {
+					let broadcastStatus = "awaiting-signed-tx";
+					let broadcast: Record<string, unknown> | null = null;
+					if (params.signedTxHex) {
+						try {
+							const executeIntent =
+								asObject(simulated.result?.executeIntent) || {};
+							broadcast = await submitEvmSignedTx({
+								signedTxHex: params.signedTxHex,
+								network:
+									params.broadcastNetwork ||
+									String(executeIntent.fromChain || "bsc"),
+								rpcUrl: params.broadcastRpcUrl,
+							});
+							broadcastStatus = "submitted";
+						} catch (error) {
+							broadcastStatus = "failed";
+							broadcast = {
+								error: error instanceof Error ? error.message : String(error),
+							};
+						}
+					}
+					baseResult = {
+						...baseResult,
+						liveRequested: true,
+						broadcastStatus,
+						broadcast,
+					};
+				}
 				return {
 					content: [
 						{ type: "text", text: JSON.stringify(baseResult, null, 2) },

@@ -9,6 +9,25 @@ const LIVE_EXECUTE_MAX_PER_RUN_USD = 100;
 const EXECUTE_ALLOWED_TEMPLATE = "rebalance-crosschain-v0";
 const EXECUTE_ALLOWED_CHAINS = new Set(["base", "bsc"]);
 
+const EVM_RPC_ENDPOINTS = {
+	base: "https://base.publicnode.com",
+	bsc: "https://bsc.publicnode.com",
+};
+
+function parseBroadcastNetwork(value) {
+	const v = String(value || "").toLowerCase();
+	return v === "base" ? "base" : "bsc";
+}
+
+function getBroadcastRpcEndpoint(network, overrideUrl) {
+	if (overrideUrl && String(overrideUrl).trim())
+		return String(overrideUrl).trim();
+	const envKey = `EVM_RPC_${network.toUpperCase()}_URL`;
+	const envOverride = process.env[envKey]?.trim();
+	if (envOverride) return envOverride;
+	return EVM_RPC_ENDPOINTS[network];
+}
+
 function parseArgs(argv) {
 	const args = { _: [] };
 	for (let i = 0; i < argv.length; i += 1) {
@@ -40,12 +59,15 @@ function usage() {
 		"",
 		"Notes:",
 		"  v0 runner is intentionally non-custodial and plan-first.",
-		"  execute mode is policy-gated and does not broadcast transactions yet.",
+		"  live execute supports optional signed tx broadcast (raw tx only).",
 		"",
 		"Execute flags:",
 		"  --confirmExecuteToken I_ACKNOWLEDGE_EXECUTION",
 		"  --live true",
 		"  --liveConfirmToken I_ACKNOWLEDGE_LIVE_EXECUTION",
+		"  --signedTxHex 0x... (optional, live execute only)",
+		"  --broadcastNetwork bsc|base (default: bsc)",
+		"  --broadcastRpcUrl https://... (optional override)",
 	].join("\n");
 }
 
@@ -103,6 +125,35 @@ function evaluateExecutePolicy(spec) {
 async function loadJson(filePath) {
 	const raw = await readFile(filePath, "utf8");
 	return JSON.parse(raw);
+}
+
+async function submitSignedTx(params) {
+	const signedTxHex = String(params.signedTxHex || "").trim();
+	if (!/^0x[0-9a-fA-F]+$/.test(signedTxHex)) {
+		throw new Error("signedTxHex must be a 0x-prefixed hex string");
+	}
+	const network = parseBroadcastNetwork(params.network || "bsc");
+	const rpcUrl = getBroadcastRpcEndpoint(network, params.rpcUrl);
+	const response = await fetch(rpcUrl, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "eth_sendRawTransaction",
+			params: [signedTxHex],
+		}),
+	});
+	if (!response.ok) {
+		throw new Error(`broadcast rpc failed: HTTP ${response.status}`);
+	}
+	const json = await response.json();
+	if (json?.error) {
+		throw new Error(`broadcast rpc error: ${json.error.message || "unknown"}`);
+	}
+	const txHash = String(json?.result || "").trim();
+	if (!txHash) throw new Error("broadcast rpc returned empty tx hash");
+	return { network, rpcUrl, txHash };
 }
 
 async function main() {
@@ -206,14 +257,33 @@ async function main() {
 		ts: new Date().toISOString(),
 	}));
 
+	let broadcastStatus =
+		mode === "execute" ? (live ? "awaiting-signed-tx" : "skipped") : "n/a";
+	let broadcast = null;
+	if (mode === "execute" && live && args.signedTxHex) {
+		try {
+			broadcast = await submitSignedTx({
+				signedTxHex: args.signedTxHex,
+				network: args.broadcastNetwork || "bsc",
+				rpcUrl: args.broadcastRpcUrl,
+			});
+			broadcastStatus = "submitted";
+		} catch (error) {
+			broadcastStatus = "failed";
+			broadcast = {
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
+
 	const result = {
 		status: mode === "execute" ? "ready" : "ok",
 		mode,
 		strategyId: spec.id || null,
 		policy: mode === "execute" ? executePolicy : null,
 		liveRequested: mode === "execute" ? live : false,
-		broadcastStatus:
-			mode === "execute" ? (live ? "not-implemented-yet" : "skipped") : "n/a",
+		broadcastStatus,
+		broadcast,
 		steps: executionTrace,
 		evidence: {
 			type: "strategy_execution_trace@v0",
