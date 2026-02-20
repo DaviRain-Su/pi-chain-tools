@@ -9389,6 +9389,61 @@ async function discoverPoolCandidatesFromProtocolApis(protocol) {
 	return [...new Set(out)];
 }
 
+async function discoverListaCandidatesFromStaticBundle() {
+	const fetchTextWithTimeout = async (
+		url,
+		timeoutMs = 7000,
+		accept = "*/*",
+	) => {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), timeoutMs);
+		try {
+			const res = await fetch(url, {
+				headers: { accept },
+				signal: controller.signal,
+			});
+			if (!res.ok) return "";
+			return await res.text();
+		} catch {
+			return "";
+		} finally {
+			clearTimeout(timer);
+		}
+	};
+	try {
+		const html = await fetchTextWithTimeout(
+			"https://bsc.lista.org/",
+			7000,
+			"text/html",
+		);
+		if (!html) return [];
+		const scriptMatch = html.match(
+			/https:\/\/static\.lista\.org\/lista-static\/assets\/index-[^"']+\.js/,
+		);
+		const scriptUrl = scriptMatch?.[0] || "";
+		if (!scriptUrl) return [];
+		const js = await fetchTextWithTimeout(scriptUrl, 7000, "*/*");
+		if (!js) return [];
+		const found = js.match(/0x[a-fA-F0-9]{40}/g) || [];
+		const excluded = new Set([
+			BSC_USDC.toLowerCase(),
+			BSC_USDT.toLowerCase(),
+			BSC_WBNB.toLowerCase(),
+			BSC_ROUTER_V2.toLowerCase(),
+			"0x0000000000000000000000000000000000000000",
+			"0x000000000000000000000000000000000000dead",
+			"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		]);
+		return [
+			...new Set(
+				found.map((x) => x.toLowerCase()).filter((x) => !excluded.has(x)),
+			),
+		].slice(0, 80);
+	} catch {
+		return [];
+	}
+}
+
 async function discoverPoolCandidatesFromDefiLlama(protocol) {
 	const key = String(protocol || "").toLowerCase();
 	const projectName = key === "lista" ? "lista" : "wombat-exchange";
@@ -9453,6 +9508,7 @@ async function scorePoolCandidates(candidates, protocol) {
 	]);
 	const listaPoolIface = new Interface([
 		"function supply(address asset,uint256 amount,address onBehalfOf,uint16 referralCode)",
+		"function getReservesList() view returns (address[])",
 	]);
 	const readBalanceRaw = async (token, owner) => {
 		const data = erc20Iface.encodeFunctionData("balanceOf", [owner]);
@@ -9474,7 +9530,23 @@ async function scorePoolCandidates(candidates, protocol) {
 				0,
 			]);
 			await provider.call({ to: pool, data });
-			return { compatible: true, reason: "call_ok" };
+			const reservesData = listaPoolIface.encodeFunctionData(
+				"getReservesList",
+				[],
+			);
+			const reservesRaw = await provider.call({ to: pool, data: reservesData });
+			const decoded = listaPoolIface.decodeFunctionResult(
+				"getReservesList",
+				reservesRaw,
+			);
+			const reserves = (decoded?.[0] || []).map((x) => String(x).toLowerCase());
+			const hasStable =
+				reserves.includes(BSC_USDT.toLowerCase()) ||
+				reserves.includes(BSC_USDC.toLowerCase());
+			if (!hasStable) {
+				return { compatible: false, reason: "reserves_missing_stables" };
+			}
+			return { compatible: true, reason: "pool_signature_and_reserves_ok" };
 		} catch (error) {
 			const msg = String(error?.message || error || "").toLowerCase();
 			if (
@@ -9489,7 +9561,7 @@ async function scorePoolCandidates(candidates, protocol) {
 			) {
 				return { compatible: false, reason: "missing_supply_selector" };
 			}
-			return { compatible: true, reason: "revert_but_selector_present" };
+			return { compatible: false, reason: "revert_probe_call" };
 		}
 	};
 	const rows = [];
@@ -9506,7 +9578,7 @@ async function scorePoolCandidates(candidates, protocol) {
 			listaProbe?.compatible === true
 				? 50
 				: listaProbe?.compatible === false
-					? -100
+					? -1_000_000_000
 					: 0;
 		rows.push({
 			pool,
@@ -9532,6 +9604,10 @@ async function discoverBscPoolsByProtocol(protocol) {
 		candidates = await discoverPoolCandidatesFromProtocolApis(key);
 		source = "protocol-api";
 	}
+	if (candidates.length === 0 && key === "lista") {
+		candidates = await discoverListaCandidatesFromStaticBundle();
+		source = "lista-static-bundle";
+	}
 	if (candidates.length === 0) {
 		candidates = await discoverPoolCandidatesFromDefiLlama(key);
 		source = "defillama";
@@ -9544,6 +9620,8 @@ async function discoverBscPoolsByProtocol(protocol) {
 		warning =
 			"auto-discovery found no BSC pool addresses from configured protocol API URLs / DeFiLlama / protocol metadata; set BSC_*_POOL_DISCOVERY_API_URLS or BSC_*_POOL_CANDIDATES";
 	}
+	const candidateLimit = key === "lista" ? 24 : 40;
+	candidates = [...new Set(candidates)].slice(0, candidateLimit);
 	const rows = await scorePoolCandidates(candidates, key);
 	const topScore = Number(rows[0]?.totalScore ?? rows[0]?.liquidityScore ?? 0);
 	const topLiquidity = Number(rows[0]?.liquidityScore || 0);
