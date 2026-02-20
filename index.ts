@@ -83,7 +83,12 @@ function validateStrategyStructure(specInput: unknown): {
 	return { ok: errors.length === 0, errors };
 }
 
-function simulateStrategyRun(specInput: unknown, mode: "dry-run" | "plan") {
+const EXECUTE_CONFIRM_TOKEN = "I_ACKNOWLEDGE_EXECUTION";
+
+function simulateStrategyRun(
+	specInput: unknown,
+	mode: "dry-run" | "plan" | "execute",
+) {
 	const spec = asObject(specInput);
 	if (!spec) {
 		return { ok: false, errors: ["spec must be object"] };
@@ -100,13 +105,18 @@ function simulateStrategyRun(specInput: unknown, mode: "dry-run" | "plan") {
 		id: String(step.id || `step-${index}`),
 		action: String(step.action || "unknown"),
 		component: String(step.component || "unknown"),
-		status: mode === "plan" ? "PLANNED" : "SIMULATED_OK",
+		status:
+			mode === "plan"
+				? "PLANNED"
+				: mode === "execute"
+					? "EXECUTION_BLOCKED_BY_POLICY"
+					: "SIMULATED_OK",
 		ts: new Date().toISOString(),
 	}));
 	return {
 		ok: true,
 		result: {
-			status: "ok",
+			status: mode === "execute" ? "blocked" : "ok",
 			mode,
 			strategyId: spec.id || null,
 			steps: trace,
@@ -256,15 +266,47 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 			name: "pct_strategy_run",
 			label: "PCT Strategy Run",
 			description:
-				"Run strategy in v0 plan/dry-run mode and return execution trace evidence.",
+				"Run strategy in v0 plan/dry-run mode and return execution trace evidence. execute mode is gated by explicit confirmation and currently policy-blocked.",
 			parameters: Type.Object({
 				spec: Type.Object({}, { additionalProperties: true }),
 				mode: Type.Optional(
-					Type.Union([Type.Literal("dry-run"), Type.Literal("plan")]),
+					Type.Union([
+						Type.Literal("dry-run"),
+						Type.Literal("plan"),
+						Type.Literal("execute"),
+					]),
 				),
+				confirmExecuteToken: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, params) {
-				const mode = (params.mode || "dry-run") as "dry-run" | "plan";
+				const mode = (params.mode || "dry-run") as
+					| "dry-run"
+					| "plan"
+					| "execute";
+
+				if (
+					mode === "execute" &&
+					params.confirmExecuteToken !== EXECUTE_CONFIRM_TOKEN
+				) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(
+									{
+										status: "blocked",
+										reason:
+											"execute mode requires explicit confirmExecuteToken",
+										requiredToken: EXECUTE_CONFIRM_TOKEN,
+									},
+									null,
+									2,
+								),
+							},
+						],
+					};
+				}
+
 				const simulated = simulateStrategyRun(params.spec, mode);
 				if (!simulated.ok) {
 					return {
