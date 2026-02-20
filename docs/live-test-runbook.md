@@ -21,6 +21,15 @@ Recommended for full dry-run visibility:
 - `BREEZE_API_BASE_URL`
 - `BREEZE_API_KEY`
 
+Optional AsterDEX execute-binding policy vars (autonomous seam, no direct unsafe execute):
+
+- `BSC_AUTONOMOUS_ASTERDEX_ENABLED=true`
+- `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED=true`
+- `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED=true` (enforce blocker when missing)
+- `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND`
+- `BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS`
+- `BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS`
+
 ## Guardrails
 
 - `--confirm-live true` is mandatory for `--mode execute` and `--mode full`.

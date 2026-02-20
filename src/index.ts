@@ -322,7 +322,9 @@ export {
 	getAsterDexCapability,
 	getAsterDexReadiness,
 	parseAsterDexConfig,
+	prepareAsterDexExecuteIntent,
 	readAsterDexHealth,
+	resolveAsterDexExecuteBinding,
 } from "./chains/bsc-autonomous/asterdex.js";
 export type {
 	AutonomousBlocker,
@@ -338,6 +340,10 @@ export type {
 export type {
 	AsterDexCapability,
 	AsterDexConfig,
+	AsterDexExecuteBinding,
+	AsterDexExecuteIntentInput,
+	AsterDexExecutePreparation,
 	AsterDexHealthStatus,
+	AsterDexPreparedExecuteIntent,
 	AsterDexReadiness,
 } from "./chains/bsc-autonomous/asterdex.js";

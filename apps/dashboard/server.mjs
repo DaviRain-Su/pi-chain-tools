@@ -544,6 +544,51 @@ const BSC_AUTONOMOUS_MODE =
 	String(
 		envOrCfg("BSC_AUTONOMOUS_MODE", "bsc.autonomous.mode", "false"),
 	).toLowerCase() === "true";
+const BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED =
+	String(
+		envOrCfg(
+			"BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED",
+			"bsc.autonomous.asterdex.executeBindingRequired",
+			"false",
+		),
+	).toLowerCase() === "true";
+const BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED =
+	String(
+		envOrCfg(
+			"BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED",
+			"bsc.autonomous.asterdex.executeBindingEnabled",
+			"false",
+		),
+	).toLowerCase() === "true";
+const BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE =
+	String(
+		envOrCfg(
+			"BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE",
+			"bsc.autonomous.asterdex.executeActive",
+			"false",
+		),
+	).toLowerCase() === "true";
+const BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND = String(
+	envOrCfg(
+		"BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND",
+		"bsc.autonomous.asterdex.executeCommand",
+		"",
+	),
+).trim();
+const BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS = String(
+	envOrCfg(
+		"BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS",
+		"bsc.autonomous.asterdex.routerAddress",
+		"",
+	),
+).trim();
+const BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS = String(
+	envOrCfg(
+		"BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS",
+		"bsc.autonomous.asterdex.executorAddress",
+		"",
+	),
+).trim();
 const BSC_EXECUTE_COMMAND = String(
 	envOrCfg("BSC_EXECUTE_COMMAND", "bsc.execute.command", ""),
 ).trim();
@@ -1959,6 +2004,9 @@ async function readProofSummary() {
 		skipped: Boolean(breezeLatest?.skipped),
 		reason: breezeLatest?.reason || null,
 	};
+	const executeBinding = resolveAsterDexExecuteBinding({
+		autonomousMode: BSC_AUTONOMOUS_MODE,
+	});
 	return {
 		generatedAt: new Date().toISOString(),
 		items: { starknet, bsc, security, breeze },
@@ -1967,6 +2015,12 @@ async function readProofSummary() {
 					chain: "bsc",
 					enabled: true,
 					execution: resolveExecutionMarkers({ autonomousMode: true }),
+					executeBinding,
+					executeBindingRequired:
+						BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED,
+					executeBindingReady:
+						BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED !== true ||
+						executeBinding !== "none",
 				}
 			: undefined,
 	};
@@ -8287,6 +8341,17 @@ function recordRebalanceMetric(entry) {
 	void saveMetricsToDisk();
 }
 
+function resolveAsterDexExecuteBinding({ autonomousMode }) {
+	const ready =
+		autonomousMode === true &&
+		BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED === true &&
+		Boolean(BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND) &&
+		Boolean(BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS) &&
+		Boolean(BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS);
+	if (!ready) return "none";
+	return BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE ? "active" : "prepared";
+}
+
 function resolveExecutionMarkers({ autonomousMode }) {
 	if (autonomousMode) {
 		return {
@@ -9180,6 +9245,11 @@ const server = http.createServer(async (req, res) => {
 							chain: "bsc",
 							enabled: true,
 							execution: resolveExecutionMarkers({ autonomousMode: true }),
+							executeBinding: resolveAsterDexExecuteBinding({
+								autonomousMode: true,
+							}),
+							executeBindingRequired:
+								BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED,
 						}
 					: undefined,
 			});

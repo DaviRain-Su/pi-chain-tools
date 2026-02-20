@@ -45,6 +45,26 @@ BSC_AUTONOMOUS_MODE=true npm run live:test:preflight
 curl -s http://127.0.0.1:4173/api/proof/summary | jq '.summary.autonomousTrack'
 ```
 
+AsterDEX execute-binding readiness (autonomous, additive):
+
+```bash
+# prepare-only seam (no unsafe bypass)
+export BSC_AUTONOMOUS_MODE=true
+export BSC_AUTONOMOUS_ASTERDEX_ENABLED=true
+export BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED=true
+export BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED=true
+export BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND='node scripts/asterdex-exec-safe.mjs "{intent}"'
+export BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS=0xYourRouter
+export BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS=0xYourExecutor
+
+npm run live:test:preflight
+npm run readiness:build
+curl -s http://127.0.0.1:4173/api/proof/summary | jq '.summary.autonomousTrack | {executeBinding, executeBindingRequired, executeBindingReady}'
+curl -s http://127.0.0.1:4173/api/readiness/matrix | jq '.matrix.autonomousTrack.evidence | {asterDexExecuteBinding, asterDexExecuteBindingRequired, asterDexExecuteBindingReady}'
+```
+
+If binding is required but missing, autonomous checks emit blocker + remediation hints in both live-test and readiness outputs.
+
 ## EVM Security Watch (Quickstart)
 
 Read-only drift monitor for watched EVM contracts (code hash / proxy impl / owner / paused / optional approval spikes).

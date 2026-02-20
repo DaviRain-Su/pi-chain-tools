@@ -2,15 +2,15 @@
 
 ## 1) Latest Commit
 
-- Hash: `92068ac7eb5125e4269f047bc79c9b719cbd0279`
-- Commit Date (ISO): 2026-02-20T08:58:55+08:00
-- Subject: feat(bsc): add flag-gated autonomous execution track template
+- Hash: `cec51cd40e1f0411f0e8dadafb09216dbb42e849`
+- Commit Date (ISO): 2026-02-20T09:06:21+08:00
+- Subject: feat(bsc-autonomous): harden policy checks and readiness visibility
 
 ## 2) Quality Snapshot (best-effort)
 
 | Command | Status | Exit Code | Timestamp | Source Session |
 | --- | --- | --- | --- | --- |
-| npm run check | pass | 0 | 2026-02-20T01:05:30.384Z | 20ff737f-71eb-4c3e-ba06-fc5d1dc11b1d |
+| npm run check | pass | 0 | 2026-02-20T01:19:06.889Z | 336abd98-6570-460f-806b-1449e077964a |
 | npm run test | unknown | - | - | - |
 | npm run security:check | pass | 0 | 2026-02-18T12:33:00.912Z | 993a0f40-d72c-4933-aa85-4a238ff9c98e |
 
@@ -26,7 +26,7 @@
 
 - Dashboard status: stopped_or_unknown
 - Dashboard listen line: NEAR dashboard listening on http://127.0.0.1:4173
-- Latest OpenClaw session id: 20ff737f-71eb-4c3e-ba06-fc5d1dc11b1d
+- Latest OpenClaw session id: 336abd98-6570-460f-806b-1449e077964a
 
 ## 5) Onchain Tx Proof Template
 

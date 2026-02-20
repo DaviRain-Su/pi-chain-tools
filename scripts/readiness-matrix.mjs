@@ -131,6 +131,40 @@ function evaluateAutonomousReadiness(env) {
 		String(env.BSC_AUTONOMOUS_MODE || "")
 			.trim()
 			.toLowerCase() === "true";
+	const asterDexBindingRequired =
+		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED || "")
+			.trim()
+			.toLowerCase() === "true";
+	const asterDexBindingEnabled =
+		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED || "")
+			.trim()
+			.toLowerCase() === "true";
+	const asterDexExecuteActive =
+		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE || "")
+			.trim()
+			.toLowerCase() === "true";
+	const asterDexExecuteCommand = String(
+		env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND || "",
+	).trim();
+	const asterDexRouter = String(
+		env.BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS || "",
+	).trim();
+	const asterDexExecutor = String(
+		env.BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS || "",
+	).trim();
+	const asterDexConfigReady = Boolean(
+		asterDexBindingEnabled &&
+			asterDexExecuteCommand &&
+			asterDexRouter &&
+			asterDexExecutor,
+	);
+	const asterDexExecuteBinding =
+		!enabled || !asterDexConfigReady
+			? "none"
+			: asterDexExecuteActive
+				? "active"
+				: "prepared";
+
 	if (!enabled) {
 		return {
 			enabled: false,
@@ -139,8 +173,17 @@ function evaluateAutonomousReadiness(env) {
 			actions: [
 				"Legacy track active; set BSC_AUTONOMOUS_MODE=true to run autonomous rollout checks.",
 			],
-			evidence: ["autonomous mode disabled"],
-			evidenceFields: { autonomousMode: false, cycleConfigPresent: false },
+			evidence: [
+				"autonomous mode disabled",
+				`AsterDEX execute binding: ${asterDexExecuteBinding}`,
+			],
+			evidenceFields: {
+				autonomousMode: false,
+				cycleConfigPresent: false,
+				asterDexExecuteBinding,
+				asterDexExecuteBindingRequired: false,
+				asterDexExecuteBindingReady: true,
+			},
 		};
 	}
 	const cycleId = String(env.BSC_AUTONOMOUS_CYCLE_ID || "").trim();
@@ -157,6 +200,11 @@ function evaluateAutonomousReadiness(env) {
 			"deterministic cycle config missing (set BSC_AUTONOMOUS_CYCLE_ID and BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS)",
 		);
 	}
+	if (asterDexBindingRequired && asterDexExecuteBinding === "none") {
+		blockers.push(
+			"AsterDEX execute binding required but unavailable (set BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS)",
+		);
+	}
 	return {
 		enabled: true,
 		status: blockers.length ? "red" : "green",
@@ -165,18 +213,28 @@ function evaluateAutonomousReadiness(env) {
 			? [
 					"Define deterministic cycle id + interval before enabling autonomous execution.",
 					"Use legacy/manual trigger path only when BSC_AUTONOMOUS_MODE is off.",
+					"If AsterDEX binding is required, set binding envs and re-run rollout gate.",
 				]
-			: ["Deterministic cycle config present; keep manual triggers disabled."],
+			: [
+					"Deterministic cycle config present; keep manual triggers disabled.",
+					"AsterDEX execute binding readiness is healthy for current policy.",
+				],
 		evidence: [
 			"autonomous mode enabled",
 			`cycle id: ${cycleId || "missing"}`,
 			`cycle interval seconds: ${Number.isFinite(interval) ? interval : "missing"}`,
+			`AsterDEX execute binding: ${asterDexExecuteBinding}`,
+			`AsterDEX binding required: ${asterDexBindingRequired}`,
 		],
 		evidenceFields: {
 			autonomousMode: true,
 			cycleConfigPresent,
 			cycleId: cycleId || undefined,
 			intervalSeconds: Number.isFinite(interval) ? interval : undefined,
+			asterDexExecuteBinding,
+			asterDexExecuteBindingRequired: asterDexBindingRequired,
+			asterDexExecuteBindingReady:
+				asterDexBindingRequired !== true || asterDexExecuteBinding !== "none",
 		},
 	};
 }

@@ -6,3 +6,8 @@ This module hosts additive, flag-gated autonomous-track metadata and routing hel
 - Optional: autonomous track markers (`BSC_AUTONOMOUS_MODE=true`)
 
 The design goal is incremental compatibility: no legacy interface breaking changes.
+
+AsterDEX execute-binding seam is additive and guarded:
+- capability marker: `executeBinding: none|prepared|active`
+- `prepared` = typed execute intent can be prepared
+- `active` = explicit active marker set; still expected to pass risk/confirmation gates

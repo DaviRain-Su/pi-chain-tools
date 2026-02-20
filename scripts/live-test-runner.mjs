@@ -83,6 +83,31 @@ function evaluateAutonomousTrack(env, mode) {
 		String(env.BSC_AUTONOMOUS_MODE || "")
 			.trim()
 			.toLowerCase() === "true";
+	const asterDexBindingRequired =
+		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED || "")
+			.trim()
+			.toLowerCase() === "true";
+	const asterDexBindingEnabled =
+		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED || "")
+			.trim()
+			.toLowerCase() === "true";
+	const asterDexExecuteActive =
+		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE || "")
+			.trim()
+			.toLowerCase() === "true";
+	const asterDexConfigReady = Boolean(
+		asterDexBindingEnabled &&
+			String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND || "").trim() &&
+			String(env.BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS || "").trim() &&
+			String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS || "").trim(),
+	);
+	const asterDexExecuteBinding =
+		!autonomousMode || !asterDexConfigReady
+			? "none"
+			: asterDexExecuteActive
+				? "active"
+				: "prepared";
+
 	if (!autonomousMode) {
 		return {
 			enabled: false,
@@ -91,7 +116,13 @@ function evaluateAutonomousTrack(env, mode) {
 			actions: [
 				"Set BSC_AUTONOMOUS_MODE=true to validate autonomous controls.",
 			],
-			evidence: { autonomousMode: false, cycleConfigPresent: false },
+			evidence: {
+				autonomousMode: false,
+				cycleConfigPresent: false,
+				asterDexExecuteBinding,
+				asterDexExecuteBindingRequired: false,
+				asterDexExecuteBindingReady: true,
+			},
 		};
 	}
 	const cycleId = String(env.BSC_AUTONOMOUS_CYCLE_ID || "").trim();
@@ -103,6 +134,11 @@ function evaluateAutonomousTrack(env, mode) {
 	if (!cycleId || !Number.isFinite(interval) || interval <= 0) {
 		blockers.push(
 			"deterministic cycle config missing (BSC_AUTONOMOUS_CYCLE_ID, BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS)",
+		);
+	}
+	if (asterDexBindingRequired && asterDexExecuteBinding === "none") {
+		blockers.push(
+			"AsterDEX execute binding required but unavailable (set BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS)",
 		);
 	}
 	if (mode !== "full") {
@@ -120,6 +156,7 @@ function evaluateAutonomousTrack(env, mode) {
 				: [
 						"Route calls through deterministic contract cycle.",
 						"Disable BSC_AUTONOMOUS_MODE for manual preflight/dryrun testing.",
+						"If AsterDEX binding is required, set binding envs before rerun.",
 					],
 		evidence: {
 			autonomousMode: true,
@@ -129,6 +166,10 @@ function evaluateAutonomousTrack(env, mode) {
 			cycleId: cycleId || undefined,
 			intervalSeconds: Number.isFinite(interval) ? interval : undefined,
 			requestMode: mode,
+			asterDexExecuteBinding,
+			asterDexExecuteBindingRequired: asterDexBindingRequired,
+			asterDexExecuteBindingReady:
+				asterDexBindingRequired !== true || asterDexExecuteBinding !== "none",
 		},
 	};
 }
