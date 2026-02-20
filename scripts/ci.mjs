@@ -15,10 +15,10 @@ function run(command, args, env = process.env) {
 	});
 }
 
-const runtime = ensurePythonAliasEnv(process.env, "ci-python-shim-");
-if (runtime.strategy === "python3-shim") {
+const runtime = ensurePythonAliasEnv(process.env);
+if (runtime.strategy === "python3-direct") {
 	console.warn(
-		"[ci] python missing; attached python3 shim for this run (python -> python3)",
+		"[ci] python missing; using python3 directly for this run (PYTHON)",
 	);
 } else if (runtime.strategy === "python-missing") {
 	console.warn(

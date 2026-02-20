@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 export function commandPath(bin, env = process.env) {
 	const result = spawnSync("bash", ["-lc", `command -v ${bin}`], {
@@ -13,14 +10,11 @@ export function commandPath(bin, env = process.env) {
 	return String(result.stdout || "").trim();
 }
 
-export function ensurePythonAliasEnv(
-	baseEnv = process.env,
-	shimPrefix = "python-shim-",
-) {
+export function ensurePythonAliasEnv(baseEnv = process.env) {
 	const pythonPath = commandPath("python", baseEnv);
 	if (pythonPath) {
 		return {
-			env: { ...baseEnv },
+			env: { ...baseEnv, PYTHON: pythonPath },
 			shimDir: null,
 			strategy: "native-python",
 		};
@@ -35,21 +29,13 @@ export function ensurePythonAliasEnv(
 		};
 	}
 
-	const shimDir = mkdtempSync(path.join(os.tmpdir(), shimPrefix));
-	const shimPath = path.join(shimDir, "python");
-	try {
-		symlinkSync(python3Path, shimPath);
-	} catch {
-		const script = `#!/usr/bin/env bash\nexec "${python3Path}" "$@"\n`;
-		writeFileSync(shimPath, script, { encoding: "utf8", mode: 0o755 });
-	}
-
+	const directEnv = {
+		...baseEnv,
+		PYTHON: python3Path,
+	};
 	return {
-		env: {
-			...baseEnv,
-			PATH: `${shimDir}:${baseEnv.PATH || ""}`,
-		},
-		shimDir,
-		strategy: "python3-shim",
+		env: directEnv,
+		shimDir: null,
+		strategy: "python3-direct",
 	};
 }

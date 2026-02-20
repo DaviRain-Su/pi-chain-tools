@@ -217,14 +217,11 @@ async function main() {
 		checkFailureKind: "",
 	};
 
-	const runtime = ensurePythonAliasEnv(
-		process.env,
-		"ci-resilient-python-shim-",
-	);
-	if (runtime.strategy === "python3-shim") {
+	const runtime = ensurePythonAliasEnv(process.env);
+	if (runtime.strategy === "python3-direct") {
 		signatures.pythonShimApplied = 1;
 		console.log(
-			"[ci-resilient] python missing, attached python3 shim for this CI run",
+			"[ci-resilient] python missing, using python3 directly for this CI run (PYTHON)",
 		);
 	} else if (runtime.strategy === "python-missing") {
 		signatures.pythonMissingDetections += 1;
