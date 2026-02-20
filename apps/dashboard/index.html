@@ -1631,7 +1631,7 @@
                   return `<tr><td>${row?.runId || "-"}</td><td>${row?.mode || "-"}</td><td><span class="${statusCls}">${status}</span></td><td title="${row?.txHash || ""}">${tx}</td><td title="${blockers.join(" | ")}">${blockerText}</td><td>${finished}</td></tr>`;
                 })
                 .join("")
-            : `<tr><td colspan="6" class="muted">No autonomous cycle runs yet (run \`npm run autonomous:bsc:cycle -- --mode dryrun\`).</td></tr>`;
+            : `<tr><td colspan="6" class="muted">No autonomous cycle runs yet (run \`npm run autonomous:hyperliquid:cycle -- --mode dryrun\`).</td></tr>`;
         }
         burrowPosEl.innerHTML = `Collateral: ${rowsToText(data.burrow.collateral)}<br/>Supplied: ${rowsToText(data.burrow.supplied)}<br/>Borrowed: ${rowsToText(data.burrow.borrowed)}`;
         const yieldHealthText = computeYieldHealth(data);

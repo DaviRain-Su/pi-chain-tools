@@ -8,6 +8,8 @@ import { runHyperliquidExecSafe } from "./hyperliquid-exec-safe.mjs";
 import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
 import { normalizeTxReceipt } from "./tx-receipt-normalize.mjs";
 
+import { applyLegacyBscAutonomousEnvCompat } from "../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
 const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) ?? process.cwd();
 const AUTONOMOUS_PROOFS_ROOT = path.join(
 	REPO_ROOT,
@@ -153,18 +155,16 @@ function buildIntent(runId, env) {
 	return {
 		runId,
 		tokenIn: String(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_IN || env.BSC_USDC || "USDC",
+			env.HYPERLIQUID_AUTONOMOUS_TOKEN_IN || env.BSC_USDC || "USDC",
 		),
 		tokenOut: String(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_OUT || env.BSC_USDT || "USDT",
+			env.HYPERLIQUID_AUTONOMOUS_TOKEN_OUT || env.BSC_USDT || "USDT",
 		),
 		amountRaw: String(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_AMOUNT_RAW || "1000000000000000",
+			env.HYPERLIQUID_AUTONOMOUS_AMOUNT_RAW || "1000000000000000",
 		),
-		routerAddress: String(env.BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS || ""),
-		executorAddress: String(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS || "",
-		),
+		routerAddress: String(env.HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS || ""),
+		executorAddress: String(env.HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS || ""),
 	};
 }
 
@@ -206,7 +206,7 @@ function runSnapshotCommand(commandTemplate, env, stage) {
 		return { stage, available: false, source: "not_configured" };
 	}
 	const timeoutMs = parsePositiveInt(
-		env.BSC_AUTONOMOUS_RECONCILE_SNAPSHOT_TIMEOUT_MS,
+		env.HYPERLIQUID_AUTONOMOUS_RECONCILE_SNAPSHOT_TIMEOUT_MS,
 		20000,
 	);
 	const out = spawnSync(command, {
@@ -291,11 +291,11 @@ function summarizeReconcile(execResult, reconcileSnapshot) {
 function createLiveSafetyContext(env) {
 	return {
 		minIntervalSeconds: parsePositiveInt(
-			env.BSC_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS,
+			env.HYPERLIQUID_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS,
 			300,
 		),
 		lockTtlSeconds: parsePositiveInt(
-			env.BSC_AUTONOMOUS_CYCLE_LOCK_TTL_SECONDS,
+			env.HYPERLIQUID_AUTONOMOUS_CYCLE_LOCK_TTL_SECONDS,
 			900,
 		),
 	};
@@ -404,12 +404,13 @@ export async function runBscAutonomousCycle(
 	const intent = buildIntent(args.runId, env);
 	const transitionEvidence = evaluateCycleTransitionEvidence({
 		raw:
-			args.triggerJson || String(env.BSC_AUTONOMOUS_TRIGGER_JSON || "").trim(),
-		requiredCycleId: String(env.BSC_AUTONOMOUS_CYCLE_ID || "").trim(),
+			args.triggerJson ||
+			String(env.HYPERLIQUID_AUTONOMOUS_TRIGGER_JSON || "").trim(),
+		requiredCycleId: String(env.HYPERLIQUID_AUTONOMOUS_CYCLE_ID || "").trim(),
 		env,
 	});
 	const confirm = String(
-		env.BSC_AUTONOMOUS_HYPERLIQUID_CONFIRM_TEXT || "HYPERLIQUID_EXECUTE_LIVE",
+		env.HYPERLIQUID_AUTONOMOUS_CONFIRM_TEXT || "HYPERLIQUID_EXECUTE_LIVE",
 	);
 	const safety = createLiveSafetyContext(env);
 	const state = await loadCycleState(args.statePath);
@@ -421,11 +422,11 @@ export async function runBscAutonomousCycle(
 	}
 
 	const requireOnchainTrigger =
-		String(env.BSC_AUTONOMOUS_ONCHAIN_TRIGGER_REQUIRED || "true")
+		String(env.HYPERLIQUID_AUTONOMOUS_ONCHAIN_TRIGGER_REQUIRED || "true")
 			.trim()
 			.toLowerCase() === "true";
 	const contractEntrypointEnabled =
-		String(env.BSC_AUTONOMOUS_CONTRACT_ENTRYPOINT_ENABLED || "true")
+		String(env.HYPERLIQUID_AUTONOMOUS_CONTRACT_ENTRYPOINT_ENABLED || "true")
 			.trim()
 			.toLowerCase() === "true";
 	if (
@@ -435,7 +436,7 @@ export async function runBscAutonomousCycle(
 		!contractEntrypointEnabled
 	) {
 		const proof = {
-			suite: "bsc-autonomous-cycle",
+			suite: "hyperliquid-autonomous-cycle",
 			version: 2,
 			startedAt,
 			finishedAt: nowIso(),
@@ -485,16 +486,16 @@ export async function runBscAutonomousCycle(
 	let proof;
 	try {
 		const beforeSnapshot = runSnapshotCommand(
-			env.BSC_AUTONOMOUS_RECONCILE_BEFORE_COMMAND ||
-				env.BSC_AUTONOMOUS_RECONCILE_SNAPSHOT_COMMAND ||
+			env.HYPERLIQUID_AUTONOMOUS_RECONCILE_BEFORE_COMMAND ||
+				env.HYPERLIQUID_AUTONOMOUS_RECONCILE_SNAPSHOT_COMMAND ||
 				"",
 			env,
 			"before",
 		);
 		const execution = runHyperliquidExecSafe(execArgs, env);
 		const afterSnapshot = runSnapshotCommand(
-			env.BSC_AUTONOMOUS_RECONCILE_AFTER_COMMAND ||
-				env.BSC_AUTONOMOUS_RECONCILE_SNAPSHOT_COMMAND ||
+			env.HYPERLIQUID_AUTONOMOUS_RECONCILE_AFTER_COMMAND ||
+				env.HYPERLIQUID_AUTONOMOUS_RECONCILE_SNAPSHOT_COMMAND ||
 				"",
 			env,
 			"after",
@@ -518,7 +519,7 @@ export async function runBscAutonomousCycle(
 				}
 			: transitionEvidence;
 		proof = {
-			suite: "bsc-autonomous-cycle",
+			suite: "hyperliquid-autonomous-cycle",
 			version: 3,
 			startedAt,
 			finishedAt: nowIso(),
@@ -601,7 +602,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 		})
 		.catch((error) => {
 			console.error(
-				"[bsc-autonomous-cycle] failed",
+				"[hyperliquid-autonomous-cycle] failed",
 				error instanceof Error ? error.message : String(error),
 			);
 			process.exitCode = 1;

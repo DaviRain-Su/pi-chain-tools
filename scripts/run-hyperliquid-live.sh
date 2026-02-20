@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${1:-$ROOT_DIR/.env.bsc.local}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "[run-bsc-live] missing env file: $ENV_FILE"
+  echo "[run-hyperliquid-live] missing env file: $ENV_FILE"
   echo "Copy $ROOT_DIR/.env.bsc.example -> $ROOT_DIR/.env.bsc.local and fill secrets."
   exit 1
 fi

@@ -62,14 +62,14 @@ describe("hyperliquid-exec-safe", () => {
 				"--trigger-proof-json",
 				JSON.stringify({
 					txHash: `0x${"ab".repeat(32)}`,
-					cycleId: "cycle-bsc-mainnet-v1",
+					cycleId: "cycle-hyperliquid-mainnet-v1",
 					transitionId: "step-1",
 					stateDelta: { previousState: "IDLE", nextState: "EXECUTING" },
 				}),
 			],
 			{
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND:
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE: "true",
+				HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND:
 					"node -e \"console.log(JSON.stringify({txHash:'0x' + 'cd'.repeat(32),emittedEvents:['CycleStateTransition','ExecutionDecision'],stateDelta:{previousState:'0',nextState:'0'}}))\"",
 			},
 		);

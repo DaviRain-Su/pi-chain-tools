@@ -1,4 +1,4 @@
-# Autonomous BSC Submission Bundle
+# Autonomous Hyperliquid Submission Bundle
 
 - Generated: 2026-02-20T04:30:33.921Z
 - Cycle mode: dryrun
@@ -17,12 +17,12 @@
 - Tx hash: n/a
 - Emitted events: 0
 - State delta: n/a
-- ABI path: contracts/bsc-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json
+- ABI path: contracts/hyperliquid-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json
 
 ## Reproducibility
 
 - One command: `npm run autonomous:evidence:regen`
-- `npm run autonomous:bsc:cycle -- --mode dryrun --run-id submission-proof-001`
+- `npm run autonomous:hyperliquid:cycle -- --mode dryrun --run-id submission-proof-001`
 - `npm run live:test:preflight`
 - `npm run readiness:refresh`
 - `npm run autonomous:submission:bundle`
@@ -30,7 +30,7 @@
 ## Key links
 
 - Repo: https://github.com/davirain/pi-chain-tools
-- Demo script: docs/autonomous-bsc-demo.md
+- Demo script: docs/autonomous-hyperliquid-demo.md
 - Readiness matrix: docs/mainnet-readiness-matrix.md
 - Contract architecture: docs/autonomous-contract-architecture.md
 
@@ -39,6 +39,6 @@
 - /home/davirain/clawd/pi-chain-tools/apps/dashboard/data/proofs/autonomous-cycle/latest.json
 - /home/davirain/clawd/pi-chain-tools/apps/dashboard/data/proofs/live-test/latest.json
 - /home/davirain/clawd/pi-chain-tools/docs/mainnet-readiness-matrix.md
-- /home/davirain/clawd/pi-chain-tools/contracts/bsc-autonomous/deployments/bscTestnet.latest.json
-- contracts/bsc-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json
+- /home/davirain/clawd/pi-chain-tools/contracts/hyperliquid-autonomous/deployments/bscTestnet.latest.json
+- contracts/hyperliquid-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json
 

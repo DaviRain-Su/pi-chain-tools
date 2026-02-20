@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ethers } from "ethers";
 
+import { applyLegacyBscAutonomousEnvCompat } from "../../../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
@@ -31,10 +33,13 @@ function normalizeStateDelta(transitions) {
 
 async function main() {
 	const args = parseArgs();
-	const rpc = process.env.BSC_TESTNET_RPC_URL || process.env.BSC_RPC_URL;
+	const rpc =
+		process.env.HYPERLIQUID_TESTNET_RPC_URL || process.env.BSC_RPC_URL;
 	const pk =
-		process.env.BSC_TESTNET_PRIVATE_KEY || process.env.BSC_EXECUTE_PRIVATE_KEY;
-	const address = args.contract || process.env.BSC_AUTONOMOUS_CONTRACT_ADDRESS;
+		process.env.HYPERLIQUID_TESTNET_PRIVATE_KEY ||
+		process.env.BSC_EXECUTE_PRIVATE_KEY;
+	const address =
+		args.contract || process.env.HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS;
 	if (!rpc || !pk || !address)
 		throw new Error("missing rpc/private key/contract address");
 
@@ -56,21 +61,21 @@ async function main() {
 			ethers.keccak256(ethers.toUtf8Bytes(`cycle-${Date.now()}`)),
 		transitionNonce: BigInt(
 			args.transitionNonce ||
-				process.env.BSC_AUTONOMOUS_CONTRACT_NEXT_NONCE ||
+				process.env.HYPERLIQUID_AUTONOMOUS_CONTRACT_NEXT_NONCE ||
 				"1",
 		),
 		amountRaw: BigInt(
 			args.amountRaw ||
-				process.env.BSC_AUTONOMOUS_HYPERLIQUID_AMOUNT_RAW ||
+				process.env.HYPERLIQUID_AUTONOMOUS_AMOUNT_RAW ||
 				"1000000000000000",
 		),
 		tokenIn:
 			args.tokenIn ||
-			process.env.BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_IN_ADDRESS ||
+			process.env.HYPERLIQUID_AUTONOMOUS_TOKEN_IN_ADDRESS ||
 			ethers.ZeroAddress,
 		tokenOut:
 			args.tokenOut ||
-			process.env.BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_OUT_ADDRESS ||
+			process.env.HYPERLIQUID_AUTONOMOUS_TOKEN_OUT_ADDRESS ||
 			ethers.ZeroAddress,
 		routeData,
 		routeDataHash: ethers.keccak256(routeData),

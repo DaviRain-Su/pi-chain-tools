@@ -1,13 +1,13 @@
 {
-	"suite": "autonomous-bsc-submission-bundle",
+	"suite": "autonomous-hyperliquid-submission-bundle",
 	"version": 2,
 	"generatedAt": "2026-02-20T04:30:33.921Z",
 	"artifacts": {
 		"cycleProofPath": "/home/davirain/clawd/pi-chain-tools/apps/dashboard/data/proofs/autonomous-cycle/latest.json",
 		"liveTestPath": "/home/davirain/clawd/pi-chain-tools/apps/dashboard/data/proofs/live-test/latest.json",
 		"readinessPath": "/home/davirain/clawd/pi-chain-tools/docs/mainnet-readiness-matrix.md",
-		"contractDeploymentPath": "/home/davirain/clawd/pi-chain-tools/contracts/bsc-autonomous/deployments/bscTestnet.latest.json",
-		"contractAbiPath": "contracts/bsc-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json"
+		"contractDeploymentPath": "/home/davirain/clawd/pi-chain-tools/contracts/hyperliquid-autonomous/deployments/bscTestnet.latest.json",
+		"contractAbiPath": "contracts/hyperliquid-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json"
 	},
 	"summary": {
 		"cycleMode": "dryrun",
@@ -42,13 +42,13 @@
 		"network": "bscTestnet",
 		"chainId": null,
 		"address": null,
-		"abiPath": "contracts/bsc-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json",
-		"verifyScript": "npm run contracts:bsc:verify:testnet"
+		"abiPath": "contracts/hyperliquid-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json",
+		"verifyScript": "npm run contracts:hyperliquid:verify:testnet"
 	},
 	"reproducibility": {
 		"oneCommand": "npm run autonomous:evidence:regen",
 		"commandSequence": [
-			"npm run autonomous:bsc:cycle -- --mode dryrun --run-id submission-proof-001",
+			"npm run autonomous:hyperliquid:cycle -- --mode dryrun --run-id submission-proof-001",
 			"npm run live:test:preflight",
 			"npm run readiness:refresh",
 			"npm run autonomous:submission:bundle"
@@ -56,7 +56,7 @@
 	},
 	"links": {
 		"repo": "https://github.com/davirain/pi-chain-tools",
-		"demoRunbook": "docs/autonomous-bsc-demo.md",
+		"demoRunbook": "docs/autonomous-hyperliquid-demo.md",
 		"readiness": "docs/mainnet-readiness-matrix.md",
 		"architecture": "docs/autonomous-contract-architecture.md"
 	}

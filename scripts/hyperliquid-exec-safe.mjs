@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 
+import { applyLegacyBscAutonomousEnvCompat } from "../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
 const DEFAULT_CONFIRM_TEXT = "HYPERLIQUID_EXECUTE_LIVE";
 const TX_HASH_PATTERN = /0x[a-fA-F0-9]{64}/;
 
@@ -113,15 +115,13 @@ export function runHyperliquidExecSafe(
 		Boolean(triggerProof?.stateDelta?.previousState) &&
 		Boolean(triggerProof?.stateDelta?.nextState);
 	const confirmText = String(
-		env.BSC_AUTONOMOUS_HYPERLIQUID_CONFIRM_TEXT || DEFAULT_CONFIRM_TEXT,
+		env.HYPERLIQUID_AUTONOMOUS_CONFIRM_TEXT || DEFAULT_CONFIRM_TEXT,
 	);
 	const maxAmountRaw = BigInt(
-		String(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_MAX_AMOUNT_RAW || "1000000000000000000",
-		),
+		String(env.HYPERLIQUID_AUTONOMOUS_MAX_AMOUNT_RAW || "1000000000000000000"),
 	);
 	const liveCommandTemplate = String(
-		env.BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND || "",
+		env.HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND || "",
 	).trim();
 	if (!intent || !intent.amountRaw || !intent.runId) {
 		return {
@@ -180,17 +180,17 @@ export function runHyperliquidExecSafe(
 			},
 		};
 	}
-	if (!parseBoolean(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE, false)) {
+	if (!parseBoolean(env.HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE, false)) {
 		return {
 			ok: false,
 			status: "blocked",
 			reason: "execute_binding_not_active",
 			blockers: [
-				"Live execution blocked: missing/disabled env key BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE=true",
+				"Live execution blocked: missing/disabled env key HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE=true",
 			],
 			evidence: {
 				runId: intent.runId,
-				missingEnvKeys: ["BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE"],
+				missingEnvKeys: ["HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE"],
 			},
 		};
 	}
@@ -200,11 +200,11 @@ export function runHyperliquidExecSafe(
 			status: "blocked",
 			reason: "live_command_missing",
 			blockers: [
-				"Live execution blocked: missing env key BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND",
+				"Live execution blocked: missing env key HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND",
 			],
 			evidence: {
 				runId: intent.runId,
-				missingEnvKeys: ["BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND"],
+				missingEnvKeys: ["HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND"],
 			},
 		};
 	}
@@ -215,7 +215,7 @@ export function runHyperliquidExecSafe(
 		encoding: "utf8",
 		env,
 		timeout: Number.parseInt(
-			String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_TIMEOUT_MS || "120000"),
+			String(env.HYPERLIQUID_AUTONOMOUS_EXECUTE_TIMEOUT_MS || "120000"),
 			10,
 		),
 	});

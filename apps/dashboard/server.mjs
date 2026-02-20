@@ -12,6 +12,7 @@ import { MaxUint256 } from "@ethersproject/constants";
 import { JsonRpcProvider } from "@ethersproject/providers";
 import { Wallet } from "@ethersproject/wallet";
 
+import { applyLegacyBscAutonomousEnvCompat } from "../../scripts/hyperliquid-env-compat.mjs";
 import { executeListaSupplySdkFirst } from "./bsc-lista-execute.mjs";
 import {
 	collectListaSdkMarketView,
@@ -55,6 +56,8 @@ import {
 	validateStrategyDslV1,
 	validateStrategySemanticV1,
 } from "./strategy-dsl.mjs";
+
+applyLegacyBscAutonomousEnvCompat(process.env);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -545,52 +548,56 @@ const BSC_EXECUTE_MODE = String(
 )
 	.trim()
 	.toLowerCase();
-const BSC_AUTONOMOUS_MODE =
-	String(
-		envOrCfg("BSC_AUTONOMOUS_MODE", "bsc.autonomous.mode", "false"),
-	).toLowerCase() === "true";
-const BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED =
+const HYPERLIQUID_AUTONOMOUS_MODE =
 	String(
 		envOrCfg(
-			"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED",
-			"bsc.autonomous.hyperliquid.executeBindingRequired",
+			"HYPERLIQUID_AUTONOMOUS_MODE",
+			"hyperliquid.autonomous.mode",
 			"false",
 		),
 	).toLowerCase() === "true";
-const BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED =
+const HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED =
 	String(
 		envOrCfg(
-			"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED",
-			"bsc.autonomous.hyperliquid.executeBindingEnabled",
+			"HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED",
+			"hyperliquid.autonomous.hyperliquid.executeBindingRequired",
 			"false",
 		),
 	).toLowerCase() === "true";
-const BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE =
+const HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED =
 	String(
 		envOrCfg(
-			"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE",
-			"bsc.autonomous.hyperliquid.executeActive",
+			"HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED",
+			"hyperliquid.autonomous.hyperliquid.executeBindingEnabled",
 			"false",
 		),
 	).toLowerCase() === "true";
-const BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND = String(
+const HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE =
+	String(
+		envOrCfg(
+			"HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE",
+			"hyperliquid.autonomous.hyperliquid.executeActive",
+			"false",
+		),
+	).toLowerCase() === "true";
+const HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND = String(
 	envOrCfg(
-		"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND",
-		"bsc.autonomous.hyperliquid.executeCommand",
+		"HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND",
+		"hyperliquid.autonomous.hyperliquid.executeCommand",
 		"",
 	),
 ).trim();
-const BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS = String(
+const HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS = String(
 	envOrCfg(
-		"BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS",
-		"bsc.autonomous.hyperliquid.routerAddress",
+		"HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS",
+		"hyperliquid.autonomous.hyperliquid.routerAddress",
 		"",
 	),
 ).trim();
-const BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS = String(
+const HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS = String(
 	envOrCfg(
-		"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS",
-		"bsc.autonomous.hyperliquid.executorAddress",
+		"HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS",
+		"hyperliquid.autonomous.hyperliquid.executorAddress",
 		"",
 	),
 ).trim();
@@ -2010,21 +2017,21 @@ async function readProofSummary() {
 		reason: breezeLatest?.reason || null,
 	};
 	const executeBinding = resolveHyperliquidExecuteBinding({
-		autonomousMode: BSC_AUTONOMOUS_MODE,
+		autonomousMode: HYPERLIQUID_AUTONOMOUS_MODE,
 	});
 	return {
 		generatedAt: new Date().toISOString(),
 		items: { starknet, bsc, security, breeze },
-		autonomousTrack: BSC_AUTONOMOUS_MODE
+		autonomousTrack: HYPERLIQUID_AUTONOMOUS_MODE
 			? {
 					chain: "bsc",
 					enabled: true,
 					execution: resolveExecutionMarkers({ autonomousMode: true }),
 					executeBinding,
 					executeBindingRequired:
-						BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED,
+						HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED,
 					executeBindingReady:
-						BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED !== true ||
+						HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED !== true ||
 						executeBinding !== "none",
 				}
 			: undefined,
@@ -8425,12 +8432,12 @@ function recordRebalanceMetric(entry) {
 function resolveHyperliquidExecuteBinding({ autonomousMode }) {
 	const ready =
 		autonomousMode === true &&
-		BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED === true &&
-		Boolean(BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND) &&
-		Boolean(BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS) &&
-		Boolean(BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS);
+		HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED === true &&
+		Boolean(HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND) &&
+		Boolean(HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS) &&
+		Boolean(HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS);
 	if (!ready) return "none";
-	return BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE ? "active" : "prepared";
+	return HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE ? "active" : "prepared";
 }
 
 function resolveExecutionMarkers({ autonomousMode }) {
@@ -8593,7 +8600,7 @@ async function runBscAutonomousExecution(payload, context) {
 		...legacyResult,
 		autonomous: {
 			enabled: true,
-			runner: "bsc-autonomous-template-v1",
+			runner: "hyperliquid-autonomous-template-v1",
 			note: "Hyperliquid/BNB autonomous template active (incremental compatibility mode)",
 		},
 	};
@@ -8706,7 +8713,7 @@ async function executeAction(payload) {
 				.trim()
 				.toLowerCase();
 			if (chain === "bsc") {
-				const autonomousMode = BSC_AUTONOMOUS_MODE;
+				const autonomousMode = HYPERLIQUID_AUTONOMOUS_MODE;
 				const runner = autonomousMode
 					? runBscAutonomousExecution
 					: runBscLegacyExecution;
@@ -9330,7 +9337,7 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, {
 				ok: true,
 				matrix,
-				autonomousTrack: BSC_AUTONOMOUS_MODE
+				autonomousTrack: HYPERLIQUID_AUTONOMOUS_MODE
 					? {
 							chain: "bsc",
 							enabled: true,
@@ -9339,7 +9346,7 @@ const server = http.createServer(async (req, res) => {
 								autonomousMode: true,
 							}),
 							executeBindingRequired:
-								BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED,
+								HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED,
 						}
 					: undefined,
 			});

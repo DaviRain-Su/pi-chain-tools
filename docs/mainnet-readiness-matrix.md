@@ -8,7 +8,7 @@
 
 | Module | Status | Last validated | Top blocker | Next action |
 | --- | --- | --- | --- | --- |
-| BSC autonomous track | 🟢 GREEN | 2026-02-20T05:15:08.188Z | - | Legacy track active; set BSC_AUTONOMOUS_MODE=true to run autonomous rollout checks. |
+| Hyperliquid autonomous track | 🟢 GREEN | 2026-02-20T05:15:08.188Z | - | Legacy track active; set HYPERLIQUID_AUTONOMOUS_MODE=true to run autonomous rollout checks. |
 | BSC execute | 🟡 YELLOW | 2026-02-19T14:05:18.982Z | preflight missing env: BSC_EXECUTE_ENABLED,BSC_RPC_URL | Run npm run execute:proof:bsc and refresh matrix |
 | Starknet execute | 🔴 RED | - | no Starknet execution proof found in docs/execution-proofs/*/proof-starknet.md | Run npm run execute:proof:starknet and refresh matrix |
 | NEAR flows | 🟡 YELLOW | 2026-02-20T05:15:08.173Z | latest evidence is preflight/readiness only; no recent mutate proof attached | Run targeted NEAR flow (dryrun/execute-safe) and save proof artifact for green |
@@ -18,11 +18,11 @@
 
 ## Evidence details
 
-### BSC autonomous track
+### Hyperliquid autonomous track
 
 - Status: green
 - Last validated: 2026-02-20T05:15:08.188Z
-- Next action: Legacy track active; set BSC_AUTONOMOUS_MODE=true to run autonomous rollout checks.
+- Next action: Legacy track active; set HYPERLIQUID_AUTONOMOUS_MODE=true to run autonomous rollout checks.
 - Evidence:
   - autonomous mode disabled
   - Hyperliquid execute binding: none

@@ -6,6 +6,8 @@ import path from "node:path";
 
 import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
 
+import { applyLegacyBscAutonomousEnvCompat } from "../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
 const VALID_MODES = new Set(["preflight", "dryrun", "execute", "full"]);
 const VALID_CHAINS = new Set(["bsc", "starknet", "solana", "all"]);
 const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) ?? process.cwd();
@@ -80,26 +82,26 @@ function selectedChains(targetChain) {
 
 function evaluateAutonomousTrack(env, mode) {
 	const autonomousMode =
-		String(env.BSC_AUTONOMOUS_MODE || "")
+		String(env.HYPERLIQUID_AUTONOMOUS_MODE || "")
 			.trim()
 			.toLowerCase() === "true";
 	const hyperliquidBindingRequired =
-		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED || "")
+		String(env.HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED || "")
 			.trim()
 			.toLowerCase() === "true";
 	const hyperliquidBindingEnabled =
-		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED || "")
+		String(env.HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED || "")
 			.trim()
 			.toLowerCase() === "true";
 	const hyperliquidExecuteActive =
-		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE || "")
+		String(env.HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE || "")
 			.trim()
 			.toLowerCase() === "true";
 	const hyperliquidConfigReady = Boolean(
 		hyperliquidBindingEnabled &&
-			String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND || "").trim() &&
-			String(env.BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS || "").trim() &&
-			String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS || "").trim(),
+			String(env.HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND || "").trim() &&
+			String(env.HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS || "").trim() &&
+			String(env.HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS || "").trim(),
 	);
 	const hyperliquidExecuteBinding =
 		!autonomousMode || !hyperliquidConfigReady
@@ -114,7 +116,7 @@ function evaluateAutonomousTrack(env, mode) {
 			health: "legacy-track",
 			blockers: [],
 			actions: [
-				"Set BSC_AUTONOMOUS_MODE=true to validate autonomous controls.",
+				"Set HYPERLIQUID_AUTONOMOUS_MODE=true to validate autonomous controls.",
 			],
 			evidence: {
 				autonomousMode: false,
@@ -125,20 +127,20 @@ function evaluateAutonomousTrack(env, mode) {
 			},
 		};
 	}
-	const cycleId = String(env.BSC_AUTONOMOUS_CYCLE_ID || "").trim();
+	const cycleId = String(env.HYPERLIQUID_AUTONOMOUS_CYCLE_ID || "").trim();
 	const interval = Number.parseInt(
-		String(env.BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS || "").trim(),
+		String(env.HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS || "").trim(),
 		10,
 	);
 	const blockers = [];
 	if (!cycleId || !Number.isFinite(interval) || interval <= 0) {
 		blockers.push(
-			"deterministic cycle config missing (BSC_AUTONOMOUS_CYCLE_ID, BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS)",
+			"deterministic cycle config missing (HYPERLIQUID_AUTONOMOUS_CYCLE_ID, HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS)",
 		);
 	}
 	if (hyperliquidBindingRequired && hyperliquidExecuteBinding === "none") {
 		blockers.push(
-			"Hyperliquid execute binding required but unavailable (set BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS)",
+			"Hyperliquid execute binding required but unavailable (set HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS)",
 		);
 	}
 	if (mode !== "full") {
@@ -155,7 +157,7 @@ function evaluateAutonomousTrack(env, mode) {
 				? ["Maintain deterministic cycle execution path only."]
 				: [
 						"Route calls through deterministic contract cycle.",
-						"Disable BSC_AUTONOMOUS_MODE for manual preflight/dryrun testing.",
+						"Disable HYPERLIQUID_AUTONOMOUS_MODE for manual preflight/dryrun testing.",
 						"If Hyperliquid binding is required, set binding envs before rerun.",
 					],
 		evidence: {

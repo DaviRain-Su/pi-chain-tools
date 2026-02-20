@@ -1,7 +1,7 @@
 {
   "_format": "hh-sol-cache-2",
   "files": {
-    "/home/davirain/clawd/pi-chain-tools/contracts/bsc-autonomous/contracts/BscAutonomousStrategy.sol": {
+    "/home/davirain/clawd/pi-chain-tools/contracts/hyperliquid-autonomous/contracts/BscAutonomousStrategy.sol": {
       "lastModificationDate": 1771561693303,
       "contentHash": "b32a8b0d071abe29e9bd478f5b4c0e61",
       "sourceName": "contracts/BscAutonomousStrategy.sol",
@@ -39,7 +39,7 @@
         "BscAutonomousStrategy"
       ]
     },
-    "/home/davirain/clawd/pi-chain-tools/contracts/bsc-autonomous/contracts/MockForwarder.sol": {
+    "/home/davirain/clawd/pi-chain-tools/contracts/hyperliquid-autonomous/contracts/MockForwarder.sol": {
       "lastModificationDate": 1771554372821,
       "contentHash": "1cd77f5e364a7b50cdd1855e534030bb",
       "sourceName": "contracts/MockForwarder.sol",
@@ -76,7 +76,7 @@
         "MockForwarder"
       ]
     },
-    "/home/davirain/clawd/pi-chain-tools/contracts/bsc-autonomous/contracts/IHyperliquidEarnRouter.sol": {
+    "/home/davirain/clawd/pi-chain-tools/contracts/hyperliquid-autonomous/contracts/IHyperliquidEarnRouter.sol": {
       "lastModificationDate": 1771561693303,
       "contentHash": "aed577d76e8c65748027bb7a23c0d1bd",
       "sourceName": "contracts/IHyperliquidEarnRouter.sol",
@@ -112,7 +112,7 @@
         "IHyperliquidEarnRouter"
       ]
     },
-    "/home/davirain/clawd/pi-chain-tools/contracts/bsc-autonomous/contracts/MockHyperliquidEarnRouter.sol": {
+    "/home/davirain/clawd/pi-chain-tools/contracts/hyperliquid-autonomous/contracts/MockHyperliquidEarnRouter.sol": {
       "lastModificationDate": 1771561693303,
       "contentHash": "e0dd880ab19535ced0a6b24491001e0d",
       "sourceName": "contracts/MockHyperliquidEarnRouter.sol",

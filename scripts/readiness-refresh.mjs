@@ -3,6 +3,8 @@ import { spawnSync } from "node:child_process";
 
 import { runReadinessMatrix } from "./readiness-matrix.mjs";
 
+import { applyLegacyBscAutonomousEnvCompat } from "../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
 function runStep(command, args) {
 	const startedAt = new Date().toISOString();
 	const result = spawnSync(command, args, {

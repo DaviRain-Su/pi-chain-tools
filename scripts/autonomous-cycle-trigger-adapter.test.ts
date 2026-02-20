@@ -10,7 +10,7 @@ describe("autonomous-cycle-trigger-adapter", () => {
 		const proof = parseCycleTriggerProof(
 			JSON.stringify({
 				txHash: `0x${"ab".repeat(32)}`,
-				cycleId: "cycle-bsc-mainnet-v1",
+				cycleId: "cycle-hyperliquid-mainnet-v1",
 				transitionId: "step-42",
 				eventName: "CycleTriggered",
 				stateDelta: { previousState: "IDLE", nextState: "EXECUTING" },

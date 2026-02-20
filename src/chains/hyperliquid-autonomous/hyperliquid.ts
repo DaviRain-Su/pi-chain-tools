@@ -39,7 +39,7 @@ export type HyperliquidExecuteIntentInput = {
 
 export type HyperliquidPreparedExecuteIntent = {
 	protocol: "hyperliquid";
-	chain: "bsc";
+	chain: "hyperliquid";
 	runId: string;
 	tokenIn: string;
 	tokenOut: string;
@@ -69,6 +69,7 @@ export type HyperliquidReadiness = {
 
 const DEFAULT_API_BASE_URL = "https://api.hyperliquid.com";
 const DEFAULT_TIMEOUT_MS = 3000;
+const warnedDeprecatedKeys = new Set<string>();
 
 function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
 	if (raw == null || raw.trim() === "") return fallback;
@@ -86,41 +87,101 @@ function parsePositiveInteger(
 	return parsed;
 }
 
+function readEnvWithDeprecatedFallback(
+	env: EnvMap,
+	canonicalKey: string,
+	deprecatedKey: string,
+): string | undefined {
+	const canonicalValue = env[canonicalKey];
+	if (canonicalValue != null && canonicalValue.trim() !== "")
+		return canonicalValue;
+	const deprecatedValue = env[deprecatedKey];
+	if (deprecatedValue != null && deprecatedValue.trim() !== "") {
+		if (!warnedDeprecatedKeys.has(deprecatedKey)) {
+			warnedDeprecatedKeys.add(deprecatedKey);
+			console.warn(
+				`[deprecation] ${deprecatedKey} is deprecated. Use ${canonicalKey} instead.`,
+			);
+		}
+		return deprecatedValue;
+	}
+	return undefined;
+}
+
 export function parseHyperliquidConfig(input?: {
 	env?: EnvMap;
 }): HyperliquidConfig {
 	const env = input?.env ?? process.env;
 	return {
-		enabled: parseBoolean(env.BSC_AUTONOMOUS_HYPERLIQUID_ENABLED, false),
+		enabled: parseBoolean(
+			readEnvWithDeprecatedFallback(
+				env,
+				"HYPERLIQUID_AUTONOMOUS_ENABLED",
+				"BSC_AUTONOMOUS_HYPERLIQUID_ENABLED",
+			),
+			false,
+		),
 		apiBaseUrl: String(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_API_BASE_URL || DEFAULT_API_BASE_URL,
+			readEnvWithDeprecatedFallback(
+				env,
+				"HYPERLIQUID_AUTONOMOUS_API_BASE_URL",
+				"BSC_AUTONOMOUS_HYPERLIQUID_API_BASE_URL",
+			) || DEFAULT_API_BASE_URL,
 		)
 			.trim()
 			.replace(/\/$/, ""),
 		timeoutMs: parsePositiveInteger(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_TIMEOUT_MS,
+			readEnvWithDeprecatedFallback(
+				env,
+				"HYPERLIQUID_AUTONOMOUS_TIMEOUT_MS",
+				"BSC_AUTONOMOUS_HYPERLIQUID_TIMEOUT_MS",
+			),
 			DEFAULT_TIMEOUT_MS,
 		),
 		executeBindingEnabled: parseBoolean(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED,
+			readEnvWithDeprecatedFallback(
+				env,
+				"HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED",
+				"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED",
+			),
 			false,
 		),
 		executeBindingRequired: parseBoolean(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED,
+			readEnvWithDeprecatedFallback(
+				env,
+				"HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED",
+				"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED",
+			),
 			false,
 		),
 		executeActive: parseBoolean(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE,
+			readEnvWithDeprecatedFallback(
+				env,
+				"HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE",
+				"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE",
+			),
 			false,
 		),
 		executeCommand: String(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND || "",
+			readEnvWithDeprecatedFallback(
+				env,
+				"HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND",
+				"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND",
+			) || "",
 		).trim(),
 		routerAddress: String(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS || "",
+			readEnvWithDeprecatedFallback(
+				env,
+				"HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS",
+				"BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS",
+			) || "",
 		).trim(),
 		executorAddress: String(
-			env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS || "",
+			readEnvWithDeprecatedFallback(
+				env,
+				"HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS",
+				"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS",
+			) || "",
 		).trim(),
 	};
 }
@@ -221,25 +282,25 @@ export function prepareHyperliquidExecuteIntent(input: {
 
 	if (!config.enabled) {
 		blockers.push("Hyperliquid feature flag is disabled.");
-		remediation.push("Set BSC_AUTONOMOUS_HYPERLIQUID_ENABLED=true.");
+		remediation.push("Set HYPERLIQUID_AUTONOMOUS_ENABLED=true.");
 	}
 	if (!config.executeBindingEnabled) {
 		blockers.push("Hyperliquid execute binding is disabled.");
 		remediation.push(
-			"Set BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED=true.",
+			"Set HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED=true.",
 		);
 	}
 	if (!config.executeCommand) {
 		blockers.push("Hyperliquid execute command is missing.");
-		remediation.push("Set BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND.");
+		remediation.push("Set HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND.");
 	}
 	if (!config.routerAddress) {
 		blockers.push("Hyperliquid router address is missing.");
-		remediation.push("Set BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS.");
+		remediation.push("Set HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS.");
 	}
 	if (!config.executorAddress) {
 		blockers.push("Hyperliquid executor address is missing.");
-		remediation.push("Set BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS.");
+		remediation.push("Set HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS.");
 	}
 
 	if (executeBinding === "none") {
@@ -276,7 +337,7 @@ export function prepareHyperliquidExecuteIntent(input: {
 		remediation,
 		prepared: {
 			protocol: "hyperliquid",
-			chain: "bsc",
+			chain: "hyperliquid",
 			runId,
 			tokenIn,
 			tokenOut,

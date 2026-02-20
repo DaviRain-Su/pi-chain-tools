@@ -313,11 +313,15 @@ export { createStarknetExecuteTools } from "./chains/starknet/tools/execute.js";
 export { createStarknetToolset } from "./chains/starknet/toolset.js";
 
 export {
+	evaluateHyperliquidAutonomousPolicy,
+	getHyperliquidExecutionMarkers,
+	isHyperliquidAutonomousModeEnabled,
+	parseDeterministicCycleConfig,
+	// one-release compatibility aliases
 	evaluateBscAutonomousPolicy,
 	getBscExecutionMarkers,
 	isBscAutonomousModeEnabled,
-	parseDeterministicCycleConfig,
-} from "./chains/bsc-autonomous/track.js";
+} from "./chains/hyperliquid-autonomous/track.js";
 export {
 	getHyperliquidCapability,
 	getHyperliquidReadiness,
@@ -325,10 +329,12 @@ export {
 	prepareHyperliquidExecuteIntent,
 	readHyperliquidHealth,
 	resolveHyperliquidExecuteBinding,
-} from "./chains/bsc-autonomous/hyperliquid.js";
+} from "./chains/hyperliquid-autonomous/hyperliquid.js";
 export type {
 	AutonomousBlocker,
 	AutonomousBlockerCode,
+	HyperliquidAutonomousDecision,
+	HyperliquidAutonomousDecisionEvidence,
 	BscAutonomousDecision,
 	BscAutonomousDecisionEvidence,
 	DeterministicCycleConfig,
@@ -336,7 +342,7 @@ export type {
 	ExecutionMarkers,
 	ExecutionTrack,
 	ExecutionTrigger,
-} from "./chains/bsc-autonomous/track.js";
+} from "./chains/hyperliquid-autonomous/track.js";
 export type {
 	HyperliquidCapability,
 	HyperliquidConfig,
@@ -346,4 +352,4 @@ export type {
 	HyperliquidHealthStatus,
 	HyperliquidPreparedExecuteIntent,
 	HyperliquidReadiness,
-} from "./chains/bsc-autonomous/hyperliquid.js";
+} from "./chains/hyperliquid-autonomous/hyperliquid.js";

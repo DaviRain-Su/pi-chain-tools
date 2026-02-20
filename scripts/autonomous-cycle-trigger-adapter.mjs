@@ -1,3 +1,5 @@
+import { applyLegacyBscAutonomousEnvCompat } from "../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
 const TX_HASH_PATTERN = /^0x[a-fA-F0-9]{64}$/;
 
 function asRecord(input) {
@@ -22,7 +24,7 @@ export function parseCycleTriggerProof(raw, env = process.env) {
 	const source =
 		typeof raw === "string" && raw.trim()
 			? raw
-			: String(env.BSC_AUTONOMOUS_TRIGGER_JSON || "").trim();
+			: String(env.HYPERLIQUID_AUTONOMOUS_TRIGGER_JSON || "").trim();
 	if (!source) {
 		return {
 			available: false,

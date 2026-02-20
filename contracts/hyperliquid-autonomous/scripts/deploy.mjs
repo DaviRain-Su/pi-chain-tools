@@ -4,31 +4,36 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ethers } from "ethers";
 
+import { applyLegacyBscAutonomousEnvCompat } from "../../../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
 async function main() {
-	const rpc = process.env.BSC_TESTNET_RPC_URL || process.env.BSC_RPC_URL;
+	const rpc =
+		process.env.HYPERLIQUID_TESTNET_RPC_URL || process.env.BSC_RPC_URL;
 	const pk =
-		process.env.BSC_TESTNET_PRIVATE_KEY || process.env.BSC_EXECUTE_PRIVATE_KEY;
+		process.env.HYPERLIQUID_TESTNET_PRIVATE_KEY ||
+		process.env.BSC_EXECUTE_PRIVATE_KEY;
 	if (!rpc || !pk)
 		throw new Error(
-			"missing BSC_TESTNET_RPC_URL and/or BSC_TESTNET_PRIVATE_KEY",
+			"missing HYPERLIQUID_TESTNET_RPC_URL and/or HYPERLIQUID_TESTNET_PRIVATE_KEY",
 		);
 
 	const provider = new ethers.JsonRpcProvider(rpc);
 	const signer = new ethers.Wallet(pk, provider);
 
 	const routerAddress =
-		process.env.BSC_AUTONOMOUS_ROUTER_ADDRESS || ethers.ZeroAddress;
+		process.env.HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS || ethers.ZeroAddress;
 	const maxAmountRaw = BigInt(
-		process.env.BSC_AUTONOMOUS_CONTRACT_MAX_AMOUNT_RAW || "1000000000000000000",
+		process.env.HYPERLIQUID_AUTONOMOUS_CONTRACT_MAX_AMOUNT_RAW ||
+			"1000000000000000000",
 	);
 	const cooldown = Number(
-		process.env.BSC_AUTONOMOUS_CONTRACT_COOLDOWN_SECONDS || "300",
+		process.env.HYPERLIQUID_AUTONOMOUS_CONTRACT_COOLDOWN_SECONDS || "300",
 	);
 	const emergency =
-		process.env.BSC_AUTONOMOUS_EMERGENCY_ADMIN || signer.address;
+		process.env.HYPERLIQUID_AUTONOMOUS_EMERGENCY_ADMIN || signer.address;
 
 	const artifactPath = path.resolve(
 		ROOT,

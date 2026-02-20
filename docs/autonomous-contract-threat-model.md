@@ -1,7 +1,7 @@
 # Autonomous Contract Threat Model (BSC Hyperliquid Cycle)
 
 ## Scope
-`contracts/bsc-autonomous/contracts/BscAutonomousStrategy.sol` and its offchain invocation path (`scripts/bsc-autonomous-cycle.mjs`, `contracts/bsc-autonomous/scripts/run-cycle.mjs`).
+`contracts/hyperliquid-autonomous/contracts/BscAutonomousStrategy.sol` and its offchain invocation path (`scripts/hyperliquid-autonomous-cycle.mjs`, `contracts/hyperliquid-autonomous/scripts/run-cycle.mjs`).
 
 ## Trust Boundaries
 - **Onchain strategy contract**: authoritative state machine + guards.

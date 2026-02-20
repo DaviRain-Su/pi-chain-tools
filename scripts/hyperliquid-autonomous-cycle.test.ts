@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { runBscAutonomousCycle } from "./bsc-autonomous-cycle.mjs";
+import { runBscAutonomousCycle } from "./hyperliquid-autonomous-cycle.mjs";
 
-describe("bsc-autonomous-cycle", () => {
+describe("hyperliquid-autonomous-cycle", () => {
 	it("produces deterministic dryrun proof artifact fields", async () => {
-		const out = "/tmp/bsc-autonomous-cycle-test.json";
+		const out = "/tmp/hyperliquid-autonomous-cycle-test.json";
 		const result = await runBscAutonomousCycle(
 			["--mode", "dryrun", "--run-id", "cycle-test-1", "--out", out],
 			{},
@@ -27,7 +27,7 @@ describe("bsc-autonomous-cycle", () => {
 	});
 
 	it("uses contract emitted transition evidence in live mode", async () => {
-		const out = "/tmp/bsc-autonomous-cycle-live-test.json";
+		const out = "/tmp/hyperliquid-autonomous-cycle-live-test.json";
 		const unique = Date.now();
 		const result = await runBscAutonomousCycle(
 			[
@@ -38,15 +38,15 @@ describe("bsc-autonomous-cycle", () => {
 				"--out",
 				out,
 				"--state-path",
-				`/tmp/bsc-autonomous-cycle-live-state-${unique}.json`,
+				`/tmp/hyperliquid-autonomous-cycle-live-state-${unique}.json`,
 			],
 			{
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND:
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE: "true",
+				HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND:
 					"node -e \"console.log(JSON.stringify({txHash:'0x' + 'ef'.repeat(32),emittedEvents:['CycleStateTransition','ExecutionDecision'],stateDelta:{previousState:'0',nextState:'0'},transition:{cycleId:'cycle-live',transitionId:'1',eventName:'CycleStateTransition',emittedEvents:['CycleStateTransition'],stateDelta:{previousState:'0',nextState:'0'}}}))\"",
-				BSC_AUTONOMOUS_HYPERLIQUID_CONFIRM_TEXT: "HYPERLIQUID_EXECUTE_LIVE",
-				BSC_AUTONOMOUS_CONTRACT_ENTRYPOINT_ENABLED: "true",
-				BSC_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS: "1",
+				HYPERLIQUID_AUTONOMOUS_CONFIRM_TEXT: "HYPERLIQUID_EXECUTE_LIVE",
+				HYPERLIQUID_AUTONOMOUS_CONTRACT_ENTRYPOINT_ENABLED: "true",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS: "1",
 			},
 		);
 		expect(result.ok).toBe(true);

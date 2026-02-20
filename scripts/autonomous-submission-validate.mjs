@@ -5,6 +5,8 @@ import path from "node:path";
 
 import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
 
+import { applyLegacyBscAutonomousEnvCompat } from "../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
 const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) ?? process.cwd();
 
 async function readJsonSafe(filePath) {
@@ -38,10 +40,14 @@ export async function validateAutonomousSubmission() {
 		REPO_ROOT,
 		"docs",
 		"submission-bundles",
-		"autonomous-bsc",
+		"autonomous-hyperliquid",
 		"bundle.json",
 	);
-	const demoPath = path.join(REPO_ROOT, "docs", "autonomous-bsc-demo.md");
+	const demoPath = path.join(
+		REPO_ROOT,
+		"docs",
+		"autonomous-hyperliquid-demo.md",
+	);
 	const readmePath = path.join(REPO_ROOT, "README.md");
 
 	const cycle = await readJsonSafe(cyclePath);
@@ -68,7 +74,7 @@ export async function validateAutonomousSubmission() {
 		"Hyperliquid core route evidence present",
 		routeOk,
 		"cycle proof marks core route hyperliquid_earn_core",
-		`run: npm run autonomous:bsc:cycle -- --mode dryrun --run-id validator-refresh and verify ${cyclePath}`,
+		`run: npm run autonomous:hyperliquid:cycle -- --mode dryrun --run-id validator-refresh and verify ${cyclePath}`,
 	);
 
 	const txOk =
@@ -82,7 +88,7 @@ export async function validateAutonomousSubmission() {
 		"onchain cycle tx evidence present",
 		txOk,
 		"tx hash + decoded events + state delta found",
-		"run a live testnet cycle and store latest proof: npm run autonomous:bsc:testnet:evidence",
+		"run a live testnet cycle and store latest proof: npm run autonomous:hyperliquid:testnet:evidence",
 	);
 
 	const nonManualOk =

@@ -4,12 +4,14 @@ import path from "node:path";
 
 import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
 
+import { applyLegacyBscAutonomousEnvCompat } from "../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
 const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) ?? process.cwd();
 const OUT_DIR = path.join(
 	REPO_ROOT,
 	"docs",
 	"submission-bundles",
-	"autonomous-bsc",
+	"autonomous-hyperliquid",
 );
 
 async function readJsonSafe(filePath) {
@@ -50,7 +52,7 @@ export async function buildAutonomousSubmissionBundle() {
 	const deploymentPath = path.join(
 		REPO_ROOT,
 		"contracts",
-		"bsc-autonomous",
+		"hyperliquid-autonomous",
 		"deployments",
 		"bscTestnet.latest.json",
 	);
@@ -58,7 +60,7 @@ export async function buildAutonomousSubmissionBundle() {
 	const generatedAt = new Date().toISOString();
 
 	const bundle = {
-		suite: "autonomous-bsc-submission-bundle",
+		suite: "autonomous-hyperliquid-submission-bundle",
 		version: 2,
 		generatedAt,
 		artifacts: {
@@ -67,7 +69,7 @@ export async function buildAutonomousSubmissionBundle() {
 			readinessPath,
 			contractDeploymentPath: deploymentPath,
 			contractAbiPath:
-				"contracts/bsc-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json",
+				"contracts/hyperliquid-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json",
 		},
 		summary: {
 			cycleMode: cycle?.mode || "missing",
@@ -87,11 +89,11 @@ export async function buildAutonomousSubmissionBundle() {
 			transition: cycle?.cycleTransitionEvidence?.transition || null,
 			contractAddress:
 				deployment?.address ||
-				process.env.BSC_AUTONOMOUS_CONTRACT_ADDRESS ||
+				process.env.HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS ||
 				null,
 			routerAddress:
 				deployment?.routerAddress ||
-				process.env.BSC_AUTONOMOUS_ROUTER_ADDRESS ||
+				process.env.HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS ||
 				null,
 			entryFunction:
 				"runDeterministicCycle((bytes32,uint256,uint256,address,address,bytes,bytes32,bool))",
@@ -101,13 +103,13 @@ export async function buildAutonomousSubmissionBundle() {
 			chainId: deployment?.chainId || null,
 			address: deployment?.address || null,
 			abiPath:
-				"contracts/bsc-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json",
-			verifyScript: "npm run contracts:bsc:verify:testnet",
+				"contracts/hyperliquid-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json",
+			verifyScript: "npm run contracts:hyperliquid:verify:testnet",
 		},
 		reproducibility: {
 			oneCommand: "npm run autonomous:evidence:regen",
 			commandSequence: [
-				"npm run autonomous:bsc:cycle -- --mode dryrun --run-id submission-proof-001",
+				"npm run autonomous:hyperliquid:cycle -- --mode dryrun --run-id submission-proof-001",
 				"npm run live:test:preflight",
 				"npm run readiness:refresh",
 				"npm run autonomous:submission:bundle",
@@ -115,14 +117,14 @@ export async function buildAutonomousSubmissionBundle() {
 		},
 		links: {
 			repo: "https://github.com/davirain/pi-chain-tools",
-			demoRunbook: "docs/autonomous-bsc-demo.md",
+			demoRunbook: "docs/autonomous-hyperliquid-demo.md",
 			readiness: "docs/mainnet-readiness-matrix.md",
 			architecture: "docs/autonomous-contract-architecture.md",
 		},
 	};
 
 	const markdown = [
-		"# Autonomous BSC Submission Bundle",
+		"# Autonomous Hyperliquid Submission Bundle",
 		"",
 		`- Generated: ${generatedAt}`,
 		`- Cycle mode: ${bundle.summary.cycleMode}`,

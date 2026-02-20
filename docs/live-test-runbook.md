@@ -23,16 +23,16 @@ Recommended for full dry-run visibility:
 
 Optional Hyperliquid execute-binding policy vars (autonomous seam, no direct unsafe execute):
 
-- `BSC_AUTONOMOUS_HYPERLIQUID_ENABLED=true`
-- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED=true`
-- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED=true` (enforce blocker when missing)
-- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND` (recommended: `node scripts/hyperliquid-exec-safe.mjs "{intent}"`)
-- `BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS`
-- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS`
-- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE=true` (only when live execution is intentionally enabled)
-- `BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND` (actual tx broadcaster command template)
-- `BSC_AUTONOMOUS_HYPERLIQUID_CONFIRM_TEXT` (default `HYPERLIQUID_EXECUTE_LIVE`)
-- `BSC_AUTONOMOUS_HYPERLIQUID_MAX_AMOUNT_RAW` (default cap `1000000000000000000`)
+- `HYPERLIQUID_AUTONOMOUS_ENABLED=true`
+- `HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED=true`
+- `HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED=true` (enforce blocker when missing)
+- `HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND` (recommended: `node scripts/hyperliquid-exec-safe.mjs "{intent}"`)
+- `HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS`
+- `HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS`
+- `HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE=true` (only when live execution is intentionally enabled)
+- `HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND` (actual tx broadcaster command template)
+- `HYPERLIQUID_AUTONOMOUS_CONFIRM_TEXT` (default `HYPERLIQUID_EXECUTE_LIVE`)
+- `HYPERLIQUID_AUTONOMOUS_MAX_AMOUNT_RAW` (default cap `1000000000000000000`)
 
 ## Guardrails
 
@@ -140,14 +140,14 @@ Artifacts generated:
 Operator commands:
 
 ```bash
-npm run autonomous:bsc:runs -- --limit 8
+npm run autonomous:hyperliquid:runs -- --limit 8
 npm run doctor:paths
 ```
 
 Live lock controls (default-safe):
 
-- `BSC_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS` (default `300`)
-- `BSC_AUTONOMOUS_CYCLE_LOCK_TTL_SECONDS` (default `900`)
+- `HYPERLIQUID_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS` (default `300`)
+- `HYPERLIQUID_AUTONOMOUS_CYCLE_LOCK_TTL_SECONDS` (default `900`)
 
 ## Foundry crystallization note (targeted)
 

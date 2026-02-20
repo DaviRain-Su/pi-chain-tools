@@ -23,25 +23,25 @@ Details: `docs/live-test-runbook.md`
 
 ## Autonomous track rollout gate
 
-BSC autonomous track template is isolated and **flag-gated**.
+Hyperliquid autonomous track template is isolated and **flag-gated**.
 
-- Default path (backward compatible): `BSC_AUTONOMOUS_MODE=false`
-- Autonomous path: `BSC_AUTONOMOUS_MODE=true`
+- Default path (backward compatible): `HYPERLIQUID_AUTONOMOUS_MODE=false`
+- Autonomous path: `HYPERLIQUID_AUTONOMOUS_MODE=true`
 
 Run full rollout regression gate before enabling in any live environment:
 
 ```bash
-npm run autonomous:rollout:gate
+npm run autonomous:hyperliquid:rollout:gate
 ```
 
 Safe toggle + verify commands:
 
 ```bash
 # legacy/default track
-BSC_AUTONOMOUS_MODE=false npm run live:test:preflight
+HYPERLIQUID_AUTONOMOUS_MODE=false npm run live:test:preflight
 
 # autonomous track markers
-BSC_AUTONOMOUS_MODE=true npm run live:test:preflight
+HYPERLIQUID_AUTONOMOUS_MODE=true npm run live:test:preflight
 curl -s http://127.0.0.1:4173/api/proof/summary | jq '.summary.autonomousTrack'
 ```
 
@@ -49,13 +49,13 @@ Hyperliquid execute-binding readiness (autonomous, additive):
 
 ```bash
 # prepare-only seam (no unsafe bypass)
-export BSC_AUTONOMOUS_MODE=true
-export BSC_AUTONOMOUS_HYPERLIQUID_ENABLED=true
-export BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED=true
-export BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED=true
-export BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND='node scripts/hyperliquid-exec-safe.mjs "{intent}"'
-export BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS=0xYourRouter
-export BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS=0xYourExecutor
+export HYPERLIQUID_AUTONOMOUS_MODE=true
+export HYPERLIQUID_AUTONOMOUS_ENABLED=true
+export HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED=true
+export HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED=true
+export HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND='node scripts/hyperliquid-exec-safe.mjs "{intent}"'
+export HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS=0xYourRouter
+export HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS=0xYourExecutor
 
 npm run live:test:preflight
 npm run readiness:build
@@ -65,24 +65,38 @@ curl -s http://127.0.0.1:4173/api/readiness/matrix | jq '.matrix.autonomousTrack
 
 If binding is required but missing, autonomous checks emit blocker + remediation hints in both live-test and readiness outputs.
 
-Autonomous BSC track uses Hyperliquid as the core yield engine.
-- Use `BSC_AUTONOMOUS_HYPERLIQUID_*` env keys.
+Autonomous Hyperliquid track uses Hyperliquid as the core yield engine.
+- Use `HYPERLIQUID_AUTONOMOUS_*` env keys.
 
-Autonomous cycle runnable proof (deterministic BSC cycle):
+Env migration (single-release compatibility):
+- `BSC_AUTONOMOUS_MODE` -> `HYPERLIQUID_AUTONOMOUS_MODE`
+- `BSC_AUTONOMOUS_CYCLE_ID` -> `HYPERLIQUID_AUTONOMOUS_CYCLE_ID`
+- `BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS` -> `HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS`
+- `BSC_AUTONOMOUS_HYPERLIQUID_ENABLED` -> `HYPERLIQUID_AUTONOMOUS_ENABLED`
+- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED` -> `HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED`
+- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED` -> `HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED`
+- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE` -> `HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE`
+- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND` -> `HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND`
+- `BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS` -> `HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS`
+- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS` -> `HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS`
+- `BSC_TESTNET_RPC_URL` -> `HYPERLIQUID_TESTNET_RPC_URL`
+- `BSC_TESTNET_PRIVATE_KEY` -> `HYPERLIQUID_TESTNET_PRIVATE_KEY`
+
+Autonomous cycle runnable proof (deterministic Hyperliquid cycle):
 
 ```bash
 # safe dryrun (default)
-npm run autonomous:bsc:cycle -- --mode dryrun --run-id cycle-dryrun-001
+npm run autonomous:hyperliquid:cycle -- --mode dryrun --run-id cycle-dryrun-001
 
 # guarded live run (requires active binding + confirm text + live command env)
 # extra safety: lock + replay guard are persisted in apps/dashboard/data/autonomous-cycle-state.json
-BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE=true \
-BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND='node -e "console.log(JSON.stringify({txHash:\"0x1111111111111111111111111111111111111111111111111111111111111111\"}))"' \
-BSC_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS=300 \
-npm run autonomous:bsc:cycle -- --mode live --run-id cycle-live-001
+HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE=true \
+HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND='node -e "console.log(JSON.stringify({txHash:\"0x1111111111111111111111111111111111111111111111111111111111111111\"}))"' \
+HYPERLIQUID_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS=300 \
+npm run autonomous:hyperliquid:cycle -- --mode live --run-id cycle-live-001
 
 # list latest cycle runs (status/txHash/blockers)
-npm run autonomous:bsc:runs -- --limit 8
+npm run autonomous:hyperliquid:runs -- --limit 8
 
 # quick cwd/path diagnosis for ENOENT/cwd mistakes
 npm run doctor:paths
@@ -98,7 +112,7 @@ npm run autonomous:submission:validate
 Testnet evidence runner (real onchain cycle if env ready; deterministic missing-keys guidance otherwise):
 
 ```bash
-npm run autonomous:bsc:testnet:evidence
+npm run autonomous:hyperliquid:testnet:evidence
 ```
 
 ## EVM Security Watch (Quickstart)

@@ -5,6 +5,8 @@ import path from "node:path";
 
 import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
 
+import { applyLegacyBscAutonomousEnvCompat } from "../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
 const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) ?? process.cwd();
 
 const OUTPUT_JSON_PATH = path.join(
@@ -55,7 +57,7 @@ const SECURITY_REPORTS_ROOT = path.join(
 );
 
 const MODULE_ORDER = [
-	"bsc_autonomous_track",
+	"hyperliquid_autonomous_track",
 	"bsc_execute",
 	"starknet_execute",
 	"near_flows",
@@ -128,29 +130,29 @@ function buildModule({
 
 function evaluateAutonomousReadiness(env) {
 	const enabled =
-		String(env.BSC_AUTONOMOUS_MODE || "")
+		String(env.HYPERLIQUID_AUTONOMOUS_MODE || "")
 			.trim()
 			.toLowerCase() === "true";
 	const hyperliquidBindingRequired =
-		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED || "")
+		String(env.HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED || "")
 			.trim()
 			.toLowerCase() === "true";
 	const hyperliquidBindingEnabled =
-		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED || "")
+		String(env.HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED || "")
 			.trim()
 			.toLowerCase() === "true";
 	const hyperliquidExecuteActive =
-		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE || "")
+		String(env.HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE || "")
 			.trim()
 			.toLowerCase() === "true";
 	const hyperliquidExecuteCommand = String(
-		env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND || "",
+		env.HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND || "",
 	).trim();
 	const hyperliquidRouter = String(
-		env.BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS || "",
+		env.HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS || "",
 	).trim();
 	const hyperliquidExecutor = String(
-		env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS || "",
+		env.HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS || "",
 	).trim();
 	const hyperliquidConfigReady = Boolean(
 		hyperliquidBindingEnabled &&
@@ -171,7 +173,7 @@ function evaluateAutonomousReadiness(env) {
 			status: "green",
 			blockers: [],
 			actions: [
-				"Legacy track active; set BSC_AUTONOMOUS_MODE=true to run autonomous rollout checks.",
+				"Legacy track active; set HYPERLIQUID_AUTONOMOUS_MODE=true to run autonomous rollout checks.",
 			],
 			evidence: [
 				"autonomous mode disabled",
@@ -186,9 +188,9 @@ function evaluateAutonomousReadiness(env) {
 			},
 		};
 	}
-	const cycleId = String(env.BSC_AUTONOMOUS_CYCLE_ID || "").trim();
+	const cycleId = String(env.HYPERLIQUID_AUTONOMOUS_CYCLE_ID || "").trim();
 	const intervalRaw = String(
-		env.BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS || "",
+		env.HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS || "",
 	).trim();
 	const interval = Number.parseInt(intervalRaw, 10);
 	const cycleConfigPresent = Boolean(
@@ -197,12 +199,12 @@ function evaluateAutonomousReadiness(env) {
 	const blockers = [];
 	if (!cycleConfigPresent) {
 		blockers.push(
-			"deterministic cycle config missing (set BSC_AUTONOMOUS_CYCLE_ID and BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS)",
+			"deterministic cycle config missing (set HYPERLIQUID_AUTONOMOUS_CYCLE_ID and HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS)",
 		);
 	}
 	if (hyperliquidBindingRequired && hyperliquidExecuteBinding === "none") {
 		blockers.push(
-			"Hyperliquid execute binding required but unavailable (set BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS)",
+			"Hyperliquid execute binding required but unavailable (set HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS)",
 		);
 	}
 	return {
@@ -212,7 +214,7 @@ function evaluateAutonomousReadiness(env) {
 		actions: blockers.length
 			? [
 					"Define deterministic cycle id + interval before enabling autonomous execution.",
-					"Use legacy/manual trigger path only when BSC_AUTONOMOUS_MODE is off.",
+					"Use legacy/manual trigger path only when HYPERLIQUID_AUTONOMOUS_MODE is off.",
 					"If Hyperliquid binding is required, set binding envs and re-run rollout gate.",
 				]
 			: [
@@ -257,8 +259,8 @@ async function buildMatrix() {
 
 	modules.push(
 		buildModule({
-			key: "bsc_autonomous_track",
-			label: "BSC autonomous track",
+			key: "hyperliquid_autonomous_track",
+			label: "Hyperliquid autonomous track",
 			status: autonomousState.status,
 			evidence: autonomousState.evidence,
 			blockers: autonomousState.blockers,

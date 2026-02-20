@@ -52,10 +52,10 @@ function main() {
 	line(`- verdict: ${ok ? "healthy" : "degraded"}`);
 	if (!ok) {
 		line(
-			"- suggested command: npm run autonomous:bsc:runs -- --limit 5 (observability check)",
+			"- suggested command: npm run autonomous:hyperliquid:runs -- --limit 5 (observability check)",
 		);
 		line(
-			"- suggested command: npm run autonomous:bsc:cycle -- --mode dryrun --run-id diag-dryrun-001",
+			"- suggested command: npm run autonomous:hyperliquid:cycle -- --mode dryrun --run-id diag-dryrun-001",
 		);
 	}
 }

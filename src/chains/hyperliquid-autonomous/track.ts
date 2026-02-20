@@ -29,7 +29,7 @@ export type DeterministicCycleConfig = {
 	intervalSeconds: number;
 };
 
-export type BscAutonomousDecisionEvidence = {
+export type HyperliquidAutonomousDecisionEvidence = {
 	autonomousMode: boolean;
 	requestTrigger: ExecutionTrigger;
 	requiredTrigger: "deterministic_contract_cycle";
@@ -42,27 +42,56 @@ export type BscAutonomousDecisionEvidence = {
 	hyperliquidExecuteBindingReady: boolean;
 };
 
-export type BscAutonomousDecision = {
+export type HyperliquidAutonomousDecision = {
 	markers: ExecutionMarkers;
 	allowed: boolean;
 	blockers: AutonomousBlocker[];
 	actions: string[];
-	evidence: BscAutonomousDecisionEvidence;
+	evidence: HyperliquidAutonomousDecisionEvidence;
 };
 
-export function isBscAutonomousModeEnabled(input?: {
+const warnedDeprecatedKeys = new Set<string>();
+
+function readEnvWithDeprecatedFallback(
+	env: Record<string, string | undefined>,
+	canonicalKey: string,
+	deprecatedKey: string,
+): string | undefined {
+	const canonicalValue = env[canonicalKey];
+	if (canonicalValue != null && canonicalValue.trim() !== "")
+		return canonicalValue;
+	const deprecatedValue = env[deprecatedKey];
+	if (deprecatedValue != null && deprecatedValue.trim() !== "") {
+		if (!warnedDeprecatedKeys.has(deprecatedKey)) {
+			warnedDeprecatedKeys.add(deprecatedKey);
+			console.warn(
+				`[deprecation] ${deprecatedKey} is deprecated. Use ${canonicalKey} instead.`,
+			);
+		}
+		return deprecatedValue;
+	}
+	return undefined;
+}
+
+export function isHyperliquidAutonomousModeEnabled(input?: {
 	env?: Record<string, string | undefined>;
 	defaultValue?: boolean;
 }): boolean {
 	const env = input?.env ?? process.env;
-	const raw = env.BSC_AUTONOMOUS_MODE;
+	const raw = readEnvWithDeprecatedFallback(
+		env,
+		"HYPERLIQUID_AUTONOMOUS_MODE",
+		"BSC_AUTONOMOUS_MODE",
+	);
 	if (raw == null || raw.trim() === "") {
 		return input?.defaultValue ?? false;
 	}
 	return raw.trim().toLowerCase() === "true";
 }
 
-export function getBscExecutionMarkers(autonomous: boolean): ExecutionMarkers {
+export function getHyperliquidExecutionMarkers(
+	autonomous: boolean,
+): ExecutionMarkers {
 	if (autonomous) {
 		return {
 			track: "autonomous",
@@ -81,8 +110,18 @@ export function parseDeterministicCycleConfig(input?: {
 	env?: Record<string, string | undefined>;
 }): DeterministicCycleConfig | null {
 	const env = input?.env ?? process.env;
-	const cycleId = env.BSC_AUTONOMOUS_CYCLE_ID?.trim() ?? "";
-	const intervalRaw = env.BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS?.trim() ?? "";
+	const cycleId =
+		readEnvWithDeprecatedFallback(
+			env,
+			"HYPERLIQUID_AUTONOMOUS_CYCLE_ID",
+			"BSC_AUTONOMOUS_CYCLE_ID",
+		)?.trim() ?? "";
+	const intervalRaw =
+		readEnvWithDeprecatedFallback(
+			env,
+			"HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS",
+			"BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS",
+		)?.trim() ?? "";
 	const intervalSeconds = Number.parseInt(intervalRaw, 10);
 	if (!cycleId || !Number.isFinite(intervalSeconds) || intervalSeconds <= 0) {
 		return null;
@@ -90,15 +129,15 @@ export function parseDeterministicCycleConfig(input?: {
 	return { cycleId, intervalSeconds };
 }
 
-export function evaluateBscAutonomousPolicy(input?: {
+export function evaluateHyperliquidAutonomousPolicy(input?: {
 	env?: Record<string, string | undefined>;
 	requestTrigger?: ExecutionTrigger;
 	requireHyperliquidExecuteBinding?: boolean;
-}): BscAutonomousDecision {
+}): HyperliquidAutonomousDecision {
 	const env = input?.env ?? process.env;
-	const autonomousMode = isBscAutonomousModeEnabled({ env });
+	const autonomousMode = isHyperliquidAutonomousModeEnabled({ env });
 	const requestTrigger = input?.requestTrigger ?? "external";
-	const markers = getBscExecutionMarkers(autonomousMode);
+	const markers = getHyperliquidExecutionMarkers(autonomousMode);
 	const cycleConfig = parseDeterministicCycleConfig({ env });
 	const hyperliquidConfig = parseHyperliquidConfig({ env });
 	const hyperliquidExecuteBinding =
@@ -116,10 +155,10 @@ export function evaluateBscAutonomousPolicy(input?: {
 			reason:
 				"Autonomous mode requires deterministic cycle config (cycle id + interval seconds).",
 			remediation:
-				"Set BSC_AUTONOMOUS_CYCLE_ID and BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS to deterministic values.",
+				"Set HYPERLIQUID_AUTONOMOUS_CYCLE_ID and HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS to deterministic values.",
 		});
 		actions.push(
-			"Define deterministic cycle env vars before autonomous rollout (BSC_AUTONOMOUS_CYCLE_ID, BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS).",
+			"Define deterministic cycle env vars before autonomous rollout (HYPERLIQUID_AUTONOMOUS_CYCLE_ID, HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS).",
 		);
 	}
 
@@ -129,7 +168,7 @@ export function evaluateBscAutonomousPolicy(input?: {
 			reason:
 				"External/manual trigger paths are blocked while autonomous mode is enabled.",
 			remediation:
-				"Route execution through deterministic contract cycle, or disable BSC_AUTONOMOUS_MODE for manual/testing paths.",
+				"Route execution through deterministic contract cycle, or disable HYPERLIQUID_AUTONOMOUS_MODE for manual/testing paths.",
 		});
 		actions.push(
 			"Use deterministic cycle trigger path only in autonomous mode; keep manual trigger for legacy mode.",
@@ -146,7 +185,7 @@ export function evaluateBscAutonomousPolicy(input?: {
 				reason:
 					"Autonomous mode requires Hyperliquid execute-binding readiness, but binding is unavailable.",
 				remediation:
-					"Enable and configure Hyperliquid execute binding (BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS).",
+					"Enable and configure Hyperliquid execute binding (HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS).",
 			});
 			actions.push(
 				"Set Hyperliquid execute binding envs and re-run autonomous rollout gate to verify readiness.",
@@ -156,11 +195,11 @@ export function evaluateBscAutonomousPolicy(input?: {
 
 	if (!autonomousMode) {
 		actions.push(
-			"Legacy path active. Enable BSC_AUTONOMOUS_MODE=true to validate deterministic autonomous controls.",
+			"Legacy path active. Enable HYPERLIQUID_AUTONOMOUS_MODE=true to validate deterministic autonomous controls.",
 		);
 	}
 
-	const evidence: BscAutonomousDecisionEvidence = {
+	const evidence: HyperliquidAutonomousDecisionEvidence = {
 		autonomousMode,
 		requestTrigger,
 		requiredTrigger: "deterministic_contract_cycle",
@@ -189,3 +228,11 @@ export function evaluateBscAutonomousPolicy(input?: {
 		evidence,
 	};
 }
+
+// temporary one-release compatibility aliases
+export type BscAutonomousDecisionEvidence =
+	HyperliquidAutonomousDecisionEvidence;
+export type BscAutonomousDecision = HyperliquidAutonomousDecision;
+export const isBscAutonomousModeEnabled = isHyperliquidAutonomousModeEnabled;
+export const getBscExecutionMarkers = getHyperliquidExecutionMarkers;
+export const evaluateBscAutonomousPolicy = evaluateHyperliquidAutonomousPolicy;

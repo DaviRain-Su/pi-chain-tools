@@ -132,7 +132,7 @@ describe("package.json script contracts", () => {
 		expect(scripts?.["sdk:capability-diff"]).toBe(
 			"node scripts/sdk-capability-diff.mjs",
 		);
-		expect(scripts?.["autonomous:bsc:runs"]).toBe(
+		expect(scripts?.["autonomous:hyperliquid:runs"]).toBe(
 			"node scripts/autonomous-cycle-runs.mjs",
 		);
 		expect(scripts?.["doctor:paths"]).toBe(

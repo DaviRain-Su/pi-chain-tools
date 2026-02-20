@@ -6,13 +6,15 @@ import path from "node:path";
 
 import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
 
+import { applyLegacyBscAutonomousEnvCompat } from "../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
 const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) ?? process.cwd();
 const DEFAULT_ENV_FILE = path.join(REPO_ROOT, ".env.bsc.local");
 const DEFAULT_OUTPUT = path.join(
 	REPO_ROOT,
 	"docs",
 	"submission-bundles",
-	"autonomous-bsc",
+	"autonomous-hyperliquid",
 	"testnet-cycle-evidence.json",
 );
 
@@ -83,21 +85,24 @@ function hasValue(env, key) {
 
 function validatePrerequisites(env) {
 	const missing = [];
-	if (!hasValue(env, "BSC_TESTNET_RPC_URL") && !hasValue(env, "BSC_RPC_URL")) {
-		missing.push("BSC_TESTNET_RPC_URL or BSC_RPC_URL");
+	if (
+		!hasValue(env, "HYPERLIQUID_TESTNET_RPC_URL") &&
+		!hasValue(env, "BSC_RPC_URL")
+	) {
+		missing.push("HYPERLIQUID_TESTNET_RPC_URL or BSC_RPC_URL");
 	}
 	if (
-		!hasValue(env, "BSC_TESTNET_PRIVATE_KEY") &&
+		!hasValue(env, "HYPERLIQUID_TESTNET_PRIVATE_KEY") &&
 		!hasValue(env, "BSC_EXECUTE_PRIVATE_KEY")
 	) {
-		missing.push("BSC_TESTNET_PRIVATE_KEY or BSC_EXECUTE_PRIVATE_KEY");
+		missing.push("HYPERLIQUID_TESTNET_PRIVATE_KEY or BSC_EXECUTE_PRIVATE_KEY");
 	}
 	if (
-		!hasValue(env, "BSC_AUTONOMOUS_CONTRACT_ADDRESS") &&
-		!hasValue(env, "BSC_AUTONOMOUS_ROUTER_ADDRESS")
+		!hasValue(env, "HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS") &&
+		!hasValue(env, "HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS")
 	) {
 		missing.push(
-			"BSC_AUTONOMOUS_CONTRACT_ADDRESS or BSC_AUTONOMOUS_ROUTER_ADDRESS",
+			"HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS or HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS",
 		);
 	}
 	return {
@@ -144,8 +149,8 @@ function deterministicGuidance(missing) {
 		nextSteps: [
 			"cp .env.bsc.example .env.bsc.local",
 			"fill all missing keys listed above",
-			"npm run contracts:bsc:compile",
-			"npm run autonomous:bsc:testnet:evidence",
+			"npm run contracts:hyperliquid:compile",
+			"npm run autonomous:hyperliquid:testnet:evidence",
 		],
 	};
 }
@@ -165,7 +170,7 @@ export async function runAutonomousTestnetEvidence(
 	}
 
 	if (args.doCompile) {
-		const compile = spawnSync("npm", ["run", "contracts:bsc:compile"], {
+		const compile = spawnSync("npm", ["run", "contracts:hyperliquid:compile"], {
 			cwd: REPO_ROOT,
 			encoding: "utf8",
 			env,
@@ -178,7 +183,7 @@ export async function runAutonomousTestnetEvidence(
 	}
 
 	let strategyAddress = String(
-		env.BSC_AUTONOMOUS_CONTRACT_ADDRESS || "",
+		env.HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS || "",
 	).trim();
 	let deployEvidence = null;
 	if (!strategyAddress) {
@@ -186,7 +191,7 @@ export async function runAutonomousTestnetEvidence(
 			path.join(
 				REPO_ROOT,
 				"contracts",
-				"bsc-autonomous",
+				"hyperliquid-autonomous",
 				"scripts",
 				"deploy.mjs",
 			),
@@ -210,7 +215,7 @@ export async function runAutonomousTestnetEvidence(
 		path.join(
 			REPO_ROOT,
 			"contracts",
-			"bsc-autonomous",
+			"hyperliquid-autonomous",
 			"scripts",
 			"run-cycle.mjs",
 		),
@@ -218,7 +223,7 @@ export async function runAutonomousTestnetEvidence(
 			"--contract",
 			strategyAddress,
 			"--transitionNonce",
-			String(env.BSC_AUTONOMOUS_CONTRACT_NEXT_NONCE || "1"),
+			String(env.HYPERLIQUID_AUTONOMOUS_CONTRACT_NEXT_NONCE || "1"),
 		],
 		env,
 	);
@@ -230,7 +235,7 @@ export async function runAutonomousTestnetEvidence(
 	const cycleEvidence = parseJsonFromOutput(cycle);
 
 	const evidence = {
-		suite: "autonomous-bsc-testnet-evidence",
+		suite: "autonomous-hyperliquid-testnet-evidence",
 		version: 1,
 		generatedAt: new Date().toISOString(),
 		network: "bscTestnet",

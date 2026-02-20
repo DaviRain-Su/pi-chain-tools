@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+
+import { applyLegacyBscAutonomousEnvCompat } from "../scripts/hyperliquid-env-compat.mjs";
+applyLegacyBscAutonomousEnvCompat(process.env);
+function parseBoolean(raw) {
+	return (
+		String(raw || "")
+			.trim()
+			.toLowerCase() === "true"
+	);
+}
+
+function line(key, value) {
+	return `${key}=${value}`;
+}
+
+const env = process.env;
+const confirmText = String(
+	env.HYPERLIQUID_AUTONOMOUS_CONFIRM_TEXT || "HYPERLIQUID_EXECUTE_LIVE",
+);
+const checklist = [
+	line(
+		"HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE",
+		env.HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE || "true",
+	),
+	line(
+		"HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND",
+		env.HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND || "<set-live-command>",
+	),
+	line("HYPERLIQUID_AUTONOMOUS_CONFIRM_TEXT", confirmText),
+	line(
+		"HYPERLIQUID_AUTONOMOUS_MAX_AMOUNT_RAW",
+		env.HYPERLIQUID_AUTONOMOUS_MAX_AMOUNT_RAW || "1000000000000000000",
+	),
+	line(
+		"HYPERLIQUID_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS",
+		env.HYPERLIQUID_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS || "300",
+	),
+	line(
+		"HYPERLIQUID_AUTONOMOUS_CYCLE_LOCK_TTL_SECONDS",
+		env.HYPERLIQUID_AUTONOMOUS_CYCLE_LOCK_TTL_SECONDS || "900",
+	),
+	line(
+		"HYPERLIQUID_AUTONOMOUS_RECONCILE_SNAPSHOT_COMMAND",
+		env.HYPERLIQUID_AUTONOMOUS_RECONCILE_SNAPSHOT_COMMAND ||
+			"<optional-balance-snapshot-command>",
+	),
+];
+
+console.log(
+	"# Hyperliquid autonomous dryrun checklist (copy to .env.bsc.local)",
+);
+for (const row of checklist) console.log(row);
+console.log("");
+console.log("# Dryrun command");
+console.log(
+	"npm run autonomous:hyperliquid:cycle -- --mode dryrun --run-id dryrun-check",
+);
+console.log("# Live command (guarded)");
+console.log(
+	`npm run autonomous:hyperliquid:cycle -- --mode live --run-id live-check --confirm ${confirmText}`,
+);
+
+const ready =
+	parseBoolean(env.HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE) &&
+	String(env.HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND || "").trim();
+if (!ready) {
+	console.log(
+		"# status: live mode currently blocked until required env keys are set.",
+	);
+}

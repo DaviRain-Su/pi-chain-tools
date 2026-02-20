@@ -6,7 +6,7 @@ Move autonomous execution from script-only guardrails to **contract-enforced det
 
 ## Contract Package
 
-Path: `contracts/bsc-autonomous/`
+Path: `contracts/hyperliquid-autonomous/`
 
 ### Core contracts
 
@@ -48,7 +48,7 @@ These are consumed by scripts as submission evidence (tx hash + decoded events +
 
 Autonomy scripts continue to support legacy/offchain flow, but now support contract-first execution:
 
-- `scripts/bsc-autonomous-cycle.mjs`
+- `scripts/hyperliquid-autonomous-cycle.mjs`
   - accepts contract entrypoint mode via env
   - merges runtime transition evidence from decoded contract events
 - `scripts/hyperliquid-exec-safe.mjs`
@@ -57,9 +57,9 @@ Autonomy scripts continue to support legacy/offchain flow, but now support contr
 
 Contract interaction scripts:
 
-- `contracts/bsc-autonomous/scripts/deploy.mjs`
-- `contracts/bsc-autonomous/scripts/run-cycle.mjs`
-- `contracts/bsc-autonomous/scripts/verify-placeholder.mjs`
+- `contracts/hyperliquid-autonomous/scripts/deploy.mjs`
+- `contracts/hyperliquid-autonomous/scripts/run-cycle.mjs`
+- `contracts/hyperliquid-autonomous/scripts/verify-placeholder.mjs`
 
 ## Required env placeholders
 
@@ -73,13 +73,13 @@ See `.env.bsc.example` for:
 
 ## ABI + function path for review
 
-- ABI: `contracts/bsc-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json`
+- ABI: `contracts/hyperliquid-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json`
 - Function: `runDeterministicCycle((bytes32,uint256,uint256,address,address,bytes,bytes32,bool))`
 - Primary events: `CycleStateTransition`, `ExecutionDecision`
 
 ## Test coverage
 
-- Unit/state tests: `contracts/bsc-autonomous/test/strategy.state-machine.test.js`
+- Unit/state tests: `contracts/hyperliquid-autonomous/test/strategy.state-machine.test.js`
   - successful deterministic cycle
   - max amount guard
   - cooldown enforcement

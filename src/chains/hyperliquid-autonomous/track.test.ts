@@ -7,7 +7,7 @@ import {
 	parseDeterministicCycleConfig,
 } from "./track.js";
 
-describe("bsc autonomous mode routing", () => {
+describe("hyperliquid autonomous mode routing", () => {
 	it("keeps legacy markers when flag is off/missing", () => {
 		expect(isBscAutonomousModeEnabled({ env: {} })).toBe(false);
 		expect(
@@ -21,7 +21,7 @@ describe("bsc autonomous mode routing", () => {
 
 	it("switches to autonomous markers when flag is on", () => {
 		const enabled = isBscAutonomousModeEnabled({
-			env: { BSC_AUTONOMOUS_MODE: "true" },
+			env: { HYPERLIQUID_AUTONOMOUS_MODE: "true" },
 		});
 		expect(enabled).toBe(true);
 		expect(getBscExecutionMarkers(enabled)).toEqual({
@@ -33,7 +33,7 @@ describe("bsc autonomous mode routing", () => {
 
 	it("requires deterministic cycle config when autonomous mode is on", () => {
 		const result = evaluateBscAutonomousPolicy({
-			env: { BSC_AUTONOMOUS_MODE: "true" },
+			env: { HYPERLIQUID_AUTONOMOUS_MODE: "true" },
 			requestTrigger: "deterministic_contract_cycle",
 		});
 		expect(result.allowed).toBe(false);
@@ -41,7 +41,7 @@ describe("bsc autonomous mode routing", () => {
 			"AUTONOMOUS_CYCLE_CONFIG_MISSING",
 		);
 		expect(result.blockers[0]?.remediation).toContain(
-			"BSC_AUTONOMOUS_CYCLE_ID",
+			"HYPERLIQUID_AUTONOMOUS_CYCLE_ID",
 		);
 		expect(result.evidence.cycleConfigPresent).toBe(false);
 	});
@@ -49,9 +49,9 @@ describe("bsc autonomous mode routing", () => {
 	it("blocks external/manual triggers in autonomous mode", () => {
 		const result = evaluateBscAutonomousPolicy({
 			env: {
-				BSC_AUTONOMOUS_MODE: "true",
-				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
-				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
+				HYPERLIQUID_AUTONOMOUS_MODE: "true",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_ID: "cycle-hyperliquid-mainnet-v1",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
 			},
 			requestTrigger: "external",
 		});
@@ -65,10 +65,10 @@ describe("bsc autonomous mode routing", () => {
 	it("emits Hyperliquid execute binding blocker when required but missing", () => {
 		const result = evaluateBscAutonomousPolicy({
 			env: {
-				BSC_AUTONOMOUS_MODE: "true",
-				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
-				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED: "true",
+				HYPERLIQUID_AUTONOMOUS_MODE: "true",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_ID: "cycle-hyperliquid-mainnet-v1",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED: "true",
 			},
 			requestTrigger: "deterministic_contract_cycle",
 		});
@@ -77,22 +77,22 @@ describe("bsc autonomous mode routing", () => {
 			"AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_UNAVAILABLE",
 		);
 		expect(result.blockers[0]?.remediation).toContain(
-			"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED",
+			"HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED",
 		);
 	});
 
 	it("accepts prepared Hyperliquid execute binding when required", () => {
 		const result = evaluateBscAutonomousPolicy({
 			env: {
-				BSC_AUTONOMOUS_MODE: "true",
-				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
-				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
-				BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND: "node scripts/exec.mjs",
-				BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS: "0xrouter",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS: "0xexecutor",
+				HYPERLIQUID_AUTONOMOUS_MODE: "true",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_ID: "cycle-hyperliquid-mainnet-v1",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
+				HYPERLIQUID_AUTONOMOUS_ENABLED: "true",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED: "true",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED: "true",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND: "node scripts/exec.mjs",
+				HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS: "0xrouter",
+				HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS: "0xexecutor",
 			},
 			requestTrigger: "deterministic_contract_cycle",
 		});
@@ -104,17 +104,17 @@ describe("bsc autonomous mode routing", () => {
 	it("marks active Hyperliquid execute binding when active flag is set", () => {
 		const result = evaluateBscAutonomousPolicy({
 			env: {
-				BSC_AUTONOMOUS_MODE: "true",
-				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
-				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
-				BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND:
+				HYPERLIQUID_AUTONOMOUS_MODE: "true",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_ID: "cycle-hyperliquid-mainnet-v1",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
+				HYPERLIQUID_AUTONOMOUS_ENABLED: "true",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED: "true",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED: "true",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE: "true",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND:
 					"node scripts/hyperliquid-exec-safe.mjs",
-				BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS: "0xrouter",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS: "0xexecutor",
+				HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS: "0xrouter",
+				HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS: "0xexecutor",
 			},
 			requestTrigger: "deterministic_contract_cycle",
 		});
@@ -126,9 +126,9 @@ describe("bsc autonomous mode routing", () => {
 	it("keeps compatibility when binding requirement flag is off", () => {
 		const result = evaluateBscAutonomousPolicy({
 			env: {
-				BSC_AUTONOMOUS_MODE: "true",
-				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
-				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
+				HYPERLIQUID_AUTONOMOUS_MODE: "true",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_ID: "cycle-hyperliquid-mainnet-v1",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
 			},
 			requestTrigger: "deterministic_contract_cycle",
 		});
@@ -139,9 +139,9 @@ describe("bsc autonomous mode routing", () => {
 	it("marks deterministic autonomous request as ready with evidence", () => {
 		const result = evaluateBscAutonomousPolicy({
 			env: {
-				BSC_AUTONOMOUS_MODE: "true",
-				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
-				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
+				HYPERLIQUID_AUTONOMOUS_MODE: "true",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_ID: "cycle-hyperliquid-mainnet-v1",
+				HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
 			},
 			requestTrigger: "deterministic_contract_cycle",
 		});
@@ -160,12 +160,12 @@ describe("bsc autonomous mode routing", () => {
 		expect(
 			parseDeterministicCycleConfig({
 				env: {
-					BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
-					BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
+					HYPERLIQUID_AUTONOMOUS_CYCLE_ID: "cycle-hyperliquid-mainnet-v1",
+					HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
 				},
 			}),
 		).toEqual({
-			cycleId: "cycle-bsc-mainnet-v1",
+			cycleId: "cycle-hyperliquid-mainnet-v1",
 			intervalSeconds: 300,
 		});
 	});

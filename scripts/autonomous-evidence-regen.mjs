@@ -20,7 +20,7 @@ export function regenerateAutonomousEvidence() {
 	const steps = [
 		runStep("npm", [
 			"run",
-			"autonomous:bsc:cycle",
+			"autonomous:hyperliquid:cycle",
 			"--",
 			"--mode",
 			"dryrun",

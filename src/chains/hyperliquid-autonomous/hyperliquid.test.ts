@@ -9,7 +9,7 @@ import {
 	resolveHyperliquidExecuteBinding,
 } from "./hyperliquid.js";
 
-describe("bsc autonomous hyperliquid seam", () => {
+describe("hyperliquid autonomous hyperliquid seam", () => {
 	it("keeps seam disabled by default", async () => {
 		const readiness = await getHyperliquidReadiness({ env: {} });
 		expect(readiness.config.enabled).toBe(false);
@@ -22,15 +22,15 @@ describe("bsc autonomous hyperliquid seam", () => {
 		expect(
 			parseHyperliquidConfig({
 				env: {
-					BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true",
-					BSC_AUTONOMOUS_HYPERLIQUID_API_BASE_URL: "https://example.invalid/",
-					BSC_AUTONOMOUS_HYPERLIQUID_TIMEOUT_MS: "5000",
-					BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED: "true",
-					BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED: "true",
-					BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE: "false",
-					BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND: "node scripts/exec.mjs",
-					BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS: "0xrouter",
-					BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS: "0xexecutor",
+					HYPERLIQUID_AUTONOMOUS_ENABLED: "true",
+					HYPERLIQUID_AUTONOMOUS_API_BASE_URL: "https://example.invalid/",
+					HYPERLIQUID_AUTONOMOUS_TIMEOUT_MS: "5000",
+					HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED: "true",
+					HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED: "true",
+					HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE: "false",
+					HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND: "node scripts/exec.mjs",
+					HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS: "0xrouter",
+					HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS: "0xexecutor",
 				},
 			}),
 		).toEqual({
@@ -49,11 +49,11 @@ describe("bsc autonomous hyperliquid seam", () => {
 	it("exposes execute-binding capability marker", () => {
 		const capability = getHyperliquidCapability({
 			env: {
-				BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND: "node scripts/exec.mjs",
-				BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS: "0xrouter",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS: "0xexecutor",
+				HYPERLIQUID_AUTONOMOUS_ENABLED: "true",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED: "true",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND: "node scripts/exec.mjs",
+				HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS: "0xrouter",
+				HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS: "0xexecutor",
 			},
 		});
 		expect(capability.canReadHealth).toBe(true);
@@ -97,11 +97,11 @@ describe("bsc autonomous hyperliquid seam", () => {
 	it("prepares typed execute intent when binding is ready", () => {
 		const prepared = prepareHyperliquidExecuteIntent({
 			env: {
-				BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED: "true",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND: "node scripts/exec.mjs",
-				BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS: "0xrouter",
-				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS: "0xexecutor",
+				HYPERLIQUID_AUTONOMOUS_ENABLED: "true",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED: "true",
+				HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND: "node scripts/exec.mjs",
+				HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS: "0xrouter",
+				HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS: "0xexecutor",
 			},
 			intent: {
 				tokenIn: "USDT",
@@ -113,7 +113,7 @@ describe("bsc autonomous hyperliquid seam", () => {
 		expect(prepared.executeBinding).toBe("prepared");
 		expect(prepared.prepared).toMatchObject({
 			protocol: "hyperliquid",
-			chain: "bsc",
+			chain: "hyperliquid",
 			tokenIn: "USDT",
 			tokenOut: "USDC",
 			amountRaw: "1000000",
@@ -122,7 +122,7 @@ describe("bsc autonomous hyperliquid seam", () => {
 
 	it("returns binding-missing blockers with remediation when not configured", () => {
 		const result = prepareHyperliquidExecuteIntent({
-			env: { BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true" },
+			env: { HYPERLIQUID_AUTONOMOUS_ENABLED: "true" },
 			intent: {
 				tokenIn: "USDT",
 				tokenOut: "USDC",
@@ -132,7 +132,7 @@ describe("bsc autonomous hyperliquid seam", () => {
 		expect(result.ok).toBe(false);
 		expect(result.executeBinding).toBe("none");
 		expect(result.remediation.join(" ")).toContain(
-			"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED",
+			"HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED",
 		);
 	});
 

@@ -17,9 +17,9 @@ module.exports = {
 	networks: {
 		hardhat: {},
 		bscTestnet: {
-			url: process.env.BSC_TESTNET_RPC_URL || "",
-			accounts: process.env.BSC_TESTNET_PRIVATE_KEY
-				? [process.env.BSC_TESTNET_PRIVATE_KEY]
+			url: process.env.HYPERLIQUID_TESTNET_RPC_URL || "",
+			accounts: process.env.HYPERLIQUID_TESTNET_PRIVATE_KEY
+				? [process.env.HYPERLIQUID_TESTNET_PRIVATE_KEY]
 				: [],
 		},
 		bscMainnet: {

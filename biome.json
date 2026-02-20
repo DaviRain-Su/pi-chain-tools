@@ -3,8 +3,8 @@
 	"files": {
 		"ignore": [
 			"apps/dashboard/data/**",
-			"contracts/bsc-autonomous/artifacts/**",
-			"contracts/bsc-autonomous/cache/**"
+			"contracts/hyperliquid-autonomous/artifacts/**",
+			"contracts/hyperliquid-autonomous/cache/**"
 		]
 	}
 }
