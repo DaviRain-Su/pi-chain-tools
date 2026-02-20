@@ -6,6 +6,7 @@
 
 - `pct_strategy_compile`
 - `pct_strategy_validate`
+- `pct_strategy_templates`
 - `pct_strategy_run`
 - `pct_strategy_track`
 
@@ -100,4 +101,19 @@ CLI 快速烟测：
 
 ```bash
 npm run stable-yield:smoke
+```
+
+
+## 0) 查看可上架策略模板（Market Manifests）
+
+调用 `pct_strategy_templates`：
+
+```json
+{}
+```
+
+查看某个模板：
+
+```json
+{ "template": "stable-yield-v1" }
 ```

@@ -38,6 +38,10 @@ type StrategyCompilerModule = {
 		spec: Record<string, unknown>,
 		manifests: Record<string, unknown>[],
 	) => { ok: boolean; errors: string[] };
+	listStrategyTemplateManifests: () => Record<string, unknown>[];
+	getStrategyTemplateManifest: (
+		template: string,
+	) => Record<string, unknown> | null;
 };
 
 async function loadStrategyCompiler(): Promise<StrategyCompilerModule> {
@@ -564,6 +568,63 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 									status: "ok",
 									manifestsLoaded: manifests.length,
 									strategy: compiled.spec,
+								},
+								null,
+								2,
+							),
+						},
+					],
+				};
+			},
+		}),
+	);
+
+	pi.registerTool(
+		defineTool({
+			name: "pct_strategy_templates",
+			label: "PCT Strategy Templates",
+			description:
+				"List strategy template market manifests or fetch one template manifest by id.",
+			parameters: Type.Object({
+				template: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const compiler = await loadStrategyCompiler();
+				if (params.template) {
+					const manifest = compiler.getStrategyTemplateManifest(
+						String(params.template),
+					);
+					if (!manifest) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify(
+										{ status: "not_found", template: params.template },
+										null,
+										2,
+									),
+								},
+							],
+						};
+					}
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify({ status: "ok", manifest }, null, 2),
+							},
+						],
+					};
+				}
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(
+								{
+									status: "ok",
+									templates: compiler.listStrategyTemplateManifests(),
 								},
 								null,
 								2,

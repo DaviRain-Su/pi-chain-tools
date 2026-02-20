@@ -58,6 +58,7 @@ describe("openclaw strategy tools", () => {
 		const names = registrar.tools.map((t) => t.name);
 		expect(names).toContain("pct_strategy_compile");
 		expect(names).toContain("pct_strategy_validate");
+		expect(names).toContain("pct_strategy_templates");
 		expect(names).toContain("pct_strategy_run");
 		expect(names).toContain("pct_strategy_track");
 	});
