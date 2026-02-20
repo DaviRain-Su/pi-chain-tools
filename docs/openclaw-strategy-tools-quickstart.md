@@ -125,3 +125,8 @@ npm run stable-yield:smoke
 - `riskTier`
 - `recommendedMinUsd` / `recommendedMaxUsd`
 - `strategyType`
+
+可过滤列表：
+```json
+{ "riskTier": "low", "strategyType": "yield", "status": "active" }
+```

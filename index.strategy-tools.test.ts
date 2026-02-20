@@ -80,6 +80,29 @@ describe("openclaw strategy tools", () => {
 		expect(payload.requiredToken).toBe("I_ACKNOWLEDGE_EXECUTION");
 	});
 
+	it("filters strategy templates by riskTier", async () => {
+		const registrar = createRegistrar();
+		openclawExtension(registrar);
+		const t = registrar.tools.find((x) => x.name === "pct_strategy_templates");
+		if (!t) throw new Error("pct_strategy_templates not registered");
+		const result = await t.execute("t3", {
+			riskTier: "low",
+			strategyType: "yield",
+		});
+		const payload = JSON.parse(result.content[0].text) as Record<
+			string,
+			unknown
+		>;
+		expect(payload.status).toBe("ok");
+		const templates = payload.templates as Record<string, unknown>[];
+		expect(Array.isArray(templates)).toBe(true);
+		expect(templates.length).toBeGreaterThan(0);
+		for (const item of templates) {
+			expect(item.riskTier).toBe("low");
+			expect(item.strategyType).toBe("yield");
+		}
+	});
+
 	it("blocks live execute when small-cap policy exceeded", async () => {
 		const registrar = createRegistrar();
 		openclawExtension(registrar);

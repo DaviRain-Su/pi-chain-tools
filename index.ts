@@ -587,6 +587,9 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 				"List strategy template market manifests or fetch one template manifest by id.",
 			parameters: Type.Object({
 				template: Type.Optional(Type.String()),
+				riskTier: Type.Optional(Type.String()),
+				strategyType: Type.Optional(Type.String()),
+				status: Type.Optional(Type.String()),
 			}),
 			async execute(_toolCallId, params) {
 				const compiler = await loadStrategyCompiler();
@@ -617,6 +620,27 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 						],
 					};
 				}
+				const templates = compiler
+					.listStrategyTemplateManifests()
+					.filter((m) => {
+						const entry = asObject(m) || {};
+						if (
+							params.riskTier &&
+							String(entry.riskTier || "") !== String(params.riskTier)
+						)
+							return false;
+						if (
+							params.strategyType &&
+							String(entry.strategyType || "") !== String(params.strategyType)
+						)
+							return false;
+						if (
+							params.status &&
+							String(entry.status || "") !== String(params.status)
+						)
+							return false;
+						return true;
+					});
 				return {
 					content: [
 						{
@@ -624,7 +648,7 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 							text: JSON.stringify(
 								{
 									status: "ok",
-									templates: compiler.listStrategyTemplateManifests(),
+									templates,
 								},
 								null,
 								2,
