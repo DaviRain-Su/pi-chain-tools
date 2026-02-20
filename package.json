@@ -98,7 +98,8 @@
 		"strategy:templates": "node scripts/strategy-templates.mjs",
 		"stable-yield:auto-migrate:v1": "node scripts/stable-yield-auto-migrate-v1.mjs",
 		"stable-yield:auto-migrate:v1:cron-install": "bash scripts/install-stable-yield-auto-migrate-cron.sh",
-		"stable-yield:auto-migrate:v2": "node scripts/stable-yield-auto-migrate-v2.mjs"
+		"stable-yield:auto-migrate:v2": "node scripts/stable-yield-auto-migrate-v2.mjs",
+		"stable-yield:auto-migrate:v2:cron-install": "bash scripts/install-stable-yield-auto-migrate-v2-cron.sh"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",

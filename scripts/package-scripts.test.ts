@@ -129,6 +129,9 @@ describe("package.json script contracts", () => {
 		expect(scripts?.["stable-yield:auto-migrate:v2"]).toBe(
 			"node scripts/stable-yield-auto-migrate-v2.mjs",
 		);
+		expect(scripts?.["stable-yield:auto-migrate:v2:cron-install"]).toBe(
+			"bash scripts/install-stable-yield-auto-migrate-v2-cron.sh",
+		);
 		expect(scripts?.["stable-yield:auto-migrate:v1:cron-install"]).toBe(
 			"bash scripts/install-stable-yield-auto-migrate-cron.sh",
 		);

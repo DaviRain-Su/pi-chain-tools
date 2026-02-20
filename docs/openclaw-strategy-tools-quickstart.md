@@ -133,6 +133,11 @@ npm run stable-yield:auto-migrate:v2 -- --maxMoveUsd 5 --minApyDeltaBps 20
 
 # 可通过参数/环境注入外部APY用于比较
 npm run stable-yield:auto-migrate:v2 -- --listaUsdtApy 1.8 --wombatUsdtApy 1.2
+
+# 安装 v2 cron（每30分钟评估一次）
+npm run stable-yield:auto-migrate:v2:cron-install
+# logs: logs/stable-yield-auto-migrate-v2.log
+# last json: logs/stable-yield-auto-migrate-v2-last.json
 ```
 
 
