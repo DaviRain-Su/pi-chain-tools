@@ -3,6 +3,7 @@
 	"files": {
 		"ignore": [
 			"apps/dashboard/data/**",
+			"logs/**",
 			"contracts/hyperliquid-autonomous/artifacts/**",
 			"contracts/hyperliquid-autonomous/cache/**"
 		]
