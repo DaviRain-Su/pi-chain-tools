@@ -9443,7 +9443,7 @@ async function discoverSeedCandidatesFromProtocolMeta(protocol) {
 	return [...new Set(out)];
 }
 
-async function scorePoolCandidates(candidates) {
+async function scorePoolCandidates(candidates, protocol) {
 	const provider = new JsonRpcProvider(BSC_RPC_URL, {
 		name: "bsc",
 		chainId: BSC_CHAIN_ID,
@@ -9451,22 +9451,73 @@ async function scorePoolCandidates(candidates) {
 	const erc20Iface = new Interface([
 		"function balanceOf(address owner) view returns (uint256)",
 	]);
+	const listaPoolIface = new Interface([
+		"function supply(address asset,uint256 amount,address onBehalfOf,uint16 referralCode)",
+	]);
 	const readBalanceRaw = async (token, owner) => {
 		const data = erc20Iface.encodeFunctionData("balanceOf", [owner]);
 		const raw = await provider.call({ to: token, data });
 		return erc20Iface.decodeFunctionResult("balanceOf", raw)[0].toString();
 	};
+	const probeListaCompatibility = async (pool) => {
+		if (String(protocol || "") !== "lista")
+			return { compatible: null, reason: null };
+		try {
+			const code = await provider.getCode(pool);
+			if (!code || code === "0x") {
+				return { compatible: false, reason: "no_contract_code" };
+			}
+			const data = listaPoolIface.encodeFunctionData("supply", [
+				BSC_USDT,
+				"1",
+				"0x0000000000000000000000000000000000000001",
+				0,
+			]);
+			await provider.call({ to: pool, data });
+			return { compatible: true, reason: "call_ok" };
+		} catch (error) {
+			const msg = String(error?.message || error || "").toLowerCase();
+			if (
+				msg.includes("no_contract_code") ||
+				msg.includes("call to non-contract")
+			) {
+				return { compatible: false, reason: "no_contract_code" };
+			}
+			if (
+				msg.includes("function selector") ||
+				msg.includes("method not found")
+			) {
+				return { compatible: false, reason: "missing_supply_selector" };
+			}
+			return { compatible: true, reason: "revert_but_selector_present" };
+		}
+	};
 	const rows = [];
 	for (const pool of candidates) {
-		const [usdcRaw, usdtRaw] = await Promise.all([
+		const [usdcRaw, usdtRaw, listaProbe] = await Promise.all([
 			readWithFallback(() => readBalanceRaw(BSC_USDC, pool), "0"),
 			readWithFallback(() => readBalanceRaw(BSC_USDT, pool), "0"),
+			probeListaCompatibility(pool),
 		]);
 		const usdcUi = Number(rawToUi(usdcRaw, BSC_USDC_DECIMALS));
 		const usdtUi = Number(rawToUi(usdtRaw, BSC_USDT_DECIMALS));
-		rows.push({ pool, usdcUi, usdtUi, liquidityScore: usdcUi + usdtUi });
+		const liquidityScore = usdcUi + usdtUi;
+		const compatibilityScore =
+			listaProbe?.compatible === true
+				? 50
+				: listaProbe?.compatible === false
+					? -100
+					: 0;
+		rows.push({
+			pool,
+			usdcUi,
+			usdtUi,
+			liquidityScore,
+			compatibility: listaProbe,
+			totalScore: liquidityScore + compatibilityScore,
+		});
 	}
-	rows.sort((a, b) => b.liquidityScore - a.liquidityScore);
+	rows.sort((a, b) => Number(b.totalScore || 0) - Number(a.totalScore || 0));
 	return rows;
 }
 
@@ -9493,14 +9544,20 @@ async function discoverBscPoolsByProtocol(protocol) {
 		warning =
 			"auto-discovery found no BSC pool addresses from configured protocol API URLs / DeFiLlama / protocol metadata; set BSC_*_POOL_DISCOVERY_API_URLS or BSC_*_POOL_CANDIDATES";
 	}
-	const rows = await scorePoolCandidates(candidates);
-	const topScore = Number(rows[0]?.liquidityScore || 0);
-	const recommended = topScore > 0 ? (rows[0]?.pool ?? null) : null;
+	const rows = await scorePoolCandidates(candidates, key);
+	const topScore = Number(rows[0]?.totalScore ?? rows[0]?.liquidityScore ?? 0);
+	const topLiquidity = Number(rows[0]?.liquidityScore || 0);
+	const topCompatOk = rows[0]?.compatibility?.compatible === true;
+	const canRecommend =
+		topLiquidity > 0 ||
+		(key === "lista" && topCompatOk && source === "protocol-api");
+	const recommended =
+		canRecommend && topScore > 0 ? (rows[0]?.pool ?? null) : null;
 	let reasonCode = "recommended";
-	if (!warning && rows.length > 0 && topScore <= 0) {
+	if (!warning && rows.length > 0 && (!canRecommend || topScore <= 0)) {
 		warning =
-			"auto-discovery candidates found but liquidity score is zero; recommendation withheld for safety";
-		reasonCode = "withheld_zero_liquidity";
+			"auto-discovery candidates found but recommendation withheld by safety policy (need positive liquidity or stronger protocol evidence)";
+		reasonCode = "withheld_safety_policy";
 	}
 	if (rows.length === 0) {
 		reasonCode = "no_candidates";
