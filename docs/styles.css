@@ -337,6 +337,16 @@ h3 {
 	transform: translateY(-1px);
 }
 
+.btn:focus-visible,
+.top-nav a:focus-visible,
+.top-nav-toggle:focus-visible,
+.theme-toggle:focus-visible,
+.hero-more-links summary:focus-visible,
+.command-block button:focus-visible {
+	outline: 2px solid rgba(86, 224, 205, 0.8);
+	outline-offset: 2px;
+}
+
 .btn-primary {
 	background: linear-gradient(135deg, #5d72ff 0%, #30c4ae 100%);
 	box-shadow: 0 10px 28px rgba(72, 104, 255, 0.36);
