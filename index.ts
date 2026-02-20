@@ -87,9 +87,11 @@ function validateStrategyStructure(specInput: unknown): {
 }
 
 const EXECUTE_CONFIRM_TOKEN = "I_ACKNOWLEDGE_EXECUTION";
+const LIVE_EXECUTE_CONFIRM_TOKEN = "I_ACKNOWLEDGE_LIVE_EXECUTION";
 const EXECUTE_ALLOWED_TEMPLATE = "rebalance-crosschain-v0";
 const EXECUTE_ALLOWED_CHAINS = new Set(["base", "bsc"]);
 const EXECUTE_MAX_PER_RUN_USD = 5000;
+const LIVE_EXECUTE_MAX_PER_RUN_USD = 100;
 
 function evaluateExecutePolicy(spec: Record<string, unknown>) {
 	const metadata = asObject(spec.metadata);
@@ -443,6 +445,8 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 				),
 				confirmExecuteToken: Type.Optional(Type.String()),
 				prepareQuote: Type.Optional(Type.Boolean()),
+				live: Type.Optional(Type.Boolean()),
+				liveConfirmToken: Type.Optional(Type.String()),
 				quoteContext: Type.Optional(
 					Type.Object({}, { additionalProperties: true }),
 				),
@@ -492,6 +496,49 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					};
 				}
 
+				if (mode === "execute" && params.live === true) {
+					const maxPerRunUsd = Number(
+						asObject(asObject(params.spec)?.constraints)?.risk?.maxPerRunUsd ||
+							0,
+					);
+					if (maxPerRunUsd > LIVE_EXECUTE_MAX_PER_RUN_USD) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify(
+										{
+											status: "blocked",
+											reason: `live execution cap exceeded (${maxPerRunUsd} > ${LIVE_EXECUTE_MAX_PER_RUN_USD})`,
+										},
+										null,
+										2,
+									),
+								},
+							],
+						};
+					}
+					if (params.liveConfirmToken !== LIVE_EXECUTE_CONFIRM_TOKEN) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify(
+										{
+											status: "blocked",
+											reason:
+												"live execution requires explicit liveConfirmToken",
+											requiredToken: LIVE_EXECUTE_CONFIRM_TOKEN,
+										},
+										null,
+										2,
+									),
+								},
+							],
+						};
+					}
+				}
+
 				if (
 					mode === "execute" &&
 					params.prepareQuote === true &&
@@ -528,6 +575,9 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 										...simulated.result,
 										quotePrepareStatus: "ok",
 										quotePlan: quoteResult.quotePlan,
+										liveRequested: params.live === true,
+										broadcastStatus:
+											params.live === true ? "not-implemented-yet" : "skipped",
 									},
 									null,
 									2,
@@ -537,9 +587,17 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					};
 				}
 
+				const baseResult =
+					mode === "execute" && params.live === true
+						? {
+								...simulated.result,
+								liveRequested: true,
+								broadcastStatus: "not-implemented-yet",
+							}
+						: simulated.result;
 				return {
 					content: [
-						{ type: "text", text: JSON.stringify(simulated.result, null, 2) },
+						{ type: "text", text: JSON.stringify(baseResult, null, 2) },
 					],
 				};
 			},
