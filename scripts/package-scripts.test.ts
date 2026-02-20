@@ -123,6 +123,9 @@ describe("package.json script contracts", () => {
 		expect(scripts?.["stable-yield:smoke"]).toBe(
 			"node scripts/stable-yield-smoke.mjs",
 		);
+		expect(scripts?.["stable-yield:auto-migrate:v1"]).toBe(
+			"node scripts/stable-yield-auto-migrate-v1.mjs",
+		);
 		expect(scripts?.["dashboard:restart"]).toContain(
 			"node scripts/dashboard-restart.mjs --restart",
 		);

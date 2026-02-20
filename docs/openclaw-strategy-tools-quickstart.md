@@ -103,6 +103,16 @@ CLI 快速烟测：
 npm run stable-yield:smoke
 ```
 
+自动迁移 v1（BSC，Venus USDC/USDT 二选一，按 supply APY 迁移）：
+
+```bash
+# 先看计划（默认 dry-run）
+npm run stable-yield:auto-migrate:v1
+
+# 真执行（带确认 token）
+npm run stable-yield:auto-migrate:v1 -- --execute true --confirm I_ACKNOWLEDGE_AUTO_MIGRATE --maxMoveUsd 5
+```
+
 
 ## 0) 查看可上架策略模板（Market Manifests）
 
