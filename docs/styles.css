@@ -236,6 +236,26 @@ h3 {
 	padding: 0.66rem 1rem;
 }
 
+.hero-kpi {
+	display: grid;
+	gap: 0.45rem;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	margin-top: 1rem;
+}
+
+.hero-kpi span {
+	background: rgba(16, 27, 43, 0.72);
+	border: 1px solid rgba(154, 174, 210, 0.24);
+	border-radius: 0.65rem;
+	color: #c9d8f3;
+	font-size: 0.78rem;
+	padding: 0.48rem 0.58rem;
+}
+
+.hero-kpi strong {
+	color: #ecf3ff;
+}
+
 .hero-more-links {
 	margin-top: 0.72rem;
 }
@@ -440,6 +460,12 @@ section.panel:nth-of-type(even)::before {
 	font-family: "IBM Plex Mono", "Menlo", "Monaco", monospace;
 	font-size: 0.78rem;
 	padding: 0.45rem 0.7rem;
+	transition: transform 140ms ease, filter 180ms ease;
+}
+
+.command-block button.is-copied {
+	filter: saturate(1.25) brightness(1.08);
+	transform: translateY(-1px);
 }
 
 .step-nav {
@@ -551,6 +577,10 @@ section.panel:nth-of-type(even)::before {
 	}
 
 	.step-buttons {
+		grid-template-columns: 1fr;
+	}
+
+	.hero-kpi {
 		grid-template-columns: 1fr;
 	}
 

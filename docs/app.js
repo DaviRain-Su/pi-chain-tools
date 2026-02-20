@@ -8,8 +8,10 @@ function bindCopy(buttonId, commandId) {
 		if (!value) return;
 		try {
 			await navigator.clipboard.writeText(value);
-			button.textContent = "Copied";
+			button.classList.add("is-copied");
+			button.textContent = "✓ Copied";
 			setTimeout(() => {
+				button.classList.remove("is-copied");
 				button.textContent = "Copy";
 			}, 1400);
 		} catch {
