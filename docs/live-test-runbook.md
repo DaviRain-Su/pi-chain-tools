@@ -21,7 +21,7 @@ Recommended for full dry-run visibility:
 - `BREEZE_API_BASE_URL`
 - `BREEZE_API_KEY`
 
-Optional Hyperliquid execute-binding policy vars (autonomous seam, no direct unsafe execute):
+Optional Hyperliquid execute-binding policy vars (offchain orchestrator seam, no direct unsafe execute):
 
 - `HYPERLIQUID_AUTONOMOUS_ENABLED=true`
 - `HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED=true`
@@ -104,6 +104,17 @@ After any non-OK run:
    - `npm run live:test:dryrun`
    - execute only with explicit confirmation
 
+
+## Why offchain orchestrator mode
+
+This repo uses offchain orchestration as the declared production/demo target because it improves:
+
+- speed of setup and incident recovery,
+- reliability across heterogeneous environments,
+- operator control via explicit confirmation + local key custody.
+
+Onchain evidence is still required where available (tx hash/events/state changes), but autonomous onchain trigger proof is not a release blocker in this mode.
+
 ## Mainnet readiness matrix (timely update)
 
 Build/update readiness artifacts (JSON + markdown):
@@ -130,7 +141,7 @@ Artifacts generated:
 - `apps/dashboard/data/readiness/latest.json`
 - Dashboard API: `GET /api/readiness/matrix`
 
-## Autonomous cycle observability + live safety lock
+## Offchain orchestrator observability + live safety lock
 
 - Cycle proof latest: `apps/dashboard/data/proofs/autonomous-cycle/latest.json`
 - Cycle proof history: `apps/dashboard/data/proofs/autonomous-cycle/runs/*.json`

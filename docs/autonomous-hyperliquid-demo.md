@@ -1,9 +1,9 @@
-# Autonomous Hyperliquid 3-Min Demo Script
+# Hyperliquid Offchain-Orchestrator 3-Min Demo Script
 
 ## 0:00 - 0:30 Setup + safety gates
-- Show `HYPERLIQUID_AUTONOMOUS_MODE=true` and deterministic cycle envs.
-- Show Hyperliquid execute binding envs (`*_EXECUTE_BINDING_ENABLED`, router/executor, command).
-- Mention hard gates: confirm text + max amount cap + active binding required.
+- Show `HYPERLIQUID_AUTONOMOUS_MODE=false` as default operating posture (offchain orchestrator).
+- Show Hyperliquid execute binding envs (`*_EXECUTE_BINDING_ENABLED`, router/executor, command) as optional guarded seam.
+- Mention hard gates: confirm text + max amount cap + cooldown/replay lock + panic stop.
 
 ## 0:30 - 1:30 Dryrun cycle proof
 Run:
@@ -17,7 +17,7 @@ Show artifact:
 - Fields: `mode`, `decision`, `txEvidence`, `reconcileSummary`.
 
 ## 1:30 - 2:30 Guarded live path
-Use a configured live executor command and active binding:
+Use a configured live executor command and active binding (offchain trigger, onchain evidence capture):
 
 ```bash
 export HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE=true

@@ -57,7 +57,7 @@ const SECURITY_REPORTS_ROOT = path.join(
 );
 
 const MODULE_ORDER = [
-	"hyperliquid_autonomous_track",
+	"hyperliquid_offchain_orchestrator_track",
 	"bsc_execute",
 	"starknet_execute",
 	"near_flows",
@@ -173,10 +173,10 @@ function evaluateAutonomousReadiness(env) {
 			status: "green",
 			blockers: [],
 			actions: [
-				"Legacy track active; set HYPERLIQUID_AUTONOMOUS_MODE=true to run autonomous rollout checks.",
+				"Offchain orchestrator mode active (default). Keep HYPERLIQUID_AUTONOMOUS_MODE=false unless explicitly testing autonomous contract cycle.",
 			],
 			evidence: [
-				"autonomous mode disabled",
+				"offchain orchestrator mode active (autonomous contract cycle disabled)",
 				`Hyperliquid execute binding: ${hyperliquidExecuteBinding}`,
 			],
 			evidenceFields: {
@@ -213,8 +213,8 @@ function evaluateAutonomousReadiness(env) {
 		blockers,
 		actions: blockers.length
 			? [
-					"Define deterministic cycle id + interval before enabling autonomous execution.",
-					"Use legacy/manual trigger path only when HYPERLIQUID_AUTONOMOUS_MODE is off.",
+					"Define deterministic cycle id + interval before enabling autonomous contract-cycle experiments.",
+					"Use offchain orchestrator path for production/readiness gates.",
 					"If Hyperliquid binding is required, set binding envs and re-run rollout gate.",
 				]
 			: [
@@ -222,7 +222,7 @@ function evaluateAutonomousReadiness(env) {
 					"Hyperliquid execute binding readiness is healthy for current policy.",
 				],
 		evidence: [
-			"autonomous mode enabled",
+			"autonomous contract-cycle mode enabled (experimental)",
 			`cycle id: ${cycleId || "missing"}`,
 			`cycle interval seconds: ${Number.isFinite(interval) ? interval : "missing"}`,
 			`Hyperliquid execute binding: ${hyperliquidExecuteBinding}`,
@@ -259,14 +259,15 @@ async function buildMatrix() {
 
 	modules.push(
 		buildModule({
-			key: "hyperliquid_autonomous_track",
-			label: "Hyperliquid autonomous track",
+			key: "hyperliquid_offchain_orchestrator_track",
+			label: "Hyperliquid offchain orchestrator track",
 			status: autonomousState.status,
 			evidence: autonomousState.evidence,
 			blockers: autonomousState.blockers,
 			lastValidatedAt: generatedAt,
 			nextAction:
-				autonomousState.actions[0] || "Review autonomous rollout blockers",
+				autonomousState.actions[0] ||
+				"Review offchain orchestrator readiness blockers",
 		}),
 	);
 
@@ -575,7 +576,7 @@ async function buildMatrix() {
 					}
 				: {
 						track: "legacy",
-						governance: "onchain_only",
+						governance: "offchain_orchestrator_local_key",
 						trigger: "external",
 					},
 		},

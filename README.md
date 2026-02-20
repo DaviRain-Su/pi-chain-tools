@@ -2,7 +2,7 @@
 
 Gradience is a multi-chain AI agent runtime — 44 NEAR tools, 30+ EVM tools, full Solana/Sui coverage — that turns blockchain capabilities into structured, safe, composable MCP services.
 
-**Featured: [Autonomous Stablecoin Yield Agent on NEAR](docs/near-hackathon.md)** — an AI agent that continuously monitors Burrow lending markets and autonomously rebalances stablecoin positions to maximize yield. Starts with one command, keeps working after you close the tab.
+**Featured: [Stablecoin Yield Orchestrator on NEAR](docs/near-hackathon.md)** — an offchain orchestrator that continuously monitors Burrow lending markets, proposes/replays guarded actions, and records onchain execution evidence (tx hash/events/state deltas).
 
 ## One-click real test runner
 
@@ -21,98 +21,52 @@ npm run live:test:full -- --confirm-live true --max-usd 2 --target-chain bsc --p
 
 Details: `docs/live-test-runbook.md`
 
-## Autonomous track rollout gate
+## Hyperliquid offchain orchestrator track (default)
 
-Hyperliquid autonomous track template is isolated and **flag-gated**.
+Current operating model is **offchain orchestrator + onchain execution evidence + guardrails**.
 
-- Default path (backward compatible): `HYPERLIQUID_AUTONOMOUS_MODE=false`
-- Autonomous path: `HYPERLIQUID_AUTONOMOUS_MODE=true`
+- Default/canonical path: `HYPERLIQUID_AUTONOMOUS_MODE=false`
+- Optional experimental path: `HYPERLIQUID_AUTONOMOUS_MODE=true` (not required for release gate)
 
-Run full rollout regression gate before enabling in any live environment:
+### Why this mode
 
-```bash
-npm run autonomous:hyperliquid:rollout:gate
-```
+- **Speed**: lower setup and troubleshooting overhead vs contract-only trigger requirements
+- **Reliability**: fewer hard dependencies during demos/ops handoffs
+- **Operator control**: explicit confirmations, caps, cooldown, panic stop, and local key custody
 
-Safe toggle + verify commands:
-
-```bash
-# legacy/default track
-HYPERLIQUID_AUTONOMOUS_MODE=false npm run live:test:preflight
-
-# autonomous track markers
-HYPERLIQUID_AUTONOMOUS_MODE=true npm run live:test:preflight
-curl -s http://127.0.0.1:4173/api/proof/summary | jq '.summary.autonomousTrack'
-```
-
-Hyperliquid execute-binding readiness (autonomous, additive):
+Run the local orchestrator gate before live usage:
 
 ```bash
-# prepare-only seam (no unsafe bypass)
-export HYPERLIQUID_AUTONOMOUS_MODE=true
-export HYPERLIQUID_AUTONOMOUS_ENABLED=true
-export HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED=true
-export HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED=true
-export HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND='node scripts/hyperliquid-exec-safe.mjs "{intent}"'
-export HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS=0xYourRouter
-export HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS=0xYourExecutor
-
 npm run live:test:preflight
 npm run readiness:build
-curl -s http://127.0.0.1:4173/api/proof/summary | jq '.summary.autonomousTrack | {executeBinding, executeBindingRequired, executeBindingReady}'
-curl -s http://127.0.0.1:4173/api/readiness/matrix | jq '.matrix.autonomousTrack.evidence | {hyperliquidExecuteBinding, hyperliquidExecuteBindingRequired, hyperliquidExecuteBindingReady}'
+npm run autonomous:submission:validate
 ```
 
-If binding is required but missing, autonomous checks emit blocker + remediation hints in both live-test and readiness outputs.
-
-Autonomous Hyperliquid track uses Hyperliquid as the core yield engine.
-- Use `HYPERLIQUID_AUTONOMOUS_*` env keys.
-
-Env migration (single-release compatibility):
-- `BSC_AUTONOMOUS_MODE` -> `HYPERLIQUID_AUTONOMOUS_MODE`
-- `BSC_AUTONOMOUS_CYCLE_ID` -> `HYPERLIQUID_AUTONOMOUS_CYCLE_ID`
-- `BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS` -> `HYPERLIQUID_AUTONOMOUS_CYCLE_INTERVAL_SECONDS`
-- `BSC_AUTONOMOUS_HYPERLIQUID_ENABLED` -> `HYPERLIQUID_AUTONOMOUS_ENABLED`
-- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED` -> `HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_ENABLED`
-- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED` -> `HYPERLIQUID_AUTONOMOUS_EXECUTE_BINDING_REQUIRED`
-- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE` -> `HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE`
-- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND` -> `HYPERLIQUID_AUTONOMOUS_EXECUTE_COMMAND`
-- `BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS` -> `HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS`
-- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS` -> `HYPERLIQUID_AUTONOMOUS_EXECUTOR_ADDRESS`
-- `BSC_TESTNET_RPC_URL` -> `HYPERLIQUID_TESTNET_RPC_URL`
-- `BSC_TESTNET_PRIVATE_KEY` -> `HYPERLIQUID_TESTNET_PRIVATE_KEY`
-
-Autonomous cycle runnable proof (deterministic Hyperliquid cycle):
+Guarded cycle (offchain trigger, onchain evidence when executed):
 
 ```bash
 # safe dryrun (default)
 npm run autonomous:hyperliquid:cycle -- --mode dryrun --run-id cycle-dryrun-001
 
-# guarded live run (requires active binding + confirm text + live command env)
-# extra safety: lock + replay guard are persisted in apps/dashboard/data/autonomous-cycle-state.json
+# guarded live run (explicit operator controls)
 HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE=true \
-HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND='node -e "console.log(JSON.stringify({txHash:\"0x1111111111111111111111111111111111111111111111111111111111111111\"}))"' \
+HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND='node -e "console.log(JSON.stringify({txHash:"0x1111111111111111111111111111111111111111111111111111111111111111"}))"' \
 HYPERLIQUID_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS=300 \
 npm run autonomous:hyperliquid:cycle -- --mode live --run-id cycle-live-001
-
-# list latest cycle runs (status/txHash/blockers)
-npm run autonomous:hyperliquid:runs -- --limit 8
-
-# quick cwd/path diagnosis for ENOENT/cwd mistakes
-npm run doctor:paths
 ```
 
-Submission bundle + strict checklist validator:
+Safety controls surfaced in runtime and artifacts:
+
+- explicit confirm text (`HYPERLIQUID_AUTONOMOUS_CONFIRM_TEXT`)
+- max amount cap (`HYPERLIQUID_AUTONOMOUS_MAX_AMOUNT_RAW`)
+- cooldown / replay lock (`HYPERLIQUID_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS`)
+- panic stop (`--panic-stop ./ops/PANIC_STOP` in live test runner)
+
+Submission bundle + checklist validator:
 
 ```bash
 npm run autonomous:submission:bundle
 npm run autonomous:submission:validate
-```
-
-Testnet evidence runner (real onchain cycle if env ready; deterministic missing-keys guidance otherwise):
-
-```bash
-npm run autonomous:hyperliquid:testnet:evidence
 ```
 
 ## EVM Security Watch (Quickstart)
@@ -796,14 +750,15 @@ sui client active-address
 ls ~/.sui/sui_config/sui.keystore
 ```
 
-### 5) NEAR signer config (no explicit private key required)
+### 5) NEAR signer config (canonical: local credentials file)
 
-NEAR execute/workflow tools can auto-load signer in this order:
+Recommended signer path for this repo: **local file-based keys only** (`~/.near-credentials/...`).
 
-1. `privateKey` parameter (`ed25519:...`)
-2. `NEAR_PRIVATE_KEY`
-3. local credentials file:
-   - `~/.near-credentials/<network>/<accountId>.json`
+NEAR execute/workflow tools resolve signer from:
+
+1. local credentials file: `~/.near-credentials/<network>/<accountId>.json` (canonical)
+2. optional explicit param (`privateKey`) for advanced/manual flows only
+3. `NEAR_PRIVATE_KEY` (legacy fallback, discouraged for day-to-day ops)
 
 Account id resolution order:
 

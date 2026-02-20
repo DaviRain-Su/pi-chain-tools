@@ -1,6 +1,6 @@
 # NEAR Innovation Sandbox — Submission: Autonomous Stablecoin Yield Agent
 
-> **One job, end-to-end: an AI agent that continuously monitors NEAR DeFi lending markets and autonomously rebalances your stablecoin position to maximize yield — while you sleep.**
+> **One job, end-to-end: an offchain orchestrator that continuously monitors NEAR DeFi lending markets and safely rebalances your stablecoin position with onchain evidence and guardrails.**
 
 ---
 
@@ -18,7 +18,7 @@ You hold stablecoins on NEAR. Burrow lending protocol offers variable APR across
 
 ## The Solution
 
-**An autonomous yield optimization agent that runs as a background service.** It uses NEAR's Burrow lending protocol and a structured MCP (Model Context Protocol) tool layer to:
+**An offchain-orchestrated yield optimization agent that runs as a background service.** It uses NEAR's Burrow lending protocol and a structured MCP (Model Context Protocol) tool layer to:
 
 1. **Scan** all stablecoin lending markets on Burrow
 2. **Read** your current supplied position
@@ -41,7 +41,7 @@ near_yieldWorkerStart({
 })
 ```
 
-That's it. The agent handles everything else autonomously.
+That's it. The orchestrator handles the loop with explicit safety controls and auditable evidence.
 
 ---
 

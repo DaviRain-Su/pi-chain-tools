@@ -17,13 +17,14 @@ async function readJsonSafe(filePath) {
 	}
 }
 
-function pushCheck(result, name, pass, passHint, failHint) {
+function pushCheck(result, name, pass, passHint, failHint, required = true) {
 	result.checks.push({
 		name,
+		required,
 		status: pass ? "PASS" : "WARN",
 		detail: pass ? passHint : failHint,
 	});
-	if (!pass) result.gaps.push({ name, action: failHint });
+	if (!pass) result.gaps.push({ name, required, action: failHint });
 }
 
 export async function validateAutonomousSubmission() {
@@ -54,7 +55,7 @@ export async function validateAutonomousSubmission() {
 	const bundle = await readJsonSafe(bundlePath);
 
 	const result = {
-		suite: "hyperliquid-submission-validator",
+		suite: "hyperliquid-offchain-orchestrator-submission-validator",
 		version: 1,
 		generatedAt: new Date().toISOString(),
 		status: "PASS",
@@ -71,7 +72,7 @@ export async function validateAutonomousSubmission() {
 		);
 	pushCheck(
 		result,
-		"Hyperliquid core route evidence present",
+		"Hyperliquid core route evidence present (offchain orchestrator)",
 		routeOk,
 		"cycle proof marks core route hyperliquid_earn_core",
 		`run: npm run autonomous:hyperliquid:cycle -- --mode dryrun --run-id validator-refresh and verify ${cyclePath}`,
@@ -83,12 +84,14 @@ export async function validateAutonomousSubmission() {
 		Array.isArray(cycle?.txEvidence?.emittedEvents) &&
 		cycle.txEvidence.emittedEvents.length > 0 &&
 		cycle?.txEvidence?.stateDelta;
+	const txEvidenceRequired = cycle?.mode === "live";
 	pushCheck(
 		result,
-		"onchain cycle tx evidence present",
+		"onchain execution evidence present (tx hash/events/state delta)",
 		txOk,
 		"tx hash + decoded events + state delta found",
 		"run a live testnet cycle and store latest proof: npm run autonomous:hyperliquid:testnet:evidence",
+		txEvidenceRequired,
 	);
 
 	const nonManualOk =
@@ -96,10 +99,11 @@ export async function validateAutonomousSubmission() {
 		cycle?.txEvidence?.receiptNormalized?.chain === "bsc";
 	pushCheck(
 		result,
-		"non-manual core-path proof present",
+		"autonomous onchain trigger proof present (optional in declared model)",
 		nonManualOk,
 		"verifiable transition + normalized onchain receipt found",
-		"enable onchain trigger proof and rerun live cycle to populate cycleTransitionEvidence.verifiable=true",
+		"optional: enable onchain trigger proof and rerun live cycle to populate cycleTransitionEvidence.verifiable=true",
+		false,
 	);
 
 	const docsOk =
@@ -115,7 +119,7 @@ export async function validateAutonomousSubmission() {
 		`ensure files exist (${demoPath}, ${readmePath}) and regenerate bundle: npm run autonomous:submission:bundle`,
 	);
 
-	if (result.gaps.length > 0) result.status = "WARN";
+	if (result.gaps.some((gap) => gap.required !== false)) result.status = "WARN";
 	console.log(JSON.stringify(result, null, 2));
 	return result;
 }

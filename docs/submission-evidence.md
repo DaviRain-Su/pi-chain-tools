@@ -2,15 +2,15 @@
 
 ## 1) Latest Commit
 
-- Hash: `3ac334bb1a835d7ff8184bc14b88116c7da3af5a`
-- Commit Date (ISO): 2026-02-20T13:45:29+08:00
-- Subject: fix(testnet-evidence): precheck router-or-contract prerequisite
+- Hash: `6e40331410e9cd0c9249db2d77bd5e363365da2d`
+- Commit Date (ISO): 2026-02-20T13:57:44+08:00
+- Subject: migrate autonomous track to hyperliquid-native naming and envs
 
 ## 2) Quality Snapshot (best-effort)
 
 | Command | Status | Exit Code | Timestamp | Source Session |
 | --- | --- | --- | --- | --- |
-| npm run check | pass | 0 | 2026-02-20T05:57:28.499Z | 22bec307-4f83-49a7-abe0-7dd9cfc1e077 |
+| npm run check | pass | 0 | 2026-02-20T06:33:52.034Z | 94b39b0b-edbd-498f-bdd5-5459ea79d727 |
 | npm run test | unknown | - | - | - |
 | npm run security:check | pass | 0 | 2026-02-18T12:33:00.912Z | 993a0f40-d72c-4933-aa85-4a238ff9c98e |
 
@@ -26,7 +26,7 @@
 
 - Dashboard status: stopped_or_unknown
 - Dashboard listen line: NEAR dashboard listening on http://127.0.0.1:4173
-- Latest OpenClaw session id: 22bec307-4f83-49a7-abe0-7dd9cfc1e077
+- Latest OpenClaw session id: 94b39b0b-edbd-498f-bdd5-5459ea79d727
 
 ## 5) Onchain Tx Proof Template
 

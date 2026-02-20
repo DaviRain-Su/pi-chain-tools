@@ -13,10 +13,12 @@
 
 ## B. Onchain Proof（最关键）
 
-- [ ] 至少 1 条 Monad 真实 tx hash
+- [ ] 运行模式声明为 offchain orchestrator + onchain evidence + guardrails
+- [ ] 至少 1 条真实 tx hash（按当前提交链路）
 - [ ] 建议 2-3 条 tx hash（read/execute/reconcile场景更完整）
 - [ ] Explorer 链接全部可打开
 - [ ] tx 对应操作与文案一致（避免“写了 claim，链上是 deposit”）
+- [ ] 若无 autonomous trigger proof，不作为单独否决项（需有可验证执行证据）
 
 ## C. Reproducibility（评审高权重）
 

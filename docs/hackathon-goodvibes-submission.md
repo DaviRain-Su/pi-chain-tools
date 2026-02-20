@@ -12,7 +12,7 @@
 
 ## 2) One-line Pitch
 
-An autonomous stable yield agent that can plan, execute, reconcile, and monitor cross-chain/BSC yield operations with production-style guardrails and onchain execution proof.
+An offchain orchestrator stable-yield agent that can plan, execute, reconcile, and monitor cross-chain/BSC yield operations with production-style guardrails and onchain execution evidence.
 
 ---
 
@@ -20,7 +20,7 @@ An autonomous stable yield agent that can plan, execute, reconcile, and monitor 
 
 We built a practical **AI-driven stable yield agent** focused on real execution and ops visibility:
 
-- **Autonomous strategy flow**: read market signals → plan → gated execution → post-action reconciliation.
+- **Offchain orchestrator flow**: read market signals → plan → gated execution → post-action reconciliation.
 - **BSC native execution**:
   - Lista native RPC execution path (real onchain tx path).
   - Wombat native RPC execution path (real onchain tx path).
@@ -32,6 +32,16 @@ We built a practical **AI-driven stable yield agent** focused on real execution 
   - standardized execution artifact and reconciliation objects for traceability and review.
 
 ---
+
+
+### Operating model choice (explicit)
+
+We intentionally ship this track as **offchain orchestrator + onchain execution evidence + guardrails** instead of requiring fully onchain autonomous triggering.
+
+Why:
+- faster iteration and incident response during hackathon operations,
+- more reliable execution in mixed local/demo environments,
+- stronger human/operator control (explicit confirm, caps, cooldown, panic stop, local-key custody).
 
 ## 4) Track
 
@@ -85,7 +95,7 @@ Recommended track(s):
 - Node.js 20+
 - npm
 - BSC RPC endpoint
-- funded test account/private key (for real execution path)
+- funded test account with **local file-based private key** (for real execution path)
 
 ## Setup
 
@@ -111,14 +121,14 @@ export BSC_LISTA_EXECUTE_ENABLED=true
 export BSC_LISTA_EXECUTE_MODE=native
 export BSC_LISTA_NATIVE_EXECUTE_ENABLED=true
 export BSC_LISTA_POOL=0xYOUR_LISTA_POOL_ADDRESS
-export BSC_LISTA_EXECUTE_PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HEX
+export BSC_LISTA_EXECUTE_PRIVATE_KEY="$(cat ~/.keys/pi-chain-tools/bsc-lista.key)"
 
 # Wombat native
 export BSC_WOMBAT_EXECUTE_ENABLED=true
 export BSC_WOMBAT_EXECUTE_MODE=native
 export BSC_WOMBAT_NATIVE_EXECUTE_ENABLED=true
 export BSC_WOMBAT_POOL=0xYOUR_WOMBAT_POOL_ADDRESS
-export BSC_WOMBAT_EXECUTE_PRIVATE_KEY=0xYOUR_PRIVATE_KEY_HEX
+export BSC_WOMBAT_EXECUTE_PRIVATE_KEY="$(cat ~/.keys/pi-chain-tools/bsc-wombat.key)"
 ```
 
 Run quality checks:

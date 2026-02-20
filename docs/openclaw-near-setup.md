@@ -59,12 +59,14 @@ For RPC stability under public endpoint throttling, prefer a fallback list:
 
 - `NEAR_MAINNET_RPC_URLS=https://1rpc.io/near,https://rpc.mainnet.near.org,https://near-mainnet.public.blastapi.io`
 
-For execute/sign flows, set one signer source explicitly when possible:
+For execute/sign flows, use **local credentials files** as the canonical signer source:
 
-- `NEAR_PRIVATE_KEY`
-- `NEAR_CREDENTIALS_DIR`
+- `NEAR_CREDENTIALS_DIR` (or default `~/.near-credentials`)
+- account file: `~/.near-credentials/<network>/<account>.json`
 
-> Never commit private keys.
+Legacy fallback (discouraged): `NEAR_PRIVATE_KEY` in env.
+
+> Never commit private keys. Prefer local file-based keys outside repo and load at runtime only.
 
 ## 3) Smoke test (read-only first)
 
@@ -87,7 +89,7 @@ Before any execute tools (`near_transferNear`, `near_swapRef`, `near_supplyBurro
 1. Confirm account/network are correct
 2. Start with workflow `analysis` / `simulate`
 3. Use small amounts first
-4. Keep keys in env/credentials only (no plaintext in chat)
+4. Keep keys in local credential files/secure env only (no plaintext in chat)
 
 ## 5) Common issues
 
@@ -98,7 +100,7 @@ Before any execute tools (`near_transferNear`, `near_swapRef`, `near_supplyBurro
 
 ### Auth/key errors
 - Verify `NEAR_ACCOUNT_ID`
-- Verify signer source (`NEAR_PRIVATE_KEY` or `NEAR_CREDENTIALS_DIR`)
+- Verify signer source (`NEAR_CREDENTIALS_DIR` and local credential file)
 - Ensure key matches the account on selected network
 
 ### RPC/network mismatch / 429 throttling

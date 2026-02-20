@@ -113,13 +113,14 @@ function evaluateAutonomousTrack(env, mode) {
 	if (!autonomousMode) {
 		return {
 			enabled: false,
-			health: "legacy-track",
+			health: "offchain-orchestrator",
 			blockers: [],
 			actions: [
-				"Set HYPERLIQUID_AUTONOMOUS_MODE=true to validate autonomous controls.",
+				"Default offchain orchestrator mode is active. Set HYPERLIQUID_AUTONOMOUS_MODE=true only for autonomous contract-cycle experiments.",
 			],
 			evidence: {
 				autonomousMode: false,
+				operatingModel: "offchain_orchestrator_local_key",
 				cycleConfigPresent: false,
 				hyperliquidExecuteBinding,
 				hyperliquidExecuteBindingRequired: false,
@@ -145,7 +146,7 @@ function evaluateAutonomousTrack(env, mode) {
 	}
 	if (mode !== "full") {
 		blockers.push(
-			`manual mode '${mode}' is external; autonomous track allows deterministic contract cycle only`,
+			`manual mode '${mode}' uses offchain orchestration; autonomous contract-cycle path is optional`,
 		);
 	}
 	return {
@@ -383,7 +384,7 @@ function toMarkdown(report) {
 		`- preflight: ${report.phases.preflight?.ok ? "ok" : "failed/skipped"}`,
 		`- dryrun: ${report.phases.dryrun?.ok ? "ok" : "failed/skipped"}`,
 		`- execute: ${report.phases.execute?.ok ? "ok" : "failed/skipped"}`,
-		`- autonomous health: ${report.autonomousTrack?.health ?? "legacy-track"}`,
+		`- orchestrator track health: ${report.autonomousTrack?.health ?? "offchain-orchestrator"}`,
 		"",
 		"## Rollback guidance",
 		"",
@@ -437,7 +438,7 @@ export async function runLiveTestRunner(rawArgs = process.argv.slice(2)) {
 					}
 				: {
 						track: "legacy",
-						governance: "onchain_only",
+						governance: "offchain_orchestrator_local_key",
 						trigger: "external",
 					},
 		},
