@@ -83,6 +83,7 @@ function usage() {
 		"  --runId run-xxx (optional idempotency key)",
 		"  --idempotencyPath /tmp/pct-idem.json (optional)",
 		"  --evidenceOut /tmp/strategy-evidence.json (optional)",
+		"  --trackAfterBroadcast true|false (optional)",
 		"  stable-yield-v1 live: defaults evidence path to docs/execution-proofs/YYYY-MM-DD/*.json",
 	].join("\n");
 }
@@ -188,6 +189,21 @@ async function submitSignedTx(params) {
 	return { network, rpcUrl, txHash };
 }
 
+async function fetchLifiStatus(params) {
+	const query = new URLSearchParams({
+		txHash: String(params.txHash || "").trim(),
+		fromChain: String(params.fromChain || "56"),
+		toChain: String(params.toChain || params.fromChain || "56"),
+	});
+	const res = await fetch(`https://li.quest/v1/status?${query.toString()}`, {
+		headers: { accept: "application/json" },
+	});
+	if (!res.ok) {
+		throw new Error(`status fetch failed: HTTP ${res.status}`);
+	}
+	return await res.json();
+}
+
 async function main() {
 	const args = parseArgs(process.argv.slice(2));
 	if (args.help) {
@@ -276,6 +292,11 @@ async function main() {
 	}
 
 	const runId = String(args.runId || "").trim();
+	const templateName = String(spec?.metadata?.template || "").trim();
+	const isStableYield = templateName === "stable-yield-v1";
+	const shouldTrack =
+		toBool(args.trackAfterBroadcast) ||
+		(isStableYield && mode === "execute" && live);
 	const evidenceOut =
 		String(args.evidenceOut || "").trim() ||
 		defaultStableYieldEvidencePath(spec, runId) ||
@@ -331,6 +352,26 @@ async function main() {
 			};
 		}
 	}
+	let tracking = null;
+	if (shouldTrack && broadcastStatus === "submitted" && broadcast?.txHash) {
+		try {
+			const chains = Array.isArray(spec?.constraints?.allow?.chains)
+				? spec.constraints.allow.chains.map((x) => String(x).toLowerCase())
+				: [];
+			const toChainId = { bsc: "56", base: "8453" };
+			const from = toChainId[chains[0]] || "56";
+			const to = toChainId[chains[1]] || from;
+			tracking = await fetchLifiStatus({
+				txHash: broadcast.txHash,
+				fromChain: from,
+				toChain: to,
+			});
+		} catch (error) {
+			tracking = {
+				error: error instanceof Error ? error.message : String(error),
+			};
+		}
+	}
 
 	const result = {
 		status: mode === "execute" ? "ready" : "ok",
@@ -342,6 +383,7 @@ async function main() {
 		evidenceOutPath: evidenceOut || null,
 		broadcastStatus,
 		broadcast,
+		tracking,
 		steps: executionTrace,
 		evidence: {
 			type: "strategy_execution_trace@v0",
