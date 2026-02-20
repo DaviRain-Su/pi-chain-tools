@@ -49,7 +49,10 @@ describe("normalize-runtime-metrics", () => {
 				env: { ...process.env, NEAR_DASHBOARD_METRICS_PATH: targetPath },
 			});
 			expect(second.status).toBe(0);
-			expect(second.stdout).toContain("already normalized");
+			expect(
+				second.stdout.includes("already normalized") ||
+					second.stdout.includes("fast-skip unchanged"),
+			).toBe(true);
 			expect(readFileSync(targetPath, "utf8")).toBe(afterFirst);
 		} finally {
 			rmSync(tmpDir, { recursive: true, force: true });

@@ -4,6 +4,7 @@
 		"ignore": [
 			"apps/dashboard/data/**",
 			"logs/**",
+			"docs/execution-proofs/**",
 			"contracts/hyperliquid-autonomous/artifacts/**",
 			"contracts/hyperliquid-autonomous/cache/**"
 		]
