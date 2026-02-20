@@ -3,7 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "@sinclair/typebox";
 import { getEvmChainId, parseEvmNetwork } from "./src/chains/evm/runtime.js";
-import { planLifiQuoteRoutes } from "./src/chains/evm/tools/lifi-planning.js";
+import {
+	lifiGet,
+	planLifiQuoteRoutes,
+} from "./src/chains/evm/tools/lifi-planning.js";
 import { LIFI_DEFAULT_SLIPPAGE } from "./src/chains/evm/tools/lifi-types.js";
 import { createNearToolset } from "./src/chains/near/toolset.js";
 import { registerChainToolsets } from "./src/core/register.js";
@@ -167,6 +170,23 @@ function buildLifiExecuteIntent(spec: Record<string, unknown>) {
 			"Call LI.FI quote endpoint to resolve route + transactionRequest",
 		requiresSigner: true,
 	};
+}
+
+async function getLifiStatus(params: {
+	txHash: string;
+	fromNetwork: string;
+	toNetwork: string;
+	bridge?: string;
+}) {
+	const fromNetwork = parseEvmNetwork(params.fromNetwork as never);
+	const toNetwork = parseEvmNetwork(params.toNetwork as never);
+	const queryParams: Record<string, string> = {
+		txHash: params.txHash.trim(),
+		fromChain: String(getEvmChainId(fromNetwork)),
+		toChain: String(getEvmChainId(toNetwork)),
+	};
+	if (params.bridge) queryParams.bridge = params.bridge;
+	return await lifiGet<Record<string, unknown>>("/status", queryParams);
 }
 
 async function prepareLifiQuoteFromIntent(
@@ -599,6 +619,32 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					content: [
 						{ type: "text", text: JSON.stringify(baseResult, null, 2) },
 					],
+				};
+			},
+		}),
+	);
+
+	pi.registerTool(
+		defineTool({
+			name: "pct_strategy_track",
+			label: "PCT Strategy Track",
+			description:
+				"Track LI.FI bridge execution status by txHash for execute-ready strategy runs.",
+			parameters: Type.Object({
+				txHash: Type.String(),
+				fromNetwork: Type.String(),
+				toNetwork: Type.String(),
+				bridge: Type.Optional(Type.String()),
+			}),
+			async execute(_toolCallId, params) {
+				const status = await getLifiStatus({
+					txHash: params.txHash,
+					fromNetwork: params.fromNetwork,
+					toNetwork: params.toNetwork,
+					bridge: params.bridge,
+				});
+				return {
+					content: [{ type: "text", text: JSON.stringify(status, null, 2) }],
 				};
 			},
 		}),
