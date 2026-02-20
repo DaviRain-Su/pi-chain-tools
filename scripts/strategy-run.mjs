@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -222,7 +223,12 @@ async function main() {
 		process.exit(1);
 	}
 
-	const spec = await loadJson(path.resolve(String(args.spec)));
+	const specPath = path.resolve(String(args.spec));
+	if (!existsSync(specPath)) {
+		console.error(`spec file not found: ${specPath}`);
+		process.exit(1);
+	}
+	const spec = await loadJson(specPath);
 	const steps = Array.isArray(spec?.plan?.steps) ? spec.plan.steps : [];
 	if (steps.length === 0) {
 		console.error("strategy plan.steps is required");
