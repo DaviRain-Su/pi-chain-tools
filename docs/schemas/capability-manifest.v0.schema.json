@@ -1,0 +1,87 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://pi-chain-tools/schemas/capability-manifest.v0.schema.json",
+	"title": "PI Chain Tools Capability Manifest v0",
+	"type": "object",
+	"additionalProperties": false,
+	"required": [
+		"id",
+		"version",
+		"kind",
+		"actions",
+		"chains",
+		"inputSchema",
+		"outputSchema"
+	],
+	"properties": {
+		"id": { "type": "string", "minLength": 1 },
+		"version": { "type": "string", "pattern": "^v?\\d+\\.\\d+(\\.\\d+)?$" },
+		"kind": {
+			"type": "string",
+			"enum": ["dex", "bridge", "lending", "vault", "oracle", "custom"]
+		},
+		"provider": { "type": "string", "minLength": 1 },
+		"actions": {
+			"type": "array",
+			"minItems": 1,
+			"items": { "type": "string", "minLength": 1 }
+		},
+		"chains": {
+			"type": "array",
+			"minItems": 1,
+			"items": { "type": "string", "minLength": 1 }
+		},
+		"requires": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"signer": { "type": "boolean" },
+				"rpc": { "type": "boolean" },
+				"apiKey": { "type": "boolean" },
+				"env": {
+					"type": "array",
+					"items": { "type": "string", "minLength": 1 }
+				}
+			}
+		},
+		"limits": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"minAmountUsd": { "type": "number", "minimum": 0 },
+				"maxAmountUsd": { "type": "number", "minimum": 0 },
+				"maxSlippageBps": { "type": "integer", "minimum": 1, "maximum": 2000 }
+			}
+		},
+		"inputSchema": {
+			"type": "object",
+			"additionalProperties": true,
+			"required": ["type"],
+			"properties": {
+				"type": { "type": "string" }
+			}
+		},
+		"outputSchema": {
+			"type": "object",
+			"additionalProperties": true,
+			"required": ["type"],
+			"properties": {
+				"type": { "type": "string" }
+			}
+		},
+		"statusModel": {
+			"type": "object",
+			"additionalProperties": false,
+			"properties": {
+				"states": {
+					"type": "array",
+					"items": { "type": "string", "minLength": 1 }
+				},
+				"terminalStates": {
+					"type": "array",
+					"items": { "type": "string", "minLength": 1 }
+				}
+			}
+		}
+	}
+}

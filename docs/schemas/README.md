@@ -16,6 +16,10 @@
   - 验证 deBridge 执行工件（`debridge_crosschain_execute@v1`）结构，供跨链执行审计与 reconciliation 消费
 - `debridge-execution-reconciliation.v1.schema.json`
   - 验证 deBridge reconciliation 结果（`debridge_execution_reconciliation@v1`）结构，供审计/可观测性统一消费
+- `strategy-spec.v0.schema.json`
+  - 验证“策略自动生成”最小闭环的 Strategy Spec v0（目标/约束/触发器/执行计划）
+- `capability-manifest.v0.schema.json`
+  - 验证组件能力清单（actions/chains/requires/limits/input/output schema），用于跨协议可复用编排
 
 ## 本地校验
 
@@ -34,8 +38,8 @@ npm run schema:ci-check            # 一步到位：清单 + 全量 schema 内�
 npm run schema:audit              # 一步到位：清单 + 严格诊断（适配 AI/自动化）
 ```
 
-> 注：`npm run schema:validate` 当前 CI gate 校验 OpenClaw BTC5m 三份基线 schema + `bsc-post-action-supply-artifact.v1.schema.json` + `debridge-crosschain-execute-artifact.v1.schema.json` + `debridge-execution-reconciliation.v1.schema.json`。
-> `strategy-dsl.v1.schema.json` 由策略发布接口在运行时消费（`/api/strategies` 的 DSL v1 校验）。
+> 注：`npm run schema:validate` 当前 CI gate 校验 OpenClaw BTC5m 三份基线 schema + `bsc-post-action-supply-artifact.v1.schema.json` + `debridge-crosschain-execute-artifact.v1.schema.json` + `debridge-execution-reconciliation.v1.schema.json` + `strategy-spec.v0.schema.json` + `capability-manifest.v0.schema.json`。
+> `strategy-dsl.v1.schema.json` 由策略发布接口在运行时消费（`/api/strategies` 的 DSL v1 校验），与 v0 spec 并行演进。
 
 脚本会检查：
 
