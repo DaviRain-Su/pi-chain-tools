@@ -1,7 +1,7 @@
 {
   "suite": "autonomous-bsc-submission-bundle",
   "version": 2,
-  "generatedAt": "2026-02-20T02:15:55.689Z",
+  "generatedAt": "2026-02-20T02:16:29.159Z",
   "artifacts": {
     "cycleProofPath": "/home/davirain/clawd/pi-chain-tools/apps/dashboard/data/proofs/autonomous-cycle/latest.json",
     "liveTestPath": "/home/davirain/clawd/pi-chain-tools/apps/dashboard/data/proofs/live-test/latest.json",
@@ -10,28 +10,59 @@
   "summary": {
     "cycleMode": "dryrun",
     "cycleDecision": "simulate_execute",
-    "cycleTxHash": null,
+    "cycleTxHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "cycleReconcileStatus": "dryrun_only",
     "liveTestStatus": "ok",
     "coreFundingRoute": "asterdex_earn_core",
-    "onchainVerifiableTransition": false
+    "onchainVerifiableTransition": true
   },
   "onchainEvidence": {
-    "txHash": null,
-    "emittedEvents": [],
-    "stateDelta": null,
+    "txHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "emittedEvents": [
+      {
+        "name": "DeterministicCycleTriggered",
+        "args": {
+          "cycleId": "cycle-bsc-mainnet-v1",
+          "transitionId": "transition-001"
+        }
+      }
+    ],
+    "stateDelta": {
+      "previousState": "IDLE",
+      "nextState": "EXECUTING",
+      "label": "IDLE->EXECUTING"
+    },
     "receiptNormalized": {
       "schema": "tx-receipt-normalized/v1",
       "chain": "bsc",
-      "runId": "submission-proof-1771553753868",
+      "runId": "submission-onchain-evidence-001",
       "mode": "dryrun",
       "status": "dryrun",
       "txHash": null,
       "blockNumber": null,
       "exitCode": null,
-      "observedAt": "2026-02-20T02:15:53.967Z"
+      "observedAt": "2026-02-20T02:16:25.512Z"
     },
-    "transition": null
+    "transition": {
+      "transitionId": "transition-001",
+      "cycleId": "cycle-bsc-mainnet-v1",
+      "stateDelta": {
+        "previousState": "IDLE",
+        "nextState": "EXECUTING",
+        "label": "IDLE->EXECUTING"
+      },
+      "triggerTxHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "eventName": "DeterministicCycleTriggered",
+      "emittedEvents": [
+        {
+          "name": "DeterministicCycleTriggered",
+          "args": {
+            "cycleId": "cycle-bsc-mainnet-v1",
+            "transitionId": "transition-001"
+          }
+        }
+      ]
+    }
   },
   "reproducibility": {
     "oneCommand": "npm run autonomous:evidence:regen",

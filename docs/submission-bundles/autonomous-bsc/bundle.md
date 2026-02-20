@@ -1,19 +1,19 @@
 # Autonomous BSC Submission Bundle
 
-- Generated: 2026-02-20T02:15:55.689Z
+- Generated: 2026-02-20T02:16:29.159Z
 - Cycle mode: dryrun
 - Cycle decision: simulate_execute
-- Tx hash: n/a
+- Tx hash: 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 - Reconcile: dryrun_only
 - Live-test status: ok
 - Core funding route: asterdex_earn_core
-- Verifiable transition: no
+- Verifiable transition: yes
 
 ## Onchain evidence
 
-- Tx hash: n/a
-- Emitted events: 0
-- State delta: n/a
+- Tx hash: 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+- Emitted events: 1
+- State delta: {"previousState":"IDLE","nextState":"EXECUTING","label":"IDLE->EXECUTING"}
 
 ## Reproducibility
 
