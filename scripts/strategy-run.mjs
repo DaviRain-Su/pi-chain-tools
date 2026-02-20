@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -29,6 +29,15 @@ function getBroadcastRpcEndpoint(network, overrideUrl) {
 	const envOverride = process.env[envKey]?.trim();
 	if (envOverride) return envOverride;
 	return EVM_RPC_ENDPOINTS[network];
+}
+
+function defaultStableYieldEvidencePath(spec, runId) {
+	const template = String(spec?.metadata?.template || "").trim();
+	if (template !== "stable-yield-v1") return null;
+	const day = new Date().toISOString().slice(0, 10);
+	const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+	const id = runId || `stable-yield-${stamp}`;
+	return path.join("docs", "execution-proofs", day, `${id}.json`);
 }
 
 function parseArgs(argv) {
@@ -74,6 +83,7 @@ function usage() {
 		"  --runId run-xxx (optional idempotency key)",
 		"  --idempotencyPath /tmp/pct-idem.json (optional)",
 		"  --evidenceOut /tmp/strategy-evidence.json (optional)",
+		"  stable-yield-v1 live: defaults evidence path to docs/execution-proofs/YYYY-MM-DD/*.json",
 	].join("\n");
 }
 
@@ -266,6 +276,10 @@ async function main() {
 	}
 
 	const runId = String(args.runId || "").trim();
+	const evidenceOut =
+		String(args.evidenceOut || "").trim() ||
+		defaultStableYieldEvidencePath(spec, runId) ||
+		"";
 	const idempotencyPath =
 		String(args.idempotencyPath || "").trim() ||
 		"/tmp/pct-strategy-idempotency.json";
@@ -325,6 +339,7 @@ async function main() {
 		policy: mode === "execute" ? executePolicy : null,
 		liveRequested: mode === "execute" ? live : false,
 		runId: runId || null,
+		evidenceOutPath: evidenceOut || null,
 		broadcastStatus,
 		broadcast,
 		steps: executionTrace,
@@ -348,9 +363,10 @@ async function main() {
 		await saveIdempotencyStore(idempotencyPath, idem);
 	}
 
-	if (args.evidenceOut) {
+	if (evidenceOut) {
+		await mkdir(path.dirname(evidenceOut), { recursive: true });
 		await writeFile(
-			String(args.evidenceOut),
+			evidenceOut,
 			`${JSON.stringify(result, null, 2)}\n`,
 			"utf8",
 		);
