@@ -197,6 +197,26 @@
         box-shadow: 0 0 0 2px rgba(137,240,255,0.18);
       }
 
+      .group-tabs {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 0 0 16px;
+      }
+      .group-tab {
+        border-radius: 999px;
+        padding: 5px 10px;
+        border: 1px solid #35507f;
+        background: #102042;
+        color: var(--text);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .group-tab.active {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px rgba(127,162,255,0.2);
+      }
+
       #yieldHealth,
       #bscProtocolHealth,
       #bscYieldReadiness,
@@ -243,6 +263,13 @@
         <button class="chain-tab" data-chain="starknet">Starknet</button>
         <button class="chain-tab" data-chain="near">NEAR</button>
         <button class="chain-tab" data-chain="monad">Monad</button>
+      </div>
+      <div class="group-tabs" id="groupTabs">
+        <button class="group-tab active" data-group="all">全部</button>
+        <button class="group-tab" data-group="assets">资产</button>
+        <button class="group-tab" data-group="execution">执行</button>
+        <button class="group-tab" data-group="risk">风险</button>
+        <button class="group-tab" data-group="history">历史</button>
       </div>
 
       <div class="grid">
@@ -584,6 +611,7 @@
     <script>
       const accountInput = document.getElementById("accountId");
       const chainTabsEl = document.getElementById("chainTabs");
+      const groupTabsEl = document.getElementById("groupTabs");
       const refreshBtn = document.getElementById("refresh");
       const viewDemoBtn = document.getElementById("viewDemo");
       const viewFullBtn = document.getElementById("viewFull");
