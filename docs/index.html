@@ -21,12 +21,23 @@
 		<div class="bg-shape bg-shape-b"></div>
 		<div class="page">
 			<nav class="top-nav reveal" aria-label="Section navigation">
-				<a href="#install">Install</a>
-				<a href="#latest-updates">Updates</a>
-				<a href="#production-readiness">Readiness</a>
-				<a href="#api-examples">API</a>
-				<a href="#quality-loop">Quality</a>
-				<a href="#demo">Demo</a>
+				<button
+					class="top-nav-toggle"
+					id="top-nav-toggle"
+					type="button"
+					aria-expanded="false"
+					aria-controls="top-nav-links"
+				>
+					Sections
+				</button>
+				<div class="top-nav-links" id="top-nav-links">
+					<a href="#install">Install</a>
+					<a href="#latest-updates">Updates</a>
+					<a href="#production-readiness">Readiness</a>
+					<a href="#api-examples">API</a>
+					<a href="#quality-loop">Quality</a>
+					<a href="#demo">Demo</a>
+				</div>
 			</nav>
 			<header class="hero reveal">
 				<p class="badge">Pi Extension • Multi-chain AI Runtime</p>

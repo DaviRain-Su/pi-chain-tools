@@ -54,6 +54,23 @@ for (const button of stepButtons) {
 	});
 }
 
+const topNavToggle = document.getElementById("top-nav-toggle");
+const topNavLinks = document.getElementById("top-nav-links");
+
+if (topNavToggle && topNavLinks) {
+	topNavToggle.addEventListener("click", () => {
+		const isOpen = topNavLinks.classList.toggle("is-open");
+		topNavToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+	});
+
+	for (const link of topNavLinks.querySelectorAll("a")) {
+		link.addEventListener("click", () => {
+			topNavLinks.classList.remove("is-open");
+			topNavToggle.setAttribute("aria-expanded", "false");
+		});
+	}
+}
+
 const revealItems = Array.from(document.querySelectorAll(".reveal"));
 
 if (revealItems.length > 0) {

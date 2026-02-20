@@ -90,6 +90,17 @@ body {
 	z-index: 10;
 }
 
+.top-nav-toggle {
+	display: none;
+}
+
+.top-nav-links {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.45rem;
+	width: 100%;
+}
+
 .top-nav a {
 	background: rgba(109, 125, 255, 0.16);
 	border: 1px solid rgba(166, 178, 255, 0.24);
@@ -384,5 +395,29 @@ h3 {
 
 	.step-buttons {
 		grid-template-columns: 1fr;
+	}
+
+	.top-nav {
+		padding: 0.5rem;
+	}
+
+	.top-nav-toggle {
+		background: rgba(109, 125, 255, 0.22);
+		border: 1px solid rgba(166, 178, 255, 0.4);
+		border-radius: 0.55rem;
+		color: #e9eeff;
+		display: inline-flex;
+		font-family: "IBM Plex Mono", "Menlo", "Monaco", monospace;
+		font-size: 0.74rem;
+		padding: 0.4rem 0.62rem;
+	}
+
+	.top-nav-links {
+		display: none;
+		flex-direction: column;
+	}
+
+	.top-nav-links.is-open {
+		display: flex;
 	}
 }
