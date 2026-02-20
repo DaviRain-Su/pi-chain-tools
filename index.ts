@@ -197,6 +197,45 @@ async function getLifiStatus(params: {
 	return await lifiGet<Record<string, unknown>>("/status", queryParams);
 }
 
+async function fetchErc20Decimals(network: string, token: string) {
+	const parsedNetwork = parseEvmNetwork(network as never);
+	const rpcUrl = getEvmRpcEndpoint(parsedNetwork);
+	const response = await fetch(rpcUrl, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "eth_call",
+			params: [{ to: token, data: "0x313ce567" }, "latest"],
+		}),
+	});
+	if (!response.ok)
+		throw new Error(`decimals call failed: HTTP ${response.status}`);
+	const payload = (await response.json()) as {
+		result?: string;
+		error?: { message?: string };
+	};
+	if (payload.error) {
+		throw new Error(payload.error.message || "decimals call failed");
+	}
+	const raw = String(payload.result || "0x0");
+	return Number.parseInt(raw, 16);
+}
+
+function humanAmountToRaw(amountHuman: string, decimals: number): string {
+	const normalized = amountHuman.trim();
+	if (!/^\d+(\.\d+)?$/.test(normalized)) {
+		throw new Error("fromAmountHuman must be a positive decimal string");
+	}
+	const [intPart, fracPart = ""] = normalized.split(".");
+	const fracClamped = fracPart.slice(0, decimals).padEnd(decimals, "0");
+	const raw =
+		BigInt(intPart) * 10n ** BigInt(decimals) + BigInt(fracClamped || "0");
+	if (raw <= 0n) throw new Error("fromAmountHuman must be > 0");
+	return raw.toString();
+}
+
 async function prepareLifiQuoteFromIntent(
 	executeIntent: Record<string, unknown>,
 	quoteContext: Record<string, unknown>,
@@ -210,7 +249,8 @@ async function prepareLifiQuoteFromIntent(
 	const toChainId = getEvmChainId(toNetwork).toString();
 	const fromToken = String(quoteContext.fromToken || "").trim();
 	const toToken = String(quoteContext.toToken || "").trim();
-	const fromAmount = String(quoteContext.fromAmount || "").trim();
+	const fromAmountRawInput = String(quoteContext.fromAmount || "").trim();
+	const fromAmountHuman = String(quoteContext.fromAmountHuman || "").trim();
 	const fromAddress = String(quoteContext.fromAddress || "").trim();
 	const toAddress = String(quoteContext.toAddress || "").trim() || fromAddress;
 	const orderRaw = String(quoteContext.order || "RECOMMENDED").toUpperCase();
@@ -223,11 +263,34 @@ async function prepareLifiQuoteFromIntent(
 			: "RECOMMENDED";
 	const slippage = Number(quoteContext.slippage ?? LIFI_DEFAULT_SLIPPAGE);
 
-	if (!fromToken || !toToken || !fromAmount || !fromAddress) {
+	if (!fromToken || !toToken || !fromAddress) {
 		return {
 			ok: false,
 			errors: [
-				"prepareQuote requires quoteContext.fromToken/toToken/fromAmount/fromAddress",
+				"prepareQuote requires quoteContext.fromToken/toToken/fromAddress",
+			],
+		};
+	}
+
+	const fromTokenDecimals = await fetchErc20Decimals(fromChain, fromToken);
+	let fromAmount = fromAmountRawInput;
+	if (fromAmountHuman) {
+		const computedRaw = humanAmountToRaw(fromAmountHuman, fromTokenDecimals);
+		if (fromAmount && fromAmount !== computedRaw) {
+			return {
+				ok: false,
+				errors: [
+					`precision mismatch: fromAmount(${fromAmount}) != fromAmountHuman(${fromAmountHuman})@decimals(${fromTokenDecimals}) => ${computedRaw}`,
+				],
+			};
+		}
+		fromAmount = computedRaw;
+	}
+	if (!fromAmount) {
+		return {
+			ok: false,
+			errors: [
+				"prepareQuote requires quoteContext.fromAmount or quoteContext.fromAmountHuman",
 			],
 		};
 	}
@@ -259,6 +322,12 @@ async function prepareLifiQuoteFromIntent(
 			estimate: planned.selected.quote.estimate,
 			fallback: planned.fallback,
 			metrics: planned.metrics,
+			precisionCheck: {
+				fromToken,
+				fromTokenDecimals,
+				fromAmountRaw: fromAmount,
+				fromAmountHuman: fromAmountHuman || null,
+			},
 		},
 	};
 }
@@ -672,6 +741,27 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					params.prepareQuote === true &&
 					simulated.result?.status === "ready"
 				) {
+					if (
+						params.live === true &&
+						!String(asObject(params.quoteContext)?.fromAmountHuman || "").trim()
+					) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify(
+										{
+											status: "blocked",
+											reason:
+												"live prepareQuote now requires quoteContext.fromAmountHuman for precision-safe execution",
+										},
+										null,
+										2,
+									),
+								},
+							],
+						};
+					}
 					const quoteResult = await prepareLifiQuoteFromIntent(
 						asObject(simulated.result.executeIntent) || {},
 						asObject(params.quoteContext) || {},
