@@ -111,6 +111,7 @@ const STABLE_YIELD_V2_LAST_PATH = path.join(
 	"logs",
 	"stable-yield-auto-migrate-v2-last.json",
 );
+const BSC_LOCAL_ENV_PATH = path.join(__dirname, "..", "..", ".env.bsc.local");
 
 function deepGet(obj, dottedPath, fallback = undefined) {
 	const parts = String(dottedPath || "")
@@ -9296,6 +9297,104 @@ function startBscYieldWorker(options = {}) {
 	}, BSC_YIELD_WORKER.intervalMs);
 }
 
+function parseDotEnv(raw) {
+	const out = {};
+	for (const line of String(raw || "").split("\n")) {
+		const t = line.trim();
+		if (!t || t.startsWith("#")) continue;
+		const idx = t.indexOf("=");
+		if (idx <= 0) continue;
+		const k = t.slice(0, idx).trim();
+		const v = t.slice(idx + 1).trim();
+		out[k] = v;
+	}
+	return out;
+}
+
+function upsertEnv(raw, updates) {
+	const lines = String(raw || "").split("\n");
+	const keys = Object.keys(updates);
+	const seen = new Set();
+	const next = lines.map((line) => {
+		const idx = line.indexOf("=");
+		if (idx <= 0) return line;
+		const key = line.slice(0, idx).trim();
+		if (!(key in updates)) return line;
+		seen.add(key);
+		return `${key}=${updates[key]}`;
+	});
+	for (const key of keys) {
+		if (!seen.has(key)) next.push(`${key}=${updates[key]}`);
+	}
+	return `${next.join("\n").replace(/\n+$/g, "")}\n`;
+}
+
+function maskEnvValue(value) {
+	if (!value) return "missing";
+	return `set(len=${String(value).length})`;
+}
+
+async function readBscConfigStatus() {
+	let raw = "";
+	try {
+		raw = await readFile(BSC_LOCAL_ENV_PATH, "utf8");
+	} catch {
+		raw = "";
+	}
+	const env = parseDotEnv(raw);
+	return {
+		path: BSC_LOCAL_ENV_PATH,
+		lista: {
+			enabled: env.BSC_LISTA_EXECUTE_ENABLED || "missing",
+			mode: env.BSC_LISTA_EXECUTE_MODE || "missing",
+			nativeEnabled: env.BSC_LISTA_NATIVE_EXECUTE_ENABLED || "missing",
+			pool: env.BSC_LISTA_POOL || "missing",
+			privateKey: maskEnvValue(env.BSC_LISTA_EXECUTE_PRIVATE_KEY),
+		},
+		wombat: {
+			enabled: env.BSC_WOMBAT_EXECUTE_ENABLED || "missing",
+			mode: env.BSC_WOMBAT_EXECUTE_MODE || "missing",
+			nativeEnabled: env.BSC_WOMBAT_NATIVE_EXECUTE_ENABLED || "missing",
+			pool: env.BSC_WOMBAT_POOL || "missing",
+			privateKey: maskEnvValue(env.BSC_WOMBAT_EXECUTE_PRIVATE_KEY),
+		},
+	};
+}
+
+async function updateBscConfigByProtocol(payload) {
+	const protocol = String(payload?.protocol || "").toLowerCase();
+	if (protocol !== "lista" && protocol !== "wombat") {
+		throw new Error("protocol must be lista or wombat");
+	}
+	const prefix = protocol === "lista" ? "BSC_LISTA" : "BSC_WOMBAT";
+	let raw = "";
+	try {
+		raw = await readFile(BSC_LOCAL_ENV_PATH, "utf8");
+	} catch {
+		raw = "";
+	}
+	const updates = {
+		[`${prefix}_EXECUTE_ENABLED`]: payload.enabled === true ? "true" : "false",
+		[`${prefix}_EXECUTE_MODE`]: String(payload.mode || "native").toLowerCase(),
+		[`${prefix}_NATIVE_EXECUTE_ENABLED`]:
+			payload.nativeEnabled === true ? "true" : "false",
+	};
+	if (typeof payload.pool === "string" && payload.pool.trim()) {
+		updates[`${prefix}_POOL`] = payload.pool.trim();
+	}
+	if (typeof payload.privateKey === "string" && payload.privateKey.trim()) {
+		updates[`${prefix}_EXECUTE_PRIVATE_KEY`] = payload.privateKey.trim();
+	}
+	const nextRaw = upsertEnv(raw, updates);
+	await writeFile(BSC_LOCAL_ENV_PATH, nextRaw, "utf8");
+	return {
+		ok: true,
+		protocol,
+		updatedKeys: Object.keys(updates),
+		restartRequired: true,
+	};
+}
+
 async function readStableYieldAutoMigrateStatus() {
 	const result = {
 		v1: {
@@ -9349,6 +9448,21 @@ const server = http.createServer(async (req, res) => {
 		if (url.pathname === "/api/stable-yield/auto-migrate/status") {
 			const status = await readStableYieldAutoMigrateStatus();
 			return json(res, 200, { ok: true, status });
+		}
+
+		if (url.pathname === "/api/bsc/config/status" && req.method === "GET") {
+			const status = await readBscConfigStatus();
+			return json(res, 200, { ok: true, status });
+		}
+
+		if (url.pathname === "/api/bsc/config/update" && req.method === "POST") {
+			const chunks = [];
+			for await (const chunk of req) chunks.push(chunk);
+			const text = Buffer.concat(chunks).toString("utf8") || "{}";
+			const payload = JSON.parse(text);
+			const result = await updateBscConfigByProtocol(payload);
+			const status = await readBscConfigStatus();
+			return json(res, 200, { ok: true, result, status });
 		}
 
 		if (url.pathname === "/api/security/watch/status" && req.method === "GET") {

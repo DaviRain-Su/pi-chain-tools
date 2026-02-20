@@ -282,6 +282,7 @@
         <div class="card"><h3>Security Watch</h3><div id="securityWatchCard" class="muted">-</div></div>
         <div class="card"><h3>Proof Summary</h3><div id="proofSummaryCard" class="muted">-</div></div>
         <div class="card"><h3>Stable-Yield Auto-Migrate</h3><div id="stableYieldAutoMigrateCard" class="muted">-</div></div>
+        <div class="card"><h3>BSC Execute Config Wizard</h3><div id="bscConfigCard" class="muted">-</div><div class="row" style="margin-top:8px"><select id="bscConfigProtocol"><option value="lista">lista</option><option value="wombat">wombat</option></select><input id="bscConfigPool" placeholder="pool address 0x..." size="24"/><input id="bscConfigPrivateKey" placeholder="private key 0x... (optional)" size="24"/><label class="muted" style="display:flex;align-items:center;gap:4px"><input id="bscConfigEnabled" type="checkbox" checked/>enable</label><label class="muted" style="display:flex;align-items:center;gap:4px"><input id="bscConfigNativeEnabled" type="checkbox" checked/>native</label><button id="saveBscConfig">Save Config</button></div></div>
       </div>
 
       <div class="card" style="margin-top:12px">
@@ -631,6 +632,13 @@
       const securityWatchCardEl = document.getElementById("securityWatchCard");
       const proofSummaryCardEl = document.getElementById("proofSummaryCard");
       const stableYieldAutoMigrateCardEl = document.getElementById("stableYieldAutoMigrateCard");
+      const bscConfigCardEl = document.getElementById("bscConfigCard");
+      const bscConfigProtocolEl = document.getElementById("bscConfigProtocol");
+      const bscConfigPoolEl = document.getElementById("bscConfigPool");
+      const bscConfigPrivateKeyEl = document.getElementById("bscConfigPrivateKey");
+      const bscConfigEnabledEl = document.getElementById("bscConfigEnabled");
+      const bscConfigNativeEnabledEl = document.getElementById("bscConfigNativeEnabled");
+      const saveBscConfigBtn = document.getElementById("saveBscConfig");
       const autonomousCycleRunsMetaEl = document.getElementById("autonomousCycleRunsMeta");
       const autonomousCycleRunsRowsEl = document.getElementById("autonomousCycleRunsRows");
       const yieldHealthEl = document.getElementById("yieldHealth");
@@ -1536,7 +1544,7 @@
           : "";
         const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
         const safeFetch = (input) => fetch(input).catch(() => null);
-        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes, readinessMatrixRes, securityWatchStatusRes, proofSummaryRes, autonomousCycleRunsRes, stableYieldAutoMigrateRes] = await Promise.all([
+        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes, readinessMatrixRes, securityWatchStatusRes, proofSummaryRes, autonomousCycleRunsRes, stableYieldAutoMigrateRes, bscConfigStatusRes] = await Promise.all([
           safeFetch(`/api/snapshot${query}`),
           safeFetch(`/api/portfolio/unified${query}`),
           safeFetch(`/api/bsc/yield/plan${bscAccountQuery ? `${bscAccountQuery}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
@@ -1560,6 +1568,7 @@
           safeFetch("/api/proof/summary"),
           safeFetch("/api/autonomous/cycle/runs?limit=8"),
           safeFetch("/api/stable-yield/auto-migrate/status"),
+          safeFetch("/api/bsc/config/status"),
         ]);
         const data = snapRes ? await snapRes.json().catch(() => ({ error: "snapshot_parse_failed" })) : { error: "snapshot_unreachable" };
         const unified = unifiedRes ? await unifiedRes.json().catch(() => ({ ok: false })) : { ok: false };
@@ -1584,6 +1593,7 @@
         const proofSummary = proofSummaryRes ? await proofSummaryRes.json().catch(() => ({ ok: false, summary: null })) : { ok: false, summary: null };
         const autonomousCycleRuns = autonomousCycleRunsRes ? await autonomousCycleRunsRes.json().catch(() => ({ ok: false, runs: [] })) : { ok: false, runs: [] };
         const stableYieldAutoMigrate = stableYieldAutoMigrateRes ? await stableYieldAutoMigrateRes.json().catch(() => ({ ok: false, status: {} })) : { ok: false, status: {} };
+        const bscConfigStatus = bscConfigStatusRes ? await bscConfigStatusRes.json().catch(() => ({ ok: false, status: {} })) : { ok: false, status: {} };
         lastCiSignatures = ciSignatures;
 
         const warnings = [];
@@ -1596,6 +1606,7 @@
         if (proofSummary?.ok === false) warnings.push("proof summary unavailable");
         if (autonomousCycleRuns?.ok === false) warnings.push("autonomous cycle runs unavailable");
         if (stableYieldAutoMigrate?.ok === false) warnings.push("stable-yield auto-migrate status unavailable");
+        if (bscConfigStatus?.ok === false) warnings.push("bsc config status unavailable");
         if (statusBannerEl) {
           if (warnings.length) {
             statusBannerEl.style.display = "block";
@@ -1688,6 +1699,17 @@
             `v2 last status: <span class="${lastStatus === "executed" ? "ok" : lastStatus === "noop" ? "muted" : "warn"}">${lastStatus}</span>`,
             `best market: ${best} · delta(bps): ${delta}`,
             `snapshot: ${v2?.lastJsonPath || "-"}`,
+          ].join("<br/>");
+        }
+        if (bscConfigCardEl) {
+          const status = bscConfigStatus?.status || {};
+          const lista = status?.lista || {};
+          const wombat = status?.wombat || {};
+          bscConfigCardEl.innerHTML = [
+            `env path: ${status?.path || "-"}`,
+            `lista: enabled=${lista?.enabled || "-"} mode=${lista?.mode || "-"} native=${lista?.nativeEnabled || "-"} pool=${lista?.pool || "missing"}`,
+            `wombat: enabled=${wombat?.enabled || "-"} mode=${wombat?.mode || "-"} native=${wombat?.nativeEnabled || "-"} pool=${wombat?.pool || "missing"}`,
+            `<span class="warn">保存配置后需要执行 npm run dashboard:restart</span>`,
           ].join("<br/>");
         }
         const cycleRuns = Array.isArray(autonomousCycleRuns?.runs) ? autonomousCycleRuns.runs.slice(0, 8) : [];
@@ -3321,6 +3343,34 @@
       viewFullBtn?.addEventListener("click", () => {
         localStorage.setItem(VIEW_MODE_KEY, "full");
         applyViewMode("full");
+      });
+
+      saveBscConfigBtn?.addEventListener("click", async () => {
+        const protocol = String(bscConfigProtocolEl?.value || "lista");
+        const payload = {
+          protocol,
+          enabled: bscConfigEnabledEl?.checked === true,
+          nativeEnabled: bscConfigNativeEnabledEl?.checked === true,
+          mode: "native",
+          pool: String(bscConfigPoolEl?.value || "").trim(),
+          privateKey: String(bscConfigPrivateKeyEl?.value || "").trim(),
+        };
+        try {
+          const res = await fetch("/api/bsc/config/update", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(() => ({ ok: false }));
+          if (!res.ok || data?.ok === false) {
+            throw new Error(data?.error || `save failed (${res.status})`);
+          }
+          metaEl.textContent = `Saved ${protocol} config. Please run: npm run dashboard:restart`;
+          bscConfigPrivateKeyEl.value = "";
+          await load();
+        } catch (error) {
+          metaEl.textContent = `Save config error: ${error?.message || error}`;
+        }
       });
 
       applyAcpFiltersFromStorage();
