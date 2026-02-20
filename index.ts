@@ -74,6 +74,73 @@ function asObject(value: unknown): Record<string, unknown> | null {
 		: null;
 }
 
+function sortAndPageTemplateManifests(
+	items: Record<string, unknown>[],
+	params: Record<string, unknown>,
+): {
+	items: Record<string, unknown>[];
+	page: Record<string, unknown>;
+} {
+	const sortByInput = String(params.sortBy || "template");
+	const allowed = new Set([
+		"template",
+		"version",
+		"riskTier",
+		"strategyType",
+		"status",
+		"recommendedMinUsd",
+		"recommendedMaxUsd",
+	]);
+	const sortBy = allowed.has(sortByInput) ? sortByInput : "template";
+	const sortOrder =
+		String(params.sortOrder || "asc").toLowerCase() === "desc" ? "desc" : "asc";
+	const riskRank = (value: unknown): number => {
+		switch (String(value || "").toLowerCase()) {
+			case "low":
+				return 1;
+			case "medium":
+				return 2;
+			case "high":
+				return 3;
+			default:
+				return 99;
+		}
+	};
+	const sorted = [...items].sort((a, b) => {
+		let av: unknown = a[sortBy];
+		let bv: unknown = b[sortBy];
+		if (sortBy === "riskTier") {
+			av = riskRank(av);
+			bv = riskRank(bv);
+		}
+		const an = Number(av);
+		const bn = Number(bv);
+		const cmp =
+			Number.isFinite(an) && Number.isFinite(bn)
+				? an - bn
+				: String(av ?? "").localeCompare(String(bv ?? ""));
+		return sortOrder === "desc" ? -cmp : cmp;
+	});
+	const offset = Math.max(0, Number(params.offset || 0) || 0);
+	const limitRaw = Number(params.limit);
+	const limit =
+		Number.isFinite(limitRaw) && limitRaw > 0
+			? Math.floor(limitRaw)
+			: sorted.length;
+	const paged = sorted.slice(offset, offset + limit);
+	return {
+		items: paged,
+		page: {
+			total: sorted.length,
+			offset,
+			limit,
+			returned: paged.length,
+			sortBy,
+			sortOrder,
+		},
+	};
+}
+
 function validateStrategyStructure(specInput: unknown): {
 	ok: boolean;
 	errors: string[];
@@ -590,6 +657,10 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 				riskTier: Type.Optional(Type.String()),
 				strategyType: Type.Optional(Type.String()),
 				status: Type.Optional(Type.String()),
+				sortBy: Type.Optional(Type.String()),
+				sortOrder: Type.Optional(Type.String()),
+				limit: Type.Optional(Type.Number()),
+				offset: Type.Optional(Type.Number()),
 			}),
 			async execute(_toolCallId, params) {
 				const compiler = await loadStrategyCompiler();
@@ -641,6 +712,7 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 							return false;
 						return true;
 					});
+				const paged = sortAndPageTemplateManifests(templates, params);
 				return {
 					content: [
 						{
@@ -648,7 +720,8 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 							text: JSON.stringify(
 								{
 									status: "ok",
-									templates,
+									templates: paged.items,
+									page: paged.page,
 								},
 								null,
 								2,

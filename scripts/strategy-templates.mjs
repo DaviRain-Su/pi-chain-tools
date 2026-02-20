@@ -33,13 +33,14 @@ function parseArgs(argv) {
 
 function usage() {
 	return [
-		"Usage: node scripts/strategy-templates.mjs [--template <name>] [--riskTier <low|medium|high>] [--strategyType <yield|rebalance>] [--status <active|paused|deprecated>] [--json]",
+		"Usage: node scripts/strategy-templates.mjs [--template <name>] [--riskTier <low|medium|high>] [--strategyType <yield|rebalance>] [--status <active|paused|deprecated>] [--sortBy <field>] [--sortOrder <asc|desc>] [--limit <n>] [--offset <n>] [--json]",
 		"",
 		"Examples:",
 		"  npm run strategy:templates",
 		"  npm run strategy:templates -- --json",
 		"  npm run strategy:templates -- --template stable-yield-v1 --json",
 		"  npm run strategy:templates -- --riskTier low --strategyType yield --json",
+		"  npm run strategy:templates -- --sortBy recommendedMinUsd --sortOrder asc --limit 10 --offset 0 --json",
 	].join("\n");
 }
 
@@ -54,6 +55,57 @@ function matchesFilter(manifest, args) {
 	if (args.status && String(manifest.status) !== String(args.status))
 		return false;
 	return true;
+}
+
+function applySortAndPaging(items, args) {
+	const sortBy = String(args.sortBy || "template");
+	const sortOrder =
+		String(args.sortOrder || "asc").toLowerCase() === "desc" ? "desc" : "asc";
+	const allowedSortBy = new Set([
+		"template",
+		"version",
+		"riskTier",
+		"strategyType",
+		"status",
+		"recommendedMinUsd",
+		"recommendedMaxUsd",
+	]);
+	const key = allowedSortBy.has(sortBy) ? sortBy : "template";
+	const rankRisk = (v) =>
+		({ low: 1, medium: 2, high: 3 })[String(v || "").toLowerCase()] || 99;
+	const sorted = [...items].sort((a, b) => {
+		let av = a?.[key];
+		let bv = b?.[key];
+		if (key === "riskTier") {
+			av = rankRisk(av);
+			bv = rankRisk(bv);
+		}
+		const an = Number(av);
+		const bn = Number(bv);
+		const numeric = Number.isFinite(an) && Number.isFinite(bn);
+		const cmp = numeric
+			? an - bn
+			: String(av ?? "").localeCompare(String(bv ?? ""));
+		return sortOrder === "desc" ? -cmp : cmp;
+	});
+	const offset = Math.max(0, Number(args.offset || 0) || 0);
+	const limitRaw = Number(args.limit);
+	const limit =
+		Number.isFinite(limitRaw) && limitRaw > 0
+			? Math.floor(limitRaw)
+			: sorted.length;
+	const paged = sorted.slice(offset, offset + limit);
+	return {
+		items: paged,
+		page: {
+			total: sorted.length,
+			offset,
+			limit,
+			returned: paged.length,
+			sortBy: key,
+			sortOrder,
+		},
+	};
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -89,11 +141,18 @@ if (args.template) {
 const manifests = listStrategyTemplateManifests().filter((m) =>
 	matchesFilter(m, args),
 );
+const paged = applySortAndPaging(manifests, args);
 if (args.json) {
-	console.log(JSON.stringify({ status: "ok", templates: manifests }, null, 2));
+	console.log(
+		JSON.stringify(
+			{ status: "ok", templates: paged.items, page: paged.page },
+			null,
+			2,
+		),
+	);
 	process.exit(0);
 }
 
-for (const m of manifests) {
+for (const m of paged.items) {
 	console.log(`- ${m.template}@${m.version} [${m.pricingModel}]`);
 }

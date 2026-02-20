@@ -130,3 +130,8 @@ npm run stable-yield:smoke
 ```json
 { "riskTier": "low", "strategyType": "yield", "status": "active" }
 ```
+
+支持排序与分页：
+```json
+{ "sortBy": "recommendedMinUsd", "sortOrder": "asc", "limit": 10, "offset": 0 }
+```

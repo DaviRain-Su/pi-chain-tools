@@ -49,4 +49,23 @@ describe("strategy templates cli", () => {
 			expect(item.status).toBe("active");
 		}
 	});
+
+	it("supports sorting and pagination", () => {
+		const r = run([
+			"--sortBy",
+			"recommendedMinUsd",
+			"--sortOrder",
+			"asc",
+			"--limit",
+			"1",
+			"--offset",
+			"0",
+			"--json",
+		]);
+		expect(r.status).toBe(0);
+		const payload = JSON.parse(r.stdout);
+		expect(payload.status).toBe("ok");
+		expect(payload.page.limit).toBe(1);
+		expect(payload.templates.length).toBe(1);
+	});
 });

@@ -103,6 +103,28 @@ describe("openclaw strategy tools", () => {
 		}
 	});
 
+	it("supports template sorting and pagination", async () => {
+		const registrar = createRegistrar();
+		openclawExtension(registrar);
+		const t = registrar.tools.find((x) => x.name === "pct_strategy_templates");
+		if (!t) throw new Error("pct_strategy_templates not registered");
+		const result = await t.execute("t4", {
+			sortBy: "recommendedMinUsd",
+			sortOrder: "asc",
+			limit: 1,
+			offset: 0,
+		});
+		const payload = JSON.parse(result.content[0].text) as Record<
+			string,
+			unknown
+		>;
+		expect(payload.status).toBe("ok");
+		const page = payload.page as Record<string, unknown>;
+		expect(page.limit).toBe(1);
+		const templates = payload.templates as Record<string, unknown>[];
+		expect(templates.length).toBe(1);
+	});
+
 	it("blocks live execute when small-cap policy exceeded", async () => {
 		const registrar = createRegistrar();
 		openclawExtension(registrar);
