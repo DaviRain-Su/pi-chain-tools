@@ -1,6 +1,6 @@
 # Mainnet Readiness Matrix
 
-- Generated at: 2026-02-20T01:19:41.444Z
+- Generated at: 2026-02-20T02:15:55.566Z
 - Overall status: 🔴 RED
 - Autonomous track: healthy
 
@@ -8,27 +8,24 @@
 
 | Module | Status | Last validated | Top blocker | Next action |
 | --- | --- | --- | --- | --- |
-| BSC autonomous track | 🟢 GREEN | 2026-02-20T01:19:41.444Z | - | Deterministic cycle config present; keep manual triggers disabled. |
+| BSC autonomous track | 🟢 GREEN | 2026-02-20T02:15:55.566Z | - | Legacy track active; set BSC_AUTONOMOUS_MODE=true to run autonomous rollout checks. |
 | BSC execute | 🟡 YELLOW | 2026-02-19T14:05:18.982Z | preflight missing env: BSC_EXECUTE_ENABLED,BSC_RPC_URL | Run npm run execute:proof:bsc and refresh matrix |
 | Starknet execute | 🔴 RED | - | no Starknet execution proof found in docs/execution-proofs/*/proof-starknet.md | Run npm run execute:proof:starknet and refresh matrix |
-| NEAR flows | 🟡 YELLOW | 2026-02-20T01:19:36.875Z | latest evidence is preflight/readiness only; no recent mutate proof attached | Run targeted NEAR flow (dryrun/execute-safe) and save proof artifact for green |
+| NEAR flows | 🟡 YELLOW | 2026-02-20T02:15:55.552Z | latest evidence is preflight/readiness only; no recent mutate proof attached | Run targeted NEAR flow (dryrun/execute-safe) and save proof artifact for green |
 | MCP providers (DFlow/Breeze) | 🟡 YELLOW | - | missing breeze smoke artifact (apps/dashboard/data/proofs/breeze/latest.json) | Run npm run breeze:smoke and add equivalent DFlow smoke proof |
 | Security watch/alerts/dashboard | 🔴 RED | - | no security watch report found | Run npm run security:scan:once and verify dashboard security endpoints |
-| Live test runner | 🟡 YELLOW | 2026-02-20T01:19:36.875Z | live-test dryrun/execute evidence missing in latest artifact | Run npm run live:test:preflight then npm run live:test:dryrun |
+| Live test runner | 🟡 YELLOW | 2026-02-20T02:15:55.552Z | live-test dryrun/execute evidence missing in latest artifact | Run npm run live:test:preflight then npm run live:test:dryrun |
 
 ## Evidence details
 
 ### BSC autonomous track
 
 - Status: green
-- Last validated: 2026-02-20T01:19:41.444Z
-- Next action: Deterministic cycle config present; keep manual triggers disabled.
+- Last validated: 2026-02-20T02:15:55.566Z
+- Next action: Legacy track active; set BSC_AUTONOMOUS_MODE=true to run autonomous rollout checks.
 - Evidence:
-  - autonomous mode enabled
-  - cycle id: cycle
-  - cycle interval seconds: 300
-  - AsterDEX execute binding: prepared
-  - AsterDEX binding required: true
+  - autonomous mode disabled
+  - AsterDEX execute binding: none
 - Blockers:
   - (none)
 
@@ -55,7 +52,7 @@
 ### NEAR flows
 
 - Status: yellow
-- Last validated: 2026-02-20T01:19:36.875Z
+- Last validated: 2026-02-20T02:15:55.552Z
 - Next action: Run targeted NEAR flow (dryrun/execute-safe) and save proof artifact for green
 - Evidence:
   - dashboard /api/health reachable in latest live-test preflight
@@ -87,7 +84,7 @@
 ### Live test runner
 
 - Status: yellow
-- Last validated: 2026-02-20T01:19:36.875Z
+- Last validated: 2026-02-20T02:15:55.552Z
 - Next action: Run npm run live:test:preflight then npm run live:test:dryrun
 - Evidence:
   - live-test artifact mode=preflight ok=true

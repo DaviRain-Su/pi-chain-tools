@@ -4,6 +4,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runAsterDexExecSafe } from "./asterdex-exec-safe.mjs";
+import { evaluateCycleTransitionEvidence } from "./autonomous-cycle-trigger-adapter.mjs";
 import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
 import { normalizeTxReceipt } from "./tx-receipt-normalize.mjs";
 
@@ -110,6 +111,7 @@ function parseArgs(rawArgs = process.argv.slice(2)) {
 		historyDir: DEFAULT_HISTORY_DIR,
 		statePath: DEFAULT_STATE_PATH,
 		runId: normalizeRunId(`autonomous-cycle-${Date.now()}`),
+		triggerJson: "",
 	};
 	for (let i = 0; i < rawArgs.length; i += 1) {
 		const token = String(rawArgs[i] || "");
@@ -133,6 +135,9 @@ function parseArgs(rawArgs = process.argv.slice(2)) {
 				break;
 			case "run-id":
 				args.runId = normalizeRunId(value);
+				break;
+			case "trigger-json":
+				args.triggerJson = String(value).trim();
 				break;
 			default:
 				throw new Error(`unknown argument: --${key}`);
@@ -395,6 +400,12 @@ export async function runBscAutonomousCycle(
 	const args = parseArgs(rawArgs);
 	const startedAt = nowIso();
 	const intent = buildIntent(args.runId, env);
+	const transitionEvidence = evaluateCycleTransitionEvidence({
+		raw:
+			args.triggerJson || String(env.BSC_AUTONOMOUS_TRIGGER_JSON || "").trim(),
+		requiredCycleId: String(env.BSC_AUTONOMOUS_CYCLE_ID || "").trim(),
+		env,
+	});
 	const confirm = String(
 		env.BSC_AUTONOMOUS_ASTERDEX_CONFIRM_TEXT || "ASTERDEX_EXECUTE_LIVE",
 	);
@@ -407,6 +418,52 @@ export async function runBscAutonomousCycle(
 		liveMarked = true;
 	}
 
+	const requireOnchainTrigger =
+		String(env.BSC_AUTONOMOUS_ONCHAIN_TRIGGER_REQUIRED || "true")
+			.trim()
+			.toLowerCase() === "true";
+	if (
+		args.mode === "live" &&
+		requireOnchainTrigger &&
+		!transitionEvidence.verifiable
+	) {
+		const proof = {
+			suite: "bsc-autonomous-cycle",
+			version: 2,
+			startedAt,
+			finishedAt: nowIso(),
+			mode: args.mode,
+			decision: "hold_blocked",
+			intent,
+			coreRouteSelection: {
+				primaryFundingRoute: "asterdex_earn_core",
+				selectedFundingRoute: "asterdex_earn_core",
+				isCoreRoute: true,
+				evidenceMarkers: ["ROUTE_CORE_ASTERDEX_EARN"],
+			},
+			cycleTransitionEvidence: transitionEvidence,
+			txEvidence: {
+				status: "blocked",
+				txHash: null,
+				blockers: transitionEvidence.blockers,
+				reason: "onchain_trigger_unverifiable",
+			},
+			ok: false,
+		};
+		await mkdir(path.dirname(args.out), { recursive: true });
+		await writeFile(args.out, `${JSON.stringify(proof, null, 2)}\n`);
+		const historyPath = buildHistoryPath({
+			historyDir: args.historyDir,
+			runId: args.runId,
+		});
+		await writeJsonAtomic(historyPath, proof);
+		if (liveMarked) {
+			finalizeLiveRunState({ state, runId: args.runId, proof, error: null });
+			await writeJsonAtomic(args.statePath, state);
+		}
+		return { ok: false, out: args.out, historyPath, proof };
+	}
+
 	const execArgs = [
 		"--mode",
 		args.mode,
@@ -414,6 +471,8 @@ export async function runBscAutonomousCycle(
 		JSON.stringify(intent),
 		"--confirm",
 		args.mode === "live" ? confirm : "",
+		"--trigger-proof-json",
+		JSON.stringify(transitionEvidence.onchainTrigger?.raw || {}),
 	];
 
 	let proof;
@@ -444,12 +503,19 @@ export async function runBscAutonomousCycle(
 			: "hold_blocked";
 		proof = {
 			suite: "bsc-autonomous-cycle",
-			version: 2,
+			version: 3,
 			startedAt,
 			finishedAt: nowIso(),
 			mode: args.mode,
 			decision,
 			intent,
+			coreRouteSelection: {
+				primaryFundingRoute: "asterdex_earn_core",
+				selectedFundingRoute: "asterdex_earn_core",
+				isCoreRoute: true,
+				evidenceMarkers: ["ROUTE_CORE_ASTERDEX_EARN", "FUNDING_PATH_PRIMARY"],
+			},
+			cycleTransitionEvidence: transitionEvidence,
 			safety: {
 				minLiveIntervalSeconds: safety.minIntervalSeconds,
 				lockTtlSeconds: safety.lockTtlSeconds,
@@ -457,8 +523,11 @@ export async function runBscAutonomousCycle(
 			},
 			txEvidence: {
 				status: execution.status,
-				txHash: execution.txHash || null,
+				txHash:
+					execution.txHash || transitionEvidence.onchainTrigger?.txHash || null,
 				evidence: execution.evidence || null,
+				emittedEvents: transitionEvidence.transition?.emittedEvents || [],
+				stateDelta: transitionEvidence.transition?.stateDelta || null,
 				receiptNormalized: normalizeTxReceipt(
 					{
 						txHash: execution.txHash || null,

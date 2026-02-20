@@ -14,6 +14,7 @@ function parseArgs(rawArgs = process.argv.slice(2)) {
 		mode: "dryrun",
 		confirm: "",
 		intentJson: String(rawArgs[0] || "").trim(),
+		triggerProofJson: "",
 	};
 	for (let i = 0; i < rawArgs.length; i += 1) {
 		const token = String(rawArgs[i] || "");
@@ -32,6 +33,9 @@ function parseArgs(rawArgs = process.argv.slice(2)) {
 			case "intent-json":
 				args.intentJson = String(value).trim();
 				break;
+			case "trigger-proof-json":
+				args.triggerProofJson = String(value).trim();
+				break;
 			default:
 				throw new Error(`unknown argument: --${key}`);
 		}
@@ -43,6 +47,17 @@ function parseArgs(rawArgs = process.argv.slice(2)) {
 }
 
 function parseIntent(raw) {
+	if (!raw) return null;
+	try {
+		const parsed = JSON.parse(raw);
+		if (parsed && typeof parsed === "object") return parsed;
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+function parseTriggerProof(raw) {
 	if (!raw) return null;
 	try {
 		const parsed = JSON.parse(raw);
@@ -85,6 +100,13 @@ export function runAsterDexExecSafe(
 ) {
 	const args = parseArgs(rawArgs);
 	const intent = parseIntent(args.intentJson);
+	const triggerProof = parseTriggerProof(args.triggerProofJson);
+	const verifiableOnchainTrigger =
+		Boolean(triggerProof?.txHash) &&
+		Boolean(triggerProof?.cycleId) &&
+		Boolean(triggerProof?.transitionId) &&
+		Boolean(triggerProof?.stateDelta?.previousState) &&
+		Boolean(triggerProof?.stateDelta?.nextState);
 	const confirmText = String(
 		env.BSC_AUTONOMOUS_ASTERDEX_CONFIRM_TEXT || DEFAULT_CONFIRM_TEXT,
 	);
@@ -130,19 +152,25 @@ export function runAsterDexExecSafe(
 				runId: intent.runId,
 				amountRaw: String(intent.amountRaw),
 				commandConfigured: Boolean(liveCommandTemplate),
+				primaryFundingRoute: "asterdex_earn_core",
+				routeSelection: "core",
 			},
 		};
 	}
 
-	if (args.confirm !== confirmText) {
+	if (args.confirm !== confirmText && !verifiableOnchainTrigger) {
 		return {
 			ok: false,
 			status: "blocked",
 			reason: "confirm_mismatch",
 			blockers: [
-				`Live execution blocked: confirmation mismatch. Required input: --confirm ${confirmText}`,
+				`Live execution blocked: confirmation mismatch. Required input: --confirm ${confirmText} (or provide verifiable onchain trigger proof).`,
 			],
-			evidence: { expectedConfirmText: confirmText, runId: intent.runId },
+			evidence: {
+				expectedConfirmText: confirmText,
+				runId: intent.runId,
+				verifiableOnchainTrigger,
+			},
 		};
 	}
 	if (!parseBoolean(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE, false)) {
@@ -197,6 +225,12 @@ export function runAsterDexExecSafe(
 			exitCode: commandResult.status,
 			stdout: stdout.slice(-500),
 			stderr: stderr.slice(-500),
+			primaryFundingRoute: "asterdex_earn_core",
+			routeSelection: "core",
+			confirmationMode: verifiableOnchainTrigger
+				? "onchain_trigger"
+				: "manual_confirm",
+			triggerProof: triggerProof || null,
 		},
 	};
 }

@@ -77,7 +77,8 @@
 		"autonomous:bsc:dryrun": "node scripts/autonomous-bsc-dryrun-checklist.mjs && node scripts/bsc-autonomous-cycle.mjs --mode dryrun",
 		"autonomous:bsc:runs": "node scripts/autonomous-cycle-runs.mjs",
 		"doctor:paths": "node scripts/diagnose-runtime-paths.mjs",
-		"autonomous:submission:bundle": "node scripts/autonomous-submission-bundle.mjs"
+		"autonomous:submission:bundle": "node scripts/autonomous-submission-bundle.mjs",
+		"autonomous:evidence:regen": "node scripts/autonomous-evidence-regen.mjs"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",

@@ -30,14 +30,17 @@ npm run autonomous:bsc:cycle -- --mode live --run-id demo-live-001
 Highlight that missing env/confirm/cap violation returns explicit `status=blocked`.
 
 ## 2:30 - 3:00 Submission bundle
-Run:
+Run one-command evidence regeneration:
 
 ```bash
-npm run autonomous:submission:bundle
+npm run autonomous:evidence:regen
 ```
 
+This regenerates cycle proof + preflight/readiness + bundle in one reproducible flow.
+
 Show outputs:
+- `apps/dashboard/data/proofs/autonomous-cycle/latest.json`
 - `docs/submission-bundles/autonomous-bsc/bundle.json`
 - `docs/submission-bundles/autonomous-bsc/bundle.md`
 
-These include compact artifact paths + key links for submission review.
+These now include tx hash, emitted events, state delta, and command sequence for audit replay.

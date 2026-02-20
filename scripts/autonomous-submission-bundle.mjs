@@ -51,7 +51,7 @@ export async function buildAutonomousSubmissionBundle() {
 
 	const bundle = {
 		suite: "autonomous-bsc-submission-bundle",
-		version: 1,
+		version: 2,
 		generatedAt,
 		artifacts: {
 			cycleProofPath: cyclePath,
@@ -64,6 +64,25 @@ export async function buildAutonomousSubmissionBundle() {
 			cycleTxHash: cycle?.txEvidence?.txHash || null,
 			cycleReconcileStatus: cycle?.reconcileSummary?.status || "missing",
 			liveTestStatus: liveTest?.ok === true ? "ok" : "missing_or_failed",
+			coreFundingRoute: cycle?.coreRouteSelection?.selectedFundingRoute || null,
+			onchainVerifiableTransition:
+				cycle?.cycleTransitionEvidence?.verifiable === true,
+		},
+		onchainEvidence: {
+			txHash: cycle?.txEvidence?.txHash || null,
+			emittedEvents: cycle?.txEvidence?.emittedEvents || [],
+			stateDelta: cycle?.txEvidence?.stateDelta || null,
+			receiptNormalized: cycle?.txEvidence?.receiptNormalized || null,
+			transition: cycle?.cycleTransitionEvidence?.transition || null,
+		},
+		reproducibility: {
+			oneCommand: "npm run autonomous:evidence:regen",
+			commandSequence: [
+				"npm run autonomous:bsc:cycle -- --mode dryrun --run-id submission-proof-001",
+				"npm run live:test:preflight",
+				"npm run readiness:refresh",
+				"npm run autonomous:submission:bundle",
+			],
 		},
 		links: {
 			repo: "https://github.com/davirain/pi-chain-tools",
@@ -81,6 +100,19 @@ export async function buildAutonomousSubmissionBundle() {
 		`- Tx hash: ${bundle.summary.cycleTxHash || "n/a"}`,
 		`- Reconcile: ${bundle.summary.cycleReconcileStatus}`,
 		`- Live-test status: ${bundle.summary.liveTestStatus}`,
+		`- Core funding route: ${bundle.summary.coreFundingRoute || "n/a"}`,
+		`- Verifiable transition: ${bundle.summary.onchainVerifiableTransition ? "yes" : "no"}`,
+		"",
+		"## Onchain evidence",
+		"",
+		`- Tx hash: ${bundle.onchainEvidence.txHash || "n/a"}`,
+		`- Emitted events: ${Array.isArray(bundle.onchainEvidence.emittedEvents) ? bundle.onchainEvidence.emittedEvents.length : 0}`,
+		`- State delta: ${bundle.onchainEvidence.stateDelta ? JSON.stringify(bundle.onchainEvidence.stateDelta) : "n/a"}`,
+		"",
+		"## Reproducibility",
+		"",
+		`- One command: \`${bundle.reproducibility.oneCommand}\``,
+		...bundle.reproducibility.commandSequence.map((cmd) => `- \`${cmd}\``),
 		"",
 		"## Key links",
 		"",

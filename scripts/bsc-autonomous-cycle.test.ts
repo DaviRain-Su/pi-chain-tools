@@ -18,5 +18,11 @@ describe("bsc-autonomous-cycle", () => {
 		);
 		expect(result.proof.reconcileSummary).toBeTruthy();
 		expect(result.proof.reconcileSummary.reconcileSnapshot).toBeTruthy();
+		expect(result.proof.coreRouteSelection?.selectedFundingRoute).toBe(
+			"asterdex_earn_core",
+		);
+		expect(
+			Array.isArray(result.proof.coreRouteSelection?.evidenceMarkers),
+		).toBe(true);
 	});
 });

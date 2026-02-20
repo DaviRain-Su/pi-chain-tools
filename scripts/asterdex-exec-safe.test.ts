@@ -44,4 +44,37 @@ describe("asterdex-exec-safe", () => {
 		expect(result.status).toBe("dryrun");
 		expect(result.evidence?.runId).toBe("r2");
 	});
+
+	it("allows live execution from verifiable onchain trigger without manual confirm", () => {
+		const result = runAsterDexExecSafe(
+			[
+				"--mode",
+				"live",
+				"--confirm",
+				"WRONG_CONFIRM",
+				"--intent-json",
+				JSON.stringify({
+					runId: "r3",
+					amountRaw: "1",
+					tokenIn: "USDC",
+					tokenOut: "USDT",
+				}),
+				"--trigger-proof-json",
+				JSON.stringify({
+					txHash: `0x${"ab".repeat(32)}`,
+					cycleId: "cycle-bsc-mainnet-v1",
+					transitionId: "step-1",
+					stateDelta: { previousState: "IDLE", nextState: "EXECUTING" },
+				}),
+			],
+			{
+				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE: "true",
+				BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND:
+					"node -e \"console.log('0x' + 'cd'.repeat(32))\"",
+			},
+		);
+		expect(result.ok).toBe(true);
+		expect(result.status).toBe("executed");
+		expect(result.evidence?.confirmationMode).toBe("onchain_trigger");
+	});
 });
