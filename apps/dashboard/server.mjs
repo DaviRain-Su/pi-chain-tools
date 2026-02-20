@@ -9505,6 +9505,20 @@ async function discoverSeedCandidatesFromProtocolMeta(protocol) {
 }
 
 async function scorePoolCandidates(candidates, protocol) {
+	const callWithTimeout = async (
+		promiseFactory,
+		timeoutMs = 3500,
+		fallback = null,
+	) => {
+		const timeout = new Promise((resolve) => {
+			setTimeout(() => resolve(fallback), timeoutMs);
+		});
+		try {
+			return await Promise.race([promiseFactory(), timeout]);
+		} catch {
+			return fallback;
+		}
+	};
 	const provider = new JsonRpcProvider(BSC_RPC_URL, {
 		name: "bsc",
 		chainId: BSC_CHAIN_ID,
@@ -9573,9 +9587,20 @@ async function scorePoolCandidates(candidates, protocol) {
 	const rows = [];
 	for (const pool of candidates) {
 		const [usdcRaw, usdtRaw, listaProbe] = await Promise.all([
-			readWithFallback(() => readBalanceRaw(BSC_USDC, pool), "0"),
-			readWithFallback(() => readBalanceRaw(BSC_USDT, pool), "0"),
-			probeListaCompatibility(pool),
+			callWithTimeout(
+				() => readWithFallback(() => readBalanceRaw(BSC_USDC, pool), "0"),
+				3000,
+				"0",
+			),
+			callWithTimeout(
+				() => readWithFallback(() => readBalanceRaw(BSC_USDT, pool), "0"),
+				3000,
+				"0",
+			),
+			callWithTimeout(() => probeListaCompatibility(pool), 3500, {
+				compatible: false,
+				reason: "probe_timeout",
+			}),
 		]);
 		const usdcUi = Number(rawToUi(usdcRaw, BSC_USDC_DECIMALS));
 		const usdtUi = Number(rawToUi(usdtRaw, BSC_USDT_DECIMALS));
