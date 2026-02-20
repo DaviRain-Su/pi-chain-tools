@@ -125,6 +125,16 @@ npm run stable-yield:auto-migrate:v1:cron-install
 # logs: logs/stable-yield-auto-migrate.log
 ```
 
+v2 增强（多协议比较入口）：
+
+```bash
+# v2 支持读取 Venus + 外部注入 APY（Lista/Wombat），并给出最优市场建议
+npm run stable-yield:auto-migrate:v2 -- --maxMoveUsd 5 --minApyDeltaBps 20
+
+# 可通过参数/环境注入外部APY用于比较
+npm run stable-yield:auto-migrate:v2 -- --listaUsdtApy 1.8 --wombatUsdtApy 1.2
+```
+
 
 ## 0) 查看可上架策略模板（Market Manifests）
 
