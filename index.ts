@@ -2,6 +2,9 @@ import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "@sinclair/typebox";
+import { getEvmChainId, parseEvmNetwork } from "./src/chains/evm/runtime.js";
+import { planLifiQuoteRoutes } from "./src/chains/evm/tools/lifi-planning.js";
+import { LIFI_DEFAULT_SLIPPAGE } from "./src/chains/evm/tools/lifi-types.js";
 import { createNearToolset } from "./src/chains/near/toolset.js";
 import { registerChainToolsets } from "./src/core/register.js";
 import { defineTool } from "./src/core/types.js";
@@ -161,6 +164,72 @@ function buildLifiExecuteIntent(spec: Record<string, unknown>) {
 		nextAction:
 			"Call LI.FI quote endpoint to resolve route + transactionRequest",
 		requiresSigner: true,
+	};
+}
+
+async function prepareLifiQuoteFromIntent(
+	executeIntent: Record<string, unknown>,
+	quoteContext: Record<string, unknown>,
+) {
+	const fromChain = String(executeIntent.fromChain || "").toLowerCase();
+	const toChain = String(executeIntent.toChain || "").toLowerCase();
+	const fromNetwork = parseEvmNetwork(fromChain as never);
+	const toNetwork = parseEvmNetwork(toChain as never);
+
+	const fromChainId = getEvmChainId(fromNetwork).toString();
+	const toChainId = getEvmChainId(toNetwork).toString();
+	const fromToken = String(quoteContext.fromToken || "").trim();
+	const toToken = String(quoteContext.toToken || "").trim();
+	const fromAmount = String(quoteContext.fromAmount || "").trim();
+	const fromAddress = String(quoteContext.fromAddress || "").trim();
+	const toAddress = String(quoteContext.toAddress || "").trim() || fromAddress;
+	const orderRaw = String(quoteContext.order || "RECOMMENDED").toUpperCase();
+	const order =
+		orderRaw === "CHEAPEST" ||
+		orderRaw === "FASTEST" ||
+		orderRaw === "SAFEST" ||
+		orderRaw === "RECOMMENDED"
+			? orderRaw
+			: "RECOMMENDED";
+	const slippage = Number(quoteContext.slippage ?? LIFI_DEFAULT_SLIPPAGE);
+
+	if (!fromToken || !toToken || !fromAmount || !fromAddress) {
+		return {
+			ok: false,
+			errors: [
+				"prepareQuote requires quoteContext.fromToken/toToken/fromAmount/fromAddress",
+			],
+		};
+	}
+
+	const baseParams: Record<string, string> = {
+		fromChain: fromChainId,
+		toChain: toChainId,
+		fromToken,
+		toToken,
+		fromAmount,
+		fromAddress,
+		toAddress,
+		slippage: String(slippage),
+		integrator: process.env.LIFI_INTEGRATOR?.trim() || "pi-chain-tools",
+	};
+
+	const planned = await planLifiQuoteRoutes({
+		baseParams,
+		preferredOrder: order,
+	});
+	return {
+		ok: true,
+		quotePlan: {
+			selectedOrder: planned.selected.order,
+			score: planned.selected.score,
+			rationale: planned.selected.rationale,
+			riskHints: planned.selected.riskHints,
+			transactionRequest: planned.selected.quote.transactionRequest,
+			estimate: planned.selected.quote.estimate,
+			fallback: planned.fallback,
+			metrics: planned.metrics,
+		},
 	};
 }
 
@@ -362,7 +431,7 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 			name: "pct_strategy_run",
 			label: "PCT Strategy Run",
 			description:
-				"Run strategy in v0 plan/dry-run mode and return execution trace evidence. execute mode is gated by explicit confirmation and currently policy-blocked.",
+				"Run strategy in v0 plan/dry-run mode and return execution trace evidence. execute mode is gated by explicit confirmation and can optionally prepare LI.FI quote/txRequest.",
 			parameters: Type.Object({
 				spec: Type.Object({}, { additionalProperties: true }),
 				mode: Type.Optional(
@@ -373,6 +442,10 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					]),
 				),
 				confirmExecuteToken: Type.Optional(Type.String()),
+				prepareQuote: Type.Optional(Type.Boolean()),
+				quoteContext: Type.Optional(
+					Type.Object({}, { additionalProperties: true }),
+				),
 			}),
 			async execute(_toolCallId, params) {
 				const mode = (params.mode || "dry-run") as
@@ -418,6 +491,52 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 						],
 					};
 				}
+
+				if (
+					mode === "execute" &&
+					params.prepareQuote === true &&
+					simulated.result?.status === "ready"
+				) {
+					const quoteResult = await prepareLifiQuoteFromIntent(
+						asObject(simulated.result.executeIntent) || {},
+						asObject(params.quoteContext) || {},
+					);
+					if (!quoteResult.ok) {
+						return {
+							content: [
+								{
+									type: "text",
+									text: JSON.stringify(
+										{
+											...simulated.result,
+											quotePrepareStatus: "failed",
+											quotePrepareErrors: quoteResult.errors,
+										},
+										null,
+										2,
+									),
+								},
+							],
+						};
+					}
+					return {
+						content: [
+							{
+								type: "text",
+								text: JSON.stringify(
+									{
+										...simulated.result,
+										quotePrepareStatus: "ok",
+										quotePlan: quoteResult.quotePlan,
+									},
+									null,
+									2,
+								),
+							},
+						],
+					};
+				}
+
 				return {
 					content: [
 						{ type: "text", text: JSON.stringify(simulated.result, null, 2) },
