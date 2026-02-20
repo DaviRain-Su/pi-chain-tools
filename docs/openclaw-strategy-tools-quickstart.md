@@ -85,3 +85,19 @@
 ```
 
 返回 LI.FI 状态对象（PENDING / DONE / FAILED / REFUNDED 等）。
+
+
+## 6) stable-yield-v1（默认闭环）
+
+当 `spec.metadata.template = "stable-yield-v1"` 且 `mode=execute + live=true` 时：
+
+- 默认会走 `prepareQuote`
+- 默认优先 `autoSign`（若未提供 `signedTxHex`）
+- 默认 `trackAfterBroadcast`
+- 默认 evidence 落盘到 `docs/execution-proofs/YYYY-MM-DD/*.json`
+
+CLI 快速烟测：
+
+```bash
+npm run stable-yield:smoke
+```

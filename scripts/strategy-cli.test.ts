@@ -99,6 +99,26 @@ describe("strategy CLI flow", () => {
 		expect(payload.broadcastStatus).toBe("skipped");
 	});
 
+	it("stable-yield live sets default evidence path", () => {
+		const r = run(RUNNER, [
+			"--spec",
+			"docs/schemas/examples/strategy-stable-yield-v1.json",
+			"--mode",
+			"execute",
+			"--confirmExecuteToken",
+			"I_ACKNOWLEDGE_EXECUTION",
+			"--live",
+			"true",
+			"--liveConfirmToken",
+			"I_ACKNOWLEDGE_LIVE_EXECUTION",
+			"--json",
+		]);
+		expect(r.status).toBe(0);
+		const payload = JSON.parse(r.stdout);
+		expect(payload.status).toBe("ready");
+		expect(payload.evidenceOutPath).toContain("docs/execution-proofs/");
+	});
+
 	it("validate fails invalid structure", () => {
 		const outDir = makeTmpDir();
 		const badSpec = path.join(outDir, "bad.json");
