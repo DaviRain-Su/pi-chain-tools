@@ -3353,12 +3353,15 @@
           const data = await res.json().catch(() => ({ ok: false }));
           if (!res.ok || data?.ok === false) throw new Error(data?.error || `discover failed (${res.status})`);
           const recommended = data?.data?.recommended || "";
+          const confidence = String(data?.data?.confidence || "none");
+          const reasonCode = String(data?.data?.reasonCode || "unknown");
+          const source = String(data?.data?.source || "unknown");
           const top = (data?.data?.candidates || []).slice(0, 3).map((x) => `${x.pool} (liq=${Number(x.liquidityScore || 0).toFixed(2)})`);
           if (recommended) {
             bscConfigPoolEl.value = recommended;
-            metaEl.textContent = `Auto-discover ${protocol}: selected ${recommended}`;
+            metaEl.textContent = `Auto-discover ${protocol}: selected ${recommended} [source=${source}, confidence=${confidence}]`;
           } else {
-            metaEl.textContent = `Auto-discover ${protocol}: no candidate found. ${data?.data?.warning || ""}`;
+            metaEl.textContent = `Auto-discover ${protocol}: withheld/no candidate [reason=${reasonCode}, source=${source}] ${data?.data?.warning || ""}`;
           }
           if (bscConfigCardEl && top.length) {
             bscConfigCardEl.innerHTML += `<br/>discovered top: <span class="muted">${top.join(" ; ")}</span>`;

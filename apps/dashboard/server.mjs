@@ -9496,13 +9496,31 @@ async function discoverBscPoolsByProtocol(protocol) {
 	const rows = await scorePoolCandidates(candidates);
 	const topScore = Number(rows[0]?.liquidityScore || 0);
 	const recommended = topScore > 0 ? (rows[0]?.pool ?? null) : null;
+	let reasonCode = "recommended";
 	if (!warning && rows.length > 0 && topScore <= 0) {
 		warning =
 			"auto-discovery candidates found but liquidity score is zero; recommendation withheld for safety";
+		reasonCode = "withheld_zero_liquidity";
 	}
+	if (rows.length === 0) {
+		reasonCode = "no_candidates";
+	}
+	if (!recommended && rows.length > 0 && topScore > 0) {
+		reasonCode = "withheld_policy";
+	}
+	const confidence =
+		recommended && topScore > 1_000
+			? "high"
+			: recommended && topScore > 50
+				? "medium"
+				: recommended
+					? "low"
+					: "none";
 	return {
 		protocol: key,
 		source,
+		reasonCode,
+		confidence,
 		candidates: rows,
 		recommended,
 		warning,
