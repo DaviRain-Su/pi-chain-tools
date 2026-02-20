@@ -23,6 +23,10 @@ This repo is entering a transition from single-repo accumulation to a federated 
 
 1. **Core extraction**
    - shared interfaces/types/policy contracts (`w3rt-core`)
+   - phase-1 seeded in-repo under `src/w3rt-core/`:
+     - `tool-types.ts`
+     - `workflow-run-mode.ts`
+     - `evm-transfer-policy-types.ts`
 2. **Chain split**
    - one repo per chain family (`chain-*-tools`)
 3. **Strategy split**

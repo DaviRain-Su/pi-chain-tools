@@ -2,6 +2,21 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import {
+	EVM_TRANSFER_POLICY_SCHEMA,
+	EVM_TRANSFER_POLICY_STORE_SCHEMA,
+} from "../../w3rt-core/evm-transfer-policy-types.js";
+import type {
+	EvmTransferPolicy,
+	EvmTransferPolicyAuditAction,
+	EvmTransferPolicyAuditRecord,
+	EvmTransferPolicyCheck,
+	EvmTransferPolicyCheckInput,
+	EvmTransferPolicyEnforceOn,
+	EvmTransferPolicyMode,
+	EvmTransferPolicyTemplate,
+	EvmTransferPolicyUpdate,
+} from "../../w3rt-core/evm-transfer-policy-types.js";
 import type { EvmNetwork } from "./runtime.js";
 
 const EVM_TRANSFER_POLICY_SYMBOL = Symbol.for(
@@ -13,59 +28,18 @@ const EVM_TRANSFER_POLICY_AUDIT_SYMBOL = Symbol.for(
 const EVM_TRANSFER_POLICY_PATH_ENV = "EVM_TRANSFER_POLICY_PATH";
 const EVM_TRANSFER_POLICY_DIR_ENV = "EVM_TRANSFER_POLICY_DIR";
 const EVM_TRANSFER_POLICY_FILENAME = "evm-transfer-policy.json";
-const EVM_TRANSFER_POLICY_SCHEMA = "evm.transfer.policy.v1";
-const EVM_TRANSFER_POLICY_STORE_SCHEMA = "evm.transfer.policy.store.v1";
 
-export type EvmTransferPolicyMode = "open" | "allowlist";
-export type EvmTransferPolicyEnforceOn = "mainnet_like" | "all";
-export type EvmTransferPolicyTemplate = "production_safe" | "open_dev";
-
-export type EvmTransferPolicy = {
-	schema: "evm.transfer.policy.v1";
-	version: number;
-	updatedAt: string;
-	updatedBy: string | null;
-	note: string | null;
-	mode: EvmTransferPolicyMode;
-	enforceOn: EvmTransferPolicyEnforceOn;
-	allowedRecipients: string[];
-};
-
-export type EvmTransferPolicyUpdate = {
-	mode?: EvmTransferPolicyMode;
-	enforceOn?: EvmTransferPolicyEnforceOn;
-	allowedRecipients?: string[];
-	clearRecipients?: boolean;
-	updatedBy?: string | null;
-	note?: string | null;
-};
-
-export type EvmTransferPolicyCheckInput = {
-	network: EvmNetwork;
-	toAddress: string;
-	transferType: "native" | "erc20";
-	tokenAddress?: string;
-};
-
-export type EvmTransferPolicyCheck = {
-	allowed: boolean;
-	reason: string | null;
-	policy: EvmTransferPolicy;
-};
-
-export type EvmTransferPolicyAuditAction = "set_policy" | "apply_template";
-
-export type EvmTransferPolicyAuditRecord = {
-	schema: "evm.transfer.policy.audit.v1";
-	id: string;
-	at: string;
-	action: EvmTransferPolicyAuditAction;
-	template: EvmTransferPolicyTemplate | null;
-	actor: string | null;
-	note: string | null;
-	before: EvmTransferPolicy;
-	after: EvmTransferPolicy;
-};
+export type {
+	EvmTransferPolicy,
+	EvmTransferPolicyAuditAction,
+	EvmTransferPolicyAuditRecord,
+	EvmTransferPolicyCheck,
+	EvmTransferPolicyCheckInput,
+	EvmTransferPolicyEnforceOn,
+	EvmTransferPolicyMode,
+	EvmTransferPolicyTemplate,
+	EvmTransferPolicyUpdate,
+} from "../../w3rt-core/evm-transfer-policy-types.js";
 
 type StoredPolicyState = {
 	schema: "evm.transfer.policy.store.v1";
