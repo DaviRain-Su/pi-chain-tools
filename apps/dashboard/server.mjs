@@ -549,48 +549,48 @@ const BSC_AUTONOMOUS_MODE =
 	String(
 		envOrCfg("BSC_AUTONOMOUS_MODE", "bsc.autonomous.mode", "false"),
 	).toLowerCase() === "true";
-const BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED =
+const BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED =
 	String(
 		envOrCfg(
-			"BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED",
-			"bsc.autonomous.asterdex.executeBindingRequired",
+			"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED",
+			"bsc.autonomous.hyperliquid.executeBindingRequired",
 			"false",
 		),
 	).toLowerCase() === "true";
-const BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED =
+const BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED =
 	String(
 		envOrCfg(
-			"BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED",
-			"bsc.autonomous.asterdex.executeBindingEnabled",
+			"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED",
+			"bsc.autonomous.hyperliquid.executeBindingEnabled",
 			"false",
 		),
 	).toLowerCase() === "true";
-const BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE =
+const BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE =
 	String(
 		envOrCfg(
-			"BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE",
-			"bsc.autonomous.asterdex.executeActive",
+			"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE",
+			"bsc.autonomous.hyperliquid.executeActive",
 			"false",
 		),
 	).toLowerCase() === "true";
-const BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND = String(
+const BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND = String(
 	envOrCfg(
-		"BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND",
-		"bsc.autonomous.asterdex.executeCommand",
+		"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND",
+		"bsc.autonomous.hyperliquid.executeCommand",
 		"",
 	),
 ).trim();
-const BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS = String(
+const BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS = String(
 	envOrCfg(
-		"BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS",
-		"bsc.autonomous.asterdex.routerAddress",
+		"BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS",
+		"bsc.autonomous.hyperliquid.routerAddress",
 		"",
 	),
 ).trim();
-const BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS = String(
+const BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS = String(
 	envOrCfg(
-		"BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS",
-		"bsc.autonomous.asterdex.executorAddress",
+		"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS",
+		"bsc.autonomous.hyperliquid.executorAddress",
 		"",
 	),
 ).trim();
@@ -2009,7 +2009,7 @@ async function readProofSummary() {
 		skipped: Boolean(breezeLatest?.skipped),
 		reason: breezeLatest?.reason || null,
 	};
-	const executeBinding = resolveAsterDexExecuteBinding({
+	const executeBinding = resolveHyperliquidExecuteBinding({
 		autonomousMode: BSC_AUTONOMOUS_MODE,
 	});
 	return {
@@ -2022,9 +2022,9 @@ async function readProofSummary() {
 					execution: resolveExecutionMarkers({ autonomousMode: true }),
 					executeBinding,
 					executeBindingRequired:
-						BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED,
+						BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED,
 					executeBindingReady:
-						BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED !== true ||
+						BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED !== true ||
 						executeBinding !== "none",
 				}
 			: undefined,
@@ -8422,15 +8422,15 @@ function recordRebalanceMetric(entry) {
 	void saveMetricsToDisk();
 }
 
-function resolveAsterDexExecuteBinding({ autonomousMode }) {
+function resolveHyperliquidExecuteBinding({ autonomousMode }) {
 	const ready =
 		autonomousMode === true &&
-		BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED === true &&
-		Boolean(BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND) &&
-		Boolean(BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS) &&
-		Boolean(BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS);
+		BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED === true &&
+		Boolean(BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND) &&
+		Boolean(BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS) &&
+		Boolean(BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS);
 	if (!ready) return "none";
-	return BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE ? "active" : "prepared";
+	return BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE ? "active" : "prepared";
 }
 
 function resolveExecutionMarkers({ autonomousMode }) {
@@ -9335,11 +9335,11 @@ const server = http.createServer(async (req, res) => {
 							chain: "bsc",
 							enabled: true,
 							execution: resolveExecutionMarkers({ autonomousMode: true }),
-							executeBinding: resolveAsterDexExecuteBinding({
+							executeBinding: resolveHyperliquidExecuteBinding({
 								autonomousMode: true,
 							}),
 							executeBindingRequired:
-								BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED,
+								BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED,
 						}
 					: undefined,
 			});

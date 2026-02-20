@@ -1,4 +1,4 @@
-# BSC Autonomous Contracts Architecture (AsterDEX Track)
+# BSC Autonomous Contracts Architecture (Hyperliquid Track)
 
 ## Goal
 
@@ -22,10 +22,10 @@ Path: `contracts/bsc-autonomous/`
   - Rejects manual override-style contract forwarding by default (`msg.sender == tx.origin` path check)
   - Emergency-only override path with explicit event evidence
 
-- `IAsterDexEarnRouter.sol`
-  - Router interface binding for AsterDEX Earn execution route
+- `IHyperliquidEarnRouter.sol`
+  - Router interface binding for Hyperliquid Earn execution route
 
-- `MockAsterDexEarnRouter.sol`
+- `MockHyperliquidEarnRouter.sol`
   - Test mock for deterministic success/failure simulation
 
 ### Risk guard controls (in strategy contract)
@@ -51,7 +51,7 @@ Autonomy scripts continue to support legacy/offchain flow, but now support contr
 - `scripts/bsc-autonomous-cycle.mjs`
   - accepts contract entrypoint mode via env
   - merges runtime transition evidence from decoded contract events
-- `scripts/asterdex-exec-safe.mjs`
+- `scripts/hyperliquid-exec-safe.mjs`
   - parses structured JSON output from contract interaction scripts
   - surfaces `decodedEvents`, `stateDelta`, and `transition` in execution evidence
 

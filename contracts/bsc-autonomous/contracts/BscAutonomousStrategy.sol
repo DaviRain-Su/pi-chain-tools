@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IAsterDexEarnRouter} from "./IAsterDexEarnRouter.sol";
+import {IHyperliquidEarnRouter} from "./IHyperliquidEarnRouter.sol";
 
 contract BscAutonomousStrategy {
     enum CycleState {
@@ -25,7 +25,7 @@ contract BscAutonomousStrategy {
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant EMERGENCY_ROLE = keccak256("EMERGENCY_ROLE");
 
-    IAsterDexEarnRouter public immutable asterDexRouter;
+    IHyperliquidEarnRouter public immutable hyperliquidRouter;
 
     mapping(bytes32 => mapping(address => bool)) private roles;
 
@@ -84,7 +84,7 @@ contract BscAutonomousStrategy {
         require(router != address(0), "router_required");
         require(admin != address(0), "admin_required");
         require(emergencyAdmin != address(0), "emergency_required");
-        asterDexRouter = IAsterDexEarnRouter(router);
+        hyperliquidRouter = IHyperliquidEarnRouter(router);
         maxAmountRaw = initialMaxAmountRaw;
         cooldownSeconds = initialCooldownSeconds;
         cycleState = CycleState.Idle;
@@ -149,7 +149,7 @@ contract BscAutonomousStrategy {
         );
         cycleState = CycleState.Triggered;
 
-        (bool ok, bytes32 execId) = asterDexRouter.executeEarn(req.amountRaw, req.tokenIn, req.tokenOut, req.routeData);
+        (bool ok, bytes32 execId) = hyperliquidRouter.executeEarn(req.amountRaw, req.tokenIn, req.tokenOut, req.routeData);
         routeExecutionId = execId;
 
         if (ok) {
@@ -161,7 +161,7 @@ contract BscAutonomousStrategy {
                 req.emergencyOverride,
                 req.amountRaw,
                 execId,
-                "asterdex_earn_executed"
+                "hyperliquid_earn_executed"
             );
             emit CycleStateTransition(
                 req.cycleId,
@@ -194,7 +194,7 @@ contract BscAutonomousStrategy {
                 req.emergencyOverride,
                 req.amountRaw,
                 execId,
-                "asterdex_earn_failed"
+                "hyperliquid_earn_failed"
             );
             emit CycleStateTransition(
                 req.cycleId,

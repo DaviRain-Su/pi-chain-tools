@@ -1,11 +1,11 @@
-# Autonomous Contract Threat Model (BSC AsterDEX Cycle)
+# Autonomous Contract Threat Model (BSC Hyperliquid Cycle)
 
 ## Scope
 `contracts/bsc-autonomous/contracts/BscAutonomousStrategy.sol` and its offchain invocation path (`scripts/bsc-autonomous-cycle.mjs`, `contracts/bsc-autonomous/scripts/run-cycle.mjs`).
 
 ## Trust Boundaries
 - **Onchain strategy contract**: authoritative state machine + guards.
-- **Router contract (AsterDEX)**: external dependency; can fail, return malicious IDs, or execute unexpected logic.
+- **Router contract (Hyperliquid)**: external dependency; can fail, return malicious IDs, or execute unexpected logic.
 - **EOA operator key**: submits cycle tx and can trigger emergency operations.
 - **Offchain orchestrator**: prepares request payloads, confirms route hash, records evidence.
 - **RPC provider / indexers**: observation layer only; should not be trusted for state truth beyond chain finality.

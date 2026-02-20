@@ -21,18 +21,18 @@ Recommended for full dry-run visibility:
 - `BREEZE_API_BASE_URL`
 - `BREEZE_API_KEY`
 
-Optional AsterDEX execute-binding policy vars (autonomous seam, no direct unsafe execute):
+Optional Hyperliquid execute-binding policy vars (autonomous seam, no direct unsafe execute):
 
-- `BSC_AUTONOMOUS_ASTERDEX_ENABLED=true`
-- `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED=true`
-- `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED=true` (enforce blocker when missing)
-- `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND` (recommended: `node scripts/asterdex-exec-safe.mjs "{intent}"`)
-- `BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS`
-- `BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS`
-- `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE=true` (only when live execution is intentionally enabled)
-- `BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND` (actual tx broadcaster command template)
-- `BSC_AUTONOMOUS_ASTERDEX_CONFIRM_TEXT` (default `ASTERDEX_EXECUTE_LIVE`)
-- `BSC_AUTONOMOUS_ASTERDEX_MAX_AMOUNT_RAW` (default cap `1000000000000000000`)
+- `BSC_AUTONOMOUS_HYPERLIQUID_ENABLED=true`
+- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED=true`
+- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED=true` (enforce blocker when missing)
+- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND` (recommended: `node scripts/hyperliquid-exec-safe.mjs "{intent}"`)
+- `BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS`
+- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS`
+- `BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE=true` (only when live execution is intentionally enabled)
+- `BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND` (actual tx broadcaster command template)
+- `BSC_AUTONOMOUS_HYPERLIQUID_CONFIRM_TEXT` (default `HYPERLIQUID_EXECUTE_LIVE`)
+- `BSC_AUTONOMOUS_HYPERLIQUID_MAX_AMOUNT_RAW` (default cap `1000000000000000000`)
 
 ## Guardrails
 

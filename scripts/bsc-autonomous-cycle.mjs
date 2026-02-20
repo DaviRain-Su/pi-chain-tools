@@ -3,8 +3,8 @@ import { spawnSync } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { runAsterDexExecSafe } from "./asterdex-exec-safe.mjs";
 import { evaluateCycleTransitionEvidence } from "./autonomous-cycle-trigger-adapter.mjs";
+import { runHyperliquidExecSafe } from "./hyperliquid-exec-safe.mjs";
 import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
 import { normalizeTxReceipt } from "./tx-receipt-normalize.mjs";
 
@@ -153,16 +153,18 @@ function buildIntent(runId, env) {
 	return {
 		runId,
 		tokenIn: String(
-			env.BSC_AUTONOMOUS_ASTERDEX_TOKEN_IN || env.BSC_USDC || "USDC",
+			env.BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_IN || env.BSC_USDC || "USDC",
 		),
 		tokenOut: String(
-			env.BSC_AUTONOMOUS_ASTERDEX_TOKEN_OUT || env.BSC_USDT || "USDT",
+			env.BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_OUT || env.BSC_USDT || "USDT",
 		),
 		amountRaw: String(
-			env.BSC_AUTONOMOUS_ASTERDEX_AMOUNT_RAW || "1000000000000000",
+			env.BSC_AUTONOMOUS_HYPERLIQUID_AMOUNT_RAW || "1000000000000000",
 		),
-		routerAddress: String(env.BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS || ""),
-		executorAddress: String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS || ""),
+		routerAddress: String(env.BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS || ""),
+		executorAddress: String(
+			env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS || "",
+		),
 	};
 }
 
@@ -407,7 +409,7 @@ export async function runBscAutonomousCycle(
 		env,
 	});
 	const confirm = String(
-		env.BSC_AUTONOMOUS_ASTERDEX_CONFIRM_TEXT || "ASTERDEX_EXECUTE_LIVE",
+		env.BSC_AUTONOMOUS_HYPERLIQUID_CONFIRM_TEXT || "HYPERLIQUID_EXECUTE_LIVE",
 	);
 	const safety = createLiveSafetyContext(env);
 	const state = await loadCycleState(args.statePath);
@@ -441,10 +443,10 @@ export async function runBscAutonomousCycle(
 			decision: "hold_blocked",
 			intent,
 			coreRouteSelection: {
-				primaryFundingRoute: "asterdex_earn_core",
-				selectedFundingRoute: "asterdex_earn_core",
+				primaryFundingRoute: "hyperliquid_earn_core",
+				selectedFundingRoute: "hyperliquid_earn_core",
 				isCoreRoute: true,
-				evidenceMarkers: ["ROUTE_CORE_ASTERDEX_EARN"],
+				evidenceMarkers: ["ROUTE_CORE_HYPERLIQUID_EARN"],
 			},
 			cycleTransitionEvidence: transitionEvidence,
 			txEvidence: {
@@ -489,7 +491,7 @@ export async function runBscAutonomousCycle(
 			env,
 			"before",
 		);
-		const execution = runAsterDexExecSafe(execArgs, env);
+		const execution = runHyperliquidExecSafe(execArgs, env);
 		const afterSnapshot = runSnapshotCommand(
 			env.BSC_AUTONOMOUS_RECONCILE_AFTER_COMMAND ||
 				env.BSC_AUTONOMOUS_RECONCILE_SNAPSHOT_COMMAND ||
@@ -524,10 +526,13 @@ export async function runBscAutonomousCycle(
 			decision,
 			intent,
 			coreRouteSelection: {
-				primaryFundingRoute: "asterdex_earn_core",
-				selectedFundingRoute: "asterdex_earn_core",
+				primaryFundingRoute: "hyperliquid_earn_core",
+				selectedFundingRoute: "hyperliquid_earn_core",
 				isCoreRoute: true,
-				evidenceMarkers: ["ROUTE_CORE_ASTERDEX_EARN", "FUNDING_PATH_PRIMARY"],
+				evidenceMarkers: [
+					"ROUTE_CORE_HYPERLIQUID_EARN",
+					"FUNDING_PATH_PRIMARY",
+				],
 			},
 			cycleTransitionEvidence: mergedTransitionEvidence,
 			safety: {

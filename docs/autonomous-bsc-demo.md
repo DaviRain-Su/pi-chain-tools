@@ -2,7 +2,7 @@
 
 ## 0:00 - 0:30 Setup + safety gates
 - Show `BSC_AUTONOMOUS_MODE=true` and deterministic cycle envs.
-- Show AsterDEX execute binding envs (`*_EXECUTE_BINDING_ENABLED`, router/executor, command).
+- Show Hyperliquid execute binding envs (`*_EXECUTE_BINDING_ENABLED`, router/executor, command).
 - Mention hard gates: confirm text + max amount cap + active binding required.
 
 ## 0:30 - 1:30 Dryrun cycle proof
@@ -20,9 +20,9 @@ Show artifact:
 Use a configured live executor command and active binding:
 
 ```bash
-export BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE=true
-export BSC_AUTONOMOUS_ASTERDEX_CONFIRM_TEXT=ASTERDEX_EXECUTE_LIVE
-export BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND='your-real-executor --intent {intent}'
+export BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE=true
+export BSC_AUTONOMOUS_HYPERLIQUID_CONFIRM_TEXT=HYPERLIQUID_EXECUTE_LIVE
+export BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND='your-real-executor --intent {intent}'
 
 npm run autonomous:bsc:cycle -- --mode live --run-id demo-live-001
 ```

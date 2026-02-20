@@ -19,7 +19,7 @@ describe("bsc-autonomous-cycle", () => {
 		expect(result.proof.reconcileSummary).toBeTruthy();
 		expect(result.proof.reconcileSummary.reconcileSnapshot).toBeTruthy();
 		expect(result.proof.coreRouteSelection?.selectedFundingRoute).toBe(
-			"asterdex_earn_core",
+			"hyperliquid_earn_core",
 		);
 		expect(
 			Array.isArray(result.proof.coreRouteSelection?.evidenceMarkers),
@@ -41,10 +41,10 @@ describe("bsc-autonomous-cycle", () => {
 				`/tmp/bsc-autonomous-cycle-live-state-${unique}.json`,
 			],
 			{
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE: "true",
-				BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND:
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND:
 					"node -e \"console.log(JSON.stringify({txHash:'0x' + 'ef'.repeat(32),emittedEvents:['CycleStateTransition','ExecutionDecision'],stateDelta:{previousState:'0',nextState:'0'},transition:{cycleId:'cycle-live',transitionId:'1',eventName:'CycleStateTransition',emittedEvents:['CycleStateTransition'],stateDelta:{previousState:'0',nextState:'0'}}}))\"",
-				BSC_AUTONOMOUS_ASTERDEX_CONFIRM_TEXT: "ASTERDEX_EXECUTE_LIVE",
+				BSC_AUTONOMOUS_HYPERLIQUID_CONFIRM_TEXT: "HYPERLIQUID_EXECUTE_LIVE",
 				BSC_AUTONOMOUS_CONTRACT_ENTRYPOINT_ENABLED: "true",
 				BSC_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS: "1",
 			},

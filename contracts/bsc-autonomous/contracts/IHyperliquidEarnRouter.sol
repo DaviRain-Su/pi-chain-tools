@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-interface IAsterDexEarnRouter {
+interface IHyperliquidEarnRouter {
     function executeEarn(
         uint256 amountRaw,
         address tokenIn,

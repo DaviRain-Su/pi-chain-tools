@@ -1,7 +1,7 @@
 {
   "_format": "hh-sol-artifact-1",
-  "contractName": "IAsterDexEarnRouter",
-  "sourceName": "contracts/IAsterDexEarnRouter.sol",
+  "contractName": "IHyperliquidEarnRouter",
+  "sourceName": "contracts/IHyperliquidEarnRouter.sol",
   "abi": [
     {
       "inputs": [

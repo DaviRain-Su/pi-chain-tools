@@ -1,17 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-	getAsterDexCapability,
-	getAsterDexReadiness,
-	parseAsterDexConfig,
-	prepareAsterDexExecuteIntent,
-	readAsterDexHealth,
-	resolveAsterDexExecuteBinding,
-} from "./asterdex.js";
+	getHyperliquidCapability,
+	getHyperliquidReadiness,
+	parseHyperliquidConfig,
+	prepareHyperliquidExecuteIntent,
+	readHyperliquidHealth,
+	resolveHyperliquidExecuteBinding,
+} from "./hyperliquid.js";
 
-describe("bsc autonomous asterdex seam", () => {
+describe("bsc autonomous hyperliquid seam", () => {
 	it("keeps seam disabled by default", async () => {
-		const readiness = await getAsterDexReadiness({ env: {} });
+		const readiness = await getHyperliquidReadiness({ env: {} });
 		expect(readiness.config.enabled).toBe(false);
 		expect(readiness.health.ok).toBe(true);
 		expect(readiness.health.message).toContain("feature flag off");
@@ -20,17 +20,17 @@ describe("bsc autonomous asterdex seam", () => {
 
 	it("parses typed config with defaults", () => {
 		expect(
-			parseAsterDexConfig({
+			parseHyperliquidConfig({
 				env: {
-					BSC_AUTONOMOUS_ASTERDEX_ENABLED: "true",
-					BSC_AUTONOMOUS_ASTERDEX_API_BASE_URL: "https://example.invalid/",
-					BSC_AUTONOMOUS_ASTERDEX_TIMEOUT_MS: "5000",
-					BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED: "true",
-					BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED: "true",
-					BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE: "false",
-					BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND: "node scripts/exec.mjs",
-					BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS: "0xrouter",
-					BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS: "0xexecutor",
+					BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true",
+					BSC_AUTONOMOUS_HYPERLIQUID_API_BASE_URL: "https://example.invalid/",
+					BSC_AUTONOMOUS_HYPERLIQUID_TIMEOUT_MS: "5000",
+					BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED: "true",
+					BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED: "true",
+					BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE: "false",
+					BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND: "node scripts/exec.mjs",
+					BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS: "0xrouter",
+					BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS: "0xexecutor",
 				},
 			}),
 		).toEqual({
@@ -47,13 +47,13 @@ describe("bsc autonomous asterdex seam", () => {
 	});
 
 	it("exposes execute-binding capability marker", () => {
-		const capability = getAsterDexCapability({
+		const capability = getHyperliquidCapability({
 			env: {
-				BSC_AUTONOMOUS_ASTERDEX_ENABLED: "true",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED: "true",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND: "node scripts/exec.mjs",
-				BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS: "0xrouter",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS: "0xexecutor",
+				BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND: "node scripts/exec.mjs",
+				BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS: "0xrouter",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS: "0xexecutor",
 			},
 		});
 		expect(capability.canReadHealth).toBe(true);
@@ -63,7 +63,7 @@ describe("bsc autonomous asterdex seam", () => {
 
 	it("resolves execute binding markers correctly", () => {
 		expect(
-			resolveAsterDexExecuteBinding({
+			resolveHyperliquidExecuteBinding({
 				enabled: false,
 				executeBindingEnabled: true,
 				executeActive: true,
@@ -73,7 +73,7 @@ describe("bsc autonomous asterdex seam", () => {
 			}),
 		).toBe("none");
 		expect(
-			resolveAsterDexExecuteBinding({
+			resolveHyperliquidExecuteBinding({
 				enabled: true,
 				executeBindingEnabled: true,
 				executeActive: false,
@@ -83,7 +83,7 @@ describe("bsc autonomous asterdex seam", () => {
 			}),
 		).toBe("prepared");
 		expect(
-			resolveAsterDexExecuteBinding({
+			resolveHyperliquidExecuteBinding({
 				enabled: true,
 				executeBindingEnabled: true,
 				executeActive: true,
@@ -95,13 +95,13 @@ describe("bsc autonomous asterdex seam", () => {
 	});
 
 	it("prepares typed execute intent when binding is ready", () => {
-		const prepared = prepareAsterDexExecuteIntent({
+		const prepared = prepareHyperliquidExecuteIntent({
 			env: {
-				BSC_AUTONOMOUS_ASTERDEX_ENABLED: "true",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED: "true",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND: "node scripts/exec.mjs",
-				BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS: "0xrouter",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS: "0xexecutor",
+				BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND: "node scripts/exec.mjs",
+				BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS: "0xrouter",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS: "0xexecutor",
 			},
 			intent: {
 				tokenIn: "USDT",
@@ -112,7 +112,7 @@ describe("bsc autonomous asterdex seam", () => {
 		expect(prepared.ok).toBe(true);
 		expect(prepared.executeBinding).toBe("prepared");
 		expect(prepared.prepared).toMatchObject({
-			protocol: "asterdex",
+			protocol: "hyperliquid",
 			chain: "bsc",
 			tokenIn: "USDT",
 			tokenOut: "USDC",
@@ -121,8 +121,8 @@ describe("bsc autonomous asterdex seam", () => {
 	});
 
 	it("returns binding-missing blockers with remediation when not configured", () => {
-		const result = prepareAsterDexExecuteIntent({
-			env: { BSC_AUTONOMOUS_ASTERDEX_ENABLED: "true" },
+		const result = prepareHyperliquidExecuteIntent({
+			env: { BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true" },
 			intent: {
 				tokenIn: "USDT",
 				tokenOut: "USDC",
@@ -132,7 +132,7 @@ describe("bsc autonomous asterdex seam", () => {
 		expect(result.ok).toBe(false);
 		expect(result.executeBinding).toBe("none");
 		expect(result.remediation.join(" ")).toContain(
-			"BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED",
+			"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED",
 		);
 	});
 
@@ -141,7 +141,7 @@ describe("bsc autonomous asterdex seam", () => {
 			ok: true,
 			status: 200,
 		});
-		const result = await readAsterDexHealth({
+		const result = await readHyperliquidHealth({
 			config: {
 				enabled: true,
 				apiBaseUrl: "https://example.invalid",

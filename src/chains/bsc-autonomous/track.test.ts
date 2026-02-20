@@ -62,65 +62,65 @@ describe("bsc autonomous mode routing", () => {
 		expect(result.evidence.requestTrigger).toBe("external");
 	});
 
-	it("emits AsterDEX execute binding blocker when required but missing", () => {
+	it("emits Hyperliquid execute binding blocker when required but missing", () => {
 		const result = evaluateBscAutonomousPolicy({
 			env: {
 				BSC_AUTONOMOUS_MODE: "true",
 				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
 				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED: "true",
 			},
 			requestTrigger: "deterministic_contract_cycle",
 		});
 		expect(result.allowed).toBe(false);
 		expect(result.blockers.map((x) => x.code)).toContain(
-			"AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_UNAVAILABLE",
+			"AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_UNAVAILABLE",
 		);
 		expect(result.blockers[0]?.remediation).toContain(
-			"BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED",
+			"BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED",
 		);
 	});
 
-	it("accepts prepared AsterDEX execute binding when required", () => {
+	it("accepts prepared Hyperliquid execute binding when required", () => {
 		const result = evaluateBscAutonomousPolicy({
 			env: {
 				BSC_AUTONOMOUS_MODE: "true",
 				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
 				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
-				BSC_AUTONOMOUS_ASTERDEX_ENABLED: "true",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED: "true",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED: "true",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND: "node scripts/exec.mjs",
-				BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS: "0xrouter",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS: "0xexecutor",
+				BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND: "node scripts/exec.mjs",
+				BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS: "0xrouter",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS: "0xexecutor",
 			},
 			requestTrigger: "deterministic_contract_cycle",
 		});
 		expect(result.allowed).toBe(true);
-		expect(result.evidence.asterDexExecuteBinding).toBe("prepared");
-		expect(result.evidence.asterDexExecuteBindingReady).toBe(true);
+		expect(result.evidence.hyperliquidExecuteBinding).toBe("prepared");
+		expect(result.evidence.hyperliquidExecuteBindingReady).toBe(true);
 	});
 
-	it("marks active AsterDEX execute binding when active flag is set", () => {
+	it("marks active Hyperliquid execute binding when active flag is set", () => {
 		const result = evaluateBscAutonomousPolicy({
 			env: {
 				BSC_AUTONOMOUS_MODE: "true",
 				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
 				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
-				BSC_AUTONOMOUS_ASTERDEX_ENABLED: "true",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED: "true",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED: "true",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE: "true",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND:
-					"node scripts/asterdex-exec-safe.mjs",
-				BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS: "0xrouter",
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS: "0xexecutor",
+				BSC_AUTONOMOUS_HYPERLIQUID_ENABLED: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND:
+					"node scripts/hyperliquid-exec-safe.mjs",
+				BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS: "0xrouter",
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS: "0xexecutor",
 			},
 			requestTrigger: "deterministic_contract_cycle",
 		});
 		expect(result.allowed).toBe(true);
-		expect(result.evidence.asterDexExecuteBinding).toBe("active");
-		expect(result.evidence.asterDexExecuteBindingReady).toBe(true);
+		expect(result.evidence.hyperliquidExecuteBinding).toBe("active");
+		expect(result.evidence.hyperliquidExecuteBindingReady).toBe(true);
 	});
 
 	it("keeps compatibility when binding requirement flag is off", () => {
@@ -133,7 +133,7 @@ describe("bsc autonomous mode routing", () => {
 			requestTrigger: "deterministic_contract_cycle",
 		});
 		expect(result.allowed).toBe(true);
-		expect(result.evidence.asterDexExecuteBindingRequired).toBe(false);
+		expect(result.evidence.hyperliquidExecuteBindingRequired).toBe(false);
 	});
 
 	it("marks deterministic autonomous request as ready with evidence", () => {
@@ -152,7 +152,7 @@ describe("bsc autonomous mode routing", () => {
 			requestTrigger: "deterministic_contract_cycle",
 			cycleConfigPresent: true,
 			deterministicReady: true,
-			asterDexExecuteBinding: "none",
+			hyperliquidExecuteBinding: "none",
 		});
 	});
 

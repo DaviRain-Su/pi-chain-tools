@@ -1,7 +1,7 @@
 import {
-	parseAsterDexConfig,
-	resolveAsterDexExecuteBinding,
-} from "./asterdex.js";
+	parseHyperliquidConfig,
+	resolveHyperliquidExecuteBinding,
+} from "./hyperliquid.js";
 
 export type ExecutionTrack = "legacy" | "autonomous";
 export type ExecutionGovernance = "onchain_only" | "hybrid";
@@ -16,7 +16,7 @@ export type ExecutionMarkers = {
 export type AutonomousBlockerCode =
 	| "AUTONOMOUS_CYCLE_CONFIG_MISSING"
 	| "AUTONOMOUS_EXTERNAL_TRIGGER_BLOCKED"
-	| "AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_UNAVAILABLE";
+	| "AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_UNAVAILABLE";
 
 export type AutonomousBlocker = {
 	code: AutonomousBlockerCode;
@@ -36,9 +36,10 @@ export type BscAutonomousDecisionEvidence = {
 	cycleConfigPresent: boolean;
 	cycleConfig?: DeterministicCycleConfig;
 	deterministicReady: boolean;
-	asterDexExecuteBinding: "none" | "prepared" | "active";
-	asterDexExecuteBindingRequired: boolean;
-	asterDexExecuteBindingReady: boolean;
+	coreYieldEngine: "hyperliquid";
+	hyperliquidExecuteBinding: "none" | "prepared" | "active";
+	hyperliquidExecuteBindingRequired: boolean;
+	hyperliquidExecuteBindingReady: boolean;
 };
 
 export type BscAutonomousDecision = {
@@ -92,18 +93,19 @@ export function parseDeterministicCycleConfig(input?: {
 export function evaluateBscAutonomousPolicy(input?: {
 	env?: Record<string, string | undefined>;
 	requestTrigger?: ExecutionTrigger;
-	requireAsterDexExecuteBinding?: boolean;
+	requireHyperliquidExecuteBinding?: boolean;
 }): BscAutonomousDecision {
 	const env = input?.env ?? process.env;
 	const autonomousMode = isBscAutonomousModeEnabled({ env });
 	const requestTrigger = input?.requestTrigger ?? "external";
 	const markers = getBscExecutionMarkers(autonomousMode);
 	const cycleConfig = parseDeterministicCycleConfig({ env });
-	const asterDexConfig = parseAsterDexConfig({ env });
-	const asterDexExecuteBinding = resolveAsterDexExecuteBinding(asterDexConfig);
-	const asterDexExecuteBindingRequired =
-		(input?.requireAsterDexExecuteBinding ?? autonomousMode === true)
-			? asterDexConfig.executeBindingRequired
+	const hyperliquidConfig = parseHyperliquidConfig({ env });
+	const hyperliquidExecuteBinding =
+		resolveHyperliquidExecuteBinding(hyperliquidConfig);
+	const hyperliquidExecuteBindingRequired =
+		(input?.requireHyperliquidExecuteBinding ?? autonomousMode === true)
+			? hyperliquidConfig.executeBindingRequired
 			: false;
 	const blockers: AutonomousBlocker[] = [];
 	const actions: string[] = [];
@@ -134,20 +136,20 @@ export function evaluateBscAutonomousPolicy(input?: {
 		);
 	}
 
-	if (autonomousMode && asterDexExecuteBindingRequired) {
+	if (autonomousMode && hyperliquidExecuteBindingRequired) {
 		const bindingReady =
-			asterDexExecuteBinding === "prepared" ||
-			asterDexExecuteBinding === "active";
+			hyperliquidExecuteBinding === "prepared" ||
+			hyperliquidExecuteBinding === "active";
 		if (!bindingReady) {
 			blockers.push({
-				code: "AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_UNAVAILABLE",
+				code: "AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_UNAVAILABLE",
 				reason:
-					"Autonomous mode requires AsterDEX execute-binding readiness, but binding is unavailable.",
+					"Autonomous mode requires Hyperliquid execute-binding readiness, but binding is unavailable.",
 				remediation:
-					"Enable and configure AsterDEX execute binding (BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS).",
+					"Enable and configure Hyperliquid execute binding (BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS).",
 			});
 			actions.push(
-				"Set AsterDEX execute binding envs and re-run autonomous rollout gate to verify readiness.",
+				"Set Hyperliquid execute binding envs and re-run autonomous rollout gate to verify readiness.",
 			);
 		}
 	}
@@ -168,14 +170,15 @@ export function evaluateBscAutonomousPolicy(input?: {
 			autonomousMode &&
 			requestTrigger === "deterministic_contract_cycle" &&
 			cycleConfig != null,
-		asterDexExecuteBinding,
-		asterDexExecuteBindingRequired: Boolean(
-			autonomousMode && asterDexExecuteBindingRequired,
+		coreYieldEngine: "hyperliquid",
+		hyperliquidExecuteBinding,
+		hyperliquidExecuteBindingRequired: Boolean(
+			autonomousMode && hyperliquidExecuteBindingRequired,
 		),
-		asterDexExecuteBindingReady:
+		hyperliquidExecuteBindingReady:
 			autonomousMode !== true ||
-			asterDexExecuteBindingRequired !== true ||
-			asterDexExecuteBinding !== "none",
+			hyperliquidExecuteBindingRequired !== true ||
+			hyperliquidExecuteBinding !== "none",
 	};
 
 	return {

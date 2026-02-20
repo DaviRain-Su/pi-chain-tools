@@ -83,28 +83,28 @@ function evaluateAutonomousTrack(env, mode) {
 		String(env.BSC_AUTONOMOUS_MODE || "")
 			.trim()
 			.toLowerCase() === "true";
-	const asterDexBindingRequired =
-		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED || "")
+	const hyperliquidBindingRequired =
+		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED || "")
 			.trim()
 			.toLowerCase() === "true";
-	const asterDexBindingEnabled =
-		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED || "")
+	const hyperliquidBindingEnabled =
+		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED || "")
 			.trim()
 			.toLowerCase() === "true";
-	const asterDexExecuteActive =
-		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE || "")
+	const hyperliquidExecuteActive =
+		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE || "")
 			.trim()
 			.toLowerCase() === "true";
-	const asterDexConfigReady = Boolean(
-		asterDexBindingEnabled &&
-			String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND || "").trim() &&
-			String(env.BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS || "").trim() &&
-			String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS || "").trim(),
+	const hyperliquidConfigReady = Boolean(
+		hyperliquidBindingEnabled &&
+			String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND || "").trim() &&
+			String(env.BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS || "").trim() &&
+			String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS || "").trim(),
 	);
-	const asterDexExecuteBinding =
-		!autonomousMode || !asterDexConfigReady
+	const hyperliquidExecuteBinding =
+		!autonomousMode || !hyperliquidConfigReady
 			? "none"
-			: asterDexExecuteActive
+			: hyperliquidExecuteActive
 				? "active"
 				: "prepared";
 
@@ -119,9 +119,9 @@ function evaluateAutonomousTrack(env, mode) {
 			evidence: {
 				autonomousMode: false,
 				cycleConfigPresent: false,
-				asterDexExecuteBinding,
-				asterDexExecuteBindingRequired: false,
-				asterDexExecuteBindingReady: true,
+				hyperliquidExecuteBinding,
+				hyperliquidExecuteBindingRequired: false,
+				hyperliquidExecuteBindingReady: true,
 			},
 		};
 	}
@@ -136,9 +136,9 @@ function evaluateAutonomousTrack(env, mode) {
 			"deterministic cycle config missing (BSC_AUTONOMOUS_CYCLE_ID, BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS)",
 		);
 	}
-	if (asterDexBindingRequired && asterDexExecuteBinding === "none") {
+	if (hyperliquidBindingRequired && hyperliquidExecuteBinding === "none") {
 		blockers.push(
-			"AsterDEX execute binding required but unavailable (set BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS)",
+			"Hyperliquid execute binding required but unavailable (set BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS)",
 		);
 	}
 	if (mode !== "full") {
@@ -156,7 +156,7 @@ function evaluateAutonomousTrack(env, mode) {
 				: [
 						"Route calls through deterministic contract cycle.",
 						"Disable BSC_AUTONOMOUS_MODE for manual preflight/dryrun testing.",
-						"If AsterDEX binding is required, set binding envs before rerun.",
+						"If Hyperliquid binding is required, set binding envs before rerun.",
 					],
 		evidence: {
 			autonomousMode: true,
@@ -166,10 +166,11 @@ function evaluateAutonomousTrack(env, mode) {
 			cycleId: cycleId || undefined,
 			intervalSeconds: Number.isFinite(interval) ? interval : undefined,
 			requestMode: mode,
-			asterDexExecuteBinding,
-			asterDexExecuteBindingRequired: asterDexBindingRequired,
-			asterDexExecuteBindingReady:
-				asterDexBindingRequired !== true || asterDexExecuteBinding !== "none",
+			hyperliquidExecuteBinding,
+			hyperliquidExecuteBindingRequired: hyperliquidBindingRequired,
+			hyperliquidExecuteBindingReady:
+				hyperliquidBindingRequired !== true ||
+				hyperliquidExecuteBinding !== "none",
 		},
 	};
 }

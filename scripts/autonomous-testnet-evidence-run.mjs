@@ -86,8 +86,8 @@ function validatePrerequisites(env) {
 	const requiredAlways = [
 		"BSC_TESTNET_RPC_URL",
 		"BSC_TESTNET_PRIVATE_KEY",
-		"BSC_AUTONOMOUS_ASTERDEX_TOKEN_IN_ADDRESS",
-		"BSC_AUTONOMOUS_ASTERDEX_TOKEN_OUT_ADDRESS",
+		"BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_IN_ADDRESS",
+		"BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_OUT_ADDRESS",
 	];
 	for (const key of requiredAlways) {
 		if (!hasValue(env, key)) missing.push(key);

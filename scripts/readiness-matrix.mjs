@@ -131,37 +131,37 @@ function evaluateAutonomousReadiness(env) {
 		String(env.BSC_AUTONOMOUS_MODE || "")
 			.trim()
 			.toLowerCase() === "true";
-	const asterDexBindingRequired =
-		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED || "")
+	const hyperliquidBindingRequired =
+		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED || "")
 			.trim()
 			.toLowerCase() === "true";
-	const asterDexBindingEnabled =
-		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED || "")
+	const hyperliquidBindingEnabled =
+		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED || "")
 			.trim()
 			.toLowerCase() === "true";
-	const asterDexExecuteActive =
-		String(env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE || "")
+	const hyperliquidExecuteActive =
+		String(env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE || "")
 			.trim()
 			.toLowerCase() === "true";
-	const asterDexExecuteCommand = String(
-		env.BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND || "",
+	const hyperliquidExecuteCommand = String(
+		env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND || "",
 	).trim();
-	const asterDexRouter = String(
-		env.BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS || "",
+	const hyperliquidRouter = String(
+		env.BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS || "",
 	).trim();
-	const asterDexExecutor = String(
-		env.BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS || "",
+	const hyperliquidExecutor = String(
+		env.BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS || "",
 	).trim();
-	const asterDexConfigReady = Boolean(
-		asterDexBindingEnabled &&
-			asterDexExecuteCommand &&
-			asterDexRouter &&
-			asterDexExecutor,
+	const hyperliquidConfigReady = Boolean(
+		hyperliquidBindingEnabled &&
+			hyperliquidExecuteCommand &&
+			hyperliquidRouter &&
+			hyperliquidExecutor,
 	);
-	const asterDexExecuteBinding =
-		!enabled || !asterDexConfigReady
+	const hyperliquidExecuteBinding =
+		!enabled || !hyperliquidConfigReady
 			? "none"
-			: asterDexExecuteActive
+			: hyperliquidExecuteActive
 				? "active"
 				: "prepared";
 
@@ -175,14 +175,14 @@ function evaluateAutonomousReadiness(env) {
 			],
 			evidence: [
 				"autonomous mode disabled",
-				`AsterDEX execute binding: ${asterDexExecuteBinding}`,
+				`Hyperliquid execute binding: ${hyperliquidExecuteBinding}`,
 			],
 			evidenceFields: {
 				autonomousMode: false,
 				cycleConfigPresent: false,
-				asterDexExecuteBinding,
-				asterDexExecuteBindingRequired: false,
-				asterDexExecuteBindingReady: true,
+				hyperliquidExecuteBinding,
+				hyperliquidExecuteBindingRequired: false,
+				hyperliquidExecuteBindingReady: true,
 			},
 		};
 	}
@@ -200,9 +200,9 @@ function evaluateAutonomousReadiness(env) {
 			"deterministic cycle config missing (set BSC_AUTONOMOUS_CYCLE_ID and BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS)",
 		);
 	}
-	if (asterDexBindingRequired && asterDexExecuteBinding === "none") {
+	if (hyperliquidBindingRequired && hyperliquidExecuteBinding === "none") {
 		blockers.push(
-			"AsterDEX execute binding required but unavailable (set BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS)",
+			"Hyperliquid execute binding required but unavailable (set BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED=true with *_EXECUTE_COMMAND, *_ROUTER_ADDRESS, *_EXECUTOR_ADDRESS)",
 		);
 	}
 	return {
@@ -213,28 +213,29 @@ function evaluateAutonomousReadiness(env) {
 			? [
 					"Define deterministic cycle id + interval before enabling autonomous execution.",
 					"Use legacy/manual trigger path only when BSC_AUTONOMOUS_MODE is off.",
-					"If AsterDEX binding is required, set binding envs and re-run rollout gate.",
+					"If Hyperliquid binding is required, set binding envs and re-run rollout gate.",
 				]
 			: [
 					"Deterministic cycle config present; keep manual triggers disabled.",
-					"AsterDEX execute binding readiness is healthy for current policy.",
+					"Hyperliquid execute binding readiness is healthy for current policy.",
 				],
 		evidence: [
 			"autonomous mode enabled",
 			`cycle id: ${cycleId || "missing"}`,
 			`cycle interval seconds: ${Number.isFinite(interval) ? interval : "missing"}`,
-			`AsterDEX execute binding: ${asterDexExecuteBinding}`,
-			`AsterDEX binding required: ${asterDexBindingRequired}`,
+			`Hyperliquid execute binding: ${hyperliquidExecuteBinding}`,
+			`Hyperliquid binding required: ${hyperliquidBindingRequired}`,
 		],
 		evidenceFields: {
 			autonomousMode: true,
 			cycleConfigPresent,
 			cycleId: cycleId || undefined,
 			intervalSeconds: Number.isFinite(interval) ? interval : undefined,
-			asterDexExecuteBinding,
-			asterDexExecuteBindingRequired: asterDexBindingRequired,
-			asterDexExecuteBindingReady:
-				asterDexBindingRequired !== true || asterDexExecuteBinding !== "none",
+			hyperliquidExecuteBinding,
+			hyperliquidExecuteBindingRequired: hyperliquidBindingRequired,
+			hyperliquidExecuteBindingReady:
+				hyperliquidBindingRequired !== true ||
+				hyperliquidExecuteBinding !== "none",
 		},
 	};
 }

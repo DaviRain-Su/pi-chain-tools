@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {IAsterDexEarnRouter} from "./IAsterDexEarnRouter.sol";
+import {IHyperliquidEarnRouter} from "./IHyperliquidEarnRouter.sol";
 
-contract MockAsterDexEarnRouter is IAsterDexEarnRouter {
+contract MockHyperliquidEarnRouter is IHyperliquidEarnRouter {
     bool public shouldSucceed = true;
     bytes32 public nextExecutionId = keccak256("mock-execution");
 

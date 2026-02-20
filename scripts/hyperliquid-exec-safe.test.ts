@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { runAsterDexExecSafe } from "./asterdex-exec-safe.mjs";
+import { runHyperliquidExecSafe } from "./hyperliquid-exec-safe.mjs";
 
-describe("asterdex-exec-safe", () => {
+describe("hyperliquid-exec-safe", () => {
 	it("returns blocked when live mode is not fully configured", () => {
-		const result = runAsterDexExecSafe(
+		const result = runHyperliquidExecSafe(
 			[
 				"--mode",
 				"live",
 				"--confirm",
-				"ASTERDEX_EXECUTE_LIVE",
+				"HYPERLIQUID_EXECUTE_LIVE",
 				"--intent-json",
 				JSON.stringify({
 					runId: "r1",
@@ -26,7 +26,7 @@ describe("asterdex-exec-safe", () => {
 	});
 
 	it("supports dryrun mode and emits evidence", () => {
-		const result = runAsterDexExecSafe(
+		const result = runHyperliquidExecSafe(
 			[
 				"--mode",
 				"dryrun",
@@ -46,7 +46,7 @@ describe("asterdex-exec-safe", () => {
 	});
 
 	it("allows live execution from verifiable onchain trigger without manual confirm", () => {
-		const result = runAsterDexExecSafe(
+		const result = runHyperliquidExecSafe(
 			[
 				"--mode",
 				"live",
@@ -68,8 +68,8 @@ describe("asterdex-exec-safe", () => {
 				}),
 			],
 			{
-				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE: "true",
-				BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND:
+				BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE: "true",
+				BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND:
 					"node -e \"console.log(JSON.stringify({txHash:'0x' + 'cd'.repeat(32),emittedEvents:['CycleStateTransition','ExecutionDecision'],stateDelta:{previousState:'0',nextState:'0'}}))\"",
 			},
 		);

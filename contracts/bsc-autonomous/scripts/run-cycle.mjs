@@ -47,7 +47,9 @@ async function main() {
 	const artifact = JSON.parse(await readFile(artifactPath, "utf8"));
 	const contract = new ethers.Contract(address, artifact.abi, signer);
 
-	const routeData = ethers.toUtf8Bytes(args.routeData || "ASTERDEX:USDC->USDT");
+	const routeData = ethers.toUtf8Bytes(
+		args.routeData || "HYPERLIQUID:USDC->USDT",
+	);
 	const req = {
 		cycleId:
 			args.cycleId ||
@@ -59,16 +61,16 @@ async function main() {
 		),
 		amountRaw: BigInt(
 			args.amountRaw ||
-				process.env.BSC_AUTONOMOUS_ASTERDEX_AMOUNT_RAW ||
+				process.env.BSC_AUTONOMOUS_HYPERLIQUID_AMOUNT_RAW ||
 				"1000000000000000",
 		),
 		tokenIn:
 			args.tokenIn ||
-			process.env.BSC_AUTONOMOUS_ASTERDEX_TOKEN_IN_ADDRESS ||
+			process.env.BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_IN_ADDRESS ||
 			ethers.ZeroAddress,
 		tokenOut:
 			args.tokenOut ||
-			process.env.BSC_AUTONOMOUS_ASTERDEX_TOKEN_OUT_ADDRESS ||
+			process.env.BSC_AUTONOMOUS_HYPERLIQUID_TOKEN_OUT_ADDRESS ||
 			ethers.ZeroAddress,
 		routeData,
 		routeDataHash: ethers.keccak256(routeData),

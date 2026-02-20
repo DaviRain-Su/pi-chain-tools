@@ -319,13 +319,13 @@ export {
 	parseDeterministicCycleConfig,
 } from "./chains/bsc-autonomous/track.js";
 export {
-	getAsterDexCapability,
-	getAsterDexReadiness,
-	parseAsterDexConfig,
-	prepareAsterDexExecuteIntent,
-	readAsterDexHealth,
-	resolveAsterDexExecuteBinding,
-} from "./chains/bsc-autonomous/asterdex.js";
+	getHyperliquidCapability,
+	getHyperliquidReadiness,
+	parseHyperliquidConfig,
+	prepareHyperliquidExecuteIntent,
+	readHyperliquidHealth,
+	resolveHyperliquidExecuteBinding,
+} from "./chains/bsc-autonomous/hyperliquid.js";
 export type {
 	AutonomousBlocker,
 	AutonomousBlockerCode,
@@ -338,12 +338,12 @@ export type {
 	ExecutionTrigger,
 } from "./chains/bsc-autonomous/track.js";
 export type {
-	AsterDexCapability,
-	AsterDexConfig,
-	AsterDexExecuteBinding,
-	AsterDexExecuteIntentInput,
-	AsterDexExecutePreparation,
-	AsterDexHealthStatus,
-	AsterDexPreparedExecuteIntent,
-	AsterDexReadiness,
-} from "./chains/bsc-autonomous/asterdex.js";
+	HyperliquidCapability,
+	HyperliquidConfig,
+	HyperliquidExecuteBinding,
+	HyperliquidExecuteIntentInput,
+	HyperliquidExecutePreparation,
+	HyperliquidHealthStatus,
+	HyperliquidPreparedExecuteIntent,
+	HyperliquidReadiness,
+} from "./chains/bsc-autonomous/hyperliquid.js";

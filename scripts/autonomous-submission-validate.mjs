@@ -57,16 +57,17 @@ export async function validateAutonomousSubmission() {
 	};
 
 	const routeOk =
-		cycle?.coreRouteSelection?.selectedFundingRoute === "asterdex_earn_core" &&
+		cycle?.coreRouteSelection?.selectedFundingRoute ===
+			"hyperliquid_earn_core" &&
 		Array.isArray(cycle?.coreRouteSelection?.evidenceMarkers) &&
 		cycle.coreRouteSelection.evidenceMarkers.includes(
-			"ROUTE_CORE_ASTERDEX_EARN",
+			"ROUTE_CORE_HYPERLIQUID_EARN",
 		);
 	pushCheck(
 		result,
-		"AsterDEX core route evidence present",
+		"Hyperliquid core route evidence present",
 		routeOk,
-		"cycle proof marks core route asterdex_earn_core",
+		"cycle proof marks core route hyperliquid_earn_core",
 		`run: npm run autonomous:bsc:cycle -- --mode dryrun --run-id validator-refresh and verify ${cyclePath}`,
 	);
 

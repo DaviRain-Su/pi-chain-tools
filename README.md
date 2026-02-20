@@ -45,25 +45,30 @@ BSC_AUTONOMOUS_MODE=true npm run live:test:preflight
 curl -s http://127.0.0.1:4173/api/proof/summary | jq '.summary.autonomousTrack'
 ```
 
-AsterDEX execute-binding readiness (autonomous, additive):
+Hyperliquid execute-binding readiness (autonomous, additive):
 
 ```bash
 # prepare-only seam (no unsafe bypass)
 export BSC_AUTONOMOUS_MODE=true
-export BSC_AUTONOMOUS_ASTERDEX_ENABLED=true
-export BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED=true
-export BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED=true
-export BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND='node scripts/asterdex-exec-safe.mjs "{intent}"'
-export BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS=0xYourRouter
-export BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS=0xYourExecutor
+export BSC_AUTONOMOUS_HYPERLIQUID_ENABLED=true
+export BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_ENABLED=true
+export BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_BINDING_REQUIRED=true
+export BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_COMMAND='node scripts/hyperliquid-exec-safe.mjs "{intent}"'
+export BSC_AUTONOMOUS_HYPERLIQUID_ROUTER_ADDRESS=0xYourRouter
+export BSC_AUTONOMOUS_HYPERLIQUID_EXECUTOR_ADDRESS=0xYourExecutor
 
 npm run live:test:preflight
 npm run readiness:build
 curl -s http://127.0.0.1:4173/api/proof/summary | jq '.summary.autonomousTrack | {executeBinding, executeBindingRequired, executeBindingReady}'
-curl -s http://127.0.0.1:4173/api/readiness/matrix | jq '.matrix.autonomousTrack.evidence | {asterDexExecuteBinding, asterDexExecuteBindingRequired, asterDexExecuteBindingReady}'
+curl -s http://127.0.0.1:4173/api/readiness/matrix | jq '.matrix.autonomousTrack.evidence | {hyperliquidExecuteBinding, hyperliquidExecuteBindingRequired, hyperliquidExecuteBindingReady}'
 ```
 
 If binding is required but missing, autonomous checks emit blocker + remediation hints in both live-test and readiness outputs.
+
+Migration note (AsterDEX -> Hyperliquid):
+- `coreYieldEngine` is now `hyperliquid` for autonomous BSC track.
+- Use `BSC_AUTONOMOUS_HYPERLIQUID_*` env keys.
+- Legacy `asterdex` wrappers are kept only for compatibility and are deprecated.
 
 Autonomous cycle runnable proof (deterministic BSC cycle):
 
@@ -73,8 +78,8 @@ npm run autonomous:bsc:cycle -- --mode dryrun --run-id cycle-dryrun-001
 
 # guarded live run (requires active binding + confirm text + live command env)
 # extra safety: lock + replay guard are persisted in apps/dashboard/data/autonomous-cycle-state.json
-BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE=true \
-BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND='node -e "console.log(JSON.stringify({txHash:\"0x1111111111111111111111111111111111111111111111111111111111111111\"}))"' \
+BSC_AUTONOMOUS_HYPERLIQUID_EXECUTE_ACTIVE=true \
+BSC_AUTONOMOUS_HYPERLIQUID_LIVE_COMMAND='node -e "console.log(JSON.stringify({txHash:\"0x1111111111111111111111111111111111111111111111111111111111111111\"}))"' \
 BSC_AUTONOMOUS_CYCLE_MIN_LIVE_INTERVAL_SECONDS=300 \
 npm run autonomous:bsc:cycle -- --mode live --run-id cycle-live-001
 

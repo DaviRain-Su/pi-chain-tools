@@ -1,7 +1,7 @@
 {
 	"suite": "autonomous-bsc-submission-bundle",
 	"version": 2,
-	"generatedAt": "2026-02-20T02:35:18.602Z",
+	"generatedAt": "2026-02-20T04:30:33.921Z",
 	"artifacts": {
 		"cycleProofPath": "/home/davirain/clawd/pi-chain-tools/apps/dashboard/data/proofs/autonomous-cycle/latest.json",
 		"liveTestPath": "/home/davirain/clawd/pi-chain-tools/apps/dashboard/data/proofs/live-test/latest.json",
@@ -12,59 +12,28 @@
 	"summary": {
 		"cycleMode": "dryrun",
 		"cycleDecision": "simulate_execute",
-		"cycleTxHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"cycleTxHash": null,
 		"cycleReconcileStatus": "dryrun_only",
 		"liveTestStatus": "ok",
-		"coreFundingRoute": "asterdex_earn_core",
-		"onchainVerifiableTransition": true
+		"coreFundingRoute": "hyperliquid_earn_core",
+		"onchainVerifiableTransition": false
 	},
 	"onchainEvidence": {
-		"txHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"emittedEvents": [
-			{
-				"name": "DeterministicCycleTriggered",
-				"args": {
-					"cycleId": "cycle-bsc-mainnet-v1",
-					"transitionId": "transition-001"
-				}
-			}
-		],
-		"stateDelta": {
-			"previousState": "IDLE",
-			"nextState": "EXECUTING",
-			"label": "IDLE->EXECUTING"
-		},
+		"txHash": null,
+		"emittedEvents": [],
+		"stateDelta": null,
 		"receiptNormalized": {
 			"schema": "tx-receipt-normalized/v1",
 			"chain": "bsc",
-			"runId": "submission-onchain-evidence-001",
+			"runId": "migration-check-001",
 			"mode": "dryrun",
 			"status": "dryrun",
 			"txHash": null,
 			"blockNumber": null,
 			"exitCode": null,
-			"observedAt": "2026-02-20T02:16:25.512Z"
+			"observedAt": "2026-02-20T04:30:30.223Z"
 		},
-		"transition": {
-			"transitionId": "transition-001",
-			"cycleId": "cycle-bsc-mainnet-v1",
-			"stateDelta": {
-				"previousState": "IDLE",
-				"nextState": "EXECUTING",
-				"label": "IDLE->EXECUTING"
-			},
-			"triggerTxHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			"eventName": "DeterministicCycleTriggered",
-			"emittedEvents": [
-				{
-					"name": "DeterministicCycleTriggered",
-					"args": {
-						"cycleId": "cycle-bsc-mainnet-v1",
-						"transitionId": "transition-001"
-					}
-				}
-			]
-		},
+		"transition": null,
 		"contractAddress": null,
 		"routerAddress": null,
 		"entryFunction": "runDeterministicCycle((bytes32,uint256,uint256,address,address,bytes,bytes32,bool))"

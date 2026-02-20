@@ -1,22 +1,22 @@
 # Autonomous BSC Submission Bundle
 
-- Generated: 2026-02-20T02:35:18.602Z
+- Generated: 2026-02-20T04:30:33.921Z
 - Cycle mode: dryrun
 - Cycle decision: simulate_execute
-- Tx hash: 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+- Tx hash: n/a
 - Reconcile: dryrun_only
 - Live-test status: ok
-- Core funding route: asterdex_earn_core
-- Verifiable transition: yes
+- Core funding route: hyperliquid_earn_core
+- Verifiable transition: no
 
 ## Onchain evidence
 
 - Strategy contract: n/a
 - Router contract: n/a
 - Entry function: runDeterministicCycle((bytes32,uint256,uint256,address,address,bytes,bytes32,bool))
-- Tx hash: 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-- Emitted events: 1
-- State delta: {"previousState":"IDLE","nextState":"EXECUTING","label":"IDLE->EXECUTING"}
+- Tx hash: n/a
+- Emitted events: 0
+- State delta: n/a
 - ABI path: contracts/bsc-autonomous/artifacts/contracts/BscAutonomousStrategy.sol/BscAutonomousStrategy.json
 
 ## Reproducibility

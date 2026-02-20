@@ -1,6 +1,6 @@
 # bsc-autonomous contracts
 
-Solidity package for contract-enforced autonomous BSC cycles (AsterDEX route).
+Solidity package for contract-enforced autonomous BSC cycles (Hyperliquid route).
 
 ## Compile
 

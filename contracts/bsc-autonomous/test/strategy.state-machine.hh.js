@@ -7,7 +7,7 @@ describe("BscAutonomousStrategy state transitions", () => {
 	async function deployFixture() {
 		const [deployer, emergency] = await ethers.getSigners();
 		const routerFactory = await ethers.getContractFactory(
-			"MockAsterDexEarnRouter",
+			"MockHyperliquidEarnRouter",
 		);
 		const router = await routerFactory.deploy();
 		await router.waitForDeployment();
@@ -28,7 +28,7 @@ describe("BscAutonomousStrategy state transitions", () => {
 
 	function cycleRequest(overrides = {}) {
 		const routeData =
-			overrides.routeData || ethers.toUtf8Bytes("ASTERDEX:USDC->USDT");
+			overrides.routeData || ethers.toUtf8Bytes("HYPERLIQUID:USDC->USDT");
 		return {
 			cycleId:
 				overrides.cycleId || ethers.keccak256(ethers.toUtf8Bytes("cycle-001")),
