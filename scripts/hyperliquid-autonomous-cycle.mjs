@@ -33,6 +33,18 @@ function nowIso() {
 	return new Date().toISOString();
 }
 
+function isAutonomousOnchainMode(env) {
+	return (
+		String(env.HYPERLIQUID_AUTONOMOUS_MODE || "")
+			.trim()
+			.toLowerCase() === "true"
+	);
+}
+
+function resolveReceiptChain(env) {
+	return isAutonomousOnchainMode(env) ? "hyperliquid" : "offchain-orchestrator";
+}
+
 function normalizeRunId(input) {
 	const raw = String(input || "").trim();
 	if (!raw) return `autonomous-cycle-${Date.now()}`;
@@ -400,6 +412,7 @@ export async function runBscAutonomousCycle(
 	env = process.env,
 ) {
 	const args = parseArgs(rawArgs);
+	const receiptChain = resolveReceiptChain(env);
 	const startedAt = nowIso();
 	const intent = buildIntent(args.runId, env);
 	const transitionEvidence = evaluateCycleTransitionEvidence({
@@ -560,7 +573,7 @@ export async function runBscAutonomousCycle(
 						status: execution.status,
 						exitCode: execution?.evidence?.exitCode,
 					},
-					{ chain: "bsc", runId: args.runId, mode: args.mode },
+					{ chain: receiptChain, runId: args.runId, mode: args.mode },
 				),
 				blockers: execution.blockers || [],
 				reason: execution.reason || null,

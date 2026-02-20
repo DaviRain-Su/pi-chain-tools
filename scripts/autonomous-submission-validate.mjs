@@ -94,9 +94,11 @@ export async function validateAutonomousSubmission() {
 		txEvidenceRequired,
 	);
 
+	const receiptChain = cycle?.txEvidence?.receiptNormalized?.chain;
 	const nonManualOk =
 		cycle?.cycleTransitionEvidence?.verifiable === true &&
-		cycle?.txEvidence?.receiptNormalized?.chain === "bsc";
+		(receiptChain === "hyperliquid" ||
+			receiptChain === "offchain-orchestrator");
 	pushCheck(
 		result,
 		"autonomous onchain trigger proof present (optional in declared model)",

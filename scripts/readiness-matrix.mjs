@@ -562,7 +562,7 @@ async function buildMatrix() {
 		},
 		modules: sortedModules,
 		autonomousTrack: {
-			chain: "bsc",
+			chain: autonomousState.enabled ? "hyperliquid" : "offchain-orchestrator",
 			enabled: autonomousState.enabled,
 			health: autonomousState.status === "green" ? "healthy" : "blocked",
 			blockers: autonomousState.blockers,

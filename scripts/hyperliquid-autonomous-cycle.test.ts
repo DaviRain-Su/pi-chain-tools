@@ -16,6 +16,9 @@ describe("hyperliquid-autonomous-cycle", () => {
 		expect(result.proof.txEvidence.receiptNormalized?.schema).toBe(
 			"tx-receipt-normalized/v1",
 		);
+		expect(result.proof.txEvidence.receiptNormalized?.chain).toBe(
+			"offchain-orchestrator",
+		);
 		expect(result.proof.reconcileSummary).toBeTruthy();
 		expect(result.proof.reconcileSummary.reconcileSnapshot).toBeTruthy();
 		expect(result.proof.coreRouteSelection?.selectedFundingRoute).toBe(
@@ -24,6 +27,17 @@ describe("hyperliquid-autonomous-cycle", () => {
 		expect(
 			Array.isArray(result.proof.coreRouteSelection?.evidenceMarkers),
 		).toBe(true);
+	});
+
+	it("uses hyperliquid chain label when autonomous onchain mode is enabled", async () => {
+		const out = "/tmp/hyperliquid-autonomous-cycle-onchain-chain-test.json";
+		const result = await runBscAutonomousCycle(
+			["--mode", "dryrun", "--run-id", "cycle-onchain-chain", "--out", out],
+			{ HYPERLIQUID_AUTONOMOUS_MODE: "true" },
+		);
+		expect(result.proof.txEvidence.receiptNormalized?.chain).toBe(
+			"hyperliquid",
+		);
 	});
 
 	it("uses contract emitted transition evidence in live mode", async () => {

@@ -83,31 +83,73 @@ function hasValue(env, key) {
 	return String(env[key] || "").trim().length > 0;
 }
 
-function validatePrerequisites(env) {
+function resolveEvidenceMode(env) {
+	const onchainMode =
+		String(env.HYPERLIQUID_AUTONOMOUS_MODE || "")
+			.trim()
+			.toLowerCase() === "true";
+	return {
+		mode: onchainMode ? "onchain-contract-cycle" : "offchain-orchestrator",
+		evidenceType: onchainMode
+			? "onchain_contract_cycle_evidence"
+			: "offchain_orchestrator_evidence",
+		onchainMode,
+	};
+}
+
+function pushMissing(missing, condition, field) {
+	if (condition) missing.push(field);
+}
+
+export function validatePrerequisites(
+	env,
+	modeInfo = resolveEvidenceMode(env),
+) {
 	const missing = [];
-	if (
+	pushMissing(
+		missing,
 		!hasValue(env, "HYPERLIQUID_TESTNET_RPC_URL") &&
-		!hasValue(env, "BSC_RPC_URL")
-	) {
-		missing.push("HYPERLIQUID_TESTNET_RPC_URL or BSC_RPC_URL");
-	}
-	if (
+			!hasValue(env, "BSC_RPC_URL"),
+		"HYPERLIQUID_TESTNET_RPC_URL or BSC_RPC_URL",
+	);
+	pushMissing(
+		missing,
 		!hasValue(env, "HYPERLIQUID_TESTNET_PRIVATE_KEY") &&
-		!hasValue(env, "BSC_EXECUTE_PRIVATE_KEY")
-	) {
-		missing.push("HYPERLIQUID_TESTNET_PRIVATE_KEY or BSC_EXECUTE_PRIVATE_KEY");
-	}
-	if (
-		!hasValue(env, "HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS") &&
-		!hasValue(env, "HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS")
-	) {
-		missing.push(
+			!hasValue(env, "BSC_EXECUTE_PRIVATE_KEY"),
+		"HYPERLIQUID_TESTNET_PRIVATE_KEY or BSC_EXECUTE_PRIVATE_KEY",
+	);
+	pushMissing(
+		missing,
+		!hasValue(env, "HYPERLIQUID_AUTONOMOUS_TOKEN_IN") &&
+			!hasValue(env, "BSC_USDC"),
+		"HYPERLIQUID_AUTONOMOUS_TOKEN_IN or BSC_USDC",
+	);
+	pushMissing(
+		missing,
+		!hasValue(env, "HYPERLIQUID_AUTONOMOUS_TOKEN_OUT") &&
+			!hasValue(env, "BSC_USDT"),
+		"HYPERLIQUID_AUTONOMOUS_TOKEN_OUT or BSC_USDT",
+	);
+	pushMissing(
+		missing,
+		!hasValue(env, "HYPERLIQUID_AUTONOMOUS_AMOUNT_RAW"),
+		"HYPERLIQUID_AUTONOMOUS_AMOUNT_RAW",
+	);
+
+	if (modeInfo.onchainMode) {
+		pushMissing(
+			missing,
+			!hasValue(env, "HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS") &&
+				!hasValue(env, "HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS"),
 			"HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS or HYPERLIQUID_AUTONOMOUS_ROUTER_ADDRESS",
 		);
 	}
+
 	return {
 		ok: missing.length === 0,
 		missing,
+		mode: modeInfo.mode,
+		evidenceType: modeInfo.evidenceType,
 	};
 }
 
@@ -142,16 +184,28 @@ function parseJsonFromOutput(step) {
 	return null;
 }
 
-function deterministicGuidance(missing) {
-	return {
-		status: "missing_prerequisites",
-		missing,
-		nextSteps: [
-			"cp .env.bsc.example .env.bsc.local",
-			"fill all missing keys listed above",
+function deterministicGuidance(precheck) {
+	const nextSteps = [
+		"cp .env.bsc.example .env.bsc.local",
+		"fill all missing keys listed above",
+	];
+	if (precheck.mode === "onchain-contract-cycle") {
+		nextSteps.push(
 			"npm run contracts:hyperliquid:compile",
 			"npm run autonomous:hyperliquid:testnet:evidence",
-		],
+		);
+	} else {
+		nextSteps.push(
+			"set HYPERLIQUID_AUTONOMOUS_EXECUTE_ACTIVE=true and HYPERLIQUID_AUTONOMOUS_LIVE_COMMAND",
+			"npm run autonomous:hyperliquid:testnet:evidence",
+		);
+	}
+	return {
+		status: "missing_prerequisites",
+		mode: precheck.mode,
+		evidenceType: precheck.evidenceType,
+		missing: precheck.missing,
+		nextSteps,
 	};
 }
 
@@ -161,94 +215,154 @@ export async function runAutonomousTestnetEvidence(
 ) {
 	const args = parseArgs(rawArgs);
 	const env = loadEnv(envIn);
-	const precheck = validatePrerequisites(env);
+	const modeInfo = resolveEvidenceMode(env);
+	const precheck = validatePrerequisites(env, modeInfo);
 	if (!precheck.ok) {
-		const guidance = deterministicGuidance(precheck.missing);
+		const guidance = deterministicGuidance(precheck);
 		console.error(JSON.stringify(guidance, null, 2));
 		process.exitCode = 2;
 		return { ok: false, guidance };
 	}
 
-	if (args.doCompile) {
-		const compile = spawnSync("npm", ["run", "contracts:hyperliquid:compile"], {
-			cwd: REPO_ROOT,
-			encoding: "utf8",
-			env,
-		});
-		if (compile.status !== 0) {
-			throw new Error(
-				`compile failed: ${String(compile.stderr || compile.stdout || "unknown")}`,
+	if (modeInfo.onchainMode) {
+		if (args.doCompile) {
+			const compile = spawnSync(
+				"npm",
+				["run", "contracts:hyperliquid:compile"],
+				{
+					cwd: REPO_ROOT,
+					encoding: "utf8",
+					env,
+				},
 			);
+			if (compile.status !== 0) {
+				throw new Error(
+					`compile failed: ${String(compile.stderr || compile.stdout || "unknown")}`,
+				);
+			}
 		}
-	}
 
-	let strategyAddress = String(
-		env.HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS || "",
-	).trim();
-	let deployEvidence = null;
-	if (!strategyAddress) {
-		const deploy = runNodeScript(
+		let strategyAddress = String(
+			env.HYPERLIQUID_AUTONOMOUS_CONTRACT_ADDRESS || "",
+		).trim();
+		let deployEvidence = null;
+		if (!strategyAddress) {
+			const deploy = runNodeScript(
+				path.join(
+					REPO_ROOT,
+					"contracts",
+					"hyperliquid-autonomous",
+					"scripts",
+					"deploy.mjs",
+				),
+				[],
+				env,
+			);
+			if (!deploy.ok) {
+				throw new Error(
+					`deploy failed: ${deploy.stderr || deploy.stdout || "unknown"}`,
+				);
+			}
+			deployEvidence = parseJsonFromOutput(deploy);
+			strategyAddress = String(
+				deployEvidence?.deployment?.address || "",
+			).trim();
+			if (!strategyAddress)
+				throw new Error(
+					"deploy succeeded but no contract address found in output",
+				);
+		}
+
+		const cycle = runNodeScript(
 			path.join(
 				REPO_ROOT,
 				"contracts",
 				"hyperliquid-autonomous",
 				"scripts",
-				"deploy.mjs",
+				"run-cycle.mjs",
 			),
-			[],
+			[
+				"--contract",
+				strategyAddress,
+				"--transitionNonce",
+				String(env.HYPERLIQUID_AUTONOMOUS_CONTRACT_NEXT_NONCE || "1"),
+			],
 			env,
 		);
-		if (!deploy.ok) {
+		if (!cycle.ok) {
 			throw new Error(
-				`deploy failed: ${deploy.stderr || deploy.stdout || "unknown"}`,
+				`cycle failed: ${cycle.stderr || cycle.stdout || "unknown"}`,
 			);
 		}
-		deployEvidence = parseJsonFromOutput(deploy);
-		strategyAddress = String(deployEvidence?.deployment?.address || "").trim();
-		if (!strategyAddress)
-			throw new Error(
-				"deploy succeeded but no contract address found in output",
-			);
+		const cycleEvidence = parseJsonFromOutput(cycle);
+
+		const evidence = {
+			suite: "autonomous-hyperliquid-testnet-evidence",
+			version: 2,
+			generatedAt: new Date().toISOString(),
+			network: "bscTestnet",
+			mode: modeInfo.mode,
+			evidenceType: modeInfo.evidenceType,
+			contractAddress: strategyAddress,
+			deployment: deployEvidence?.deployment || null,
+			cycle: {
+				txHash: cycleEvidence?.txHash || null,
+				blockNumber: cycleEvidence?.blockNumber || null,
+				emittedEvents: cycleEvidence?.emittedEvents || [],
+				decision: cycleEvidence?.decision || null,
+				stateDelta: cycleEvidence?.stateDelta || null,
+				raw: cycleEvidence || null,
+			},
+		};
+
+		await mkdir(path.dirname(args.output), { recursive: true });
+		await writeFile(
+			args.output,
+			`${JSON.stringify(evidence, null, 2)}\n`,
+			"utf8",
+		);
+		console.log(
+			JSON.stringify(
+				{
+					ok: true,
+					mode: modeInfo.mode,
+					evidenceType: modeInfo.evidenceType,
+					output: args.output,
+					evidence,
+				},
+				null,
+				2,
+			),
+		);
+		return {
+			ok: true,
+			mode: modeInfo.mode,
+			evidenceType: modeInfo.evidenceType,
+			output: args.output,
+			evidence,
+		};
 	}
 
 	const cycle = runNodeScript(
-		path.join(
-			REPO_ROOT,
-			"contracts",
-			"hyperliquid-autonomous",
-			"scripts",
-			"run-cycle.mjs",
-		),
-		[
-			"--contract",
-			strategyAddress,
-			"--transitionNonce",
-			String(env.HYPERLIQUID_AUTONOMOUS_CONTRACT_NEXT_NONCE || "1"),
-		],
+		path.join(REPO_ROOT, "scripts", "hyperliquid-autonomous-cycle.mjs"),
+		["--mode", "live", "--run-id", args.runId, "--out", args.output],
 		env,
 	);
 	if (!cycle.ok) {
 		throw new Error(
-			`cycle failed: ${cycle.stderr || cycle.stdout || "unknown"}`,
+			`offchain evidence cycle failed: ${cycle.stderr || cycle.stdout || "unknown"}`,
 		);
 	}
-	const cycleEvidence = parseJsonFromOutput(cycle);
-
+	const cycleRun = parseJsonFromOutput(cycle);
+	const cycleProof = cycleRun?.proof || cycleRun?.evidence || cycleRun || null;
 	const evidence = {
 		suite: "autonomous-hyperliquid-testnet-evidence",
-		version: 1,
+		version: 2,
 		generatedAt: new Date().toISOString(),
 		network: "bscTestnet",
-		contractAddress: strategyAddress,
-		deployment: deployEvidence?.deployment || null,
-		cycle: {
-			txHash: cycleEvidence?.txHash || null,
-			blockNumber: cycleEvidence?.blockNumber || null,
-			emittedEvents: cycleEvidence?.emittedEvents || [],
-			decision: cycleEvidence?.decision || null,
-			stateDelta: cycleEvidence?.stateDelta || null,
-			raw: cycleEvidence || null,
-		},
+		mode: modeInfo.mode,
+		evidenceType: modeInfo.evidenceType,
+		cycle: cycleProof,
 	};
 
 	await mkdir(path.dirname(args.output), { recursive: true });
@@ -258,9 +372,25 @@ export async function runAutonomousTestnetEvidence(
 		"utf8",
 	);
 	console.log(
-		JSON.stringify({ ok: true, output: args.output, evidence }, null, 2),
+		JSON.stringify(
+			{
+				ok: true,
+				mode: modeInfo.mode,
+				evidenceType: modeInfo.evidenceType,
+				output: args.output,
+				evidence,
+			},
+			null,
+			2,
+		),
 	);
-	return { ok: true, output: args.output, evidence };
+	return {
+		ok: true,
+		mode: modeInfo.mode,
+		evidenceType: modeInfo.evidenceType,
+		output: args.output,
+		evidence,
+	};
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

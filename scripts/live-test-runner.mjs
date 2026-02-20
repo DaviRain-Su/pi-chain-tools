@@ -424,7 +424,7 @@ export async function runLiveTestRunner(rawArgs = process.argv.slice(2)) {
 		},
 		rollbackGuidance: null,
 		autonomousTrack: {
-			chain: "bsc",
+			chain: autonomousTrack.enabled ? "hyperliquid" : "offchain-orchestrator",
 			enabled: autonomousTrack.enabled,
 			health: autonomousTrack.health,
 			blockers: autonomousTrack.blockers,
