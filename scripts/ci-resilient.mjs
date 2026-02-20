@@ -144,7 +144,10 @@ function retryHintForSignatures(signatures) {
 		return "Detected SIGTERM interruption. Retry with bounded backoff: CI_RETRY_SIGTERM_MAX=3 npm run ci:retry";
 	}
 	if (signatures.checkFailureKind === "python-missing") {
-		return "Python missing signature detected. Use npm run ci:resilient (auto python3 shim) and confirm python3 is on PATH.";
+		return "Python missing signature detected. Use npm run ci:resilient (auto python3 fallback) and confirm python3 is on PATH.";
+	}
+	if (String(signatures.checkFailureKind).startsWith("check-breakdown-")) {
+		return "check breakdown isolated the failing sub-step. Run that script directly for focused fixes (npm run lint | npm run typecheck | npm run schema:validate).";
 	}
 	return "Retry with npm run ci:retry and inspect apps/dashboard/data/ci-signatures.jsonl for recurring signatures.";
 }
@@ -202,6 +205,37 @@ async function applyBiomeHotfix(env, signatures, reason = "proactive") {
 		signatures.pythonMissingDetections += 1;
 	}
 	return result;
+}
+
+async function runCheckBreakdown(env, signatures) {
+	console.log(
+		"[ci-resilient] check failed with unknown signature; running breakdown...",
+	);
+	const steps = [
+		{ name: "lint", args: ["run", "lint"] },
+		{ name: "typecheck", args: ["run", "typecheck"] },
+		{ name: "schema:validate", args: ["run", "schema:validate"] },
+	];
+	for (const step of steps) {
+		const result = await runWithSigtermRetry(
+			"npm",
+			step.args,
+			`check-breakdown:${step.name}`,
+			env,
+			signatures,
+		);
+		if (hasPythonMissingSignature(result.output)) {
+			signatures.pythonMissingDetections += 1;
+		}
+		if (result.code !== 0) {
+			return {
+				failedStep: step.name,
+				code: result.code,
+				output: result.output,
+			};
+		}
+	}
+	return null;
 }
 
 async function main() {
@@ -281,6 +315,17 @@ async function main() {
 	}
 	if (check.code !== 0) {
 		signatures.checkFailureKind = classifyCheckFailure(check.output);
+		if (signatures.checkFailureKind === "check-unknown") {
+			const breakdown = await runCheckBreakdown(runtime.env, signatures);
+			if (breakdown) {
+				signatures.checkFailureKind = `check-breakdown-${breakdown.failedStep}`;
+				failWithSummary(
+					breakdown.code,
+					`[ci-resilient] check failed (${signatures.checkFailureKind})`,
+					signatures,
+				);
+			}
+		}
 		failWithSummary(
 			check.code,
 			`[ci-resilient] check failed (${signatures.checkFailureKind})`,
