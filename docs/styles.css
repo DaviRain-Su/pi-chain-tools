@@ -1,15 +1,16 @@
 :root {
-	--bg: #f4efe7;
-	--panel: #fffaf1;
-	--line: #d9c8b2;
-	--text: #102128;
-	--muted: #4b5b62;
-	--accent: #d05b2f;
-	--accent-ink: #fff3e8;
-	--ink-strong: #0d3138;
-	--shape-a: #efd6be;
-	--shape-b: #cde6e3;
-	--shadow: 0 16px 48px rgba(16, 33, 40, 0.08);
+	--bg: #0d1117;
+	--bg-soft: #111826;
+	--panel: rgba(19, 27, 42, 0.76);
+	--line: rgba(154, 174, 210, 0.26);
+	--text: #e6eefc;
+	--muted: #a9b6d3;
+	--accent: #6d7dff;
+	--accent-ink: #f4f6ff;
+	--ink-strong: #f6f8ff;
+	--shape-a: rgba(109, 125, 255, 0.38);
+	--shape-b: rgba(30, 201, 177, 0.32);
+	--shadow: 0 20px 54px rgba(5, 9, 16, 0.45);
 }
 
 *,
@@ -25,11 +26,19 @@ body {
 }
 
 body {
-	background: radial-gradient(circle at 10% 10%, #fff8ef 0, transparent 40%),
-		radial-gradient(circle at 90% 85%, #e6f5f2 0, transparent 50%), var(--bg);
+	background: radial-gradient(
+			circle at 10% 10%,
+			rgba(109, 125, 255, 0.22) 0,
+			transparent 42%
+		),
+		radial-gradient(
+			circle at 90% 85%,
+			rgba(30, 201, 177, 0.2) 0,
+			transparent 48%
+		), linear-gradient(160deg, var(--bg) 0%, var(--bg-soft) 100%);
 	color: var(--text);
 	font-family: "Space Grotesk", "Avenir Next", "Helvetica Neue", sans-serif;
-	line-height: 1.45;
+	line-height: 1.5;
 	min-height: 100vh;
 }
 
@@ -67,14 +76,16 @@ body {
 }
 
 .badge {
-	background: #0f4f58;
+	background: rgba(109, 125, 255, 0.2);
+	border: 1px solid rgba(166, 178, 255, 0.4);
 	border-radius: 999px;
-	color: #daf3f0;
+	color: #dfe5ff;
 	display: inline-block;
 	font-family: "IBM Plex Mono", "Menlo", "Monaco", monospace;
-	font-size: 0.8rem;
+	font-size: 0.76rem;
+	letter-spacing: 0.02em;
 	margin: 0;
-	padding: 0.3rem 0.75rem;
+	padding: 0.35rem 0.8rem;
 }
 
 h1 {
@@ -124,13 +135,14 @@ h3 {
 }
 
 .btn-primary {
-	background: var(--accent);
-	box-shadow: 0 8px 20px rgba(208, 91, 47, 0.26);
+	background: linear-gradient(135deg, #5d72ff 0%, #30c4ae 100%);
+	box-shadow: 0 10px 28px rgba(72, 104, 255, 0.36);
 	color: var(--accent-ink);
 }
 
 .btn-ghost {
-	background: #f7efe2;
+	backdrop-filter: blur(6px);
+	background: rgba(18, 29, 47, 0.52);
 	border: 1px solid var(--line);
 	color: var(--text);
 }
@@ -143,7 +155,7 @@ h3 {
 }
 
 .stat-card {
-	background: #fcf5e9;
+	background: rgba(17, 28, 46, 0.7);
 	border: 1px solid var(--line);
 	border-radius: 1rem;
 	padding: 0.95rem;
@@ -162,6 +174,7 @@ h3 {
 }
 
 .panel {
+	backdrop-filter: blur(10px);
 	background: var(--panel);
 	border: 1px solid var(--line);
 	border-radius: 1.05rem;
@@ -169,6 +182,12 @@ h3 {
 	margin-top: 0.95rem;
 	padding: 1.15rem;
 	scroll-margin-top: 88px;
+	transition: transform 180ms ease, border-color 180ms ease;
+}
+
+.panel:hover {
+	border-color: rgba(154, 174, 210, 0.45);
+	transform: translateY(-1px);
 }
 
 .panel ol {
@@ -200,10 +219,10 @@ h3 {
 }
 
 .command-block button {
-	background: #db6b3d;
+	background: linear-gradient(135deg, #5d72ff 0%, #30c4ae 100%);
 	border: none;
 	border-radius: 0.55rem;
-	color: #fff8f0;
+	color: #f8fbff;
 	cursor: pointer;
 	font-family: "IBM Plex Mono", "Menlo", "Monaco", monospace;
 	font-size: 0.78rem;
@@ -294,7 +313,7 @@ h3 {
 
 .footer a,
 .panel a {
-	color: #0b555f;
+	color: #86c7ff;
 }
 
 .reveal {
