@@ -65,6 +65,24 @@ curl -s http://127.0.0.1:4173/api/readiness/matrix | jq '.matrix.autonomousTrack
 
 If binding is required but missing, autonomous checks emit blocker + remediation hints in both live-test and readiness outputs.
 
+Autonomous cycle runnable proof (deterministic BSC cycle):
+
+```bash
+# safe dryrun (default)
+npm run autonomous:bsc:cycle -- --mode dryrun --run-id cycle-dryrun-001
+
+# guarded live run (requires active binding + confirm text + live command env)
+BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE=true \
+BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND='node -e "console.log(JSON.stringify({txHash:\"0x1111111111111111111111111111111111111111111111111111111111111111\"}))"' \
+npm run autonomous:bsc:cycle -- --mode live --run-id cycle-live-001
+```
+
+Submission bundle generator:
+
+```bash
+npm run autonomous:submission:bundle
+```
+
 ## EVM Security Watch (Quickstart)
 
 Read-only drift monitor for watched EVM contracts (code hash / proxy impl / owner / paused / optional approval spikes).

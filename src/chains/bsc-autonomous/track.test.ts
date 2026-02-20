@@ -101,6 +101,28 @@ describe("bsc autonomous mode routing", () => {
 		expect(result.evidence.asterDexExecuteBindingReady).toBe(true);
 	});
 
+	it("marks active AsterDEX execute binding when active flag is set", () => {
+		const result = evaluateBscAutonomousPolicy({
+			env: {
+				BSC_AUTONOMOUS_MODE: "true",
+				BSC_AUTONOMOUS_CYCLE_ID: "cycle-bsc-mainnet-v1",
+				BSC_AUTONOMOUS_CYCLE_INTERVAL_SECONDS: "300",
+				BSC_AUTONOMOUS_ASTERDEX_ENABLED: "true",
+				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED: "true",
+				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED: "true",
+				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE: "true",
+				BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND:
+					"node scripts/asterdex-exec-safe.mjs",
+				BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS: "0xrouter",
+				BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS: "0xexecutor",
+			},
+			requestTrigger: "deterministic_contract_cycle",
+		});
+		expect(result.allowed).toBe(true);
+		expect(result.evidence.asterDexExecuteBinding).toBe("active");
+		expect(result.evidence.asterDexExecuteBindingReady).toBe(true);
+	});
+
 	it("keeps compatibility when binding requirement flag is off", () => {
 		const result = evaluateBscAutonomousPolicy({
 			env: {

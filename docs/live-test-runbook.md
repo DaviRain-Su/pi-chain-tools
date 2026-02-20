@@ -26,9 +26,13 @@ Optional AsterDEX execute-binding policy vars (autonomous seam, no direct unsafe
 - `BSC_AUTONOMOUS_ASTERDEX_ENABLED=true`
 - `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_ENABLED=true`
 - `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_BINDING_REQUIRED=true` (enforce blocker when missing)
-- `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND`
+- `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_COMMAND` (recommended: `node scripts/asterdex-exec-safe.mjs "{intent}"`)
 - `BSC_AUTONOMOUS_ASTERDEX_ROUTER_ADDRESS`
 - `BSC_AUTONOMOUS_ASTERDEX_EXECUTOR_ADDRESS`
+- `BSC_AUTONOMOUS_ASTERDEX_EXECUTE_ACTIVE=true` (only when live execution is intentionally enabled)
+- `BSC_AUTONOMOUS_ASTERDEX_LIVE_COMMAND` (actual tx broadcaster command template)
+- `BSC_AUTONOMOUS_ASTERDEX_CONFIRM_TEXT` (default `ASTERDEX_EXECUTE_LIVE`)
+- `BSC_AUTONOMOUS_ASTERDEX_MAX_AMOUNT_RAW` (default cap `1000000000000000000`)
 
 ## Guardrails
 

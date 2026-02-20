@@ -1,0 +1,22 @@
+{
+  "suite": "autonomous-bsc-submission-bundle",
+  "version": 1,
+  "generatedAt": "2026-02-20T01:43:25.208Z",
+  "artifacts": {
+    "cycleProofPath": "/home/davirain/clawd/pi-chain-tools/apps/dashboard/data/proofs/autonomous-cycle/latest.json",
+    "liveTestPath": "/home/davirain/clawd/pi-chain-tools/apps/dashboard/data/proofs/live-test/latest.json",
+    "readinessPath": "/home/davirain/clawd/pi-chain-tools/docs/mainnet-readiness-matrix.md"
+  },
+  "summary": {
+    "cycleMode": "dryrun",
+    "cycleDecision": "simulate_execute",
+    "cycleTxHash": null,
+    "cycleReconcileStatus": "dryrun_only",
+    "liveTestStatus": "ok"
+  },
+  "links": {
+    "repo": "https://github.com/davirain/pi-chain-tools",
+    "demoRunbook": "docs/autonomous-bsc-demo.md",
+    "readiness": "docs/mainnet-readiness-matrix.md"
+  }
+}
