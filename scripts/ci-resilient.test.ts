@@ -14,6 +14,8 @@ describe("ci resilient hardening", () => {
 			"precheck blocked: neither python nor python3 found in PATH",
 		);
 		expect(resilientSource).toContain("normalize-runtime-metrics.mjs");
+		expect(resilientSource).toContain("python3-shim");
+		expect(resilientSource).toContain("CI_SKIP_RUNTIME_METRICS");
 	});
 
 	it("adds SIGTERM retry handling in resilient and retry wrappers", () => {
