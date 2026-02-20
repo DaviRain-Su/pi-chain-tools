@@ -149,6 +149,9 @@ function retryHintForSignatures(signatures) {
 	if (String(signatures.checkFailureKind).startsWith("check-breakdown-")) {
 		return "check breakdown isolated the failing sub-step. Run that script directly for focused fixes (npm run lint | npm run typecheck | npm run schema:validate).";
 	}
+	if (signatures.strategySmokeFailures > 0) {
+		return "strategy smoke check failed. Run npm run strategy:smoke to verify compile/write/read/structure flow before rerunning CI.";
+	}
 	return "Retry with npm run ci:retry and inspect apps/dashboard/data/ci-signatures.jsonl for recurring signatures.";
 }
 
@@ -247,6 +250,7 @@ async function main() {
 		biomeHotfixRuns: 0,
 		testRetryCount: 0,
 		testFlakeRecovered: 0,
+		strategySmokeFailures: 0,
 		sigtermDetections: 0,
 		checkFailureKind: "",
 	};
@@ -333,7 +337,24 @@ async function main() {
 		);
 	}
 
-	console.log("[ci-resilient] step 2/3: npm run security:check");
+	console.log("[ci-resilient] step 2/4: npm run strategy:smoke");
+	const strategySmoke = await runWithSigtermRetry(
+		"npm",
+		["run", "strategy:smoke"],
+		"strategy-smoke",
+		runtime.env,
+		signatures,
+	);
+	if (strategySmoke.code !== 0) {
+		signatures.strategySmokeFailures += 1;
+		failWithSummary(
+			strategySmoke.code,
+			"[ci-resilient] strategy:smoke failed",
+			signatures,
+		);
+	}
+
+	console.log("[ci-resilient] step 3/4: npm run security:check");
 	const security = await runWithSigtermRetry(
 		"npm",
 		["run", "security:check"],
@@ -352,7 +373,7 @@ async function main() {
 		);
 	}
 
-	console.log("[ci-resilient] step 3/3: npm test (with one retry for flake)");
+	console.log("[ci-resilient] step 4/4: npm test (with one retry for flake)");
 	let test = await runWithSigtermRetry(
 		"npm",
 		["test"],
