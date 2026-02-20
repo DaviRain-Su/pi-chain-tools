@@ -55,6 +55,50 @@ describe("strategy CLI flow", () => {
 		expect(payload.steps.length).toBe(spec.plan.steps.length);
 	});
 
+	it("execute mode blocks without confirm token", () => {
+		const outDir = makeTmpDir();
+		const outSpec = path.join(outDir, "strategy.json");
+		const c = run(COMPILE, [
+			"--template",
+			"rebalance-crosschain-v0",
+			"--out",
+			outSpec,
+		]);
+		expect(c.status).toBe(0);
+
+		const r = run(RUNNER, ["--spec", outSpec, "--mode", "execute", "--json"]);
+		expect(r.status).toBe(2);
+		const payload = JSON.parse(r.stdout);
+		expect(payload.status).toBe("blocked");
+		expect(payload.requiredToken).toBe("I_ACKNOWLEDGE_EXECUTION");
+	});
+
+	it("execute mode returns ready with explicit token", () => {
+		const outDir = makeTmpDir();
+		const outSpec = path.join(outDir, "strategy.json");
+		const c = run(COMPILE, [
+			"--template",
+			"rebalance-crosschain-v0",
+			"--out",
+			outSpec,
+		]);
+		expect(c.status).toBe(0);
+
+		const r = run(RUNNER, [
+			"--spec",
+			outSpec,
+			"--mode",
+			"execute",
+			"--confirmExecuteToken",
+			"I_ACKNOWLEDGE_EXECUTION",
+			"--json",
+		]);
+		expect(r.status).toBe(0);
+		const payload = JSON.parse(r.stdout);
+		expect(payload.status).toBe("ready");
+		expect(payload.broadcastStatus).toBe("skipped");
+	});
+
 	it("validate fails invalid structure", () => {
 		const outDir = makeTmpDir();
 		const badSpec = path.join(outDir, "bad.json");
