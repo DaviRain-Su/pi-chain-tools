@@ -80,6 +80,69 @@ export function compileStrategySpecV0(input = {}) {
 		};
 	}
 
+	if (template === "stable-yield-v1") {
+		const chain = String(payload.chain || "bsc");
+		const asset = String(payload.asset || "USDC");
+		const riskLevel = String(payload.riskLevel || "low").toLowerCase();
+		const riskDefaults = {
+			low: { maxPerRunUsd: 100, maxSlippageBps: 60, maxDailyRuns: 8 },
+			medium: { maxPerRunUsd: 500, maxSlippageBps: 90, maxDailyRuns: 12 },
+			high: { maxPerRunUsd: 1000, maxSlippageBps: 120, maxDailyRuns: 18 },
+		};
+		const defaults = riskDefaults[riskLevel] || riskDefaults.low;
+		const maxPerRunUsd = Number(
+			risk.maxPerRunUsd || payload.maxPerRunUsd || defaults.maxPerRunUsd,
+		);
+		const maxSlippageBps = Number(
+			risk.maxSlippageBps || payload.maxSlippageBps || defaults.maxSlippageBps,
+		);
+		const maxDailyRuns = Number(
+			risk.maxDailyRuns || payload.maxDailyRuns || defaults.maxDailyRuns,
+		);
+
+		return {
+			ok: true,
+			spec: {
+				id: String(
+					payload.id ||
+						`strategy.stable-yield.${chain}.${asset.toLowerCase()}.v1`,
+				),
+				name: String(payload.name || `Stable yield v1 (${asset} on ${chain})`),
+				version: "0.1.0",
+				owner: {
+					namespace: String(payload.namespace || "community"),
+					author: String(payload.author || "pi-chain-tools"),
+				},
+				goal: {
+					kind: "yield",
+					description: String(
+						payload.goalDescription ||
+							`Auto-balance stablecoin yield on ${chain} with conservative risk gates`,
+					),
+				},
+				constraints: {
+					risk: { maxPerRunUsd, maxSlippageBps, maxDailyRuns },
+					allow: {
+						chains: [chain],
+						protocols: ["venus"],
+						assets: [asset],
+					},
+				},
+				triggers: [
+					{ type: "cron", cron: String(payload.cron || "*/30 * * * *") },
+				],
+				plan: {
+					steps: [
+						{ id: "s1", action: "read", component: "cap.venus.lending" },
+						{ id: "s2", action: "withdraw", component: "cap.venus.lending" },
+						{ id: "s3", action: "supply", component: "cap.venus.lending" },
+					],
+				},
+				metadata: { template, riskLevel },
+			},
+		};
+	}
+
 	if (template === "lending-risk-balance-v0") {
 		const asset = String(payload.asset || "USDC");
 		const maxPerRunUsd = Number(

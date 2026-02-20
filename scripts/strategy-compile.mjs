@@ -38,7 +38,7 @@ function usage() {
 		"Usage: node scripts/strategy-compile.mjs [options]",
 		"",
 		"Options:",
-		"  --template <name>        Template name (rebalance-crosschain-v0 | lending-risk-balance-v0)",
+		"  --template <name>        Template name (rebalance-crosschain-v0 | lending-risk-balance-v0 | stable-yield-v1)",
 		"  --input <path>           JSON file with compile input payload",
 		"  --out <path>             Write compiled strategy spec to file",
 		"  --manifests <dir>        Capability manifests directory (default: docs/schemas/examples)",

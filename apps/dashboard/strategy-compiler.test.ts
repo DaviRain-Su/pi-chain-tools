@@ -32,6 +32,17 @@ describe("strategy compiler v0", () => {
 		]);
 	});
 
+	it("compiles stable yield template", () => {
+		const result = compileStrategySpecV0({
+			template: "stable-yield-v1",
+			asset: "USDC",
+			riskLevel: "low",
+		});
+		expect(result.ok).toBe(true);
+		expect(result.spec.plan.steps).toHaveLength(3);
+		expect(result.spec.constraints.allow.protocols).toEqual(["venus"]);
+	});
+
 	it("fails for unsupported template", () => {
 		const result = compileStrategySpecV0({ template: "unknown-template" });
 		expect(result.ok).toBe(false);

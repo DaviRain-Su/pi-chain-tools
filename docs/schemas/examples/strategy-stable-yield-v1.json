@@ -1,0 +1,37 @@
+{
+	"id": "strategy.stable-yield.bsc.usdc.v1",
+	"name": "Stable yield v1 (USDC on BSC)",
+	"version": "0.1.0",
+	"owner": {
+		"namespace": "community",
+		"author": "pi-chain-tools"
+	},
+	"goal": {
+		"kind": "yield",
+		"description": "Auto-balance stablecoin yield on BSC with conservative risk gates"
+	},
+	"constraints": {
+		"risk": {
+			"maxPerRunUsd": 100,
+			"maxSlippageBps": 60,
+			"maxDailyRuns": 8
+		},
+		"allow": {
+			"chains": ["bsc"],
+			"protocols": ["venus"],
+			"assets": ["USDC"]
+		}
+	},
+	"triggers": [{ "type": "cron", "cron": "*/30 * * * *" }],
+	"plan": {
+		"steps": [
+			{ "id": "s1", "action": "read", "component": "cap.venus.lending" },
+			{ "id": "s2", "action": "withdraw", "component": "cap.venus.lending" },
+			{ "id": "s3", "action": "supply", "component": "cap.venus.lending" }
+		]
+	},
+	"metadata": {
+		"template": "stable-yield-v1",
+		"riskLevel": "low"
+	}
+}
