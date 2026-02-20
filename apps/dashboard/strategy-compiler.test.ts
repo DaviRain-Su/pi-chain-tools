@@ -85,6 +85,9 @@ describe("strategy compiler v0", () => {
 		expect(manifests.length).toBeGreaterThanOrEqual(3);
 		const stableYield = getStrategyTemplateManifest("stable-yield-v1");
 		expect(stableYield?.pricingModel).toBe("free");
+		expect(stableYield?.visibility).toBe("public");
+		expect(stableYield?.riskTier).toBe("low");
+		expect(stableYield?.recommendedMinUsd).toBe(5);
 		expect(stableYield?.tags).toContain("stablecoin");
 		expect(stableYield?.capabilities).toContain("cap.venus.lending");
 	});

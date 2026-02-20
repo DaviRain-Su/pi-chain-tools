@@ -117,3 +117,11 @@ npm run stable-yield:smoke
 ```json
 { "template": "stable-yield-v1" }
 ```
+
+
+模板 manifest 现在包含市场筛选字段：
+- `visibility`
+- `status`
+- `riskTier`
+- `recommendedMinUsd` / `recommendedMaxUsd`
+- `strategyType`
