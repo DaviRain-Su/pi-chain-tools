@@ -155,6 +155,7 @@ try {
 	}
 	console.log(`[normalize-runtime-metrics] normalized ${targetInput}`);
 } catch (error) {
+	const message = error instanceof Error ? error.message : String(error);
 	if (
 		error &&
 		typeof error === "object" &&
@@ -166,5 +167,8 @@ try {
 		);
 		process.exit(0);
 	}
-	throw error;
+	console.warn(
+		`[normalize-runtime-metrics] skipped: non-fatal write error (${message})`,
+	);
+	process.exit(0);
 }
