@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { resolveFromRepo } from "./runtime-paths.mjs";
+import {
+	resolveFromRepo,
+	resolveRepoRootFromMetaUrl,
+} from "./runtime-paths.mjs";
 
 const DEFAULT_TARGET_RELATIVE = "apps/dashboard/data/rebalance-metrics.json";
 const DEFAULT_CACHE_RELATIVE =
@@ -26,10 +29,14 @@ function stableNormalize(value) {
 	return value;
 }
 
+const SCRIPT_REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url);
+
 function resolvePath(input, cwd) {
 	if (path.isAbsolute(input)) return input;
-	const resolved = resolveFromRepo(input, cwd).absolutePath;
-	return resolved || null;
+	const resolvedFromCwd = resolveFromRepo(input, cwd).absolutePath;
+	if (resolvedFromCwd) return resolvedFromCwd;
+	if (SCRIPT_REPO_ROOT) return path.join(SCRIPT_REPO_ROOT, input);
+	return null;
 }
 
 function readJsonSafe(filePath) {
