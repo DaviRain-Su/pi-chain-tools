@@ -281,6 +281,7 @@
         <div class="card"><h3>Mainnet Readiness</h3><div id="readinessCard" class="muted">-</div></div>
         <div class="card"><h3>Security Watch</h3><div id="securityWatchCard" class="muted">-</div></div>
         <div class="card"><h3>Proof Summary</h3><div id="proofSummaryCard" class="muted">-</div></div>
+        <div class="card"><h3>Stable-Yield Auto-Migrate</h3><div id="stableYieldAutoMigrateCard" class="muted">-</div></div>
       </div>
 
       <div class="card" style="margin-top:12px">
@@ -629,6 +630,7 @@
       const readinessCardEl = document.getElementById("readinessCard");
       const securityWatchCardEl = document.getElementById("securityWatchCard");
       const proofSummaryCardEl = document.getElementById("proofSummaryCard");
+      const stableYieldAutoMigrateCardEl = document.getElementById("stableYieldAutoMigrateCard");
       const autonomousCycleRunsMetaEl = document.getElementById("autonomousCycleRunsMeta");
       const autonomousCycleRunsRowsEl = document.getElementById("autonomousCycleRunsRows");
       const yieldHealthEl = document.getElementById("yieldHealth");
@@ -1534,7 +1536,7 @@
           : "";
         const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
         const safeFetch = (input) => fetch(input).catch(() => null);
-        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes, readinessMatrixRes, securityWatchStatusRes, proofSummaryRes, autonomousCycleRunsRes] = await Promise.all([
+        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes, readinessMatrixRes, securityWatchStatusRes, proofSummaryRes, autonomousCycleRunsRes, stableYieldAutoMigrateRes] = await Promise.all([
           safeFetch(`/api/snapshot${query}`),
           safeFetch(`/api/portfolio/unified${query}`),
           safeFetch(`/api/bsc/yield/plan${bscAccountQuery ? `${bscAccountQuery}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
@@ -1557,6 +1559,7 @@
           safeFetch("/api/security/watch/status"),
           safeFetch("/api/proof/summary"),
           safeFetch("/api/autonomous/cycle/runs?limit=8"),
+          safeFetch("/api/stable-yield/auto-migrate/status"),
         ]);
         const data = snapRes ? await snapRes.json().catch(() => ({ error: "snapshot_parse_failed" })) : { error: "snapshot_unreachable" };
         const unified = unifiedRes ? await unifiedRes.json().catch(() => ({ ok: false })) : { ok: false };
@@ -1580,6 +1583,7 @@
         const securityWatchStatus = securityWatchStatusRes ? await securityWatchStatusRes.json().catch(() => ({ ok: false, status: null })) : { ok: false, status: null };
         const proofSummary = proofSummaryRes ? await proofSummaryRes.json().catch(() => ({ ok: false, summary: null })) : { ok: false, summary: null };
         const autonomousCycleRuns = autonomousCycleRunsRes ? await autonomousCycleRunsRes.json().catch(() => ({ ok: false, runs: [] })) : { ok: false, runs: [] };
+        const stableYieldAutoMigrate = stableYieldAutoMigrateRes ? await stableYieldAutoMigrateRes.json().catch(() => ({ ok: false, status: {} })) : { ok: false, status: {} };
         lastCiSignatures = ciSignatures;
 
         const warnings = [];
@@ -1591,6 +1595,7 @@
         if (securityWatchStatus?.ok === false) warnings.push("security watch status unavailable");
         if (proofSummary?.ok === false) warnings.push("proof summary unavailable");
         if (autonomousCycleRuns?.ok === false) warnings.push("autonomous cycle runs unavailable");
+        if (stableYieldAutoMigrate?.ok === false) warnings.push("stable-yield auto-migrate status unavailable");
         if (statusBannerEl) {
           if (warnings.length) {
             statusBannerEl.style.display = "block";
@@ -1667,6 +1672,22 @@
             renderProofRow("BSC", proofItems.bsc),
             renderProofRow("Security", proofItems.security),
             renderProofRow("Breeze", proofItems.breeze),
+          ].join("<br/>");
+        }
+        if (stableYieldAutoMigrateCardEl) {
+          const auto = stableYieldAutoMigrate?.status || {};
+          const v1 = auto?.v1 || {};
+          const v2 = auto?.v2 || {};
+          const last = v2?.lastJson || {};
+          const lastStatus = String(last?.status || "-");
+          const best = last?.best?.key || "-";
+          const delta = last?.deltaBps ?? "-";
+          stableYieldAutoMigrateCardEl.innerHTML = [
+            `v1 log: <span class="${v1?.enabled ? "ok" : "warn"}">${v1?.enabled ? "enabled" : "missing"}</span>`,
+            `v2 log: <span class="${v2?.enabled ? "ok" : "warn"}">${v2?.enabled ? "enabled" : "missing"}</span>`,
+            `v2 last status: <span class="${lastStatus === "executed" ? "ok" : lastStatus === "noop" ? "muted" : "warn"}">${lastStatus}</span>`,
+            `best market: ${best} · delta(bps): ${delta}`,
+            `snapshot: ${v2?.lastJsonPath || "-"}`,
           ].join("<br/>");
         }
         const cycleRuns = Array.isArray(autonomousCycleRuns?.runs) ? autonomousCycleRuns.runs.slice(0, 8) : [];

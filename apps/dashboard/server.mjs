@@ -90,6 +90,27 @@ const EXECUTION_PROOFS_ROOT = path.join(
 	"docs",
 	"execution-proofs",
 );
+const STABLE_YIELD_V1_LOG_PATH = path.join(
+	__dirname,
+	"..",
+	"..",
+	"logs",
+	"stable-yield-auto-migrate.log",
+);
+const STABLE_YIELD_V2_LOG_PATH = path.join(
+	__dirname,
+	"..",
+	"..",
+	"logs",
+	"stable-yield-auto-migrate-v2.log",
+);
+const STABLE_YIELD_V2_LAST_PATH = path.join(
+	__dirname,
+	"..",
+	"..",
+	"logs",
+	"stable-yield-auto-migrate-v2-last.json",
+);
 
 function deepGet(obj, dottedPath, fallback = undefined) {
 	const parts = String(dottedPath || "")
@@ -9275,6 +9296,44 @@ function startBscYieldWorker(options = {}) {
 	}, BSC_YIELD_WORKER.intervalMs);
 }
 
+async function readStableYieldAutoMigrateStatus() {
+	const result = {
+		v1: {
+			enabled: existsSync(STABLE_YIELD_V1_LOG_PATH),
+			lastLine: null,
+			logPath: STABLE_YIELD_V1_LOG_PATH,
+		},
+		v2: {
+			enabled: existsSync(STABLE_YIELD_V2_LOG_PATH),
+			lastLine: null,
+			logPath: STABLE_YIELD_V2_LOG_PATH,
+			lastJsonPath: STABLE_YIELD_V2_LAST_PATH,
+			lastJson: null,
+		},
+	};
+	const tailLine = async (filePath) => {
+		try {
+			const raw = await readFile(filePath, "utf8");
+			const lines = raw
+				.split("\n")
+				.map((x) => x.trim())
+				.filter(Boolean);
+			return lines.length ? lines[lines.length - 1] : null;
+		} catch {
+			return null;
+		}
+	};
+	result.v1.lastLine = await tailLine(STABLE_YIELD_V1_LOG_PATH);
+	result.v2.lastLine = await tailLine(STABLE_YIELD_V2_LOG_PATH);
+	try {
+		const raw = await readFile(STABLE_YIELD_V2_LAST_PATH, "utf8");
+		result.v2.lastJson = JSON.parse(raw);
+	} catch {
+		result.v2.lastJson = null;
+	}
+	return result;
+}
+
 const server = http.createServer(async (req, res) => {
 	try {
 		const url = new URL(req.url || "/", `http://${req.headers.host}`);
@@ -9285,6 +9344,11 @@ const server = http.createServer(async (req, res) => {
 				rpcCandidates: RPC_ENDPOINTS,
 				accountId: ACCOUNT_ID,
 			});
+		}
+
+		if (url.pathname === "/api/stable-yield/auto-migrate/status") {
+			const status = await readStableYieldAutoMigrateStatus();
+			return json(res, 200, { ok: true, status });
 		}
 
 		if (url.pathname === "/api/security/watch/status" && req.method === "GET") {
