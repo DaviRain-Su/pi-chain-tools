@@ -37,6 +37,7 @@
 		"schema:check-files:json": "node scripts/validate-openclaw-schemas.mjs --list-strict --json",
 		"schema:ci-check": "npm run schema:check-files:json && npm run schema:validate",
 		"schema:audit": "npm run schema:check-files:json && npm run schema:validate -- --strict --json",
+		"strategy:compile": "node scripts/strategy-compile.mjs",
 		"security:check": "node scripts/security-audit.mjs",
 		"security:scan:once": "node scripts/evm-security-scan-once.mjs",
 		"security:watch": "node scripts/evm-security-worker.mjs",
