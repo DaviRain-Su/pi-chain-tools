@@ -9310,20 +9310,39 @@ function parseAddressCandidates(raw) {
 		.filter((x) => /^0x[a-fA-F0-9]{40}$/.test(x));
 }
 
-async function discoverBscPoolsByProtocol(protocol) {
+async function discoverPoolCandidatesFromDefiLlama(protocol) {
 	const key = String(protocol || "").toLowerCase();
-	const candidateRaw =
-		key === "lista" ? BSC_LISTA_POOL_CANDIDATES : BSC_WOMBAT_POOL_CANDIDATES;
-	const candidates = parseAddressCandidates(candidateRaw);
-	if (candidates.length === 0) {
-		return {
-			protocol: key,
-			candidates: [],
-			recommended: null,
-			warning:
-				"no configured pool candidates; set BSC_LISTA_POOL_CANDIDATES / BSC_WOMBAT_POOL_CANDIDATES",
-		};
+	const projectName = key === "lista" ? "lista" : "wombat-exchange";
+	try {
+		const res = await fetch("https://yields.llama.fi/pools", {
+			headers: { accept: "application/json" },
+		});
+		if (!res.ok) return [];
+		const payload = await res.json();
+		const list = Array.isArray(payload?.data) ? payload.data : [];
+		const out = [];
+		for (const row of list) {
+			const chain = String(row?.chain || "").toLowerCase();
+			const project = String(row?.project || "").toLowerCase();
+			const symbol = String(row?.symbol || "").toUpperCase();
+			if (!chain.includes("binance")) continue;
+			if (!project.includes(projectName)) continue;
+			if (!(symbol.includes("USDC") || symbol.includes("USDT"))) continue;
+			const combined = [
+				String(row?.poolMeta || ""),
+				String(row?.pool || ""),
+				String(row?.symbol || ""),
+			].join(" ");
+			const found = combined.match(/0x[a-fA-F0-9]{40}/g) || [];
+			for (const addr of found) out.push(addr);
+		}
+		return [...new Set(out)];
+	} catch {
+		return [];
 	}
+}
+
+async function scorePoolCandidates(candidates) {
 	const provider = new JsonRpcProvider(BSC_RPC_URL, {
 		name: "bsc",
 		chainId: BSC_CHAIN_ID,
@@ -9344,18 +9363,34 @@ async function discoverBscPoolsByProtocol(protocol) {
 		]);
 		const usdcUi = Number(rawToUi(usdcRaw, BSC_USDC_DECIMALS));
 		const usdtUi = Number(rawToUi(usdtRaw, BSC_USDT_DECIMALS));
-		rows.push({
-			pool,
-			usdcUi,
-			usdtUi,
-			liquidityScore: usdcUi + usdtUi,
-		});
+		rows.push({ pool, usdcUi, usdtUi, liquidityScore: usdcUi + usdtUi });
 	}
 	rows.sort((a, b) => b.liquidityScore - a.liquidityScore);
+	return rows;
+}
+
+async function discoverBscPoolsByProtocol(protocol) {
+	const key = String(protocol || "").toLowerCase();
+	const candidateRaw =
+		key === "lista" ? BSC_LISTA_POOL_CANDIDATES : BSC_WOMBAT_POOL_CANDIDATES;
+	let candidates = parseAddressCandidates(candidateRaw);
+	let source = "env";
+	let warning = null;
+	if (candidates.length === 0) {
+		candidates = await discoverPoolCandidatesFromDefiLlama(key);
+		source = "defillama";
+		if (candidates.length === 0) {
+			warning =
+				"auto-discovery found no BSC pool addresses from DeFiLlama; you can still set BSC_*_POOL_CANDIDATES manually";
+		}
+	}
+	const rows = await scorePoolCandidates(candidates);
 	return {
 		protocol: key,
+		source,
 		candidates: rows,
 		recommended: rows[0]?.pool || null,
+		warning,
 	};
 }
 
