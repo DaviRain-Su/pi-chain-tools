@@ -65,10 +65,8 @@ curl -s http://127.0.0.1:4173/api/readiness/matrix | jq '.matrix.autonomousTrack
 
 If binding is required but missing, autonomous checks emit blocker + remediation hints in both live-test and readiness outputs.
 
-Migration note (AsterDEX -> Hyperliquid):
-- `coreYieldEngine` is now `hyperliquid` for autonomous BSC track.
+Autonomous BSC track uses Hyperliquid as the core yield engine.
 - Use `BSC_AUTONOMOUS_HYPERLIQUID_*` env keys.
-- Legacy `asterdex` wrappers are kept only for compatibility and are deprecated.
 
 Autonomous cycle runnable proof (deterministic BSC cycle):
 
