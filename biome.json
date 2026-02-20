@@ -5,6 +5,7 @@
 			"apps/dashboard/data/**",
 			"logs/**",
 			"docs/execution-proofs/**",
+			"docs/architecture/federation-scaffold/**",
 			"contracts/hyperliquid-autonomous/artifacts/**",
 			"contracts/hyperliquid-autonomous/cache/**"
 		]

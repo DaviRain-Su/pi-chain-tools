@@ -11,9 +11,13 @@ This repo is entering a transition from single-repo accumulation to a federated 
 ## Immediate action (implemented)
 
 - Added planner script: `npm run arch:federation:plan`
+- Added scaffold generator: `npm run arch:federation:scaffold`
 - Generates machine-readable plan at:
   - default: `docs/architecture/repo-federation-plan.json`
   - override: `FEDERATION_PLAN_OUTPUT_PATH=/tmp/plan.json`
+- Generates repo bootstrap templates at:
+  - default: `docs/architecture/federation-scaffold/`
+  - override: `FEDERATION_SCAFFOLD_OUTPUT_DIR=/tmp/federation-scaffold`
 
 ## Phased rollout
 

@@ -1,0 +1,14 @@
+{
+  "name": "@gradience/chain-shared-tools",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Migration target for src/chains/shared",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}
