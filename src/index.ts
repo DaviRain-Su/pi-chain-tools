@@ -18,7 +18,7 @@ export type {
 	ChainToolGroupName,
 	ChainToolset,
 	RegisteredTool,
-} from "./core/types.js";
+} from "./w3rt-core/index.js";
 export type {
 	PiMcpAdapter,
 	PiMcpRoute,
@@ -46,6 +46,13 @@ export type {
 	PiMcpRunResponse,
 	PiMcpSolanaApi,
 } from "./core/pi-mcp-solana.js";
+
+export {
+	parseRunMode,
+	parseRunModeHint,
+	parseRunModeWithCompose,
+	resolveWorkflowRunMode,
+} from "./w3rt-core/index.js";
 
 export {
 	DANGEROUS_RPC_METHODS,
@@ -189,7 +196,7 @@ export type {
 	EvmTransferPolicyEnforceOn,
 	EvmTransferPolicyMode,
 	EvmTransferPolicyUpdate,
-} from "./chains/evm/policy.js";
+} from "./w3rt-core/index.js";
 export {
 	getPolymarketBtc5mAdvice,
 	getPolymarketBtc5mMarkets,

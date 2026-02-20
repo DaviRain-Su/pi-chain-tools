@@ -27,6 +27,7 @@ This repo is entering a transition from single-repo accumulation to a federated 
      - `tool-types.ts`
      - `workflow-run-mode.ts`
      - `evm-transfer-policy-types.ts`
+     - `index.ts` (single import surface)
 2. **Chain split**
    - one repo per chain family (`chain-*-tools`)
 3. **Strategy split**
