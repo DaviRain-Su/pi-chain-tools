@@ -1,4 +1,4 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Type } from "@sinclair/typebox";
@@ -409,6 +409,14 @@ async function autoSignAndBroadcastFromQuote(params: {
 	return { network, txHash: sent.txHash, from: sent.from, to };
 }
 
+function defaultStableYieldEvidencePath(runId: string) {
+	const now = new Date();
+	const day = now.toISOString().slice(0, 10);
+	const stamp = now.toISOString().replace(/[:.]/g, "-");
+	const id = runId || `stable-yield-${stamp}`;
+	return path.join(repoRoot, "docs", "execution-proofs", day, `${id}.json`);
+}
+
 function simulateStrategyRun(
 	specInput: unknown,
 	mode: "dry-run" | "plan" | "execute",
@@ -684,6 +692,26 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 				}
 
 				const runId = String(params.runId || "").trim();
+				const templateName = String(
+					asObject(asObject(params.spec)?.metadata)?.template || "",
+				).trim();
+				const isStableYield = templateName === "stable-yield-v1";
+				const shouldPrepareQuote =
+					mode === "execute" &&
+					simulated.result?.status === "ready" &&
+					(params.prepareQuote === true ||
+						(isStableYield && params.live === true));
+				const shouldAutoSign =
+					params.autoSign === true ||
+					(isStableYield && params.live === true && !params.signedTxHex);
+				const shouldTrack =
+					params.trackAfterBroadcast === true ||
+					(isStableYield && params.live === true);
+				const evidenceOutPath =
+					params.evidenceOutPath ||
+					(isStableYield && params.live === true
+						? defaultStableYieldEvidencePath(runId)
+						: undefined);
 				const ledger = globalState[STRATEGY_LIVE_RUN_LEDGER] as Map<
 					string,
 					Record<string, unknown>
@@ -754,11 +782,7 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					}
 				}
 
-				if (
-					mode === "execute" &&
-					params.prepareQuote === true &&
-					simulated.result?.status === "ready"
-				) {
+				if (shouldPrepareQuote) {
 					const quoteResult = await prepareLifiQuoteFromIntent(
 						asObject(simulated.result.executeIntent) || {},
 						asObject(params.quoteContext) || {},
@@ -786,7 +810,7 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					let broadcast: Record<string, unknown> | null = null;
 					if (params.live === true) {
 						try {
-							if (params.autoSign === true) {
+							if (shouldAutoSign) {
 								broadcast = await autoSignAndBroadcastFromQuote({
 									quotePlan: quoteResult.quotePlan,
 									networkHint: String(params.broadcastNetwork || "bsc"),
@@ -814,7 +838,7 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					}
 					let tracking: Record<string, unknown> | null = null;
 					if (
-						params.trackAfterBroadcast === true &&
+						shouldTrack &&
 						broadcastStatus === "submitted" &&
 						broadcast?.txHash
 					) {
@@ -846,9 +870,10 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 							ts: new Date().toISOString(),
 						});
 					}
-					if (params.evidenceOutPath) {
+					if (evidenceOutPath) {
+						await mkdir(path.dirname(evidenceOutPath), { recursive: true });
 						await writeFile(
-							params.evidenceOutPath,
+							evidenceOutPath,
 							`${JSON.stringify(finalResult, null, 2)}\n`,
 							"utf8",
 						);
@@ -888,7 +913,7 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 					}
 					let tracking: Record<string, unknown> | null = null;
 					if (
-						params.trackAfterBroadcast === true &&
+						shouldTrack &&
 						broadcastStatus === "submitted" &&
 						broadcast?.txHash
 					) {
@@ -919,9 +944,10 @@ export default function openclawNearExtension(pi: ToolRegistrar): void {
 						});
 					}
 				}
-				if (params.evidenceOutPath) {
+				if (evidenceOutPath) {
+					await mkdir(path.dirname(evidenceOutPath), { recursive: true });
 					await writeFile(
-						params.evidenceOutPath,
+						evidenceOutPath,
 						`${JSON.stringify(baseResult, null, 2)}\n`,
 						"utf8",
 					);
