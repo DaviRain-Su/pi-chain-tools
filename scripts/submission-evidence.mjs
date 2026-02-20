@@ -10,7 +10,11 @@ import {
 import path from "node:path";
 
 const ROOT = process.cwd();
-const OUTPUT_PATH = path.join(ROOT, "docs", "submission-evidence.md");
+const OUTPUT_PATH = path.resolve(
+	ROOT,
+	process.env.SUBMISSION_EVIDENCE_OUTPUT_PATH ||
+		path.join("docs", "submission-evidence.md"),
+);
 const DASHBOARD_LOG_PATH = path.join(
 	ROOT,
 	"apps",
