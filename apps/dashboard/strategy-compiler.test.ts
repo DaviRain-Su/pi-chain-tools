@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
 	compileStrategySpecV0,
+	getStrategyTemplateManifest,
+	listStrategyTemplateManifests,
 	validatePlanAgainstCapabilities,
 } from "./strategy-compiler.mjs";
 
@@ -76,5 +78,14 @@ describe("strategy compiler v0", () => {
 		expect(check.errors.join("\n")).toContain(
 			"action 'supply' is not supported",
 		);
+	});
+
+	it("exposes market-ready template manifests", () => {
+		const manifests = listStrategyTemplateManifests();
+		expect(manifests.length).toBeGreaterThanOrEqual(3);
+		const stableYield = getStrategyTemplateManifest("stable-yield-v1");
+		expect(stableYield?.pricingModel).toBe("free");
+		expect(stableYield?.tags).toContain("stablecoin");
+		expect(stableYield?.capabilities).toContain("cap.venus.lending");
 	});
 });

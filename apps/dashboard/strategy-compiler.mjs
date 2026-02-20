@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import {
 	compileFromTemplate,
+	getStrategyTemplateManifest,
+	listStrategyTemplateManifests,
 	listStrategyTemplates,
 } from "./strategy-template-registry.mjs";
 
@@ -62,4 +64,8 @@ export async function loadJsonFile(path) {
 	return JSON.parse(raw);
 }
 
-export { listStrategyTemplates };
+export {
+	getStrategyTemplateManifest,
+	listStrategyTemplateManifests,
+	listStrategyTemplates,
+};

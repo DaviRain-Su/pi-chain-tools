@@ -179,23 +179,64 @@ function buildLendingRiskBalanceSpec(payload) {
 }
 
 const TEMPLATE_REGISTRY = {
-	"rebalance-crosschain-v0": buildRebalanceSpec,
-	"stable-yield-v1": buildStableYieldSpec,
-	"lending-risk-balance-v0": buildLendingRiskBalanceSpec,
+	"rebalance-crosschain-v0": {
+		compile: buildRebalanceSpec,
+		manifest: {
+			template: "rebalance-crosschain-v0",
+			version: "0.1.0",
+			author: "pi-chain-tools",
+			license: "MIT",
+			pricingModel: "free",
+			tags: ["rebalance", "cross-chain", "lifi"],
+			capabilities: ["cap.lifi.bridge-swap"],
+		},
+	},
+	"stable-yield-v1": {
+		compile: buildStableYieldSpec,
+		manifest: {
+			template: "stable-yield-v1",
+			version: "0.1.0",
+			author: "pi-chain-tools",
+			license: "MIT",
+			pricingModel: "free",
+			tags: ["stablecoin", "yield", "bsc", "venus"],
+			capabilities: ["cap.venus.lending", "cap.lifi.bridge-swap"],
+		},
+	},
+	"lending-risk-balance-v0": {
+		compile: buildLendingRiskBalanceSpec,
+		manifest: {
+			template: "lending-risk-balance-v0",
+			version: "0.1.0",
+			author: "pi-chain-tools",
+			license: "MIT",
+			pricingModel: "free",
+			tags: ["lending", "risk", "venus", "morpho"],
+			capabilities: ["cap.venus.lending", "cap.morpho.lending"],
+		},
+	},
 };
 
 export function listStrategyTemplates() {
 	return Object.keys(TEMPLATE_REGISTRY);
 }
 
+export function listStrategyTemplateManifests() {
+	return Object.values(TEMPLATE_REGISTRY).map((entry) => entry.manifest);
+}
+
+export function getStrategyTemplateManifest(template) {
+	return TEMPLATE_REGISTRY[template]?.manifest || null;
+}
+
 export function compileFromTemplate(template, payload) {
-	const handler = TEMPLATE_REGISTRY[template];
-	if (!handler) {
+	const entry = TEMPLATE_REGISTRY[template];
+	if (!entry) {
 		return {
 			ok: false,
 			errors: [`unsupported template: ${template}`],
 			supportedTemplates: listStrategyTemplates(),
 		};
 	}
-	return { ok: true, spec: handler(payload) };
+	return { ok: true, spec: entry.compile(payload) };
 }
