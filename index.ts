@@ -99,7 +99,10 @@ function validateStrategyStructure(specInput: unknown): {
 
 const EXECUTE_CONFIRM_TOKEN = "I_ACKNOWLEDGE_EXECUTION";
 const LIVE_EXECUTE_CONFIRM_TOKEN = "I_ACKNOWLEDGE_LIVE_EXECUTION";
-const EXECUTE_ALLOWED_TEMPLATE = "rebalance-crosschain-v0";
+const EXECUTE_ALLOWED_TEMPLATES = new Set([
+	"rebalance-crosschain-v0",
+	"stable-yield-v1",
+]);
 const EXECUTE_ALLOWED_CHAINS = new Set(["base", "bsc"]);
 const EXECUTE_MAX_PER_RUN_USD = 5000;
 const LIVE_EXECUTE_MAX_PER_RUN_USD = 100;
@@ -107,10 +110,12 @@ const LIVE_EXECUTE_MAX_PER_RUN_USD = 100;
 function evaluateExecutePolicy(spec: Record<string, unknown>) {
 	const metadata = asObject(spec.metadata);
 	const template = String(metadata?.template || "");
-	if (template !== EXECUTE_ALLOWED_TEMPLATE) {
+	if (!EXECUTE_ALLOWED_TEMPLATES.has(template)) {
 		return {
 			ok: false,
-			reason: `execute policy allows only template '${EXECUTE_ALLOWED_TEMPLATE}'`,
+			reason: `execute policy allows only templates: ${Array.from(
+				EXECUTE_ALLOWED_TEMPLATES,
+			).join(", ")}`,
 		};
 	}
 

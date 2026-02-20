@@ -18,7 +18,7 @@
 		},
 		"allow": {
 			"chains": ["bsc"],
-			"protocols": ["venus"],
+			"protocols": ["lifi", "venus"],
 			"assets": ["USDC"]
 		}
 	},

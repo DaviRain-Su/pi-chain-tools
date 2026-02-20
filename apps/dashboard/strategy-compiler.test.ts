@@ -40,7 +40,7 @@ describe("strategy compiler v0", () => {
 		});
 		expect(result.ok).toBe(true);
 		expect(result.spec.plan.steps).toHaveLength(3);
-		expect(result.spec.constraints.allow.protocols).toEqual(["venus"]);
+		expect(result.spec.constraints.allow.protocols).toEqual(["lifi", "venus"]);
 	});
 
 	it("fails for unsupported template", () => {

@@ -124,7 +124,7 @@ export function compileStrategySpecV0(input = {}) {
 					risk: { maxPerRunUsd, maxSlippageBps, maxDailyRuns },
 					allow: {
 						chains: [chain],
-						protocols: ["venus"],
+						protocols: ["lifi", "venus"],
 						assets: [asset],
 					},
 				},
