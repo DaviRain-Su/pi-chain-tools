@@ -4,6 +4,23 @@ Gradience is a multi-chain AI agent runtime — 44 NEAR tools, 30+ EVM tools, fu
 
 **Featured: [Autonomous Stablecoin Yield Agent on NEAR](docs/near-hackathon.md)** — an AI agent that continuously monitors Burrow lending markets and autonomously rebalances stablecoin positions to maximize yield. Starts with one command, keeps working after you close the tab.
 
+## One-click real test runner
+
+Safety-first live test pack (preflight -> dryrun -> optional execute) with panic-stop and rollback guidance.
+
+```bash
+# 1) preflight checks only
+npm run live:test:preflight
+
+# 2) non-mutating dry-run suite
+npm run live:test:dryrun -- --target-chain all --max-usd 5
+
+# 3) full flow (execute is blocked unless confirm flag is explicit)
+npm run live:test:full -- --confirm-live true --max-usd 2 --target-chain bsc --panic-stop ./ops/PANIC_STOP
+```
+
+Details: `docs/live-test-runbook.md`
+
 ## EVM Security Watch (Quickstart)
 
 Read-only drift monitor for watched EVM contracts (code hash / proxy impl / owner / paused / optional approval spikes).

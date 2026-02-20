@@ -65,7 +65,10 @@
 		"solana:bridge:heartbeat": "node scripts/solana-bridge-heartbeat.mjs",
 		"sdk:upgrade-readiness": "node scripts/sdk-upgrade-readiness.mjs",
 		"sdk:capability-diff": "node scripts/sdk-capability-diff.mjs",
-		"bsc:live": "bash scripts/run-bsc-live.sh"
+		"bsc:live": "bash scripts/run-bsc-live.sh",
+		"live:test:preflight": "node scripts/live-test-runner.mjs --mode preflight",
+		"live:test:dryrun": "node scripts/live-test-runner.mjs --mode dryrun",
+		"live:test:full": "node scripts/live-test-runner.mjs --mode full"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",
