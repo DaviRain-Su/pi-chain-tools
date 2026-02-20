@@ -68,7 +68,10 @@
 		"bsc:live": "bash scripts/run-bsc-live.sh",
 		"live:test:preflight": "node scripts/live-test-runner.mjs --mode preflight",
 		"live:test:dryrun": "node scripts/live-test-runner.mjs --mode dryrun",
-		"live:test:full": "node scripts/live-test-runner.mjs --mode full"
+		"live:test:full": "node scripts/live-test-runner.mjs --mode full",
+		"readiness:build": "node scripts/readiness-matrix.mjs",
+		"readiness:show": "node scripts/readiness-matrix.mjs --show",
+		"readiness:refresh": "node scripts/readiness-refresh.mjs"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",

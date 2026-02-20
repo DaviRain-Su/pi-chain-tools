@@ -69,6 +69,12 @@ const SECURITY_WATCH_REPORTS_ROOT =
 	process.env.EVM_SECURITY_WATCH_REPORTS_ROOT ||
 	path.join(__dirname, "data", "security-reports");
 const PROOFS_ROOT = path.join(__dirname, "data", "proofs");
+const READINESS_MATRIX_PATH = path.join(
+	__dirname,
+	"data",
+	"readiness",
+	"latest.json",
+);
 const EXECUTION_PROOFS_ROOT = path.join(
 	__dirname,
 	"..",
@@ -1953,6 +1959,15 @@ async function readProofSummary() {
 		generatedAt: new Date().toISOString(),
 		items: { starknet, bsc, security, breeze },
 	};
+}
+
+async function readReadinessMatrixLatest() {
+	try {
+		const raw = await readFile(READINESS_MATRIX_PATH, "utf8");
+		return JSON.parse(raw);
+	} catch {
+		return null;
+	}
 }
 
 const TOKENS = [
@@ -9090,6 +9105,21 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, {
 				ok: true,
 				summary,
+			});
+		}
+
+		if (url.pathname === "/api/readiness/matrix" && req.method === "GET") {
+			const matrix = await readReadinessMatrixLatest();
+			if (!matrix) {
+				return json(res, 200, {
+					ok: false,
+					error: "readiness_matrix_missing",
+					path: READINESS_MATRIX_PATH,
+				});
+			}
+			return json(res, 200, {
+				ok: true,
+				matrix,
 			});
 		}
 

@@ -90,3 +90,29 @@ After any non-OK run:
    - `npm run live:test:preflight`
    - `npm run live:test:dryrun`
    - execute only with explicit confirmation
+
+## Mainnet readiness matrix (timely update)
+
+Build/update readiness artifacts (JSON + markdown):
+
+```bash
+npm run readiness:build
+```
+
+Quick periodic refresh (runs preflight + rebuild matrix):
+
+```bash
+npm run readiness:refresh
+```
+
+Recommended cadence:
+
+- Before shipping mainnet config changes
+- After any execute-proof/security watch/live-test run
+- At least every 24h during active operations
+
+Artifacts generated:
+
+- `docs/mainnet-readiness-matrix.md`
+- `apps/dashboard/data/readiness/latest.json`
+- Dashboard API: `GET /api/readiness/matrix`

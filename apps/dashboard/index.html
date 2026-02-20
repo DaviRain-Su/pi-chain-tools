@@ -219,6 +219,7 @@
         <div class="card"><h3>Burrow Registration</h3><div id="burrowReg">-</div></div>
         <div class="card"><h3>Yield Worker</h3><div id="worker">-</div></div>
         <div class="card"><h3>PI-MCP (Safe-only)</h3><div id="piMcpCard" class="muted">-</div></div>
+        <div class="card"><h3>Mainnet Readiness</h3><div id="readinessCard" class="muted">-</div></div>
         <div class="card"><h3>Security Watch</h3><div id="securityWatchCard" class="muted">-</div></div>
         <div class="card"><h3>Proof Summary</h3><div id="proofSummaryCard" class="muted">-</div></div>
       </div>
@@ -554,6 +555,7 @@
       const burrowRegEl = document.getElementById("burrowReg");
       const workerEl = document.getElementById("worker");
       const piMcpCardEl = document.getElementById("piMcpCard");
+      const readinessCardEl = document.getElementById("readinessCard");
       const securityWatchCardEl = document.getElementById("securityWatchCard");
       const proofSummaryCardEl = document.getElementById("proofSummaryCard");
       const yieldHealthEl = document.getElementById("yieldHealth");
@@ -1459,7 +1461,7 @@
           : "";
         const selectedProtocol = String(bscExecutionProtocolEl?.value || "aave").toLowerCase();
         const safeFetch = (input) => fetch(input).catch(() => null);
-        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes, securityWatchStatusRes, proofSummaryRes] = await Promise.all([
+        const [snapRes, unifiedRes, bscYieldPlanRes, bscYieldMarketsRes, acpStatusRes, acpSummaryRes, acpJobsRes, paymentsRes, acpDeadRes, acpDismissedRes, ciSignaturesRes, monadMorphoReadinessRes, monadMorphoMarketsRes, monadMorphoStrategyRes, monadMorphoWorkerRes, monadMorphoRewardsRes, monadAgentProfileRes, piMcpDiscoverRes, readinessMatrixRes, securityWatchStatusRes, proofSummaryRes] = await Promise.all([
           safeFetch(`/api/snapshot${query}`),
           safeFetch(`/api/portfolio/unified${query}`),
           safeFetch(`/api/bsc/yield/plan${bscAccountQuery ? `${bscAccountQuery}&executionProtocol=${encodeURIComponent(selectedProtocol)}` : `?executionProtocol=${encodeURIComponent(selectedProtocol)}`}`),
@@ -1478,6 +1480,7 @@
           safeFetch("/api/monad/morpho/earn/rewards"),
           safeFetch("/api/monad/agent/profile"),
           safeFetch("/api/pi-mcp/discover"),
+          safeFetch("/api/readiness/matrix"),
           safeFetch("/api/security/watch/status"),
           safeFetch("/api/proof/summary"),
         ]);
@@ -1499,6 +1502,7 @@
         const monadMorphoRewards = monadMorphoRewardsRes ? await monadMorphoRewardsRes.json().catch(() => ({ ok: false, rewards: [] })) : { ok: false, rewards: [] };
         const monadAgentProfilePayload = monadAgentProfileRes ? await monadAgentProfileRes.json().catch(() => ({ ok: false, profile: null })) : { ok: false, profile: null };
         const piMcpDiscover = piMcpDiscoverRes ? await piMcpDiscoverRes.json().catch(() => ({ ok: false, data: {} })) : { ok: false, data: {} };
+        const readinessMatrix = readinessMatrixRes ? await readinessMatrixRes.json().catch(() => ({ ok: false, matrix: null })) : { ok: false, matrix: null };
         const securityWatchStatus = securityWatchStatusRes ? await securityWatchStatusRes.json().catch(() => ({ ok: false, status: null })) : { ok: false, status: null };
         const proofSummary = proofSummaryRes ? await proofSummaryRes.json().catch(() => ({ ok: false, summary: null })) : { ok: false, summary: null };
         lastCiSignatures = ciSignatures;
@@ -1508,6 +1512,7 @@
         if (unified?.stale) warnings.push(`unified stale: ${unified?.error || "partial fallback"}`);
         if (bscYieldPlan?.ok === false && bscYieldPlan?.error) warnings.push(`bsc plan: ${bscYieldPlan.error}`);
         if (acpStatus?.ok === false && acpStatus?.error) warnings.push(`acp: ${acpStatus.error}`);
+        if (readinessMatrix?.ok === false) warnings.push("readiness matrix unavailable");
         if (securityWatchStatus?.ok === false) warnings.push("security watch status unavailable");
         if (proofSummary?.ok === false) warnings.push("proof summary unavailable");
         if (statusBannerEl) {
@@ -1550,6 +1555,13 @@
         const piMcpCount = Number(piMcpData?.discoveredTaskCount || piMcpData?.taskCount || 0);
         if (piMcpCardEl) {
           piMcpCardEl.innerHTML = `discoveredTaskCount: <span class="ok">${piMcpCount}</span><br/>recentRuns: ${piMcpRecent.length}<br/>executeRejectionCount: <span class="${piMcpExecuteRejects > 0 ? "warn" : "ok"}">${piMcpExecuteRejects}</span>`;
+        }
+        const readiness = readinessMatrix?.matrix || {};
+        const readinessOverall = String(readiness?.overall?.status || "missing");
+        const readinessCls = readinessOverall === "green" ? "ok" : readinessOverall === "yellow" ? "warn" : "muted";
+        const readinessBlockers = Array.isArray(readiness?.overall?.topBlockers) ? readiness.overall.topBlockers.slice(0, 3) : [];
+        if (readinessCardEl) {
+          readinessCardEl.innerHTML = `overall: <span class="${readinessCls}">${readinessOverall}</span><br/>generated: ${readiness?.generatedAt ? new Date(readiness.generatedAt).toLocaleString() : "-"}<br/>top blockers:<br/><span class="muted">${readinessBlockers.length ? readinessBlockers.map((x) => `• ${x}`).join("<br/>") : "none"}</span>`;
         }
         const securityStatus = securityWatchStatus?.status || {};
         const secSummary = securityStatus?.summary || { critical: 0, warn: 0, info: 0, total: 0 };
