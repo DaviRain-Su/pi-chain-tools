@@ -113,8 +113,8 @@ body {
 
 .page {
 	margin: 0 auto;
-	max-width: 72rem;
-	padding: 2rem 1rem 4rem;
+	max-width: 76rem;
+	padding: 2.2rem 1.1rem 4.4rem;
 }
 
 .hero {
@@ -190,9 +190,10 @@ h1 {
 }
 
 h2 {
-	font-size: clamp(1.3rem, 3vw, 2rem);
+	font-size: clamp(1.34rem, 2.8vw, 2rem);
 	letter-spacing: -0.02em;
-	margin: 0 0 0.8rem;
+	line-height: 1.2;
+	margin: 0 0 0.72rem;
 }
 
 h3 {
@@ -312,9 +313,42 @@ h3 {
 	border-radius: 1.05rem;
 	box-shadow: var(--shadow);
 	margin-top: 0.95rem;
-	padding: 1.15rem;
+	overflow: hidden;
+	padding: 1.2rem;
+	position: relative;
 	scroll-margin-top: 88px;
 	transition: transform 180ms ease, border-color 180ms ease;
+}
+
+.panel::before {
+	background: linear-gradient(
+		90deg,
+		rgba(93, 114, 255, 0.28),
+		rgba(48, 196, 174, 0.2)
+	);
+	content: "";
+	height: 2px;
+	left: 0;
+	opacity: 0.95;
+	position: absolute;
+	right: 0;
+	top: 0;
+}
+
+section.panel:nth-of-type(odd)::before {
+	background: linear-gradient(
+		90deg,
+		rgba(93, 114, 255, 0.34),
+		rgba(79, 129, 255, 0.16)
+	);
+}
+
+section.panel:nth-of-type(even)::before {
+	background: linear-gradient(
+		90deg,
+		rgba(48, 196, 174, 0.34),
+		rgba(95, 144, 255, 0.16)
+	);
 }
 
 .panel:hover {
@@ -335,12 +369,13 @@ h3 {
 .command-block {
 	align-items: center;
 	background: #101f24;
+	border: 1px solid rgba(154, 174, 210, 0.18);
 	border-radius: 0.85rem;
 	color: #eff3f1;
 	display: flex;
 	gap: 0.7rem;
 	justify-content: space-between;
-	padding: 0.8rem;
+	padding: 0.82rem;
 	width: 100%;
 }
 
@@ -429,12 +464,13 @@ h3 {
 }
 
 .checklist {
-	margin: 0.75rem 0 0;
+	margin: 0.72rem 0 0;
 	padding-left: 1.1rem;
 }
 
 .checklist li {
-	margin-bottom: 0.35rem;
+	line-height: 1.5;
+	margin-bottom: 0.4rem;
 }
 
 .footer {
@@ -470,6 +506,10 @@ h3 {
 
 	.step-buttons {
 		grid-template-columns: 1fr;
+	}
+
+	.panel {
+		padding: 1rem;
 	}
 
 	.top-nav {
