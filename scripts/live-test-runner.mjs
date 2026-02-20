@@ -305,6 +305,8 @@ export async function runLiveTestRunner(rawArgs = process.argv.slice(2)) {
 		.trim()
 		.replace(/\/$/, "");
 
+	const bscAutonomousMode =
+		String(process.env.BSC_AUTONOMOUS_MODE || "").toLowerCase() === "true";
 	const report = {
 		suite: "live-test-runner",
 		version: 1,
@@ -318,6 +320,17 @@ export async function runLiveTestRunner(rawArgs = process.argv.slice(2)) {
 			execute: null,
 		},
 		rollbackGuidance: null,
+		autonomousTrack: bscAutonomousMode
+			? {
+					chain: "bsc",
+					enabled: true,
+					execution: {
+						track: "autonomous",
+						governance: "hybrid",
+						trigger: "deterministic_contract_cycle",
+					},
+				}
+			: undefined,
 	};
 
 	const shouldRunPreflight = [

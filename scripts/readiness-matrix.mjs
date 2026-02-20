@@ -128,6 +128,8 @@ function buildModule({
 
 async function buildMatrix() {
 	const generatedAt = nowIso();
+	const bscAutonomousMode =
+		String(process.env.BSC_AUTONOMOUS_MODE || "").toLowerCase() === "true";
 	const [proofBsc, proofStarknet, liveTest, breezeLatest, securityState] =
 		await Promise.all([
 			findLatestExecutionProof("bsc"),
@@ -430,6 +432,17 @@ async function buildMatrix() {
 			topBlockers: allBlockers.slice(0, 5),
 		},
 		modules: sortedModules,
+		autonomousTrack: bscAutonomousMode
+			? {
+					chain: "bsc",
+					enabled: true,
+					execution: {
+						track: "autonomous",
+						governance: "hybrid",
+						trigger: "deterministic_contract_cycle",
+					},
+				}
+			: undefined,
 	};
 }
 

@@ -21,6 +21,30 @@ npm run live:test:full -- --confirm-live true --max-usd 2 --target-chain bsc --p
 
 Details: `docs/live-test-runbook.md`
 
+## Autonomous track rollout gate
+
+BSC autonomous track template is isolated and **flag-gated**.
+
+- Default path (backward compatible): `BSC_AUTONOMOUS_MODE=false`
+- Autonomous path: `BSC_AUTONOMOUS_MODE=true`
+
+Run full rollout regression gate before enabling in any live environment:
+
+```bash
+npm run autonomous:rollout:gate
+```
+
+Safe toggle + verify commands:
+
+```bash
+# legacy/default track
+BSC_AUTONOMOUS_MODE=false npm run live:test:preflight
+
+# autonomous track markers
+BSC_AUTONOMOUS_MODE=true npm run live:test:preflight
+curl -s http://127.0.0.1:4173/api/proof/summary | jq '.summary.autonomousTrack'
+```
+
 ## EVM Security Watch (Quickstart)
 
 Read-only drift monitor for watched EVM contracts (code hash / proxy impl / owner / paused / optional approval spikes).

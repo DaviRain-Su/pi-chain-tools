@@ -5,6 +5,7 @@ apps/dashboard/data/
 .env.*
 !.env.example
 !.env.near.example
+!.env.bsc.example
 
 .generated-evm-wallet.txt
 .env.bsc.local

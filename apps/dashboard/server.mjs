@@ -540,6 +540,10 @@ const BSC_EXECUTE_MODE = String(
 )
 	.trim()
 	.toLowerCase();
+const BSC_AUTONOMOUS_MODE =
+	String(
+		envOrCfg("BSC_AUTONOMOUS_MODE", "bsc.autonomous.mode", "false"),
+	).toLowerCase() === "true";
 const BSC_EXECUTE_COMMAND = String(
 	envOrCfg("BSC_EXECUTE_COMMAND", "bsc.execute.command", ""),
 ).trim();
@@ -1958,6 +1962,13 @@ async function readProofSummary() {
 	return {
 		generatedAt: new Date().toISOString(),
 		items: { starknet, bsc, security, breeze },
+		autonomousTrack: BSC_AUTONOMOUS_MODE
+			? {
+					chain: "bsc",
+					enabled: true,
+					execution: resolveExecutionMarkers({ autonomousMode: true }),
+				}
+			: undefined,
 	};
 }
 
@@ -8276,6 +8287,172 @@ function recordRebalanceMetric(entry) {
 	void saveMetricsToDisk();
 }
 
+function resolveExecutionMarkers({ autonomousMode }) {
+	if (autonomousMode) {
+		return {
+			track: "autonomous",
+			governance: "hybrid",
+			trigger: "deterministic_contract_cycle",
+		};
+	}
+	return {
+		track: "legacy",
+		governance: "onchain_only",
+		trigger: "external",
+	};
+}
+
+function withBscExecutionMetadata(result, { autonomousMode }) {
+	const markers = resolveExecutionMarkers({ autonomousMode });
+	return {
+		...result,
+		execution: {
+			...(result.execution || {}),
+			track: markers.track,
+			governance: markers.governance,
+			trigger: markers.trigger,
+			legacyCompatible: autonomousMode !== true,
+		},
+	};
+}
+
+async function runBscLegacyExecution(payload, context) {
+	const tokenInMeta = resolveBscSwapToken(payload.tokenIn, "USDT");
+	const tokenOutMeta = resolveBscSwapToken(payload.tokenOut, "USDC");
+	if (
+		tokenInMeta.address.toLowerCase() === tokenOutMeta.address.toLowerCase()
+	) {
+		throw new Error("tokenIn and tokenOut must be different");
+	}
+	let amountRaw = String(payload.amountRaw || "").trim();
+	if (!amountRaw && payload.amountInUi !== undefined) {
+		amountRaw = uiToRaw(payload.amountInUi, tokenInMeta.decimals);
+	}
+	amountRaw = parsePositiveRaw(amountRaw, "amountRaw");
+	const slippageBps = Number.parseInt(String(payload.slippageBps || "50"), 10);
+	if (!Number.isFinite(slippageBps) || slippageBps < 0 || slippageBps > 5000) {
+		throw new Error("slippageBps must be between 0 and 5000");
+	}
+	const runId = String(payload.runId || `run-${Date.now()}`).trim();
+	const isUsdtUsdcPair =
+		tokenInMeta.address.toLowerCase() === BSC_USDT.toLowerCase() &&
+		tokenOutMeta.address.toLowerCase() === BSC_USDC.toLowerCase();
+	const quote = isUsdtUsdcPair
+		? await getBscUsdtUsdcQuote(amountRaw)
+		: await getBscPancakeV2QuoteForPair({
+				amountInRaw: amountRaw,
+				tokenIn: tokenInMeta.address,
+				tokenOut: tokenOutMeta.address,
+				decimalsIn: tokenInMeta.decimals,
+				decimalsOut: tokenOutMeta.decimals,
+			});
+	const divergenceBps = Number(quote?.divergenceBps ?? -1);
+	if (
+		Number.isFinite(divergenceBps) &&
+		divergenceBps >= 0 &&
+		divergenceBps > BSC_QUOTE_MAX_DIVERGENCE_BPS
+	) {
+		throw new Error(
+			`quote divergence too high: ${divergenceBps}bps > ${BSC_QUOTE_MAX_DIVERGENCE_BPS}bps`,
+		);
+	}
+	const minAmountOutRaw = applySlippage(quote.amountOutRaw, slippageBps);
+	const executeResult = await executeBscSwap({
+		amountInRaw: amountRaw,
+		minAmountOutRaw,
+		tokenIn: tokenInMeta.address,
+		tokenOut: tokenOutMeta.address,
+		tokenInSymbol: tokenInMeta.symbol,
+		tokenOutSymbol: tokenOutMeta.symbol,
+		router: BSC_ROUTER_V2,
+		rpcUrl: BSC_RPC_URL,
+		chainId: BSC_CHAIN_ID,
+		runId,
+	});
+	const mode = executeResult.ok ? "execute" : "plan-only";
+	pushActionHistory({
+		action: payload.action,
+		step: payload.step || null,
+		accountId: context.accountId,
+		status: executeResult.ok ? "success" : "warning",
+		summary: executeResult.ok
+			? `BSC executed amountIn=${amountRaw} minOut=${minAmountOutRaw}`
+			: `BSC plan prepared amountIn=${amountRaw} quoteOut=${quote.amountOutRaw} minOut=${minAmountOutRaw} reason=${executeResult.reason}`,
+		txHash: executeResult.txHash || null,
+	});
+	recordRebalanceMetric({
+		runId,
+		status: executeResult.ok ? "bsc-executed" : "bsc-plan",
+		amountRaw,
+		suppliedRaw: quote.amountOutRaw,
+		note: executeResult.ok
+			? `bsc execution success provider=${executeResult.provider || "unknown"}`
+			: `execution fallback: ${executeResult.reason}`,
+	});
+	return {
+		ok: true,
+		action: payload.action,
+		chain: "bsc",
+		mode,
+		txHash: executeResult.txHash || null,
+		explorerUrl: executeResult.txHash
+			? `https://bscscan.com/tx/${executeResult.txHash}`
+			: null,
+		execution: executeResult.ok
+			? {
+					provider: executeResult.provider || "unknown",
+					output: executeResult.output,
+					receipt: executeResult.receipt || null,
+				}
+			: {
+					provider: "none",
+					reason: executeResult.reason,
+				},
+		plan: {
+			rpcUrl: BSC_RPC_URL,
+			chainId: BSC_CHAIN_ID,
+			router: BSC_ROUTER_V2,
+			tokenIn: tokenInMeta.address,
+			tokenOut: tokenOutMeta.address,
+			tokenInSymbol: tokenInMeta.symbol,
+			tokenOutSymbol: tokenOutMeta.symbol,
+			amountInRaw: amountRaw,
+			quotedOutRaw: quote.amountOutRaw,
+			minAmountOutRaw,
+			quoteSource: quote.source,
+			quoteRate: quote.rate,
+			quotePairAddress: quote.pairAddress,
+			quoteLiquidityUsd: quote.liquidityUsd,
+			quoteDivergenceBps: quote.divergenceBps ?? null,
+			dexAmountOutRaw: quote.dexAmountOutRaw || null,
+			pancakeV2AmountOutRaw:
+				quote.pancakeV2AmountOutRaw || quote.onchainAmountOutRaw || null,
+			onchainAmountOutRaw: quote.onchainAmountOutRaw || null,
+			slippageBps,
+			next: executeResult.ok
+				? ["optional lend supply adapter"]
+				: [
+						"set BSC_EXECUTE_ENABLED=true",
+						"prefer BSC_EXECUTE_MODE=native + BSC_EXECUTE_PRIVATE_KEY",
+						"or set BSC_EXECUTE_MODE=command + BSC_EXECUTE_COMMAND",
+						"retry execute",
+					],
+		},
+	};
+}
+
+async function runBscAutonomousExecution(payload, context) {
+	const legacyResult = await runBscLegacyExecution(payload, context);
+	return {
+		...legacyResult,
+		autonomous: {
+			enabled: true,
+			runner: "bsc-autonomous-template-v1",
+			note: "Aster/BNB autonomous template active (incremental compatibility mode)",
+		},
+	};
+}
+
 async function executeAction(payload) {
 	const accountId = String(payload.accountId || ACCOUNT_ID).trim();
 	const nearBin = "near";
@@ -8383,136 +8560,14 @@ async function executeAction(payload) {
 				.trim()
 				.toLowerCase();
 			if (chain === "bsc") {
-				const tokenInMeta = resolveBscSwapToken(payload.tokenIn, "USDT");
-				const tokenOutMeta = resolveBscSwapToken(payload.tokenOut, "USDC");
-				if (
-					tokenInMeta.address.toLowerCase() ===
-					tokenOutMeta.address.toLowerCase()
-				) {
-					throw new Error("tokenIn and tokenOut must be different");
-				}
-				let amountRaw = String(payload.amountRaw || "").trim();
-				if (!amountRaw && payload.amountInUi !== undefined) {
-					amountRaw = uiToRaw(payload.amountInUi, tokenInMeta.decimals);
-				}
-				amountRaw = parsePositiveRaw(amountRaw, "amountRaw");
-				const slippageBps = Number.parseInt(
-					String(payload.slippageBps || "50"),
-					10,
-				);
-				if (
-					!Number.isFinite(slippageBps) ||
-					slippageBps < 0 ||
-					slippageBps > 5000
-				) {
-					throw new Error("slippageBps must be between 0 and 5000");
-				}
-				const runId = String(payload.runId || `run-${Date.now()}`).trim();
-				const isUsdtUsdcPair =
-					tokenInMeta.address.toLowerCase() === BSC_USDT.toLowerCase() &&
-					tokenOutMeta.address.toLowerCase() === BSC_USDC.toLowerCase();
-				const quote = isUsdtUsdcPair
-					? await getBscUsdtUsdcQuote(amountRaw)
-					: await getBscPancakeV2QuoteForPair({
-							amountInRaw: amountRaw,
-							tokenIn: tokenInMeta.address,
-							tokenOut: tokenOutMeta.address,
-							decimalsIn: tokenInMeta.decimals,
-							decimalsOut: tokenOutMeta.decimals,
-						});
-				const divergenceBps = Number(quote?.divergenceBps ?? -1);
-				if (
-					Number.isFinite(divergenceBps) &&
-					divergenceBps >= 0 &&
-					divergenceBps > BSC_QUOTE_MAX_DIVERGENCE_BPS
-				) {
-					throw new Error(
-						`quote divergence too high: ${divergenceBps}bps > ${BSC_QUOTE_MAX_DIVERGENCE_BPS}bps`,
-					);
-				}
-				const minAmountOutRaw = applySlippage(quote.amountOutRaw, slippageBps);
-				const executeResult = await executeBscSwap({
-					amountInRaw: amountRaw,
-					minAmountOutRaw,
-					tokenIn: tokenInMeta.address,
-					tokenOut: tokenOutMeta.address,
-					tokenInSymbol: tokenInMeta.symbol,
-					tokenOutSymbol: tokenOutMeta.symbol,
-					router: BSC_ROUTER_V2,
-					rpcUrl: BSC_RPC_URL,
-					chainId: BSC_CHAIN_ID,
-					runId,
+				const autonomousMode = BSC_AUTONOMOUS_MODE;
+				const runner = autonomousMode
+					? runBscAutonomousExecution
+					: runBscLegacyExecution;
+				const actionResult = await runner(payload, { accountId });
+				return withBscExecutionMetadata(actionResult, {
+					autonomousMode,
 				});
-				const mode = executeResult.ok ? "execute" : "plan-only";
-				pushActionHistory({
-					action: payload.action,
-					step: payload.step || null,
-					accountId,
-					status: executeResult.ok ? "success" : "warning",
-					summary: executeResult.ok
-						? `BSC executed amountIn=${amountRaw} minOut=${minAmountOutRaw}`
-						: `BSC plan prepared amountIn=${amountRaw} quoteOut=${quote.amountOutRaw} minOut=${minAmountOutRaw} reason=${executeResult.reason}`,
-					txHash: executeResult.txHash || null,
-				});
-				recordRebalanceMetric({
-					runId,
-					status: executeResult.ok ? "bsc-executed" : "bsc-plan",
-					amountRaw,
-					suppliedRaw: quote.amountOutRaw,
-					note: executeResult.ok
-						? `bsc execution success provider=${executeResult.provider || "unknown"}`
-						: `execution fallback: ${executeResult.reason}`,
-				});
-				return {
-					ok: true,
-					action: payload.action,
-					chain: "bsc",
-					mode,
-					txHash: executeResult.txHash || null,
-					explorerUrl: executeResult.txHash
-						? `https://bscscan.com/tx/${executeResult.txHash}`
-						: null,
-					execution: executeResult.ok
-						? {
-								provider: executeResult.provider || "unknown",
-								output: executeResult.output,
-								receipt: executeResult.receipt || null,
-							}
-						: {
-								provider: "none",
-								reason: executeResult.reason,
-							},
-					plan: {
-						rpcUrl: BSC_RPC_URL,
-						chainId: BSC_CHAIN_ID,
-						router: BSC_ROUTER_V2,
-						tokenIn: tokenInMeta.address,
-						tokenOut: tokenOutMeta.address,
-						tokenInSymbol: tokenInMeta.symbol,
-						tokenOutSymbol: tokenOutMeta.symbol,
-						amountInRaw: amountRaw,
-						quotedOutRaw: quote.amountOutRaw,
-						minAmountOutRaw,
-						quoteSource: quote.source,
-						quoteRate: quote.rate,
-						quotePairAddress: quote.pairAddress,
-						quoteLiquidityUsd: quote.liquidityUsd,
-						quoteDivergenceBps: quote.divergenceBps ?? null,
-						dexAmountOutRaw: quote.dexAmountOutRaw || null,
-						pancakeV2AmountOutRaw:
-							quote.pancakeV2AmountOutRaw || quote.onchainAmountOutRaw || null,
-						onchainAmountOutRaw: quote.onchainAmountOutRaw || null,
-						slippageBps,
-						next: executeResult.ok
-							? ["optional lend supply adapter"]
-							: [
-									"set BSC_EXECUTE_ENABLED=true",
-									"prefer BSC_EXECUTE_MODE=native + BSC_EXECUTE_PRIVATE_KEY",
-									"or set BSC_EXECUTE_MODE=command + BSC_EXECUTE_COMMAND",
-									"retry execute",
-								],
-					},
-				};
 			}
 			if (chain !== "near") {
 				throw new Error(`unsupported chain '${chain}'`);
@@ -9120,6 +9175,13 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, {
 				ok: true,
 				matrix,
+				autonomousTrack: BSC_AUTONOMOUS_MODE
+					? {
+							chain: "bsc",
+							enabled: true,
+							execution: resolveExecutionMarkers({ autonomousMode: true }),
+						}
+					: undefined,
 			});
 		}
 

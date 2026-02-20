@@ -71,7 +71,8 @@
 		"live:test:full": "node scripts/live-test-runner.mjs --mode full",
 		"readiness:build": "node scripts/readiness-matrix.mjs",
 		"readiness:show": "node scripts/readiness-matrix.mjs --show",
-		"readiness:refresh": "node scripts/readiness-refresh.mjs"
+		"readiness:refresh": "node scripts/readiness-refresh.mjs",
+		"autonomous:rollout:gate": "npm run check && npm test && npm run live:test:preflight && npm run readiness:refresh"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",
