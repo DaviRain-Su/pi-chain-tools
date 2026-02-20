@@ -58,8 +58,39 @@ for (const button of stepButtons) {
 
 const topNavToggle = document.getElementById("top-nav-toggle");
 const topNavLinks = document.getElementById("top-nav-links");
+const themeToggle = document.getElementById("theme-toggle");
 const navLinks = Array.from(document.querySelectorAll("[data-nav-link]"));
 const progressBar = document.getElementById("scroll-progress-bar");
+
+function applyTheme(theme) {
+	if (theme === "light") {
+		document.body.setAttribute("data-theme", "light");
+		if (themeToggle) {
+			themeToggle.textContent = "Dark";
+			themeToggle.setAttribute("aria-pressed", "true");
+		}
+		return;
+	}
+	document.body.removeAttribute("data-theme");
+	if (themeToggle) {
+		themeToggle.textContent = "Light";
+		themeToggle.setAttribute("aria-pressed", "false");
+	}
+}
+
+const savedTheme = window.localStorage.getItem("gradience-theme");
+if (savedTheme === "light") {
+	applyTheme("light");
+}
+
+if (themeToggle) {
+	themeToggle.addEventListener("click", () => {
+		const next =
+			document.body.getAttribute("data-theme") === "light" ? "dark" : "light";
+		applyTheme(next);
+		window.localStorage.setItem("gradience-theme", next);
+	});
+}
 
 if (topNavToggle && topNavLinks) {
 	topNavToggle.addEventListener("click", () => {

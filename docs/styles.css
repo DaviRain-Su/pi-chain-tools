@@ -13,6 +13,21 @@
 	--shadow: 0 20px 54px rgba(5, 9, 16, 0.45);
 }
 
+body[data-theme="light"] {
+	--bg: #f5f8ff;
+	--bg-soft: #eef4ff;
+	--panel: rgba(255, 255, 255, 0.84);
+	--line: rgba(106, 128, 170, 0.26);
+	--text: #1d2b44;
+	--muted: #56698d;
+	--accent: #4f63e8;
+	--accent-ink: #ffffff;
+	--ink-strong: #111f38;
+	--shape-a: rgba(99, 118, 255, 0.2);
+	--shape-b: rgba(53, 189, 165, 0.18);
+	--shadow: 0 16px 38px rgba(58, 88, 133, 0.16);
+}
+
 *,
 *::before,
 *::after {
@@ -134,6 +149,17 @@ body {
 	position: sticky;
 	top: 0.75rem;
 	z-index: 10;
+}
+
+.theme-toggle {
+	background: rgba(48, 196, 174, 0.2);
+	border: 1px solid rgba(86, 224, 205, 0.46);
+	border-radius: 0.55rem;
+	color: var(--text);
+	cursor: pointer;
+	font-family: "IBM Plex Mono", "Menlo", "Monaco", monospace;
+	font-size: 0.74rem;
+	padding: 0.35rem 0.55rem;
 }
 
 .top-nav-toggle {
