@@ -17,6 +17,9 @@
 		<link rel="stylesheet" href="./styles.css" />
 	</head>
 	<body>
+		<div class="scroll-progress" aria-hidden="true">
+			<div class="scroll-progress-bar" id="scroll-progress-bar"></div>
+		</div>
 		<div class="bg-shape bg-shape-a"></div>
 		<div class="bg-shape bg-shape-b"></div>
 		<div class="page">
@@ -31,12 +34,12 @@
 					Sections
 				</button>
 				<div class="top-nav-links" id="top-nav-links">
-					<a href="#install">Install</a>
-					<a href="#latest-updates">Updates</a>
-					<a href="#production-readiness">Readiness</a>
-					<a href="#api-examples">API</a>
-					<a href="#quality-loop">Quality</a>
-					<a href="#demo">Demo</a>
+					<a href="#install" data-nav-link>Install</a>
+					<a href="#latest-updates" data-nav-link>Updates</a>
+					<a href="#production-readiness" data-nav-link>Readiness</a>
+					<a href="#api-examples" data-nav-link>API</a>
+					<a href="#quality-loop" data-nav-link>Quality</a>
+					<a href="#demo" data-nav-link>Demo</a>
 				</div>
 			</nav>
 			<header class="hero reveal">

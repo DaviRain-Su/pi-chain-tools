@@ -56,6 +56,8 @@ for (const button of stepButtons) {
 
 const topNavToggle = document.getElementById("top-nav-toggle");
 const topNavLinks = document.getElementById("top-nav-links");
+const navLinks = Array.from(document.querySelectorAll("[data-nav-link]"));
+const progressBar = document.getElementById("scroll-progress-bar");
 
 if (topNavToggle && topNavLinks) {
 	topNavToggle.addEventListener("click", () => {
@@ -70,6 +72,53 @@ if (topNavToggle && topNavLinks) {
 		});
 	}
 }
+
+function updateScrollProgress() {
+	if (!progressBar) return;
+	const doc = document.documentElement;
+	const maxScroll = Math.max(doc.scrollHeight - window.innerHeight, 1);
+	const progress = Math.min(Math.max(window.scrollY / maxScroll, 0), 1);
+	progressBar.style.transform = `scaleX(${progress})`;
+}
+
+function setActiveNavLink(sectionId) {
+	for (const link of navLinks) {
+		const href = link.getAttribute("href") || "";
+		if (href === `#${sectionId}`) {
+			link.classList.add("is-active");
+		} else {
+			link.classList.remove("is-active");
+		}
+	}
+}
+
+const sectionEls = navLinks
+	.map((link) => {
+		const href = link.getAttribute("href") || "";
+		if (!href.startsWith("#")) return null;
+		return document.querySelector(href);
+	})
+	.filter(Boolean);
+
+if (sectionEls.length > 0) {
+	const sectionObserver = new IntersectionObserver(
+		(entries) => {
+			for (const entry of entries) {
+				if (!entry.isIntersecting) continue;
+				if (!entry.target.id) continue;
+				setActiveNavLink(entry.target.id);
+			}
+		},
+		{ threshold: 0.35 },
+	);
+	for (const section of sectionEls) {
+		sectionObserver.observe(section);
+	}
+}
+
+window.addEventListener("scroll", updateScrollProgress, { passive: true });
+window.addEventListener("resize", updateScrollProgress);
+updateScrollProgress();
 
 const revealItems = Array.from(document.querySelectorAll(".reveal"));
 
