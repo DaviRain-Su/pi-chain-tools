@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { resolveRepoRootFromMetaUrl } from "./runtime-paths.mjs";
+
+const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) || process.cwd();
 
 const maxAttempts = Math.max(
 	1,
@@ -15,6 +18,7 @@ function runCiOnce() {
 		const child = spawn("npm", ["run", "ci:resilient"], {
 			stdio: "inherit",
 			env: process.env,
+			cwd: REPO_ROOT,
 			shell: process.platform === "win32",
 		});
 		child.on("close", (code, signal) => {

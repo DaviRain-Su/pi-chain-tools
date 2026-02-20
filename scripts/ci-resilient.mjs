@@ -3,10 +3,14 @@ import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { ensurePythonAliasEnv } from "./python-runtime.mjs";
-import { resolveFromRepo } from "./runtime-paths.mjs";
+import {
+	resolveFromRepo,
+	resolveRepoRootFromMetaUrl,
+} from "./runtime-paths.mjs";
 
 const DEFAULT_SIGNATURES_RELATIVE_PATH =
 	"apps/dashboard/data/ci-signatures.jsonl";
+const REPO_ROOT = resolveRepoRootFromMetaUrl(import.meta.url) || process.cwd();
 
 function resolveSignaturesPath() {
 	if (process.env.CI_SIGNATURES_JSONL_PATH) {
@@ -30,6 +34,7 @@ function run(command, args, label, env = process.env) {
 		const child = spawn(command, args, {
 			stdio: ["inherit", "pipe", "pipe"],
 			env,
+			cwd: REPO_ROOT,
 			shell: process.platform === "win32",
 		});
 		child.stdout.on("data", (chunk) => {
