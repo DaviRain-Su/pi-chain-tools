@@ -120,6 +120,9 @@ describe("package.json script contracts", () => {
 		);
 		expect(scripts?.["demo:monad-bsc"]).toBe("node scripts/demo-monad-bsc.mjs");
 		expect(scripts?.["ops:smoke"]).toBe("node scripts/ops-smoke.mjs");
+		expect(scripts?.["stable-yield:smoke"]).toBe(
+			"node scripts/stable-yield-smoke.mjs",
+		);
 		expect(scripts?.["dashboard:restart"]).toContain(
 			"node scripts/dashboard-restart.mjs --restart",
 		);

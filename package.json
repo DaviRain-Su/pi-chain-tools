@@ -93,7 +93,8 @@
 		"contracts:hyperliquid:test": "hardhat test --config contracts/hyperliquid-autonomous/hardhat.config.cjs",
 		"contracts:hyperliquid:deploy:testnet": "node contracts/hyperliquid-autonomous/scripts/deploy.mjs",
 		"contracts:hyperliquid:verify:testnet": "node contracts/hyperliquid-autonomous/scripts/verify-placeholder.mjs",
-		"contracts:hyperliquid:cycle:testnet": "node contracts/hyperliquid-autonomous/scripts/run-cycle.mjs"
+		"contracts:hyperliquid:cycle:testnet": "node contracts/hyperliquid-autonomous/scripts/run-cycle.mjs",
+		"stable-yield:smoke": "node scripts/stable-yield-smoke.mjs"
 	},
 	"dependencies": {
 		"@cetusprotocol/aggregator-sdk": "^1.4.4",

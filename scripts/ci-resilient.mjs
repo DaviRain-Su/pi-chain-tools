@@ -337,7 +337,7 @@ async function main() {
 		);
 	}
 
-	console.log("[ci-resilient] step 2/4: npm run strategy:smoke");
+	console.log("[ci-resilient] step 2/5: npm run strategy:smoke");
 	const strategySmoke = await runWithSigtermRetry(
 		"npm",
 		["run", "strategy:smoke"],
@@ -354,7 +354,7 @@ async function main() {
 		);
 	}
 
-	console.log("[ci-resilient] step 3/4: npm run security:check");
+	console.log("[ci-resilient] step 4/5: npm run security:check");
 	const security = await runWithSigtermRetry(
 		"npm",
 		["run", "security:check"],
@@ -373,7 +373,7 @@ async function main() {
 		);
 	}
 
-	console.log("[ci-resilient] step 4/4: npm test (with one retry for flake)");
+	console.log("[ci-resilient] step 5/5: npm test (with one retry for flake)");
 	let test = await runWithSigtermRetry(
 		"npm",
 		["test"],
