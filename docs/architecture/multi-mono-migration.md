@@ -22,9 +22,16 @@ This repo is entering a transition from single-repo accumulation to a federated 
 ## Fast-track pilot export (now)
 
 - Run `npm run arch:federation:export:near`
-- Default output: `../gradience-repos/chain-near-tools`
-- Override output: `FEDERATION_EXPORT_DIR=/tmp/chain-near-tools npm run arch:federation:export:near`
-- This gives a standalone Near-chain pilot repo bundle you can publish immediately.
+- Run `npm run arch:federation:export:evm`
+- Run `npm run arch:federation:export:solana`
+- Run `npm run arch:federation:export:all` (batch)
+- Default outputs:
+  - `../gradience-repos/chain-near-tools`
+  - `../gradience-repos/chain-evm-tools`
+  - `../gradience-repos/chain-solana-tools`
+- Override output example:
+  - `FEDERATION_EXPORT_DIR=/tmp/chain-near-tools npm run arch:federation:export:near`
+- These commands give standalone pilot repo bundles you can publish immediately.
 
 ## Phased rollout
 
