@@ -1,6 +1,6 @@
 import { createSolanaWorkflowToolset } from "../chains/solana/workflow-toolset.js";
 import { registerChainToolsets } from "../core/register.js";
-import type { ToolRegistrar } from "../core/types.js";
+import type { ToolRegistrar } from "../w3rt-core/index.js";
 
 const SOLANA_WORKFLOW_EXTENSION_REGISTERED = Symbol.for(
 	"pi-chain-tools/solana-workflow-extension/registered",

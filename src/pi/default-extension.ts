@@ -1,4 +1,4 @@
-import type { ToolRegistrar } from "../core/types.js";
+import type { ToolRegistrar } from "../w3rt-core/index.js";
 import evmExtension from "./evm-extension.js";
 import kaspaExtension from "./kaspa-extension.js";
 import metaExtension from "./meta-extension.js";

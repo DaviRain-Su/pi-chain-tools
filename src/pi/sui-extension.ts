@@ -1,6 +1,6 @@
 import { createSuiToolset } from "../chains/sui/toolset.js";
 import { registerChainToolsets } from "../core/register.js";
-import type { ToolRegistrar } from "../core/types.js";
+import type { ToolRegistrar } from "../w3rt-core/index.js";
 
 const SUI_EXTENSION_REGISTERED = Symbol.for(
 	"pi-chain-tools/sui-extension/registered",

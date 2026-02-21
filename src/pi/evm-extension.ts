@@ -1,6 +1,6 @@
 import { createEvmToolset } from "../chains/evm/toolset.js";
 import { registerChainToolsets } from "../core/register.js";
-import type { ToolRegistrar } from "../core/types.js";
+import type { ToolRegistrar } from "../w3rt-core/index.js";
 
 const EVM_EXTENSION_REGISTERED = Symbol.for(
 	"pi-chain-tools/evm-extension/registered",

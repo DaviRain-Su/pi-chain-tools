@@ -1,6 +1,6 @@
 import { createMetaToolset } from "../chains/meta/toolset.js";
 import { registerChainToolsets } from "../core/register.js";
-import type { ToolRegistrar } from "../core/types.js";
+import type { ToolRegistrar } from "../w3rt-core/index.js";
 
 const META_EXTENSION_REGISTERED = Symbol.for(
 	"pi-chain-tools/meta-extension/registered",
