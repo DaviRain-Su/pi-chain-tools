@@ -5,18 +5,16 @@ import path from "node:path";
 import {
 	EVM_TRANSFER_POLICY_SCHEMA,
 	EVM_TRANSFER_POLICY_STORE_SCHEMA,
-} from "../../w3rt-core/evm-transfer-policy-types.js";
-import type {
-	EvmTransferPolicy,
-	EvmTransferPolicyAuditAction,
-	EvmTransferPolicyAuditRecord,
-	EvmTransferPolicyCheck,
-	EvmTransferPolicyCheckInput,
-	EvmTransferPolicyEnforceOn,
-	EvmTransferPolicyMode,
-	EvmTransferPolicyTemplate,
-	EvmTransferPolicyUpdate,
-} from "../../w3rt-core/evm-transfer-policy-types.js";
+	type EvmTransferPolicy,
+	type EvmTransferPolicyAuditAction,
+	type EvmTransferPolicyAuditRecord,
+	type EvmTransferPolicyCheck,
+	type EvmTransferPolicyCheckInput,
+	type EvmTransferPolicyEnforceOn,
+	type EvmTransferPolicyMode,
+	type EvmTransferPolicyTemplate,
+	type EvmTransferPolicyUpdate,
+} from "../../w3rt-core/index.js";
 import type { EvmNetwork } from "./runtime.js";
 
 const EVM_TRANSFER_POLICY_SYMBOL = Symbol.for(
@@ -39,7 +37,7 @@ export type {
 	EvmTransferPolicyMode,
 	EvmTransferPolicyTemplate,
 	EvmTransferPolicyUpdate,
-} from "../../w3rt-core/evm-transfer-policy-types.js";
+} from "../../w3rt-core/index.js";
 
 type StoredPolicyState = {
 	schema: "evm.transfer.policy.store.v1";

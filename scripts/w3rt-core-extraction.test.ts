@@ -9,11 +9,11 @@ import {
 	EVM_TRANSFER_POLICY_SCHEMA,
 	type EvmTransferPolicy,
 } from "../src/w3rt-core/index.js";
-import { defineTool as defineToolW3rt } from "../src/w3rt-core/tool-types.js";
 import {
+	defineTool as defineToolW3rt,
 	parseRunMode as parseRunModeW3rt,
 	resolveWorkflowRunMode as resolveWorkflowRunModeW3rt,
-} from "../src/w3rt-core/workflow-run-mode.js";
+} from "../src/w3rt-core/index.js";
 
 describe("w3rt-core phase-1 extraction", () => {
 	it("keeps core/types and shared/workflow-runtime compatibility exports", () => {
