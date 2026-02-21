@@ -58,6 +58,7 @@
 		"submission:evidence": "node scripts/submission-evidence.mjs",
 		"arch:federation:plan": "node scripts/repo-federation-plan.mjs",
 		"arch:federation:scaffold": "node scripts/repo-federation-scaffold.mjs",
+		"arch:federation:export:near": "node scripts/federation-export-near.mjs",
 		"execute:proof": "node scripts/execute-proof.mjs",
 		"execute:proof:morpho": "node scripts/execute-proof.mjs --protocol=morpho",
 		"execute:proof:bsc": "node scripts/execute-proof.mjs --protocol=bsc",

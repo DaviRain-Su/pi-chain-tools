@@ -19,6 +19,13 @@ This repo is entering a transition from single-repo accumulation to a federated 
   - default: `docs/architecture/federation-scaffold/`
   - override: `FEDERATION_SCAFFOLD_OUTPUT_DIR=/tmp/federation-scaffold`
 
+## Fast-track pilot export (now)
+
+- Run `npm run arch:federation:export:near`
+- Default output: `../gradience-repos/chain-near-tools`
+- Override output: `FEDERATION_EXPORT_DIR=/tmp/chain-near-tools npm run arch:federation:export:near`
+- This gives a standalone Near-chain pilot repo bundle you can publish immediately.
+
 ## Phased rollout
 
 1. **Core extraction**
