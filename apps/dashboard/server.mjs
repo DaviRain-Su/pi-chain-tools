@@ -10803,13 +10803,24 @@ const server = http.createServer(async (req, res) => {
 
 		if (url.pathname === "/api/crosschain/debridge/readiness") {
 			const blockers = [];
+			const quoteTemplateValid =
+				Boolean(DEBRIDGE_MCP_COMMAND) &&
+				DEBRIDGE_MCP_COMMAND.includes("{originChain}") &&
+				DEBRIDGE_MCP_COMMAND.includes("{destinationChain}") &&
+				DEBRIDGE_MCP_COMMAND.includes("{tokenIn}") &&
+				DEBRIDGE_MCP_COMMAND.includes("{tokenOut}") &&
+				DEBRIDGE_MCP_COMMAND.includes("{amount}");
 			if (!DEBRIDGE_MCP_ENABLED) blockers.push("debridge_mcp_disabled");
 			if (!DEBRIDGE_MCP_COMMAND) blockers.push("missing_debridge_mcp_command");
+			if (DEBRIDGE_MCP_COMMAND && !quoteTemplateValid) {
+				blockers.push("invalid_debridge_mcp_quote_template");
+			}
 			return json(res, 200, {
 				ok: true,
 				provider: "debridge-mcp",
 				enabled: DEBRIDGE_MCP_ENABLED,
 				commandConfigured: Boolean(DEBRIDGE_MCP_COMMAND),
+				quoteCommandTemplateValid: quoteTemplateValid,
 				executeEnabled: DEBRIDGE_MCP_EXECUTE_ENABLED,
 				executeCommandConfigured: Boolean(DEBRIDGE_MCP_EXECUTE_COMMAND),
 				timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
@@ -10822,7 +10833,9 @@ const server = http.createServer(async (req, res) => {
 				hints: {
 					debridge_mcp_disabled: "DEBRIDGE_MCP_ENABLED=true",
 					missing_debridge_mcp_command:
-						"DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp --help'",
+						"DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp quote --from {originChain} --to {destinationChain} --token-in {tokenIn} --token-out {tokenOut} --amount {amount}'",
+					invalid_debridge_mcp_quote_template:
+						"DEBRIDGE_MCP_COMMAND must include placeholders: {originChain} {destinationChain} {tokenIn} {tokenOut} {amount}",
 				},
 			});
 		}
@@ -10836,8 +10849,17 @@ const server = http.createServer(async (req, res) => {
 			const text = Buffer.concat(chunks).toString("utf8") || "{}";
 			const payload = JSON.parse(text);
 			const blockers = [];
+			const quoteTemplateValid =
+				Boolean(DEBRIDGE_MCP_COMMAND) &&
+				DEBRIDGE_MCP_COMMAND.includes("{originChain}") &&
+				DEBRIDGE_MCP_COMMAND.includes("{destinationChain}") &&
+				DEBRIDGE_MCP_COMMAND.includes("{tokenIn}") &&
+				DEBRIDGE_MCP_COMMAND.includes("{tokenOut}") &&
+				DEBRIDGE_MCP_COMMAND.includes("{amount}");
 			if (!DEBRIDGE_MCP_ENABLED) blockers.push("debridge_mcp_disabled");
 			if (!DEBRIDGE_MCP_COMMAND) blockers.push("missing_debridge_mcp_command");
+			if (DEBRIDGE_MCP_COMMAND && !quoteTemplateValid)
+				blockers.push("invalid_debridge_mcp_quote_template");
 			const originChain = String(payload.originChain || "").trim();
 			const destinationChain = String(payload.destinationChain || "").trim();
 			const tokenIn = String(payload.tokenIn || "").trim();
@@ -10857,7 +10879,9 @@ const server = http.createServer(async (req, res) => {
 					hints: {
 						debridge_mcp_disabled: "DEBRIDGE_MCP_ENABLED=true",
 						missing_debridge_mcp_command:
-							"DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp --help'",
+							"DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp quote --from {originChain} --to {destinationChain} --token-in {tokenIn} --token-out {tokenOut} --amount {amount}'",
+						invalid_debridge_mcp_quote_template:
+							"DEBRIDGE_MCP_COMMAND must include placeholders: {originChain} {destinationChain} {tokenIn} {tokenOut} {amount}",
 						missing_origin_chain: "originChain=<source chain id>",
 						missing_destination_chain: "destinationChain=<target chain id>",
 						missing_token_in: "tokenIn=<source token address/symbol>",

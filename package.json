@@ -152,12 +152,13 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^1.9.4",
+		"@debridge-finance/debridge-mcp": "^0.1.4",
 		"@kamino-finance/klend-sdk": "^7.3.18",
-		"@nomicfoundation/hardhat-ethers": "^3.0.8",
-		"hardhat": "^2.24.3",
 		"@meteora-ag/dlmm": "^1.9.3",
+		"@nomicfoundation/hardhat-ethers": "^3.0.8",
 		"@raydium-io/raydium-sdk-v2": "^0.2.32-alpha",
 		"@types/node": "^20.17.24",
+		"hardhat": "^2.24.3",
 		"typescript": "^5.8.3",
 		"vitest": "^3.2.4"
 	}
