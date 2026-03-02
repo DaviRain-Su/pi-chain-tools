@@ -8,7 +8,7 @@ function parseArgs(argv) {
 		destinationChain: process.env.BRIDGE_SMOKE_DEST_CHAIN || "solana",
 		tokenIn: process.env.BRIDGE_SMOKE_TOKEN_IN || "USDC",
 		tokenOut: process.env.BRIDGE_SMOKE_TOKEN_OUT || "USDC",
-		amount: process.env.BRIDGE_SMOKE_AMOUNT || "1",
+		amount: process.env.BRIDGE_SMOKE_AMOUNT || "1000000000000000000",
 		recipient:
 			process.env.BRIDGE_SMOKE_RECIPIENT ||
 			"FM7WTd5Hr7ppp6vu3M4uAspF4DoRjrYPPFvAmqB7H95D",
@@ -135,6 +135,8 @@ async function main() {
 				ok: quote.ok,
 				status: quote.status,
 				elapsedMs: quote.elapsedMs,
+				provider: quote.data?.provider ?? null,
+				fallbackFrom: quote.data?.fallbackFrom ?? null,
 				error: quote.data?.error ?? null,
 				category: quote.data?.category ?? null,
 				retryable: quote.data?.retryable ?? null,

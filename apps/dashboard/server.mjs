@@ -291,6 +291,23 @@ const DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS = Math.max(
 		10,
 	) || 1200,
 );
+const DEBRIDGE_HTTP_API = String(
+	envOrCfg(
+		"DEBRIDGE_HTTP_API",
+		"crosschain.debridge.httpApi",
+		"https://dln.debridge.finance/v1.0",
+	),
+).trim();
+const DEBRIDGE_HTTP_QUOTE_FALLBACK_ENABLED =
+	String(
+		envOrCfg(
+			"DEBRIDGE_HTTP_QUOTE_FALLBACK_ENABLED",
+			"crosschain.debridge.httpQuoteFallbackEnabled",
+			"true",
+		),
+	)
+		.trim()
+		.toLowerCase() !== "false";
 
 function tryExtractJsonFromText(text) {
 	const source = String(text || "").trim();
@@ -347,6 +364,207 @@ function classifyDebridgeQuoteError(errorLike) {
 		category: "unknown",
 	};
 }
+
+const DEBRIDGE_FALLBACK_CHAIN_IDS = {
+	bsc: 56,
+	bnb: 56,
+	solana: 7565164,
+	sol: 7565164,
+};
+
+const DEBRIDGE_FALLBACK_TOKENS = {
+	bsc: {
+		usdc: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+		usdt: "0x55d398326f99059fF775485246999027B3197955",
+		bnb: "0x0000000000000000000000000000000000000000",
+	},
+	solana: {
+		usdc: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+		sol: "11111111111111111111111111111111",
+	},
+};
+
+const DEBRIDGE_FALLBACK_DECIMALS = {
+	bsc: {
+		"0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d": 18,
+		"0x55d398326f99059ff775485246999027b3197955": 18,
+		"0x0000000000000000000000000000000000000000": 18,
+	},
+	solana: {
+		epjfwdd5aufqssqem2qn1xzybapc8g4weggkzwytdt1v: 6,
+		"11111111111111111111111111111111": 9,
+	},
+};
+
+function resolveDebridgeFallbackChainId(chainLike) {
+	const key = String(chainLike || "")
+		.trim()
+		.toLowerCase();
+	if (!key) return null;
+	if (DEBRIDGE_FALLBACK_CHAIN_IDS[key]) return DEBRIDGE_FALLBACK_CHAIN_IDS[key];
+	if (/^\d+$/.test(key)) return Number.parseInt(key, 10);
+	return null;
+}
+
+function resolveDebridgeFallbackTokenAddress(chainLike, tokenLike) {
+	const chain = String(chainLike || "")
+		.trim()
+		.toLowerCase();
+	const token = String(tokenLike || "").trim();
+	if (!chain || !token) return null;
+	if (/^(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(token)) {
+		return token;
+	}
+	const bySymbol = DEBRIDGE_FALLBACK_TOKENS[chain];
+	if (!bySymbol) return null;
+	return bySymbol[token.toLowerCase()] || null;
+}
+
+function normalizeDebridgeFallbackAmountRaw({ amount, srcChain, srcToken }) {
+	const value = String(amount || "").trim();
+	if (!value) return null;
+	if (!value.includes(".")) {
+		if (/^\d+$/.test(value)) return value;
+		return null;
+	}
+	const chainKey = String(srcChain || "")
+		.trim()
+		.toLowerCase();
+	const tokenKey = String(srcToken || "")
+		.trim()
+		.toLowerCase();
+	const decimals =
+		DEBRIDGE_FALLBACK_DECIMALS?.[chainKey]?.[tokenKey] ??
+		DEBRIDGE_FALLBACK_DECIMALS?.[chainKey]?.[srcToken] ??
+		18;
+	const [whole, frac = ""] = value.split(".");
+	if (!/^\d+$/.test(whole || "0") || !/^\d*$/.test(frac)) return null;
+	const padded = `${whole}${frac.padEnd(decimals, "0").slice(0, decimals)}`;
+	const normalized = padded.replace(/^0+/, "") || "0";
+	return normalized;
+}
+
+function inferDebridgeFallbackSenderAddress(payload, originChain) {
+	const explicit = String(
+		payload?.account || payload?.senderAddress || payload?.fromAddress || "",
+	).trim();
+	if (explicit) return explicit;
+	if (
+		String(originChain || "")
+			.trim()
+			.toLowerCase() === "bsc" &&
+		BSC_EXECUTE_PRIVATE_KEY
+	) {
+		try {
+			return new Wallet(BSC_EXECUTE_PRIVATE_KEY).address;
+		} catch {}
+	}
+	const recipientFallback = String(payload?.recipient || "").trim();
+	return recipientFallback || null;
+}
+
+async function fetchDebridgeHttpQuoteFallback(payload) {
+	const originChain = String(payload?.originChain || "").trim();
+	const destinationChain = String(payload?.destinationChain || "").trim();
+	const tokenIn = String(payload?.tokenIn || "").trim();
+	const tokenOut = String(payload?.tokenOut || "").trim();
+	const amount = String(payload?.amount || "").trim();
+	const recipient = String(payload?.recipient || "").trim();
+	const srcChainId = resolveDebridgeFallbackChainId(originChain);
+	const dstChainId = resolveDebridgeFallbackChainId(destinationChain);
+	const srcChainTokenIn = resolveDebridgeFallbackTokenAddress(
+		originChain,
+		tokenIn,
+	);
+	const dstChainTokenOut = resolveDebridgeFallbackTokenAddress(
+		destinationChain,
+		tokenOut,
+	);
+	const senderAddress = inferDebridgeFallbackSenderAddress(
+		payload,
+		originChain,
+	);
+	const amountRaw = normalizeDebridgeFallbackAmountRaw({
+		amount,
+		srcChain: originChain,
+		srcToken: srcChainTokenIn,
+	});
+	if (
+		!srcChainId ||
+		!dstChainId ||
+		!srcChainTokenIn ||
+		!dstChainTokenOut ||
+		!recipient ||
+		!senderAddress ||
+		!amountRaw
+	) {
+		throw new Error("debridge_http_fallback_invalid_input");
+	}
+	const query = new URLSearchParams({
+		srcChainId: String(srcChainId),
+		srcChainTokenIn,
+		srcChainTokenInAmount: amountRaw,
+		dstChainId: String(dstChainId),
+		dstChainTokenOut,
+		dstChainTokenOutRecipient: recipient,
+		dstChainTokenOutAmount: "auto",
+		senderAddress,
+		srcChainOrderAuthorityAddress: senderAddress,
+		srcChainRefundAddress: senderAddress,
+		dstChainOrderAuthorityAddress: recipient,
+		prependOperatingExpenses: "true",
+	});
+	const endpoint = `${DEBRIDGE_HTTP_API.replace(/\/$/, "")}/dln/order/create-tx?${query.toString()}`;
+	const controller = new AbortController();
+	const timer = setTimeout(
+		() => controller.abort(),
+		DEBRIDGE_MCP_QUOTE_TIMEOUT_MS,
+	);
+	let response = null;
+	let bodyText = "";
+	try {
+		response = await fetch(endpoint, {
+			method: "GET",
+			signal: controller.signal,
+			headers: {
+				accept: "application/json",
+			},
+		});
+		bodyText = await response.text();
+	} finally {
+		clearTimeout(timer);
+	}
+	if (!response?.ok) {
+		throw new Error(
+			`debridge_http_quote_failed status=${response?.status || 0} body=${bodyText.slice(0, 300)}`,
+		);
+	}
+	const parsed = tryExtractJsonFromText(bodyText) || { raw: bodyText };
+	if (parsed?.error) {
+		throw new Error(`debridge_http_quote_error ${String(parsed.error)}`);
+	}
+	return {
+		provider: "debridge-http",
+		endpoint,
+		request: {
+			originChain,
+			destinationChain,
+			tokenIn,
+			tokenOut,
+			amount,
+			amountRaw,
+			recipient,
+			senderAddress,
+			srcChainId,
+			dstChainId,
+			srcChainTokenIn,
+			dstChainTokenOut,
+		},
+		quote: parsed,
+		rawOutput: bodyText,
+	};
+}
+
 const ALERT_WEBHOOK_URL = String(
 	envOrCfg("NEAR_REBAL_ALERT_WEBHOOK_URL", "alerts.webhookUrl", ""),
 );
@@ -10873,6 +11091,9 @@ const server = http.createServer(async (req, res) => {
 			return json(res, 200, {
 				ok: true,
 				provider: "debridge-mcp",
+				fallbackProvider: DEBRIDGE_HTTP_QUOTE_FALLBACK_ENABLED
+					? "debridge-http"
+					: null,
 				enabled: DEBRIDGE_MCP_ENABLED,
 				commandConfigured: Boolean(DEBRIDGE_MCP_COMMAND),
 				quoteCommandTemplateValid: quoteTemplateValid,
@@ -10880,6 +11101,8 @@ const server = http.createServer(async (req, res) => {
 				executeCommandConfigured: Boolean(DEBRIDGE_MCP_EXECUTE_COMMAND),
 				timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
 				quoteTimeoutMs: DEBRIDGE_MCP_QUOTE_TIMEOUT_MS,
+				httpFallbackEnabled: DEBRIDGE_HTTP_QUOTE_FALLBACK_ENABLED,
+				httpFallbackApi: DEBRIDGE_HTTP_API,
 				executeRetry: {
 					maxAttempts: DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS,
 					backoffMs: DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS,
@@ -10893,6 +11116,8 @@ const server = http.createServer(async (req, res) => {
 					invalid_debridge_mcp_quote_template:
 						"DEBRIDGE_MCP_COMMAND must include placeholders: {originChain} {destinationChain} {tokenIn} {tokenOut} {amount}",
 					debridge_mcp_quote_timeout_ms: "DEBRIDGE_MCP_QUOTE_TIMEOUT_MS=20000",
+					debridge_http_quote_fallback_enabled:
+						"DEBRIDGE_HTTP_QUOTE_FALLBACK_ENABLED=true",
 				},
 			});
 		}
@@ -10998,6 +11223,68 @@ const server = http.createServer(async (req, res) => {
 						category: "timeout",
 					};
 				}
+
+				if (DEBRIDGE_HTTP_QUOTE_FALLBACK_ENABLED && classified.retryable) {
+					try {
+						const fallbackStartedAt = Date.now();
+						const fallback = await fetchDebridgeHttpQuoteFallback({
+							...payload,
+							originChain,
+							destinationChain,
+							tokenIn,
+							tokenOut,
+							amount,
+						});
+						return json(res, 200, {
+							ok: true,
+							mode: "quote",
+							provider: fallback.provider,
+							fallbackFrom: "debridge-mcp",
+							elapsedMs: Date.now() - startedAt,
+							httpFallbackElapsedMs: Date.now() - fallbackStartedAt,
+							primaryError: {
+								error: classified.code,
+								retryable: classified.retryable,
+								category: classified.category,
+								message: msg,
+							},
+							request: {
+								originChain,
+								destinationChain,
+								tokenIn,
+								tokenOut,
+								amount,
+								recipient: String(payload.recipient || "").trim() || null,
+							},
+							quote: fallback.quote,
+							rawOutput: fallback.rawOutput,
+							httpFallbackRequest: fallback.request,
+							httpFallbackEndpoint: fallback.endpoint,
+						});
+					} catch (fallbackError) {
+						const fallbackMessage =
+							fallbackError instanceof Error
+								? fallbackError.message
+								: String(fallbackError);
+						return json(
+							res,
+							classified.code === "debridge_quote_timeout" ? 504 : 500,
+							{
+								ok: false,
+								provider: "debridge-mcp",
+								error: classified.code,
+								retryable: classified.retryable,
+								category: classified.category,
+								elapsedMs,
+								message: msg,
+								fallbackAttempted: true,
+								fallbackProvider: "debridge-http",
+								fallbackError: fallbackMessage,
+							},
+						);
+					}
+				}
+
 				return json(
 					res,
 					classified.code === "debridge_quote_timeout" ? 504 : 500,
@@ -11052,6 +11339,8 @@ const server = http.createServer(async (req, res) => {
 				missing_token_in: "tokenIn=<source token address/symbol>",
 				missing_token_out: "tokenOut=<target token address/symbol>",
 				missing_amount: "amount=<raw amount>",
+				debridge_http_quote_fallback_enabled:
+					"DEBRIDGE_HTTP_QUOTE_FALLBACK_ENABLED=true",
 			};
 			const fixPack = [
 				"# debridge mcp plan fix pack",
@@ -11059,6 +11348,8 @@ const server = http.createServer(async (req, res) => {
 				`DEBRIDGE_MCP_EXECUTE_ENABLED=${DEBRIDGE_MCP_EXECUTE_ENABLED}`,
 				`DEBRIDGE_MCP_TIMEOUT_MS=${DEBRIDGE_MCP_TIMEOUT_MS}`,
 				`DEBRIDGE_MCP_QUOTE_TIMEOUT_MS=${DEBRIDGE_MCP_QUOTE_TIMEOUT_MS}`,
+				`DEBRIDGE_HTTP_QUOTE_FALLBACK_ENABLED=${DEBRIDGE_HTTP_QUOTE_FALLBACK_ENABLED}`,
+				`DEBRIDGE_HTTP_API=${DEBRIDGE_HTTP_API}`,
 				`DEBRIDGE_MCP_COMMAND=${DEBRIDGE_MCP_COMMAND || "<set_quote_command>"}`,
 				`DEBRIDGE_MCP_EXECUTE_COMMAND=${DEBRIDGE_MCP_EXECUTE_COMMAND || "<set_execute_command>"}`,
 				"# placeholders: {originChain} {destinationChain} {tokenIn} {tokenOut} {amount} {recipient} {account}",
@@ -11071,6 +11362,8 @@ const server = http.createServer(async (req, res) => {
 				canExecute: blockers.length === 0 && executeBlockers.length === 0,
 				timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
 				quoteTimeoutMs: DEBRIDGE_MCP_QUOTE_TIMEOUT_MS,
+				httpFallbackEnabled: DEBRIDGE_HTTP_QUOTE_FALLBACK_ENABLED,
+				httpFallbackApi: DEBRIDGE_HTTP_API,
 				blockers,
 				executeBlockers,
 				hints,
