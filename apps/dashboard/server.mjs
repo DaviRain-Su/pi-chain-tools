@@ -249,6 +249,22 @@ const DEBRIDGE_MCP_TIMEOUT_MS = Math.max(
 		10,
 	) || 120_000,
 );
+const DEBRIDGE_MCP_QUOTE_TIMEOUT_MS = Math.min(
+	DEBRIDGE_MCP_TIMEOUT_MS,
+	Math.max(
+		1_000,
+		Number.parseInt(
+			String(
+				envOrCfg(
+					"DEBRIDGE_MCP_QUOTE_TIMEOUT_MS",
+					"crosschain.debridge.quoteTimeoutMs",
+					"20000",
+				),
+			),
+			10,
+		) || 20_000,
+	),
+);
 const DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS = Math.max(
 	1,
 	Number.parseInt(
@@ -291,6 +307,45 @@ function tryExtractJsonFromText(text) {
 		} catch {}
 	}
 	return null;
+}
+
+function classifyDebridgeQuoteError(errorLike) {
+	const message = String(errorLike || "").toLowerCase();
+	if (/timed out|timeout|etimedout|signal sigterm|killed/.test(message)) {
+		return {
+			code: "debridge_quote_timeout",
+			retryable: true,
+			category: "timeout",
+		};
+	}
+	if (/rate limit|429|too many requests/.test(message)) {
+		return {
+			code: "debridge_quote_rate_limited",
+			retryable: true,
+			category: "rate_limit",
+		};
+	}
+	if (
+		/econnreset|econnrefused|enotfound|network|socket hang up/.test(message)
+	) {
+		return {
+			code: "debridge_quote_network_error",
+			retryable: true,
+			category: "network",
+		};
+	}
+	if (/invalid|revert|bad request/.test(message)) {
+		return {
+			code: "debridge_quote_invalid_request",
+			retryable: false,
+			category: "request",
+		};
+	}
+	return {
+		code: "debridge_quote_unknown_error",
+		retryable: false,
+		category: "unknown",
+	};
 }
 const ALERT_WEBHOOK_URL = String(
 	envOrCfg("NEAR_REBAL_ALERT_WEBHOOK_URL", "alerts.webhookUrl", ""),
@@ -10824,6 +10879,7 @@ const server = http.createServer(async (req, res) => {
 				executeEnabled: DEBRIDGE_MCP_EXECUTE_ENABLED,
 				executeCommandConfigured: Boolean(DEBRIDGE_MCP_EXECUTE_COMMAND),
 				timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
+				quoteTimeoutMs: DEBRIDGE_MCP_QUOTE_TIMEOUT_MS,
 				executeRetry: {
 					maxAttempts: DEBRIDGE_MCP_EXECUTE_RETRY_MAX_ATTEMPTS,
 					backoffMs: DEBRIDGE_MCP_EXECUTE_RETRY_BACKOFF_MS,
@@ -10836,6 +10892,7 @@ const server = http.createServer(async (req, res) => {
 						"DEBRIDGE_MCP_COMMAND='npx @debridge-finance/debridge-mcp quote --from {originChain} --to {destinationChain} --token-in {tokenIn} --token-out {tokenOut} --amount {amount}'",
 					invalid_debridge_mcp_quote_template:
 						"DEBRIDGE_MCP_COMMAND must include placeholders: {originChain} {destinationChain} {tokenIn} {tokenOut} {amount}",
+					debridge_mcp_quote_timeout_ms: "DEBRIDGE_MCP_QUOTE_TIMEOUT_MS=20000",
 				},
 			});
 		}
@@ -10904,16 +10961,18 @@ const server = http.createServer(async (req, res) => {
 			for (const [k, v] of Object.entries(replacements)) {
 				cmd = cmd.split(k).join(v);
 			}
+			const startedAt = Date.now();
 			try {
 				const output = await runCommand("bash", ["-lc", cmd], {
 					env: process.env,
 					cwd: ACP_WORKDIR,
-					timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
+					timeoutMs: DEBRIDGE_MCP_QUOTE_TIMEOUT_MS,
 				});
 				return json(res, 200, {
 					ok: true,
 					mode: "quote",
 					provider: "debridge-mcp",
+					elapsedMs: Date.now() - startedAt,
 					request: {
 						originChain,
 						destinationChain,
@@ -10927,12 +10986,31 @@ const server = http.createServer(async (req, res) => {
 				});
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
-				return json(res, 500, {
-					ok: false,
-					provider: "debridge-mcp",
-					error: "debridge_quote_failed",
-					message: msg,
-				});
+				const elapsedMs = Date.now() - startedAt;
+				let classified = classifyDebridgeQuoteError(msg);
+				if (
+					classified.code === "debridge_quote_unknown_error" &&
+					elapsedMs >= DEBRIDGE_MCP_QUOTE_TIMEOUT_MS - 250
+				) {
+					classified = {
+						code: "debridge_quote_timeout",
+						retryable: true,
+						category: "timeout",
+					};
+				}
+				return json(
+					res,
+					classified.code === "debridge_quote_timeout" ? 504 : 500,
+					{
+						ok: false,
+						provider: "debridge-mcp",
+						error: classified.code,
+						retryable: classified.retryable,
+						category: classified.category,
+						elapsedMs,
+						message: msg,
+					},
+				);
 			}
 		}
 
@@ -10980,6 +11058,7 @@ const server = http.createServer(async (req, res) => {
 				`DEBRIDGE_MCP_ENABLED=${DEBRIDGE_MCP_ENABLED}`,
 				`DEBRIDGE_MCP_EXECUTE_ENABLED=${DEBRIDGE_MCP_EXECUTE_ENABLED}`,
 				`DEBRIDGE_MCP_TIMEOUT_MS=${DEBRIDGE_MCP_TIMEOUT_MS}`,
+				`DEBRIDGE_MCP_QUOTE_TIMEOUT_MS=${DEBRIDGE_MCP_QUOTE_TIMEOUT_MS}`,
 				`DEBRIDGE_MCP_COMMAND=${DEBRIDGE_MCP_COMMAND || "<set_quote_command>"}`,
 				`DEBRIDGE_MCP_EXECUTE_COMMAND=${DEBRIDGE_MCP_EXECUTE_COMMAND || "<set_execute_command>"}`,
 				"# placeholders: {originChain} {destinationChain} {tokenIn} {tokenOut} {amount} {recipient} {account}",
@@ -10990,6 +11069,8 @@ const server = http.createServer(async (req, res) => {
 				provider: "debridge-mcp",
 				canQuote: blockers.length === 0,
 				canExecute: blockers.length === 0 && executeBlockers.length === 0,
+				timeoutMs: DEBRIDGE_MCP_TIMEOUT_MS,
+				quoteTimeoutMs: DEBRIDGE_MCP_QUOTE_TIMEOUT_MS,
 				blockers,
 				executeBlockers,
 				hints,
