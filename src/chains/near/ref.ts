@@ -131,6 +131,12 @@ const DEFAULT_REF_TOKEN_DECIMALS_BY_NETWORK: Record<
 };
 
 const FEE_DIVISOR = 10_000n;
+
+function getRefRpcBackoffMs(attempt: number): number {
+	const baseMs = 250 * 2 ** Math.max(0, attempt - 1);
+	return Math.min(4_000, baseMs);
+}
+
 const DEFAULT_REF_POOL_PAIR_CANDIDATES = 3;
 const MAX_REF_POOL_PAIR_CANDIDATES = 10;
 
@@ -157,7 +163,7 @@ async function callNearRpcWithRetry<T>(params: {
 	params: unknown;
 	maxAttempts?: number;
 }): Promise<T> {
-	const maxAttempts = Math.max(1, Math.min(4, params.maxAttempts ?? 3));
+	const maxAttempts = Math.max(1, Math.min(5, params.maxAttempts ?? 4));
 	let lastError: unknown;
 	for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
 		try {
@@ -172,7 +178,9 @@ async function callNearRpcWithRetry<T>(params: {
 			if (attempt >= maxAttempts || !isTransientRefRpcError(error)) {
 				throw error;
 			}
-			await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+			await new Promise((resolve) =>
+				setTimeout(resolve, getRefRpcBackoffMs(attempt)),
+			);
 		}
 	}
 	throw lastError instanceof Error

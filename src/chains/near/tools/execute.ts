@@ -1393,6 +1393,14 @@ function assertMainnetExecutionConfirmed(
 		);
 	}
 }
+function getTransientExecutionBackoffMs(attempt: number): number {
+	const baseMs = 250 * 2 ** Math.max(0, attempt - 1);
+	return Math.min(2_000, baseMs);
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function isTransientNearExecutionError(error: unknown): boolean {
 	const message = extractErrorText(error).toLowerCase();
@@ -1416,6 +1424,7 @@ async function callWithRpcFallback<T>(params: {
 	}) => Promise<T>;
 	accountId?: string;
 	privateKey?: string;
+	maxAttemptsPerEndpoint?: number;
 }): Promise<{
 	result: T;
 	endpoint: string;
@@ -1423,29 +1432,45 @@ async function callWithRpcFallback<T>(params: {
 }> {
 	const endpoints = getNearRpcEndpoints(params.network, params.rpcUrl);
 	let lastError: unknown;
+	const attemptsPerEndpoint = Math.max(
+		1,
+		Math.min(3, params.maxAttemptsPerEndpoint ?? 2),
+	);
 	for (const endpoint of endpoints) {
-		try {
-			const { account, signerAccountId } = createNearAccountClient({
-				accountId: params.accountId,
-				privateKey: params.privateKey,
-				network: params.network,
-				rpcUrl: endpoint,
-			});
-			const result = await params.invoke({
-				account,
-				endpoint,
-				signerAccountId,
-			});
-			return {
-				result,
-				endpoint,
-				signerAccountId,
-			};
-		} catch (error) {
-			lastError = error;
-			if (!isTransientNearExecutionError(error)) {
-				throw error;
+		for (let attempt = 1; attempt <= attemptsPerEndpoint; attempt += 1) {
+			try {
+				const { account, signerAccountId } = createNearAccountClient({
+					accountId: params.accountId,
+					privateKey: params.privateKey,
+					network: params.network,
+					rpcUrl: endpoint,
+				});
+				const result = await params.invoke({
+					account,
+					endpoint,
+					signerAccountId,
+				});
+				return {
+					result,
+					endpoint,
+					signerAccountId,
+				};
+			} catch (error) {
+				lastError = error;
+				if (!isTransientNearExecutionError(error)) {
+					throw error;
+				}
+				if (attempt >= attemptsPerEndpoint) {
+					break;
+				}
+				await sleep(getTransientExecutionBackoffMs(attempt));
 			}
+		}
+		if (
+			lastError instanceof Error &&
+			!isTransientNearExecutionError(lastError)
+		) {
+			throw lastError;
 		}
 	}
 	throw lastError instanceof Error

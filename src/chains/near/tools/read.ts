@@ -1904,6 +1904,38 @@ async function fetchNearIntentsJsonWithRetry<T>(params: {
 		: new Error("NEAR Intents request failed after retries");
 }
 
+const NEAR_ACCOUNT_SEGMENT_PATTERN =
+	/^(?:[a-z0-9](?:[a-z0-9_-]{0,61}[a-z0-9])?|[a-z0-9])$/;
+
+function isLikelyNearAccountId(value: string): boolean {
+	const normalized = value.trim().toLowerCase();
+	if (!normalized || normalized.length > 64) return false;
+	if (normalized.includes(".") && normalized.length > 64) {
+		return false;
+	}
+	const segments = normalized.split(".").filter(Boolean);
+	if (segments.length === 0) return false;
+	return segments.every(
+		(segment) =>
+			segment.length > 0 &&
+			segment.length <= 63 &&
+			NEAR_ACCOUNT_SEGMENT_PATTERN.test(segment),
+	);
+}
+
+function normalizeLikelyNearAccountId(value: string, field: string): string {
+	const candidate = value.trim();
+	if (!candidate) {
+		throw new Error(`${field} is required`);
+	}
+	if (!isLikelyNearAccountId(candidate)) {
+		throw new Error(
+			`${field} must be a valid NEAR account id when the target chain is NEAR.`,
+		);
+	}
+	return candidate;
+}
+
 function isTransientNearIntentsError(error: unknown): boolean {
 	if (!(error instanceof Error)) return false;
 	const text = error.message.toLowerCase();
@@ -2006,13 +2038,21 @@ function resolveIntentsRecipientOrThrow(params: {
 	destinationToken: NearIntentsToken | null;
 	recipientType: "DESTINATION_CHAIN" | "INTENTS";
 }): string {
+	const destinationBlockchain =
+		params.destinationToken?.blockchain?.trim().toLowerCase() ?? "near";
 	const explicit = params.explicitRecipient?.trim();
-	if (explicit) return explicit;
+	if (explicit) {
+		if (
+			destinationBlockchain === "near" ||
+			params.recipientType === "INTENTS"
+		) {
+			return normalizeLikelyNearAccountId(explicit, "recipient");
+		}
+		return explicit;
+	}
 	if (params.recipientType === "INTENTS") {
 		return params.fallbackNearAccountId;
 	}
-	const destinationBlockchain =
-		params.destinationToken?.blockchain?.trim().toLowerCase() ?? "near";
 	if (destinationBlockchain === "near") {
 		return params.fallbackNearAccountId;
 	}
@@ -2028,15 +2068,23 @@ function resolveIntentsRefundToOrThrow(params: {
 	refundType: "ORIGIN_CHAIN" | "INTENTS";
 	recipient: string;
 }): string {
+	const originBlockchain =
+		params.originToken?.blockchain?.trim().toLowerCase() ?? "near";
 	const explicit = params.explicitRefundTo?.trim();
-	if (explicit) return explicit;
+	if (explicit) {
+		if (originBlockchain === "near") {
+			return normalizeLikelyNearAccountId(explicit, "refundTo");
+		}
+		return explicit;
+	}
 	if (params.refundType === "INTENTS") {
 		return params.fallbackNearAccountId;
 	}
-	const originBlockchain =
-		params.originToken?.blockchain?.trim().toLowerCase() ?? "near";
 	if (originBlockchain === "near") {
-		return params.recipient || params.fallbackNearAccountId;
+		return normalizeLikelyNearAccountId(
+			params.recipient || params.fallbackNearAccountId,
+			"refundTo",
+		);
 	}
 	throw new Error(
 		`refundTo is required for origin chain '${originBlockchain}'. Pass refundTo explicitly or use refundType=INTENTS.`,
