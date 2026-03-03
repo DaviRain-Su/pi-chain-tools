@@ -805,6 +805,53 @@ async function fetchNearIntentsJson<T>(params: {
 	};
 }
 
+function isTransientNearIntentsError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	const text = error.message.toLowerCase();
+	return (
+		text.includes("429") ||
+		text.includes("too many requests") ||
+		text.includes("fetch failed") ||
+		text.includes("timeout") ||
+		text.includes("503")
+	);
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchNearIntentsJsonWithRetry<T>(params: {
+	baseUrl: string;
+	path: string;
+	method: "GET" | "POST";
+	query?: NearIntentsQueryParams;
+	body?: Record<string, unknown>;
+	headers?: Record<string, string>;
+	maxAttempts?: number;
+}): Promise<{
+	url: string;
+	status: number;
+	payload: T;
+}> {
+	const maxAttempts = Math.max(1, Math.min(5, params.maxAttempts ?? 4));
+	let lastError: unknown;
+	for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+		try {
+			return await fetchNearIntentsJson<T>(params);
+		} catch (error) {
+			lastError = error;
+			if (attempt >= maxAttempts || !isTransientNearIntentsError(error)) {
+				throw error;
+			}
+			await sleep(Math.min(1500, 200 * 2 ** (attempt - 1)));
+		}
+	}
+	throw lastError instanceof Error
+		? lastError
+		: new Error("NEAR Intents request failed after retries");
+}
+
 function normalizeNearIntentsTokens(value: unknown): NearIntentsToken[] {
 	if (!Array.isArray(value)) {
 		throw new Error("NEAR Intents tokens response must be an array");
@@ -2405,7 +2452,7 @@ export function createNearComposeTools(): RegisteredTool[] {
 					apiKey: params.apiKey,
 					jwt: params.jwt,
 				});
-				const tokensResponse = await fetchNearIntentsJson<unknown[]>({
+				const tokensResponse = await fetchNearIntentsJsonWithRetry<unknown[]>({
 					baseUrl,
 					path: "/v0/tokens",
 					method: "GET",
@@ -2461,7 +2508,7 @@ export function createNearComposeTools(): RegisteredTool[] {
 						: {}),
 				};
 				const quoteResponse =
-					await fetchNearIntentsJson<NearIntentsQuoteResponse>({
+					await fetchNearIntentsJsonWithRetry<NearIntentsQuoteResponse>({
 						baseUrl,
 						path: "/v0/quote",
 						method: "POST",

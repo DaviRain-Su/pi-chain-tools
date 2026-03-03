@@ -1402,6 +1402,56 @@ function sleep(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isTransientRefSwapQuoteError(error: unknown): boolean {
+	const message = extractErrorText(error).toLowerCase();
+	return (
+		message.includes("429") ||
+		message.includes("too many requests") ||
+		message.includes("fetch failed") ||
+		message.includes("timeout") ||
+		message.includes("temporar") ||
+		message.includes("503")
+	);
+}
+
+async function fetchRefSwapQuoteWithRetry(params: {
+	network: string;
+	rpcUrl?: string;
+	refContractId?: string;
+	tokenInId: string;
+	tokenOutId: string;
+	amountInRaw: string;
+	poolId?: number | string;
+	slippageBps?: number;
+	maxAttempts?: number;
+}): Promise<Awaited<ReturnType<typeof getRefSwapQuote>>> {
+	const attempts = Math.max(1, Math.min(6, params.maxAttempts ?? 3));
+	let lastError: unknown;
+	for (let attempt = 1; attempt <= attempts; attempt += 1) {
+		try {
+			return await getRefSwapQuote({
+				network: params.network,
+				rpcUrl: params.rpcUrl,
+				refContractId: params.refContractId,
+				tokenInId: params.tokenInId,
+				tokenOutId: params.tokenOutId,
+				amountInRaw: params.amountInRaw,
+				poolId: params.poolId,
+				slippageBps: params.slippageBps,
+			});
+		} catch (error) {
+			lastError = error;
+			if (attempt >= attempts || !isTransientRefSwapQuoteError(error)) {
+				throw error;
+			}
+			await sleep(getTransientExecutionBackoffMs(attempt));
+		}
+	}
+	throw lastError instanceof Error
+		? lastError
+		: new Error("NEAR Ref quote request failed after retries");
+}
+
 function isTransientNearExecutionError(error: unknown): boolean {
 	const message = extractErrorText(error).toLowerCase();
 	return (
@@ -1785,7 +1835,7 @@ export function createNearExecuteTools(): RegisteredTool[] {
 
 				const refContractId = getRefContractId(network, params.refContractId);
 				const poolId = parseOptionalPoolId(params.poolId);
-				const quote = await getRefSwapQuote({
+				const quote = await fetchRefSwapQuoteWithRetry({
 					network,
 					rpcUrl: params.rpcUrl,
 					refContractId,

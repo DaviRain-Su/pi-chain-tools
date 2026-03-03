@@ -1924,16 +1924,60 @@ function isLikelyNearAccountId(value: string): boolean {
 }
 
 function normalizeLikelyNearAccountId(value: string, field: string): string {
-	const candidate = value.trim();
-	if (!candidate) {
+	const normalized = value.trim();
+	if (!normalized) {
 		throw new Error(`${field} is required`);
 	}
+	const candidate = normalized.startsWith("@")
+		? normalized.slice(1)
+		: normalized;
 	if (!isLikelyNearAccountId(candidate)) {
 		throw new Error(
 			`${field} must be a valid NEAR account id when the target chain is NEAR.`,
 		);
 	}
 	return candidate;
+}
+
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientRefSwapQuoteError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	const text = error.message.toLowerCase();
+	return (
+		text.includes("429") ||
+		text.includes("too many requests") ||
+		text.includes("fetch failed") ||
+		text.includes("timeout") ||
+		text.includes("temporar") ||
+		text.includes("503")
+	);
+}
+
+async function fetchRefSwapQuoteWithRetry<
+	T extends Parameters<typeof getRefSwapQuote>[0],
+>(
+	params: T,
+	maxAttempts = 3,
+): Promise<Awaited<ReturnType<typeof getRefSwapQuote>>> {
+	const attempts = Math.max(1, Math.min(6, Math.floor(maxAttempts)));
+	let lastError: unknown;
+	for (let attempt = 1; attempt <= attempts; attempt += 1) {
+		try {
+			return await getRefSwapQuote(params);
+		} catch (error) {
+			lastError = error;
+			if (attempt >= attempts || !isTransientRefSwapQuoteError(error)) {
+				throw error;
+			}
+			await sleep(Math.min(2_500, 300 * 2 ** (attempt - 1)));
+		}
+	}
+	throw lastError instanceof Error
+		? lastError
+		: new Error("NEAR Ref quote request failed after retries");
 }
 
 function isTransientNearIntentsError(error: unknown): boolean {
@@ -5246,7 +5290,7 @@ export function createNearReadTools() {
 				if (!tokenInId || !tokenOutId) {
 					throw new Error("tokenInId and tokenOutId are required");
 				}
-				const quote = await getRefSwapQuote({
+				const quote = await fetchRefSwapQuoteWithRetry({
 					network,
 					rpcUrl: params.rpcUrl,
 					refContractId: params.refContractId,
