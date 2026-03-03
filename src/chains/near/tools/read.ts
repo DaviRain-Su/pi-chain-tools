@@ -485,6 +485,8 @@ const DEFAULT_NEAR_INTENTS_API_BASE_URL = "https://1click.chaindefuser.com";
 const DEFAULT_NEAR_INTENTS_EXPLORER_API_BASE_URL =
 	"https://explorer.near-intents.org";
 const DEFAULT_NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS = 30_000;
+const DEFAULT_NEAR_INTENTS_TOKENS_CACHE_TTL_MS = 30_000;
+const MAX_NEAR_INTENTS_TOKENS_CACHE_TTL_MS = 300_000;
 const MAX_NEAR_PORTFOLIO_VALUATION_CACHE_TTL_MS = 3_600_000;
 const DEFAULT_BURROW_RISK_WARNING_RATIO = 0.6;
 const DEFAULT_BURROW_RISK_CRITICAL_RATIO = 0.85;
@@ -501,6 +503,13 @@ const nearPortfolioValuationTokenCache = new Map<
 	string,
 	NearPortfolioValuationCacheEntry
 >();
+type NearIntentsTokensCacheEntry = {
+	fetchedAtMs: number;
+	endpoint: string;
+	httpStatus: number;
+	tokens: NearIntentsToken[];
+};
+const nearIntentsTokensCache = new Map<string, NearIntentsTokensCacheEntry>();
 const NEAR_INTENTS_EXPLORER_CHAIN_VALUES = [
 	"near",
 	"eth",
@@ -533,6 +542,28 @@ const NEAR_INTENTS_EXPLORER_CHAIN_VALUES = [
 	"scroll",
 	"aleo",
 ] as const;
+
+const NEAR_ACCOUNT_ID_SEGMENT_RE = /^[a-z0-9._-]+$/;
+
+function isNearAccountIdLike(value: string): boolean {
+	const normalized = value.trim().toLowerCase();
+	if (!normalized) return false;
+	if (normalized.length < 2 || normalized.length > 64) return false;
+	if (
+		normalized.startsWith(".") ||
+		normalized.endsWith(".") ||
+		normalized.includes("..")
+	) {
+		return false;
+	}
+	const segments = normalized.split(".");
+	return segments.every(
+		(segment) =>
+			segment.length > 0 &&
+			segment.length <= 64 &&
+			NEAR_ACCOUNT_ID_SEGMENT_RE.test(segment),
+	);
+}
 
 function parseUnsignedBigInt(value: string, fieldName: string): bigint {
 	const normalized = value.trim();
@@ -1840,6 +1871,51 @@ async function fetchNearIntentsJson<T>(params: {
 	};
 }
 
+async function fetchNearIntentsJsonWithRetry<T>(params: {
+	baseUrl: string;
+	path: string;
+	method: "GET" | "POST";
+	query?: NearIntentsQueryParams;
+	body?: Record<string, unknown>;
+	headers?: Record<string, string>;
+	maxAttempts?: number;
+}): Promise<{
+	url: string;
+	status: number;
+	payload: T;
+}> {
+	const maxAttempts = Math.max(1, Math.min(5, params.maxAttempts ?? 4));
+	let lastError: unknown;
+	for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+		try {
+			return await fetchNearIntentsJson<T>(params);
+		} catch (error) {
+			lastError = error;
+			if (attempt >= maxAttempts || !isTransientNearIntentsError(error)) {
+				throw error;
+			}
+			await new Promise((resolve) =>
+				setTimeout(resolve, Math.min(1500, 200 * 2 ** (attempt - 1))),
+			);
+		}
+	}
+	throw lastError instanceof Error
+		? lastError
+		: new Error("NEAR Intents request failed after retries");
+}
+
+function isTransientNearIntentsError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	const text = error.message.toLowerCase();
+	return (
+		text.includes("429") ||
+		text.includes("too many requests") ||
+		text.includes("fetch failed") ||
+		text.includes("timeout") ||
+		text.includes("503")
+	);
+}
+
 function normalizeNearIntentsTokens(value: unknown): NearIntentsToken[] {
 	if (!Array.isArray(value)) {
 		throw new Error("NEAR Intents tokens response must be an array");
@@ -2003,6 +2079,61 @@ async function queryNearPortfolioValuationTokens(params: {
 	const tokens = normalizeNearIntentsTokens(response.payload);
 	if (params.cacheTtlMs > 0) {
 		nearPortfolioValuationTokenCache.set(params.baseUrl, {
+			fetchedAtMs: now,
+			endpoint: response.url,
+			httpStatus: response.status,
+			tokens,
+		});
+	}
+	return {
+		endpoint: response.url,
+		httpStatus: response.status,
+		tokens,
+		cacheHit: false,
+		cacheAgeMs: null,
+	};
+}
+
+async function queryNearIntentsTokens(params: {
+	baseUrl: string;
+	headers: Record<string, string>;
+	cacheTtlMs: number;
+}): Promise<{
+	endpoint: string;
+	httpStatus: number;
+	tokens: NearIntentsToken[];
+	cacheHit: boolean;
+	cacheAgeMs: number | null;
+}> {
+	const now = Date.now();
+	const effectiveCacheTtlMs = Math.min(
+		MAX_NEAR_INTENTS_TOKENS_CACHE_TTL_MS,
+		params.cacheTtlMs,
+	);
+	if (effectiveCacheTtlMs > 0) {
+		const cached = nearIntentsTokensCache.get(params.baseUrl);
+		if (cached) {
+			const ageMs = now - cached.fetchedAtMs;
+			if (ageMs >= 0 && ageMs <= effectiveCacheTtlMs) {
+				return {
+					endpoint: cached.endpoint,
+					httpStatus: cached.httpStatus,
+					tokens: cached.tokens,
+					cacheHit: true,
+					cacheAgeMs: ageMs,
+				};
+			}
+		}
+	}
+	const response = await fetchNearIntentsJsonWithRetry<NearIntentsToken[]>({
+		baseUrl: params.baseUrl,
+		path: "/v0/tokens",
+		method: "GET",
+		headers: params.headers,
+	});
+	const tokens = normalizeNearIntentsTokens(response.payload);
+	if (effectiveCacheTtlMs > 0) {
+		nearIntentsTokensCache.set(params.baseUrl, {
 			fetchedAtMs: now,
 			endpoint: response.url,
 			httpStatus: response.status,
@@ -5145,13 +5276,12 @@ export function createNearReadTools() {
 					apiKey: params.apiKey,
 					jwt: params.jwt,
 				});
-				const response = await fetchNearIntentsJson<NearIntentsToken[]>({
+				const response = await queryNearIntentsTokens({
 					baseUrl,
-					path: "/v0/tokens",
-					method: "GET",
 					headers: authHeaders,
+					cacheTtlMs: DEFAULT_NEAR_INTENTS_TOKENS_CACHE_TTL_MS,
 				});
-				const tokens = normalizeNearIntentsTokens(response.payload);
+				const tokens = response.tokens;
 				const blockchainFilter = params.blockchain?.trim().toLowerCase() || "";
 				const symbolFilter = params.symbol?.trim().toUpperCase() || "";
 				const assetIdFilter = params.assetId?.trim().toLowerCase() || "";
@@ -5197,8 +5327,8 @@ export function createNearReadTools() {
 					content: [{ type: "text", text: lines.join("\n") }],
 					details: {
 						apiBaseUrl: baseUrl,
-						endpoint: response.url,
-						httpStatus: response.status,
+						endpoint: response.endpoint,
+						httpStatus: response.httpStatus,
 						total: tokens.length,
 						matched: filtered.length,
 						shown: selected.length,
@@ -5301,13 +5431,12 @@ export function createNearReadTools() {
 					apiKey: params.apiKey,
 					jwt: params.jwt,
 				});
-				const tokensResponse = await fetchNearIntentsJson<NearIntentsToken[]>({
+				const tokensResponse = await queryNearIntentsTokens({
 					baseUrl,
-					path: "/v0/tokens",
-					method: "GET",
 					headers: authHeaders,
+					cacheTtlMs: DEFAULT_NEAR_INTENTS_TOKENS_CACHE_TTL_MS,
 				});
-				const tokens = normalizeNearIntentsTokens(tokensResponse.payload);
+				const tokens = tokensResponse.tokens;
 				const blockchainHint = params.blockchainHint?.trim().toLowerCase();
 				const originAssetId = resolveNearIntentsAssetId({
 					assetInput: params.originAsset,
@@ -5374,7 +5503,7 @@ export function createNearReadTools() {
 						: {}),
 				};
 				const quoteResponse =
-					await fetchNearIntentsJson<NearIntentsQuoteResponse>({
+					await fetchNearIntentsJsonWithRetry<NearIntentsQuoteResponse>({
 						baseUrl,
 						path: "/v0/quote",
 						method: "POST",
