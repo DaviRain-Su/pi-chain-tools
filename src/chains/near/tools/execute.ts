@@ -1408,9 +1408,13 @@ function isTransientRefSwapQuoteError(error: unknown): boolean {
 		message.includes("429") ||
 		message.includes("too many requests") ||
 		message.includes("fetch failed") ||
+		message.includes("failed to fetch") ||
 		message.includes("timeout") ||
 		message.includes("temporar") ||
-		message.includes("503")
+		message.includes("503") ||
+		message.includes("enotfound") ||
+		message.includes("econnreset") ||
+		message.includes("socket hang up")
 	);
 }
 
@@ -1458,9 +1462,13 @@ function isTransientNearExecutionError(error: unknown): boolean {
 		message.includes("429") ||
 		message.includes("too many requests") ||
 		message.includes("fetch failed") ||
+		message.includes("failed to fetch") ||
 		message.includes("timeout") ||
 		message.includes("temporar") ||
-		message.includes("503")
+		message.includes("503") ||
+		message.includes("enotfound") ||
+		message.includes("econnreset") ||
+		message.includes("socket hang up")
 	);
 }
 

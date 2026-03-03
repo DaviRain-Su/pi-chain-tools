@@ -2133,6 +2133,116 @@ describe("near_getIntentsQuote", () => {
 		expect(request.recipient).toBe("alice.near");
 		expect(result.content[0]?.text).toContain("CorrelationId: corr-2");
 	});
+
+	it("falls back to INTENTS recipient mode when recipient field is invalid", async () => {
+		const mockTokens = [
+			{
+				assetId: "nep141:wrap.near",
+				decimals: 24,
+				blockchain: "near",
+				symbol: "wNEAR",
+				price: 1.01,
+				priceUpdatedAt: "2026-02-13T18:09:00.000Z",
+				contractAddress: "wrap.near",
+			},
+			{
+				assetId: "nep141:usdc-near",
+				decimals: 6,
+				blockchain: "near",
+				symbol: "USDC",
+				price: 1,
+				priceUpdatedAt: "2026-02-13T18:09:00.000Z",
+				contractAddress: "usdc.near",
+			},
+		];
+		const mockQuote = {
+			correlationId: "corr-fallback",
+			timestamp: "2026-02-13T18:10:42.627Z",
+			signature: "ed25519:zzz",
+			quoteRequest: {
+				dry: true,
+				swapType: "EXACT_INPUT",
+				slippageTolerance: 100,
+				originAsset: "nep141:wrap.near",
+				depositType: "ORIGIN_CHAIN",
+				destinationAsset: "nep141:usdc-near",
+				amount: "10000000000000000000000",
+				refundTo: "alice.near",
+				refundType: "INTENTS",
+				recipient: "alice.near",
+				recipientType: "INTENTS",
+				deadline: "2026-02-14T18:30:00.000Z",
+			},
+			quote: {
+				amountIn: "10000000000000000000000",
+				amountInFormatted: "0.01",
+				amountInUsd: "0.0101",
+				minAmountIn: "10000000000000000000000",
+				amountOut: "8833",
+				amountOutFormatted: "0.008833",
+				amountOutUsd: "0.0088",
+				minAmountOut: "8744",
+				timeEstimate: 20,
+			},
+		};
+
+		let quoteAttempt = 0;
+		restMocks.fetch.mockImplementation(
+			async (url, init: RequestInit | undefined) => {
+				if ((init?.method || "GET") === "GET") {
+					return {
+						ok: true,
+						status: 200,
+						statusText: "OK",
+						text: async () => JSON.stringify(mockTokens),
+					} as Response;
+				}
+				quoteAttempt += 1;
+				if (quoteAttempt === 1) {
+					return {
+						ok: false,
+						status: 400,
+						statusText: "Bad Request",
+						text: async () =>
+							JSON.stringify({ message: "recipient is not valid" }),
+					} as Response;
+				}
+				return {
+					ok: true,
+					status: 201,
+					statusText: "Created",
+					text: async () => JSON.stringify(mockQuote),
+				} as Response;
+			},
+		);
+
+		const tool = getTool("near_getIntentsQuote");
+		const result = await tool.execute("near-read-intents-quote-fallback", {
+			originAsset: "wNEAR",
+			destinationAsset: "USDC",
+			amount: "10000000000000000000000",
+			recipient: "not-a-valid-recipient",
+			accountId: "alice.near",
+			network: "mainnet",
+			recipientType: "DESTINATION_CHAIN",
+			refundType: "ORIGIN_CHAIN",
+		});
+
+		const quoteCalls = restMocks.fetch.mock.calls.filter((call) =>
+			String(call?.[0] ?? "").endsWith("/v0/quote"),
+		);
+		expect(quoteCalls).toHaveLength(2);
+		const firstRequest = JSON.parse(
+			String((quoteCalls[0]?.[1] as RequestInit | undefined)?.body ?? "{}"),
+		) as Record<string, unknown>;
+		const secondRequest = JSON.parse(
+			String((quoteCalls[1]?.[1] as RequestInit | undefined)?.body ?? "{}"),
+		) as Record<string, unknown>;
+		expect(firstRequest.recipientType).toBe("DESTINATION_CHAIN");
+		expect(secondRequest.recipientType).toBe("INTENTS");
+		expect(secondRequest.refundType).toBe("INTENTS");
+		expect(result.content[0]?.text).toContain("CorrelationId: corr-fallback");
+	});
 });
 
 describe("near_getIntentsExplorerTransactions", () => {

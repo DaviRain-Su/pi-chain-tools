@@ -2010,8 +2010,20 @@ function isTransientNearIntentsError(error: unknown): boolean {
 		text.includes("429") ||
 		text.includes("too many requests") ||
 		text.includes("fetch failed") ||
+		text.includes("failed to fetch") ||
+		text.includes("network error") ||
 		text.includes("timeout") ||
 		text.includes("503")
+	);
+}
+
+function isRecipientValidationError(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	const text = error.message.toLowerCase();
+	return (
+		text.includes("recipient is not valid") ||
+		text.includes("refundto is not valid") ||
+		text.includes("refund to is not valid")
 	);
 }
 
@@ -5626,14 +5638,54 @@ export function createNearReadTools() {
 							}
 						: {}),
 				};
-				const quoteResponse =
-					await fetchNearIntentsJsonWithRetry<NearIntentsQuoteResponse>({
-						baseUrl,
-						path: "/v0/quote",
-						method: "POST",
-						headers: authHeaders,
-						body: quoteRequest as unknown as Record<string, unknown>,
-					});
+				const fallbackRecipientRequest =
+					recipientType === "INTENTS"
+						? null
+						: {
+								recipient: recipient,
+								recipientType,
+								refundTo,
+								refundType,
+							};
+
+				let quotePayload: NearIntentsQuoteRequest = quoteRequest;
+				const quoteResponse = await (async () => {
+					try {
+						return await fetchNearIntentsJsonWithRetry<NearIntentsQuoteResponse>(
+							{
+								baseUrl,
+								path: "/v0/quote",
+								method: "POST",
+								headers: authHeaders,
+								body: quoteRequest as unknown as Record<string, unknown>,
+							},
+						);
+					} catch (error) {
+						if (fallbackRecipientRequest && isRecipientValidationError(error)) {
+							const fallbackPayload = {
+								...quoteRequest,
+								recipientType: "INTENTS" as const,
+								recipient: fallbackRecipientRequest.recipient,
+								refundTo: fallbackRecipientRequest.recipient,
+								refundType: "INTENTS" as const,
+							};
+							if (!isLikelyNearAccountId(fallbackRecipientRequest.recipient)) {
+								throw error;
+							}
+							quotePayload = fallbackPayload;
+							return await fetchNearIntentsJsonWithRetry<NearIntentsQuoteResponse>(
+								{
+									baseUrl,
+									path: "/v0/quote",
+									method: "POST",
+									headers: authHeaders,
+									body: fallbackPayload as unknown as Record<string, unknown>,
+								},
+							);
+						}
+						throw error;
+					}
+				})();
 				const nearIntentsQuoteResponse = parseNearIntentsQuoteResponse(
 					quoteResponse.payload,
 				);
