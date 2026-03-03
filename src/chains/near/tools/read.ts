@@ -1936,7 +1936,7 @@ function normalizeLikelyNearAccountId(value: string, field: string): string {
 			`${field} must be a valid NEAR account id when the target chain is NEAR.`,
 		);
 	}
-	return candidate;
+	return candidate.toLowerCase();
 }
 
 function sleep(ms: number): Promise<void> {
@@ -1978,6 +1978,29 @@ async function fetchRefSwapQuoteWithRetry<
 	throw lastError instanceof Error
 		? lastError
 		: new Error("NEAR Ref quote request failed after retries");
+}
+
+function parseNearIntentsQuoteResponse(
+	payload: unknown,
+): NearIntentsQuoteResponse {
+	if (!payload || typeof payload !== "object") {
+		throw new Error(
+			`NEAR Intents API /v0/quote response payload is malformed: ${resolveNearIntentsErrorMessage(
+				payload,
+				"invalid payload",
+			)}`,
+		);
+	}
+	const candidate = payload as Partial<NearIntentsQuoteResponse>;
+	if (!candidate.quote || typeof candidate.quote !== "object") {
+		throw new Error(
+			`NEAR Intents API /v0/quote response payload is malformed: ${resolveNearIntentsErrorMessage(
+				payload,
+				"missing quote block",
+			)}`,
+		);
+	}
+	return candidate as NearIntentsQuoteResponse;
 }
 
 function isTransientNearIntentsError(error: unknown): boolean {
@@ -2095,10 +2118,16 @@ function resolveIntentsRecipientOrThrow(params: {
 		return explicit;
 	}
 	if (params.recipientType === "INTENTS") {
-		return params.fallbackNearAccountId;
+		return normalizeLikelyNearAccountId(
+			params.fallbackNearAccountId,
+			"recipient",
+		);
 	}
 	if (destinationBlockchain === "near") {
-		return params.fallbackNearAccountId;
+		return normalizeLikelyNearAccountId(
+			params.fallbackNearAccountId,
+			"recipient",
+		);
 	}
 	throw new Error(
 		`recipient is required for destination chain '${destinationBlockchain}'. Pass recipient explicitly or use recipientType=INTENTS.`,
@@ -2122,7 +2151,10 @@ function resolveIntentsRefundToOrThrow(params: {
 		return explicit;
 	}
 	if (params.refundType === "INTENTS") {
-		return params.fallbackNearAccountId;
+		return normalizeLikelyNearAccountId(
+			params.fallbackNearAccountId,
+			"refundTo",
+		);
 	}
 	if (originBlockchain === "near") {
 		return normalizeLikelyNearAccountId(
@@ -5602,23 +5634,26 @@ export function createNearReadTools() {
 						headers: authHeaders,
 						body: quoteRequest as unknown as Record<string, unknown>,
 					});
+				const nearIntentsQuoteResponse = parseNearIntentsQuoteResponse(
+					quoteResponse.payload,
+				);
 				const originSymbol = originToken?.symbol || originAssetId;
 				const destinationSymbol =
 					destinationToken?.symbol || destinationAssetId;
 				const lines = [
-					`Intents quote (${quoteRequest.dry ? "dry" : "live"}): ${quoteResponse.payload.quote.amountInFormatted} ${originSymbol} -> ${quoteResponse.payload.quote.amountOutFormatted} ${destinationSymbol}`,
-					`Min output: ${quoteResponse.payload.quote.minAmountOut} raw`,
-					`Estimated time: ${quoteResponse.payload.quote.timeEstimate}s`,
-					`CorrelationId: ${quoteResponse.payload.correlationId}`,
+					`Intents quote (${quoteRequest.dry ? "dry" : "live"}): ${nearIntentsQuoteResponse.quote.amountInFormatted} ${originSymbol} -> ${nearIntentsQuoteResponse.quote.amountOutFormatted} ${destinationSymbol}`,
+					`Min output: ${nearIntentsQuoteResponse.quote.minAmountOut} raw`,
+					`Estimated time: ${nearIntentsQuoteResponse.quote.timeEstimate}s`,
+					`CorrelationId: ${nearIntentsQuoteResponse.correlationId}`,
 				];
-				if (quoteResponse.payload.quote.depositAddress) {
+				if (nearIntentsQuoteResponse.quote.depositAddress) {
 					lines.push(
-						`Deposit address: ${quoteResponse.payload.quote.depositAddress}`,
+						`Deposit address: ${nearIntentsQuoteResponse.quote.depositAddress}`,
 					);
 				}
-				if (quoteResponse.payload.quote.depositMemo) {
+				if (nearIntentsQuoteResponse.quote.depositMemo) {
 					lines.push(
-						`Deposit memo: ${quoteResponse.payload.quote.depositMemo}`,
+						`Deposit memo: ${nearIntentsQuoteResponse.quote.depositMemo}`,
 					);
 				}
 				return {

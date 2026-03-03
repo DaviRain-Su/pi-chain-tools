@@ -1924,7 +1924,7 @@ describe("near_getIntentsTokens", () => {
 
 describe("near_getIntentsQuote", () => {
 	it("resolves symbol pair and returns dry quote details", async () => {
-		mockFetchJsonOnce(200, [
+		const mockTokens = [
 			{
 				assetId: "nep141:wrap.near",
 				decimals: 24,
@@ -1952,8 +1952,8 @@ describe("near_getIntentsQuote", () => {
 				priceUpdatedAt: "2026-02-13T18:09:00.000Z",
 				contractAddress: "0xa0b8",
 			},
-		]);
-		mockFetchJsonOnce(201, {
+		];
+		const mockQuote = {
 			correlationId: "corr-1",
 			timestamp: "2026-02-13T18:10:42.627Z",
 			signature: "ed25519:xxx",
@@ -1982,7 +1982,25 @@ describe("near_getIntentsQuote", () => {
 				minAmountOut: "8744",
 				timeEstimate: 20,
 			},
-		});
+		};
+		restMocks.fetch.mockImplementation(
+			async (url, init: RequestInit | undefined) => {
+				if ((init?.method || "GET") === "POST") {
+					return {
+						ok: true,
+						status: 201,
+						statusText: "Created",
+						text: async () => JSON.stringify(mockQuote),
+					} as Response;
+				}
+				return {
+					ok: true,
+					status: 200,
+					statusText: "OK",
+					text: async () => JSON.stringify(mockTokens),
+				} as Response;
+			},
+		);
 		const tool = getTool("near_getIntentsQuote");
 		const result = await tool.execute("near-read-intents-quote-1", {
 			originAsset: "wNEAR",
@@ -1992,9 +2010,12 @@ describe("near_getIntentsQuote", () => {
 			network: "mainnet",
 		});
 
-		expect(restMocks.fetch).toHaveBeenCalledTimes(2);
-		const quoteCall = restMocks.fetch.mock.calls[1];
-		expect(quoteCall?.[0]).toBe("https://1click.chaindefuser.com/v0/quote");
+		const quoteCall = restMocks.fetch.mock.calls.find((call) =>
+			String(call?.[0] ?? "").endsWith("/v0/quote"),
+		);
+		if (!quoteCall) {
+			throw new Error("Expected v0/quote request");
+		}
 		const request = JSON.parse(
 			String((quoteCall?.[1] as RequestInit | undefined)?.body ?? "{}"),
 		) as Record<string, unknown>;
@@ -2016,6 +2037,101 @@ describe("near_getIntentsQuote", () => {
 			originSymbol: "wNEAR",
 			destinationSymbol: "USDC",
 		});
+	});
+
+	it("normalizes NEAR account-style recipient and refundTo for intents quote", async () => {
+		const mockTokens = [
+			{
+				assetId: "nep141:wrap.near",
+				decimals: 24,
+				blockchain: "near",
+				symbol: "wNEAR",
+				price: 1.01,
+				priceUpdatedAt: "2026-02-13T18:09:00.000Z",
+				contractAddress: "wrap.near",
+			},
+			{
+				assetId: "nep141:usdc-near",
+				decimals: 6,
+				blockchain: "near",
+				symbol: "USDC",
+				price: 1,
+				priceUpdatedAt: "2026-02-13T18:09:00.000Z",
+				contractAddress: "usdc.near",
+			},
+		];
+		const mockQuote = {
+			correlationId: "corr-2",
+			timestamp: "2026-02-13T18:10:42.627Z",
+			signature: "ed25519:yyy",
+			quoteRequest: {
+				dry: true,
+				swapType: "EXACT_INPUT",
+				slippageTolerance: 100,
+				originAsset: "nep141:wrap.near",
+				depositType: "ORIGIN_CHAIN",
+				destinationAsset: "nep141:usdc-near",
+				amount: "10000000000000000000000",
+				refundTo: "alice.near",
+				refundType: "ORIGIN_CHAIN",
+				recipient: "alice.near",
+				recipientType: "DESTINATION_CHAIN",
+				deadline: "2026-02-14T18:30:00.000Z",
+			},
+			quote: {
+				amountIn: "10000000000000000000000",
+				amountInFormatted: "0.01",
+				amountInUsd: "0.0101",
+				minAmountIn: "10000000000000000000000",
+				amountOut: "8833",
+				amountOutFormatted: "0.008833",
+				amountOutUsd: "0.0088",
+				minAmountOut: "8744",
+				timeEstimate: 20,
+			},
+		};
+		restMocks.fetch.mockImplementation(
+			async (url, init: RequestInit | undefined) => {
+				if ((init?.method || "GET") === "POST") {
+					return {
+						ok: true,
+						status: 201,
+						statusText: "Created",
+						text: async () => JSON.stringify(mockQuote),
+					} as Response;
+				}
+				return {
+					ok: true,
+					status: 200,
+					statusText: "OK",
+					text: async () => JSON.stringify(mockTokens),
+				} as Response;
+			},
+		);
+		const tool = getTool("near_getIntentsQuote");
+		const result = await tool.execute("near-read-intents-quote-2", {
+			originAsset: "wNEAR",
+			destinationAsset: "USDC",
+			amount: "10000000000000000000000",
+			accountId: "@ALICE.NEAR",
+			network: "mainnet",
+		});
+
+		const quoteCall = restMocks.fetch.mock.calls.find((call) =>
+			String(call?.[0] ?? "").endsWith("/v0/quote"),
+		);
+		if (!quoteCall) {
+			throw new Error("Expected v0/quote request");
+		}
+		const request = JSON.parse(
+			String((quoteCall?.[1] as RequestInit | undefined)?.body ?? "{}"),
+		) as Record<string, unknown>;
+		expect(request).toMatchObject({
+			recipient: "alice.near",
+			refundTo: "alice.near",
+		});
+		expect(request.recipient).toBe("alice.near");
+		expect(result.content[0]?.text).toContain("CorrelationId: corr-2");
 	});
 });
 
